@@ -1,0 +1,17 @@
+{
+  "name": "rei",
+  "version": "0.1.0",
+  "description": "A personal AI agent CLI",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/main.ts",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "tsx": "^4.19.2"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "typescript": "^5.7.3"
+  }
+}
