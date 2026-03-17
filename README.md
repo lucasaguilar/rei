@@ -52,6 +52,49 @@ npm run check
 
 - **`MockProvider.completeChat`** (`src/providers/mock-provider.ts`): Echoes the last user message so the chat loop works without any real model.
 
+### Chat flow (main runtime)
+
+```mermaid
+flowchart TD
+  A[User runs npm run dev chat] --> B[run chat entrypoint]
+  B --> C[Create chat session messages empty]
+    B --> D[Instantiate Agent]
+  D --> E[Inject model provider MockProvider]
+
+    C --> F[Read user input in loop]
+  F --> G{Internal command}
+  G -->|help| H[Print help]
+  G -->|clear| I[Reset session messages]
+  G -->|exit| J[End process]
+  G -->|message| K[Agent runTurn]
+
+  K --> L[Append user message role user]
+  L --> M[Call provider completeChat]
+    M --> N[Model generates assistant text]
+    N --> O[Return response to Agent]
+  O --> P[Append assistant message role assistant]
+    P --> Q[Print response in terminal]
+    Q --> F
+
+    subgraph Core
+      D
+      K
+    end
+
+    subgraph Provider layer
+      E
+      M
+      N
+    end
+
+    subgraph Chat state
+      C
+      L
+      P
+      I
+    end
+```
+
 ### Adding an `OllamaProvider` later
 
 Create a new class that implements `ModelProvider`:
