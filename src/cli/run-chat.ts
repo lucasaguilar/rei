@@ -1,14 +1,17 @@
 import * as readline from "readline";
 import type { Agent } from "../core/agent.js";
-import type { ChatSession } from "../chat/types.js";
+import type { ChatSession, SessionMode } from "../chat/types.js";
 
 const HELP_TEXT = `Commands:
-  /exit  - end the session
-  /clear - clear conversation history
-  /help  - show this help`;
+  /exit           - end the session
+  /clear          - clear conversation history
+  /help           - show this help
+  /mode ask       - switch to ask mode
+  /mode planning  - switch to planning mode
+  /mode agent     - switch to agent mode`;
 
 export async function runChat(agent: Agent): Promise<void> {
-  const session: ChatSession = { messages: [] };
+  const session: ChatSession = { messages: [], mode: "ask" };
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -36,6 +39,19 @@ export async function runChat(agent: Agent): Promise<void> {
 
       if (trimmed === "/help") {
         console.log(HELP_TEXT);
+        prompt();
+        return;
+      }
+
+      const modeMatch = trimmed.match(/^\/mode\s+(\S+)$/);
+      if (modeMatch) {
+        const requested = modeMatch[1];
+        if (requested === "ask" || requested === "planning" || requested === "agent") {
+          session.mode = requested as SessionMode;
+          console.log(`Mode set to: ${session.mode}`);
+        } else {
+          console.log(`Unknown mode: ${requested}. Available modes: ask, planning, agent`);
+        }
         prompt();
         return;
       }
