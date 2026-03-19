@@ -49,6 +49,51 @@ REI supports three modes that shape how the assistant reasons and responds:
 
 The active mode can be changed at any time during a chat session with `/mode <mode>`.
 
+## 🗂️ Repository-aware context
+
+On every user turn, REI builds contextual information from the local workspace and enriches the prompt before calling the model.
+
+### How it works
+
+1. **Workspace scanning** — REI scans the workspace recursively (capped at 200 files) and collects file metadata. Binary files, lock files, and directories like `node_modules`, `.git`, `dist`, `build`, `coverage`, `.next`, and `out` are automatically ignored.
+
+2. **Relevant file selection** — REI scores every scanned file against the user's message using a simple heuristic: keyword matches in the filename score highest, path matches score lower, and the active mode applies a small boost (source files for `agent`/`planning`, docs for `planning`).  The top 8 files are selected.
+
+3. **Partial file previews** — Each selected file is read up to a 1500-character preview. Truncated files are labelled so the model knows the content was cut.
+
+4. **Prompt enrichment** — The original user message is replaced with an enriched version that includes:
+   - the original task
+   - the workspace path
+   - a brief repo summary (project markers, top-level folders, total files scanned)
+   - a list of relevant files with their scores and previews
+
+Context is **regenerated on every turn** — it is a function of `(userInput, mode, session, workspace)`, not a one-time snapshot.
+
+### Debug output
+
+Each turn prints a brief debug summary to the console:
+
+```
+[REI debug] Workspace: /path/to/project
+[REI debug] Relevant files selected: 3
+  - src/core/agent.ts (score: 6)
+  - src/prompts/prompt-builder.ts (score: 4)
+  - README.md (score: 2)
+```
+
+### Current limitations
+
+- No embeddings or semantic search yet — file selection is purely heuristic
+- No persistent repository index — the workspace is scanned fresh on every turn
+- No file writing or command execution yet
+- The model provider is still the mock provider; Ollama integration is the next step
+
+### Next planned step
+
+Integrate Ollama as the real model provider once repository-aware context is validated.
+
+---
+
 ## 🧱 Prompt System
 
 The system prompt sent to the model is built by `src/prompts/prompt-builder.ts` and is composed of two parts:
@@ -73,7 +118,15 @@ npm run check
 
 - **`ModelProvider` interface** (`src/providers/model-provider.ts`): Extended with `completeChat(messages: ChatMessage[]): Promise<string>` alongside the existing `complete(prompt: string)`. The `complete` method is preserved so the `plan` command and any existing code keep working unchanged.
 
-- **`Agent.runTurn`** (`src/core/agent.ts`): Appends the user message to the session, calls `completeChat`, and appends the assistant reply. All state lives in the `ChatSession` passed by the caller — the agent itself is stateless.
+- **`Agent.runTurn`** (`src/core/agent.ts`): Now builds a `TurnContext` via `buildTurnContext` before appending the user message. The raw input is replaced by an enriched message (task + workspace summary + relevant file previews). The system message, session history, and `ModelProvider.completeChat` contract are unchanged.
+
+- **`buildTurnContext`** (`src/context/context-builder.ts`): Orchestrates scanning → selection → preview reading and returns a `TurnContext` object used to enrich the prompt.
+
+- **`scanWorkspace`** (`src/workspace/workspace-scanner.ts`): Recursively walks the workspace, skipping ignored directories and binary/unhelpful file extensions, capped at 200 files.
+
+- **`selectRelevantFiles`** (`src/workspace/file-selector.ts`): Scores files by keyword/filename/path matching against the user input, with small mode-specific boosts. Returns up to 8 ranked files.
+
+- **`readFilePreview`** (`src/workspace/file-preview.ts`): Reads file content up to 1500 characters, truncating safely if needed.
 
 - **`MockProvider.completeChat`** (`src/providers/mock-provider.ts`): Echoes the last user message so the chat loop works without any real model.
 
@@ -93,7 +146,12 @@ flowchart TD
   G -->|exit| J[End process]
   G -->|message| K[Agent runTurn]
 
-  K --> L[Append user message role user]
+  K --> SC[Scan workspace]
+  SC --> FS[Select relevant files]
+  FS --> FP[Read file previews]
+  FP --> CB[Build TurnContext]
+  CB --> EM[Build enriched user message]
+  EM --> L[Append user message role user]
   L --> M[Call provider completeChat]
     M --> N[Model generates assistant text]
     N --> O[Return response to Agent]
@@ -104,6 +162,14 @@ flowchart TD
     subgraph Core
       D
       K
+    end
+
+    subgraph Context pipeline
+      SC
+      FS
+      FP
+      CB
+      EM
     end
 
     subgraph Provider layer
