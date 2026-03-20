@@ -94,6 +94,27 @@ Integrate Ollama as the real model provider once repository-aware context is val
 
 ---
 
+## ✂️ Message trimming
+
+REI stores the **full conversation history** in `session.messages` for the duration of a session. However, only a **trimmed message window** is sent to the model provider on each turn.
+
+### Why this matters
+
+Repository-aware context (workspace summary + file previews) is re-injected into every user message. Without trimming, the prompt sent to the model would grow linearly with the number of turns, quickly exceeding the context window of local models like Ollama.
+
+### How it works
+
+Before calling `provider.completeChat`, the agent passes `session.messages` through `buildMessagesForModel` (defined in `src/chat/message-builder.ts`):
+
+- The **system message** at index 0 is always preserved.
+- Only the **last 10 non-system messages** are kept (configurable via `maxNonSystemMessages`).
+- The original `session.messages` array is **never mutated** — full history is retained internally.
+- Repository context is **recalculated per turn**, so trimming older messages does not lose workspace grounding.
+
+This is especially important before integrating Ollama or other local models that have limited context windows.
+
+---
+
 ## 🧱 Prompt System
 
 The system prompt sent to the model is built by `src/prompts/prompt-builder.ts` and is composed of two parts:
