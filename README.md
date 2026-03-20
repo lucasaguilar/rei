@@ -26,6 +26,50 @@ npm run dev -- chat
 
 Starts a persistent conversation loop. Type any message and press Enter to get a response. The full conversation history is kept in memory for the duration of the session.
 
+## Model provider
+
+REI supports two providers selected via environment variable:
+
+- `MODEL_PROVIDER=mock` (default)
+- `MODEL_PROVIDER=ollama`
+
+### Ollama setup
+
+1. Install Ollama (Linux/macOS):
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+2. Start Ollama server (usually starts automatically after install):
+
+```bash
+ollama serve
+```
+
+3. Pull a model:
+
+```bash
+ollama pull llama3.2
+```
+
+4. Run REI with Ollama:
+
+```bash
+MODEL_PROVIDER=ollama OLLAMA_MODEL=llama3.2 npm run dev -- chat
+```
+
+Optional configuration:
+
+- `OLLAMA_BASE_URL` (default: `http://127.0.0.1:11434`)
+- `OLLAMA_MODEL` (default: `llama3.2`)
+
+Example with explicit base URL:
+
+```bash
+MODEL_PROVIDER=ollama OLLAMA_BASE_URL=http://127.0.0.1:11434 OLLAMA_MODEL=llama3.2 npm run dev -- plan "summarize this repo"
+```
+
 #### ⌨️ CLI Commands
 
 | Command          | Description                                             |
@@ -86,7 +130,7 @@ Each turn prints a brief debug summary to the console:
 - No embeddings or semantic search yet — file selection is purely heuristic
 - No persistent repository index — the workspace is scanned fresh on every turn
 - No file writing or command execution yet
-- The model provider is still the mock provider; Ollama integration is the next step
+- No provider fallback/retry policy yet (errors are surfaced directly)
 
 ### Next planned step
 

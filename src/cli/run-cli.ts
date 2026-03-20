@@ -1,5 +1,5 @@
 import { Agent } from "../core/agent.js";
-import { MockProvider } from "../providers/mock-provider.js";
+import { createModelProvider } from "../providers/provider-factory.js";
 import { planningSkill } from "../skills/planning-skill.js";
 import { runChat } from "./run-chat.js";
 
@@ -12,7 +12,7 @@ export async function runCli(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  const provider = new MockProvider();
+  const provider = createModelProvider();
   const agent = new Agent(provider);
 
   if (command === "plan") {
