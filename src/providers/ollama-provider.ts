@@ -50,7 +50,20 @@ export class OllamaProvider implements ModelProvider {
       throw new Error(`Ollama error: ${data.error}`);
     }
 
-    return data.message?.content ?? "";
+    const content = data.message?.content;
+    if (typeof content !== "string") {
+      const sanitizedDetails = JSON.stringify({
+        hasMessage: !!data.message,
+        hasContentProperty:
+          data.message != null && Object.prototype.hasOwnProperty.call(data.message, "content"),
+        contentType: typeof content,
+      });
+      throw new Error(
+        `Ollama response missing message content or content is not a string: ${sanitizedDetails}`
+      );
+    }
+
+    return content;
   }
 
   async *streamChat(messages: ChatMessage[]): AsyncIterable<string> {
