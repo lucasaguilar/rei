@@ -3,6 +3,7 @@ import type { ModelProvider } from "../providers/model-provider.js";
 import type { ChatSession } from "../chat/types.js";
 import { buildSystemMessage } from "../prompts/prompt-builder.js";
 import { buildTurnContext, type TurnContext } from "../context/context-builder.js";
+import { buildMessagesForModel } from "../chat/message-builder.js";
 
 export class Agent {
   constructor(
@@ -35,7 +36,11 @@ export class Agent {
     const enrichedMessage = buildTurnUserMessage({ userInput, context });
 
     session.messages.push({ role: "user", content: enrichedMessage });
-    const response = await this.provider.completeChat(session.messages);
+
+    // session.messages holds the complete history; send only a trimmed
+    // window to the provider to keep prompt size under control.
+    const messagesForModel = buildMessagesForModel(session.messages);
+    const response = await this.provider.completeChat(messagesForModel);
     session.messages.push({ role: "assistant", content: response });
     return response;
   }
