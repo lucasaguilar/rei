@@ -5,7 +5,7 @@ import { OllamaProvider } from "./ollama-provider.js";
 export type ProviderName = "mock" | "ollama";
 
 export function createModelProvider(): ModelProvider {
-  const providerName = (process.env.MODEL_PROVIDER ?? "mock").toLowerCase() as ProviderName;
+  const providerName = (process.env.MODEL_PROVIDER ?? "mock").toLowerCase();
 
   switch (providerName) {
     case "mock":
