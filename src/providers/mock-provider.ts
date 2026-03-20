@@ -15,8 +15,13 @@ export class MockProvider implements ModelProvider {
     const lastUser = [...messages].reverse().find((m) => m.role === "user");
     const response = `[mock response] You said: ${lastUser?.content ?? ""}`;
     const tokens = response.split(" ");
+
+    // Simulate streaming by yielding one token at a time with a delay.
     for (const token of tokens) {
+      await new Promise((resolve) => setTimeout(resolve, 80));
       yield token + " ";
     }
+
+
   }
 }
