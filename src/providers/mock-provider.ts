@@ -10,4 +10,13 @@ export class MockProvider implements ModelProvider {
     const lastUser = [...messages].reverse().find((m) => m.role === "user");
     return `[mock response] You said: ${lastUser?.content ?? ""}`;
   }
+
+  async *streamChat(messages: ChatMessage[]): AsyncIterable<string> {
+    const lastUser = [...messages].reverse().find((m) => m.role === "user");
+    const response = `[mock response] You said: ${lastUser?.content ?? ""}`;
+    const tokens = response.split(" ");
+    for (const token of tokens) {
+      yield token + " ";
+    }
+  }
 }
