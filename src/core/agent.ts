@@ -44,6 +44,43 @@ export class Agent {
     session.messages.push({ role: "assistant", content: response });
     return response;
   }
+
+  async *streamTurn(session: ChatSession, userInput: string): AsyncIterable<string> {
+    const systemContent = buildSystemMessage(session.mode);
+
+    if (session.messages.length > 0 && session.messages[0].role === "system") {
+      session.messages[0] = { role: "system", content: systemContent };
+    } else {
+      session.messages.unshift({ role: "system", content: systemContent });
+    }
+
+    const context = await buildTurnContext({
+      workspacePath: this.workspacePath,
+      userInput,
+      mode: session.mode,
+    });
+
+    debugContext(context);
+
+    const enrichedMessage = buildTurnUserMessage({ userInput, context });
+
+    session.messages.push({ role: "user", content: enrichedMessage });
+
+    const messagesForModel = buildMessagesForModel(session.messages);
+
+    if (this.provider.streamChat) {
+      let fullResponse = "";
+      for await (const token of this.provider.streamChat(messagesForModel)) {
+        fullResponse += token;
+        yield token;
+      }
+      session.messages.push({ role: "assistant", content: fullResponse });
+    } else {
+      const response = await this.provider.completeChat(messagesForModel);
+      session.messages.push({ role: "assistant", content: response });
+      yield response;
+    }
+  }
 }
 
 export function buildTurnUserMessage(params: {
