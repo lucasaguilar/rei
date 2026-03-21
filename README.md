@@ -10,10 +10,20 @@ npm install
 
 ## Commands
 
+Global option:
+
+- `--workspace <path>`: target workspace REI should analyze (defaults to current working directory)
+
 ### `plan` — one-shot task breakdown
 
 ```bash
 npm run dev -- plan "create a worktree helper CLI"
+```
+
+With explicit workspace:
+
+```bash
+npm run dev -- --workspace /workspaces/another-repo plan "create a worktree helper CLI"
 ```
 
 Sends a single prompt to the model and prints the response.
@@ -22,6 +32,18 @@ Sends a single prompt to the model and prints the response.
 
 ```bash
 npm run dev -- chat
+```
+
+With explicit workspace:
+
+```bash
+npm run dev -- --workspace /workspaces/another-repo chat
+```
+
+If only `--workspace` is provided, REI defaults to `chat` mode:
+
+```bash
+npm run dev -- --workspace /workspaces/another-repo
 ```
 
 Starts a persistent conversation loop. Type any message and press Enter to get a response. The full conversation history is kept in memory for the duration of the session.
