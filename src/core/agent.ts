@@ -8,7 +8,7 @@ import { scanWorkspace, type FileMeta } from "../workspace/workspace-scanner.js"
 
 const SCAN_CACHE_TTL_MS = 30_000;
 
-export type TurnStatus = "building_context" | "calling_model" | "streaming_response";
+export type TurnStatus = "building_context" | "calling_model" | "producing_response";
 
 type StreamTurnOptions = {
   onStatus?: (status: TurnStatus) => void;
@@ -93,7 +93,7 @@ export class Agent {
 
     if (this.provider.streamChat) {
       let fullResponse = "";
-      options?.onStatus?.("streaming_response");
+      options?.onStatus?.("producing_response");
       for await (const token of this.provider.streamChat(messagesForModel)) {
         fullResponse += token;
         yield token;
@@ -102,7 +102,7 @@ export class Agent {
     } else {
       const response = await this.provider.completeChat(messagesForModel);
       session.messages.push({ role: "assistant", content: response });
-      options?.onStatus?.("streaming_response");
+      options?.onStatus?.("producing_response");
       yield response;
     }
   }
