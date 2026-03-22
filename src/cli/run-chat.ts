@@ -1,5 +1,5 @@
 import * as readline from "readline";
-import type { Agent } from "../core/agent.js";
+import type { Agent, TurnStatus } from "../core/agent.js";
 import type { ChatSession, SessionMode } from "../chat/types.js";
 
 const LOGO = `
@@ -36,6 +36,14 @@ const MODE_PROMPTS: Record<SessionMode, string> = {
   planning: "plan > ",
   agent: "agent > ",
 };
+
+const THINKING_TEXT: Record<TurnStatus, string> = {
+  building_context: "Building context...",
+  calling_model: "Calling model...",
+  streaming_response: "Streaming response...",
+};
+
+const SPINNER_FRAMES = ["|", "/", "-", "\\"];
 
 export async function runChat(agent: Agent): Promise<void> {
   const session: ChatSession = { messages: [], mode: "ask" };
@@ -93,12 +101,48 @@ export async function runChat(agent: Agent): Promise<void> {
       }
 
       (async () => {
+        let lastStatus: TurnStatus | undefined;
+        let activeStatus: TurnStatus | undefined;
+        let spinnerFrame = 0;
+        let spinnerWidth = 0;
+        let spinnerTimer: NodeJS.Timeout | undefined;
+
+        const renderThinking = (): void => {
+          if (!activeStatus) return;
+          const frame = SPINNER_FRAMES[spinnerFrame % SPINNER_FRAMES.length];
+          spinnerFrame += 1;
+          const line = `[REI] Thinking ${frame} ${THINKING_TEXT[activeStatus]}`;
+          spinnerWidth = Math.max(spinnerWidth, line.length);
+          process.stdout.write(`\r${line.padEnd(spinnerWidth, " ")}`);
+        };
+
+        const stopThinking = (): void => {
+          if (!spinnerTimer) return;
+          clearInterval(spinnerTimer);
+          spinnerTimer = undefined;
+          process.stdout.write(`\r${" ".repeat(spinnerWidth)}\r`);
+        };
+
         try {
-          for await (const token of agent.streamTurn(session, trimmed)) {
+          for await (const token of agent.streamTurn(session, trimmed, {
+            onStatus: (status) => {
+              if (lastStatus === status) return;
+              lastStatus = status;
+              activeStatus = status;
+              if (!spinnerTimer) {
+                renderThinking();
+                spinnerTimer = setInterval(renderThinking, 100);
+              }
+            },
+          })) {
+            stopThinking();
             process.stdout.write(token);
           }
+          stopThinking();
           process.stdout.write("\n");
         } catch (err: unknown) {
+          stopThinking();
+          process.stdout.write("\n");
           console.error("Error:", err instanceof Error ? err.message : String(err));
         }
         prompt();
