@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { SessionMode } from "../chat/types.js";
-import { scanWorkspace } from "../workspace/workspace-scanner.js";
+import { scanWorkspace, type FileMeta } from "../workspace/workspace-scanner.js";
 import { selectRelevantFiles } from "../workspace/file-selector.js";
 import { readFilePreview } from "../workspace/file-preview.js";
 
@@ -30,11 +30,12 @@ export async function buildTurnContext(params: {
   workspacePath: string;
   userInput: string;
   mode: SessionMode;
+  scannedFiles?: FileMeta[];
 }): Promise<TurnContext> {
-  const { workspacePath, userInput, mode } = params;
+  const { workspacePath, userInput, mode, scannedFiles } = params;
 
-  const files = scanWorkspace(workspacePath);
-  const repoSummary = buildRepoSummary(workspacePath, files.map((f) => f.path));
+  const files = scannedFiles ?? scanWorkspace(workspacePath);
+  const repoSummary = await buildRepoSummary(workspacePath, files.map((f) => f.path));
   const selected = selectRelevantFiles(files, userInput, mode);
 
   const relevantFiles = await Promise.all(
@@ -48,7 +49,7 @@ export async function buildTurnContext(params: {
   return { workspacePath, repoSummary, relevantFiles };
 }
 
-function buildRepoSummary(workspacePath: string, filePaths: string[]): string {
+async function buildRepoSummary(workspacePath: string, filePaths: string[]): Promise<string> {
   const lines: string[] = [];
 
   // Detected project markers
@@ -62,7 +63,7 @@ function buildRepoSummary(workspacePath: string, filePaths: string[]): string {
   // Top-level folders
   const topLevelDirs: string[] = [];
   try {
-    const entries = fs.readdirSync(workspacePath, { withFileTypes: true });
+    const entries = await fs.promises.readdir(workspacePath, { withFileTypes: true });
     for (const entry of entries) {
       if (entry.isDirectory() && !entry.name.startsWith(".")) {
         topLevelDirs.push(entry.name);

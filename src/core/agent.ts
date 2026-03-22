@@ -4,12 +4,27 @@ import type { ChatSession } from "../chat/types.js";
 import { buildSystemMessage } from "../prompts/prompt-builder.js";
 import { buildTurnContext, type TurnContext } from "../context/context-builder.js";
 import { buildMessagesForModel } from "../chat/message-builder.js";
+import { scanWorkspace, type FileMeta } from "../workspace/workspace-scanner.js";
+
+const SCAN_CACHE_TTL_MS = 30_000;
+
+export type TurnStatus = "building_context" | "calling_model" | "streaming_response";
+
+type StreamTurnOptions = {
+  onStatus?: (status: TurnStatus) => void;
+};
 
 export class Agent {
+  private scanCache?: {
+    workspacePath: string;
+    files: FileMeta[];
+    timestamp: number;
+  };
+
   constructor(
     private readonly provider: ModelProvider,
     private readonly workspacePath: string = process.cwd()
-  ) {}
+  ) { }
 
   async run(prompt: string): Promise<string> {
     return this.provider.complete(prompt);
@@ -29,6 +44,7 @@ export class Agent {
       workspacePath: this.workspacePath,
       userInput,
       mode: session.mode,
+      scannedFiles: this.getWorkspaceFiles(),
     });
 
     debugContext(context);
@@ -45,7 +61,12 @@ export class Agent {
     return response;
   }
 
-  async *streamTurn(session: ChatSession, userInput: string): AsyncIterable<string> {
+  async *streamTurn(
+    session: ChatSession,
+    userInput: string,
+    options?: StreamTurnOptions
+  ): AsyncIterable<string> {
+    options?.onStatus?.("building_context");
     const systemContent = buildSystemMessage(session.mode);
 
     if (session.messages.length > 0 && session.messages[0].role === "system") {
@@ -58,6 +79,7 @@ export class Agent {
       workspacePath: this.workspacePath,
       userInput,
       mode: session.mode,
+      scannedFiles: this.getWorkspaceFiles(),
     });
 
     debugContext(context);
@@ -67,9 +89,11 @@ export class Agent {
     session.messages.push({ role: "user", content: enrichedMessage });
 
     const messagesForModel = buildMessagesForModel(session.messages);
+    options?.onStatus?.("calling_model");
 
     if (this.provider.streamChat) {
       let fullResponse = "";
+      options?.onStatus?.("streaming_response");
       for await (const token of this.provider.streamChat(messagesForModel)) {
         fullResponse += token;
         yield token;
@@ -78,8 +102,28 @@ export class Agent {
     } else {
       const response = await this.provider.completeChat(messagesForModel);
       session.messages.push({ role: "assistant", content: response });
+      options?.onStatus?.("streaming_response");
       yield response;
     }
+  }
+
+  private getWorkspaceFiles(): FileMeta[] {
+    const now = Date.now();
+    if (
+      this.scanCache &&
+      this.scanCache.workspacePath === this.workspacePath &&
+      now - this.scanCache.timestamp < SCAN_CACHE_TTL_MS
+    ) {
+      return this.scanCache.files;
+    }
+
+    const files = scanWorkspace(this.workspacePath);
+    this.scanCache = {
+      workspacePath: this.workspacePath,
+      files,
+      timestamp: now,
+    };
+    return files;
   }
 }
 
@@ -99,11 +143,13 @@ export function buildTurnUserMessage(params: {
 
   if (context.relevantFiles.length > 0) {
     lines.push(``);
+    lines.push(`Important: The file excerpts below may be partial or truncated.
+Use only the visible content. Do not reconstruct omitted code.`);
     lines.push(`Relevant files:`);
     for (const file of context.relevantFiles) {
       lines.push(``);
       lines.push(`--- ${file.path} (score: ${file.score}) ---`);
-      lines.push(file.preview);
+      //lines.push(file.preview);
     }
   }
 
