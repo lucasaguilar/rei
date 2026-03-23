@@ -101,7 +101,7 @@ export function buildAgentContractBlock(): string {
     JSON.stringify(example, null, 2),
     "",
     "Additional rules:",
-    "- Omit fields that do not apply (e.g. omit contextRequests when needsMoreContext is false).",
+    "- All fields in the example object must be present. Use empty arrays for lists that do not apply (e.g. contextRequests when needsMoreContext is false).",
     "- Do not add fields outside this contract.",
     "- confidence must be a number between 0 and 1.",
     "- All file paths must be relative to the workspace root.",
