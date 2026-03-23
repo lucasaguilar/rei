@@ -40,7 +40,7 @@ const MODE_PROMPTS: Record<SessionMode, string> = {
 const THINKING_TEXT: Record<TurnStatus, string> = {
   building_context: "Building context...",
   calling_model: "Calling model...",
-  streaming_response: "Streaming response...",
+  producing_response: "Producing response...",
 };
 
 const SPINNER_FRAMES = ["|", "/", "-", "\\"];
