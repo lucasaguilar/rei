@@ -92,12 +92,16 @@ export function buildAgentContractBlock(): string {
   };
 
   return [
-    "When responding in agent mode, output a single JSON object that conforms to this contract:",
-    "```json",
+    "AGENT MODE OUTPUT RULES (these override all general response rules):",
+    "- Your entire response must be a single raw JSON object. No text before it, no text after it.",
+    "- Do NOT use markdown fences (no ```json). Output raw JSON only.",
+    "- Do NOT greet, explain, or summarize in prose. JSON is the only valid output.",
+    "",
+    "The JSON object must conform to this exact shape:",
     JSON.stringify(example, null, 2),
-    "```",
-    "Rules:",
-    "- Omit fields that do not apply (e.g. empty contextRequests when needsMoreContext is false).",
+    "",
+    "Additional rules:",
+    "- Omit fields that do not apply (e.g. omit contextRequests when needsMoreContext is false).",
     "- Do not add fields outside this contract.",
     "- confidence must be a number between 0 and 1.",
     "- All file paths must be relative to the workspace root.",

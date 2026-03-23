@@ -8,19 +8,17 @@ export function buildSystemMessage(mode: SessionMode): string {
     "",
     `Active mode: ${mode}`,
     "",
-    loadPrompt("shared/response-rules"),
-    "",
-    loadPrompt(`modes/${mode}`),
-    "",
   ];
 
-  // Inject the structured JSON contract programmatically for agent mode.
-  // This keeps the contract machine-verifiable in TypeScript while keeping
-  // prose instructions in the markdown files.
+  // For agent mode, inject the JSON contract BEFORE the general response rules
+  // so its "override all response rules" instruction takes priority.
   if (mode === "agent") {
     sections.push(buildAgentContractBlock(), "");
+  } else {
+    sections.push(loadPrompt("shared/response-rules"), "");
   }
 
+  sections.push(loadPrompt(`modes/${mode}`), "");
   sections.push(loadPrompt(`formats/${mode}-format`));
 
   return sections.join("\n");

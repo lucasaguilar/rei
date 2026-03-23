@@ -149,7 +149,7 @@ Use only the visible content. Do not reconstruct omitted code.`);
     for (const file of context.relevantFiles) {
       lines.push(``);
       lines.push(`--- ${file.path} (score: ${file.score}) ---`);
-      //lines.push(file.preview);
+      lines.push(file.preview);
     }
   }
 
