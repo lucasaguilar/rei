@@ -151,6 +151,18 @@ function expectString(value: unknown, path: string): string {
   return value;
 }
 
+function expectLiteral<T extends string>(
+  value: unknown,
+  literal: T,
+  path: string
+): T {
+  assert(
+    typeof value === "string" && value === literal,
+    `Invalid AGENT mode response: ${path} must be "${literal}"`
+  );
+  return value as T;
+}
+
 function expectBoolean(value: unknown, path: string): boolean {
   assert(typeof value === "boolean", `Invalid AGENT mode response: ${path} must be a boolean`);
   return value;
@@ -215,11 +227,8 @@ export function validateAgentResponse(value: unknown): AgentResponse {
   assert(isRecord(value), "Invalid AGENT mode response: root value must be an object");
   assertExactKeys(value, AGENT_RESPONSE_KEYS, "response");
 
-  const version = expectString(value.version, "response.version");
-  assert(version === "1.0", 'Invalid AGENT mode response: response.version must be "1.0"');
-
-  const mode = expectString(value.mode, "response.mode");
-  assert(mode === "agent", 'Invalid AGENT mode response: response.mode must be "agent"');
+  const version = expectLiteral(value.version, "1.0" as const, "response.version");
+  const mode = expectLiteral(value.mode, "agent" as const, "response.mode");
 
   const confidence = expectNumber(value.confidence, "response.confidence");
   assert(
