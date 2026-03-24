@@ -1,17 +1,9 @@
 import * as readline from "readline";
 import type { Agent, TurnStatus } from "../core/agent.js";
 import type { ChatSession, SessionMode } from "../chat/types.js";
+import { REI_LOGO } from "./rei-logo.js";
 
-const LOGO = `
-██████╗ ███████╗██╗
-██╔══██╗██╔════╝██║
-██████╔╝█████╗  ██║
-██╔══██╗██╔══╝  ██║
-██║  ██║███████╗██║
-╚═╝  ╚═╝╚══════╝╚═╝
-`;
-
-const getWelcomeMessage = (mode: SessionMode): string => `${LOGO}
+const getWelcomeMessage = (mode: SessionMode): string => `${REI_LOGO}
 REI — Repository-Aware AI Agent
 
 Mode: ${mode}

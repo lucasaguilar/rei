@@ -8,6 +8,7 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
+    "jsonrepair": "^3.13.3",
     "tsx": "^4.19.2"
   },
   "devDependencies": {
