@@ -1,13 +1,24 @@
 Output format requirements (AGENT mode):
 - Return exactly one JSON object that conforms to the injected AgentResponse contract.
 - Return JSON only (no markdown fences, no prose before/after, no bullet lists).
+- The first character of the response must be `{` and the last character must be `}`.
+- The response must not contain triple backticks anywhere.
 - Use valid JSON syntax with double-quoted keys/strings.
-- Include all fields from the contract; for array fields that do not apply, return an empty array.
+- Include all fields from the contract; no top-level key is optional.
+- For array fields that do not apply, return an empty array instead of omitting the field.
 - Keep paths workspace-relative in all file/target fields.
 - In actions.type, use only inspect, modify, or validate.
+- In analysis-first tasks, prefer inspect actions.
+- Use modify only when the user explicitly asks for repository changes or concrete change proposals.
+- Use validate only when a concrete validation step is justified.
 - In proposedChanges, describe the intended change clearly and technically.
+- proposedChanges may be an empty array when the task is analysis-only.
 - In proposedChanges.description, include the logical insertion point when applicable (for example, before bootstrap or after initialization).
 - In proposedChanges.description, include relevant constraints and assumptions from the visible context.
+- risks may be an empty array when no concrete risks are visible in the provided context.
+- If needsMoreContext is false, contextRequests must be an empty array.
+- If needsMoreContext is true, contextRequests must contain one or more entries.
+- Never omit description inside actions, proposedChanges, or risks.
 - Do not generate full code patches or diffs in this phase.
 - Avoid exact code generation unless the snippet is trivial and required to explain intent.
 - If you want to suggest a next step, put it in finalMessage or an existing description field. Do not add fields such as nextStep, notes, rationale, or metadata.

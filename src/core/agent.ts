@@ -8,6 +8,7 @@ import { buildMessagesForModel } from "../chat/message-builder.js";
 import { scanWorkspace, type FileMeta } from "../workspace/workspace-scanner.js";
 
 const SCAN_CACHE_TTL_MS = 30_000;
+const AGENT_JSON_REPAIR_RETRIES = 1;
 
 export type TurnStatus = "building_context" | "calling_model" | "producing_response";
 
@@ -57,8 +58,7 @@ export class Agent {
     // session.messages holds the complete history; send only a trimmed
     // window to the provider to keep prompt size under control.
     const messagesForModel = buildMessagesForModel(session.messages);
-    const rawResponse = await this.provider.completeChat(messagesForModel);
-    const response = normalizeAssistantResponse(session.mode, rawResponse);
+    const response = await this.generateAssistantResponse(session.mode, messagesForModel);
     session.messages.push({ role: "assistant", content: response });
     return response;
   }
@@ -94,17 +94,7 @@ export class Agent {
     options?.onStatus?.("calling_model");
 
     if (session.mode === "agent") {
-      let rawResponse = "";
-
-      if (this.provider.streamChat) {
-        for await (const token of this.provider.streamChat(messagesForModel)) {
-          rawResponse += token;
-        }
-      } else {
-        rawResponse = await this.provider.completeChat(messagesForModel);
-      }
-
-      const response = normalizeAssistantResponse(session.mode, rawResponse);
+      const response = await this.generateAssistantResponse(session.mode, messagesForModel);
       session.messages.push({ role: "assistant", content: response });
       options?.onStatus?.("producing_response");
       yield response;
@@ -144,6 +134,47 @@ export class Agent {
       timestamp: now,
     };
     return files;
+  }
+
+  private async generateAssistantResponse(
+    mode: ChatSession["mode"],
+    messagesForModel: ChatSession["messages"]
+  ): Promise<string> {
+    if (mode !== "agent") {
+      return this.provider.completeChat(messagesForModel);
+    }
+
+    let rawResponse = await this.provider.completeChat(messagesForModel);
+    let lastError: Error | undefined;
+
+    for (let attempt = 0; attempt <= AGENT_JSON_REPAIR_RETRIES; attempt += 1) {
+      try {
+        return normalizeAssistantResponse(mode, rawResponse);
+      } catch (error: unknown) {
+        if (!(error instanceof Error)) {
+          throw error;
+        }
+        lastError = error;
+
+        if (attempt === AGENT_JSON_REPAIR_RETRIES) {
+          break;
+        }
+
+        const repairMessages: ChatSession["messages"] = [
+          ...messagesForModel,
+          {
+            role: "user",
+            content: buildAgentRepairPrompt(error.message),
+          },
+        ];
+
+        rawResponse = await this.provider.completeChat(repairMessages);
+      }
+    }
+
+    throw new Error(
+      `Agent mode could not produce a valid JSON response after ${AGENT_JSON_REPAIR_RETRIES + 1} attempt(s): ${lastError?.message ?? "unknown validation error"}`
+    );
   }
 }
 
@@ -195,4 +226,16 @@ function normalizeAssistantResponse(mode: ChatSession["mode"], rawResponse: stri
 
   const validated = parseAgentResponse(rawResponse);
   return JSON.stringify(validated, null, 2);
+}
+
+function buildAgentRepairPrompt(validationError: string): string {
+  return [
+    "Your previous AGENT mode response failed schema validation.",
+    `Validation error: ${validationError}`,
+    "Return a corrected response as raw JSON only.",
+    "Do not include markdown fences or extra prose.",
+    "The first character of your response must be { and the last character must be }.",
+    "Your response must not contain triple backticks anywhere.",
+    "Keep the same intent and include every required field from the AGENT contract.",
+  ].join("\n");
 }

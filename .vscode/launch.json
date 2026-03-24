@@ -69,6 +69,28 @@
             "skipFiles": [
                 "<node_internals>/**"
             ],
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "REI deepseek-coder-v2:16b (Ollama)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": [
+                "run",
+                "dev",
+                "--",
+                //"--workspace",
+                //"/workspaces/app-for-news",
+                "chat"
+            ],
+            "env": {
+                "MODEL_PROVIDER": "ollama",
+                "OLLAMA_MODEL": "deepseek-coder-v2:16b"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
         }
     ]
 }

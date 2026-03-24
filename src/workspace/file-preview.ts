@@ -1,6 +1,6 @@
 import * as fs from "fs/promises";
 
-const DEFAULT_MAX_CHARS = 1500;
+const DEFAULT_MAX_CHARS = 900;
 
 export async function readFilePreview(
   filePath: string,
