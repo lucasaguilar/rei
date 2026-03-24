@@ -107,11 +107,11 @@ MODEL_PROVIDER=ollama OLLAMA_BASE_URL=http://127.0.0.1:11434 OLLAMA_MODEL=llama3
 
 REI supports three modes that shape how the assistant reasons and responds:
 
-- **`ask`** — Explanation mode. REI answers questions and explains code. No planning or execution mindset unless explicitly requested.
+- **`ask`** — Explanation mode. REI answers questions and explains code. No planning or execution mindset unless explicitly requested. Default output is plain text.
 
-- **`planning`** — Analysis and plan mode. REI analyzes the codebase, identifies relevant parts, and proposes a step-by-step implementation plan. No execution simulation.
+- **`planning`** — Analysis and plan mode. REI analyzes the codebase, identifies relevant parts, and proposes a step-by-step implementation plan. No execution simulation. Default output is plain text.
 
-- **`agent`** — Execution-oriented reasoning mode. REI thinks like a coding agent: it describes actions to inspect, modify, and validate code, and produces an operational execution plan. Files are not modified at this stage.
+- **`agent`** — Execution-oriented reasoning mode. REI thinks like a coding agent: it describes actions to inspect, modify, and validate code, and produces an operational execution plan. Files are not modified at this stage. Output must be valid JSON matching the agent contract.
 
 The active mode can be changed at any time during a chat session with `/mode <mode>`.
 
@@ -123,9 +123,9 @@ On every user turn, REI builds contextual information from the local workspace a
 
 1. **Workspace scanning** — REI scans the workspace recursively (capped at 200 files) and collects file metadata. Binary files, lock files, and directories like `node_modules`, `.git`, `dist`, `build`, `coverage`, `.next`, and `out` are automatically ignored.
 
-2. **Relevant file selection** — REI scores every scanned file against the user's message using a simple heuristic: keyword matches in the filename score highest, path matches score lower, and the active mode applies a small boost (source files for `agent`/`planning`, docs for `planning`).  The top 8 files are selected.
+2. **Relevant file selection** — REI scores every scanned file against the user's message using a simple heuristic: keyword matches in the filename score highest, path matches score lower, and the active mode applies a small boost (source files for `agent`/`planning`, docs for `planning`). The top 6 files are selected.
 
-3. **Partial file previews** — Each selected file is read up to a 1500-character preview. Truncated files are labelled so the model knows the content was cut.
+3. **Partial file previews** — Each selected file is read up to a 900-character preview. Truncated files are labelled so the model knows the content was cut.
 
 4. **Prompt enrichment** — The original user message is replaced with an enriched version that includes:
    - the original task
@@ -152,11 +152,12 @@ Each turn prints a brief debug summary to the console:
 - No embeddings or semantic search yet — file selection is purely heuristic
 - No persistent repository index — the workspace is scanned fresh on every turn
 - No file writing or command execution yet
-- No provider fallback/retry policy yet (errors are surfaced directly)
+- No provider fallback policy yet (provider errors are surfaced directly)
+- Agent mode includes one JSON repair retry when contract validation fails
 
 ### Next planned step
 
-Integrate Ollama as the real model provider once repository-aware context is validated.
+Harden response reliability across local models (especially in `agent` mode) with better recovery and prompt-shaping strategies while preserving strict contract validation.
 
 ---
 
@@ -177,7 +178,7 @@ Before calling `provider.completeChat`, the agent passes `session.messages` thro
 - The original `session.messages` array is **never mutated** — full history is retained internally.
 - Repository context is **recalculated per turn**, so trimming older messages does not lose workspace grounding.
 
-This is especially important before integrating Ollama or other local models that have limited context windows.
+This is especially important when using local models (including Ollama) that have limited context windows.
 
 ---
 
@@ -211,9 +212,11 @@ npm run check
 
 - **`scanWorkspace`** (`src/workspace/workspace-scanner.ts`): Recursively walks the workspace, skipping ignored directories and binary/unhelpful file extensions, capped at 200 files.
 
-- **`selectRelevantFiles`** (`src/workspace/file-selector.ts`): Scores files by keyword/filename/path matching against the user input, with small mode-specific boosts. Returns up to 8 ranked files.
+- **`selectRelevantFiles`** (`src/workspace/file-selector.ts`): Scores files by keyword/filename/path matching against the user input, with small mode-specific boosts. Returns up to 6 ranked files.
 
-- **`readFilePreview`** (`src/workspace/file-preview.ts`): Reads file content up to 1500 characters, truncating safely if needed.
+- **`readFilePreview`** (`src/workspace/file-preview.ts`): Reads file content up to 900 characters, truncating safely if needed.
+
+- **`Agent.generateAssistantResponse`** (`src/core/agent.ts`): Centralizes mode-specific response handling. In `agent` mode it enforces contract validation and performs one repair retry if JSON output is invalid.
 
 - **`MockProvider.completeChat`** (`src/providers/mock-provider.ts`): Echoes the last user message so the chat loop works without any real model.
 
@@ -224,7 +227,7 @@ flowchart TD
   A[User runs npm run dev chat] --> B[run chat entrypoint]
   B --> C[Create chat session messages empty]
     B --> D[Instantiate Agent]
-  D --> E[Inject model provider MockProvider]
+  D --> E[Inject model provider from factory]
 
     C --> F[Read user input in loop]
   F --> G{Internal command}
@@ -273,28 +276,16 @@ flowchart TD
     end
 ```
 
-### Adding an `OllamaProvider` later
+### Ollama provider implementation status
 
-Create a new class that implements `ModelProvider`:
+`OllamaProvider` is already implemented in `src/providers/ollama-provider.ts` and supports:
 
-```typescript
-import type { ModelProvider } from "./model-provider.js";
-import type { ChatMessage } from "../chat/types.js";
+- `completeChat(messages)` via `POST /api/chat` with `stream: false`
+- `streamChat(messages)` via `POST /api/chat` with `stream: true`
+- configurable `OLLAMA_BASE_URL` and `OLLAMA_MODEL`
+- clear error surfacing for HTTP and payload-level failures
 
-export class OllamaProvider implements ModelProvider {
-  async complete(prompt: string): Promise<string> {
-    return this.completeChat([{ role: "user", content: prompt }]);
-  }
-
-  async completeChat(messages: ChatMessage[]): Promise<string> {
-    // POST to http://localhost:11434/api/chat with { model, messages }
-    // and return response.message.content
-    throw new Error("Not yet implemented");
-  }
-}
-```
-
-Then swap `MockProvider` for `OllamaProvider` in `run-cli.ts` — no other changes needed.
+Provider selection is done through `MODEL_PROVIDER` using `src/providers/provider-factory.ts`.
 
 ## 📝 Documentation rule
 

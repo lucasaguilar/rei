@@ -5,7 +5,7 @@ export type RankedFile = FileMeta & {
   score: number;
 };
 
-const TOP_FILES_LIMIT = 8;
+const TOP_FILES_LIMIT = 6;
 
 export function selectRelevantFiles(
   files: FileMeta[],
