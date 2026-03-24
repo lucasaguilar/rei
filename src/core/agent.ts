@@ -1,6 +1,7 @@
 import * as path from "path";
 import type { ModelProvider } from "../providers/model-provider.js";
 import type { ChatSession } from "../chat/types.js";
+import { parseAgentResponse } from "../contracts/agent-response.types.js";
 import { buildSystemMessage } from "../prompts/prompt-builder.js";
 import { buildTurnContext, type TurnContext } from "../context/context-builder.js";
 import { buildMessagesForModel } from "../chat/message-builder.js";
@@ -56,7 +57,8 @@ export class Agent {
     // session.messages holds the complete history; send only a trimmed
     // window to the provider to keep prompt size under control.
     const messagesForModel = buildMessagesForModel(session.messages);
-    const response = await this.provider.completeChat(messagesForModel);
+    const rawResponse = await this.provider.completeChat(messagesForModel);
+    const response = normalizeAssistantResponse(session.mode, rawResponse);
     session.messages.push({ role: "assistant", content: response });
     return response;
   }
@@ -90,6 +92,24 @@ export class Agent {
 
     const messagesForModel = buildMessagesForModel(session.messages);
     options?.onStatus?.("calling_model");
+
+    if (session.mode === "agent") {
+      let rawResponse = "";
+
+      if (this.provider.streamChat) {
+        for await (const token of this.provider.streamChat(messagesForModel)) {
+          rawResponse += token;
+        }
+      } else {
+        rawResponse = await this.provider.completeChat(messagesForModel);
+      }
+
+      const response = normalizeAssistantResponse(session.mode, rawResponse);
+      session.messages.push({ role: "assistant", content: response });
+      options?.onStatus?.("producing_response");
+      yield response;
+      return;
+    }
 
     if (this.provider.streamChat) {
       let fullResponse = "";
@@ -166,4 +186,13 @@ function debugContext(context: TurnContext): void {
   console.log(scannedNote);
   console.log(filesNote);
   if (fileList) console.log(fileList);
+}
+
+function normalizeAssistantResponse(mode: ChatSession["mode"], rawResponse: string): string {
+  if (mode !== "agent") {
+    return rawResponse;
+  }
+
+  const validated = parseAgentResponse(rawResponse);
+  return JSON.stringify(validated, null, 2);
 }

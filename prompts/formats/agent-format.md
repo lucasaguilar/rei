@@ -4,3 +4,10 @@ Output format requirements (AGENT mode):
 - Use valid JSON syntax with double-quoted keys/strings.
 - Include all fields from the contract; for array fields that do not apply, return an empty array.
 - Keep paths workspace-relative in all file/target fields.
+- In actions.type, use only inspect, modify, or validate.
+- In proposedChanges, describe the intended change clearly and technically.
+- In proposedChanges.description, include the logical insertion point when applicable (for example, before bootstrap or after initialization).
+- In proposedChanges.description, include relevant constraints and assumptions from the visible context.
+- Do not generate full code patches or diffs in this phase.
+- Avoid exact code generation unless the snippet is trivial and required to explain intent.
+- If you want to suggest a next step, put it in finalMessage or an existing description field. Do not add fields such as nextStep, notes, rationale, or metadata.

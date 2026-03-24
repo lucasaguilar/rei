@@ -25,7 +25,6 @@
             "skipFiles": [
                 "<node_internals>/**"
             ],
-            
         },
         {
             "type": "node",
@@ -48,7 +47,28 @@
             "skipFiles": [
                 "<node_internals>/**"
             ],
-            
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "REI qwen2.5-coder:3b (Ollama)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": [
+                "run",
+                "dev",
+                "--",
+                //"--workspace",
+                //"/workspaces/app-for-news",
+                "chat"
+            ],
+            "env": {
+                "MODEL_PROVIDER": "ollama",
+                "OLLAMA_MODEL": "qwen2.5-coder:3b"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
         }
     ]
 }
