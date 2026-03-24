@@ -63,9 +63,9 @@ export interface AgentResponse {
   /** Actions the agent would perform (inspect / modify / validate). */
   actions: AgentAction[];
   /**
-   * Proposed repository changes for planning mode behavior (described, not applied),
+   * Proposed repository changes for agent-mode preview (described, not applied),
    * each including target file, intent, approximate location, and constraints.
-   * Do not require full code patches or diffs at this stage.
+   * Agent mode operates preview-first — no actual file writes are performed at this stage.
    */
   proposedChanges: AgentProposedChange[];
   /** Risks or concerns about the proposed plan. */
