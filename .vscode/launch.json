@@ -131,7 +131,7 @@
             "env": {
                 "MODEL_PROVIDER": "groq",
                 "GROQ_MODEL": "qwen/qwen3-32b",
-                "GROQ_API_KEY": "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"
+                "GROQ_API_KEY": "${env:GROQ_API_KEY}"
             },
             "console": "integratedTerminal",
             "skipFiles": [
