@@ -136,9 +136,9 @@ export class OllamaProvider implements ModelProvider {
         messages,
         stream,
         options: {
-          num_ctx: 4096,   // Limita el contexto para evitar lentitud
-          num_thread: 8,   // Usa todos tus núcleos disponibles
-          temperature: 0   // Para que el JSON sea más predecible
+          num_ctx: 4096,   // Limit context length to balance performance and memory usage
+          num_thread: 8,   // Use 8 threads (adjust as needed for your hardware)
+          temperature: 0   // Low temperature for more deterministic JSON output
         }
       }),
     };
