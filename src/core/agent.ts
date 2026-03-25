@@ -158,7 +158,7 @@ export class Agent {
       try {
         const recovered = parseAgentResponseWithRecovery(rawResponse);
         if (recovered.stage !== "direct") {
-          console.log(`[REI debug] Agent JSON recovered via: ${recovered.stage}`);
+          console.warn(`[REI debug] Agent JSON recovered via: ${recovered.stage}`);
         }
         return JSON.stringify(recovered.response, null, 2);
       } catch (error: unknown) {
