@@ -91,6 +91,8 @@ const AGENT_RESPONSE_KEYS = [
 
 const AGENT_CONTEXT_REQUEST_KEYS = ["path", "reason"] as const;
 const AGENT_ACTION_KEYS = ["type", "target", "description"] as const;
+const AGENT_ACTION_COMPAT_KEYS = ["type", "target", "description", "value"] as const;
+const AGENT_ACTION_COMPAT_KEY_SET = new Set<string>(AGENT_ACTION_COMPAT_KEYS);
 const AGENT_PROPOSED_CHANGE_KEYS = ["file", "description"] as const;
 const AGENT_RISK_KEYS = ["label", "detail"] as const;
 
@@ -148,7 +150,33 @@ function assertExactKeys(
 
 function expectString(value: unknown, path: string): string {
   assert(typeof value === "string", `Invalid AGENT mode response: ${path} must be a string`);
-  return value;
+  assert(
+    !/^<.+>$/.test((value as string).trim()),
+    `Invalid AGENT mode response: ${path} contains an unfilled template placeholder`
+  );
+  return value as string;
+}
+
+function expectRelativeWorkspacePath(value: unknown, path: string): string {
+  const raw = expectString(value, path).trim();
+  assert(raw.length > 0, `Invalid AGENT mode response: ${path} must not be empty`);
+
+  const hasUriScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw);
+  const isWindowsAbsolute = /^[a-zA-Z]:[\\/]/.test(raw);
+  const isUnixAbsolute = raw.startsWith("/");
+
+  assert(
+    !hasUriScheme && !isWindowsAbsolute && !isUnixAbsolute,
+    `Invalid AGENT mode response: ${path} must be a workspace-relative path`
+  );
+
+  // Disallow directory traversal segments to ensure the path is truly workspace-root-relative.
+  const segments = raw.split(/[\\/]+/);
+  assert(
+    !segments.includes(".."),
+    `Invalid AGENT mode response: ${path} must not contain ".." path traversal segments`
+  );
+  return raw;
 }
 
 function expectLiteral<T extends string>(
@@ -177,14 +205,27 @@ function validateContextRequest(value: unknown, path: string): AgentContextReque
   assert(isRecord(value), `Invalid AGENT mode response: ${path} must be an object`);
   assertExactKeys(value, AGENT_CONTEXT_REQUEST_KEYS, path);
   return {
-    path: expectString(value.path, `${path}.path`),
+    path: expectRelativeWorkspacePath(value.path, `${path}.path`),
     reason: expectString(value.reason, `${path}.reason`),
   };
 }
 
 function validateAction(value: unknown, path: string): AgentAction {
   assert(isRecord(value), `Invalid AGENT mode response: ${path} must be an object`);
-  assertExactKeys(value, AGENT_ACTION_KEYS, path);
+  for (const key of Object.keys(value)) {
+    assert(
+      AGENT_ACTION_COMPAT_KEY_SET.has(key),
+      `Invalid AGENT mode response: unexpected field ${path}.${key}`
+    );
+  }
+  assert(
+    "type" in value && "target" in value,
+    `Invalid AGENT mode response: missing field ${path}.${!("type" in value) ? "type" : "target"}`
+  );
+  assert(
+    "description" in value || "value" in value,
+    `Invalid AGENT mode response: missing field ${path}.description`
+  );
 
   const rawType = expectString(value.type, `${path}.type`);
   const type = ACTION_TYPE_ALIASES[rawType.toLowerCase()];
@@ -193,10 +234,15 @@ function validateAction(value: unknown, path: string): AgentAction {
     `Invalid AGENT mode response: ${path}.type must be inspect, modify, or validate`
   );
 
+  const descriptionCandidate =
+    typeof value.description === "string"
+      ? value.description
+      : expectString(value.value, `${path}.value`);
+
   return {
     type,
-    target: expectString(value.target, `${path}.target`),
-    description: expectString(value.description, `${path}.description`),
+    target: expectRelativeWorkspacePath(value.target, `${path}.target`),
+    description: descriptionCandidate,
   };
 }
 
@@ -204,7 +250,7 @@ function validateProposedChange(value: unknown, path: string): AgentProposedChan
   assert(isRecord(value), `Invalid AGENT mode response: ${path} must be an object`);
   assertExactKeys(value, AGENT_PROPOSED_CHANGE_KEYS, path);
   return {
-    file: expectString(value.file, `${path}.file`),
+    file: expectRelativeWorkspacePath(value.file, `${path}.file`),
     description: expectString(value.description, `${path}.description`),
   };
 }
@@ -285,20 +331,21 @@ export function buildAgentContractBlock(): string {
   const example: AgentResponse = {
     version: "1.0",
     mode: "agent",
-    summary: "<one-sentence summary of the understood task>",
+    summary: "Propose to add a console.log statement to src/main.ts",
     confidence: 0.9,
     needsMoreContext: false,
     contextRequests: [],
     actions: [
-      { type: "inspect", target: "<file>", description: "<what to look for>" },
+      { type: "inspect", target: "src/main.ts", description: "Locate the entry point function to determine where to insert the log" },
+      { type: "modify", target: "src/main.ts", description: "Add console.log call at the start of the main function" },
     ],
     proposedChanges: [
-      { file: "<file>", description: "<what would change and why>" },
+      { file: "src/main.ts", description: "Insert console.log at the top of the main() function body" },
     ],
     risks: [
-      { label: "<risk label>", detail: "<explanation and mitigation>" },
+      { label: "debug output in production", detail: "console.log left in production code may expose internals; consider guarding with an env check" },
     ],
-    finalMessage: "<message to the user>",
+    finalMessage: "Propose to add a console.log statement at the entry point of src/main.ts. Review the proposed change before applying.",
   };
 
   return [

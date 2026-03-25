@@ -156,7 +156,12 @@ export class Agent {
 
     for (let attempt = 0; attempt <= AGENT_JSON_REPAIR_RETRIES; attempt += 1) {
       try {
-        const recovered = parseAgentResponseWithRecovery(rawResponse);
+        const normalized = normalizeAgentResponsePaths(rawResponse, this.workspacePath);
+        const recovered = parseAgentResponseWithRecovery(normalized);
+        const semanticIssues = validateAgentResponseSemantics(recovered.response, messagesForModel);
+        if (semanticIssues.length > 0) {
+          throw new Error(`Invalid AGENT mode semantic response: ${semanticIssues.join("; ")}`);
+        }
         if (recovered.stage !== "direct") {
           console.warn(`[REI debug] Agent JSON recovered via: ${recovered.stage}`);
         }
@@ -262,14 +267,33 @@ function parseAgentResponseWithRecovery(rawResponse: string): {
 }
 
 function buildAgentRepairPrompt(validationError: string): string {
+  const isSemantic = validationError.includes("semantic");
+  const isPathError = validationError.includes("workspace-relative path");
+
+  const extra: string[] = [];
+
+  if (isSemantic) {
+    extra.push(
+      "IMPORTANT: Write summary and finalMessage in proposal tense (e.g. \"Propose to add…\", \"Would add…\"), not as if the change already happened.",
+      "If the task requests a repository change, include at least one modify action or one proposedChange."
+    );
+  }
+
+  if (isPathError) {
+    extra.push(
+      "IMPORTANT: All file paths (in actions[].target, proposedChanges[].file, contextRequests[].path) must be workspace-relative (e.g. \"src/main.ts\", NOT \"/workspaces/rei/src/main.ts\")."
+    );
+  }
+
   return [
-    "Your previous AGENT mode response failed schema validation.",
+    "Your previous AGENT mode response failed validation.",
     `Validation error: ${validationError}`,
     "Return a corrected response as raw JSON only.",
     "Do not include markdown fences or extra prose.",
     "The first character of your response must be { and the last character must be }.",
     "Your response must not contain triple backticks anywhere.",
     "Keep the same intent and include every required field from the AGENT contract.",
+    ...extra,
   ].join("\n");
 }
 
@@ -297,6 +321,63 @@ function sanitizeAgentJsonText(rawResponse: string): string {
   }
 
   return candidate;
+}
+
+function normalizeAgentResponsePaths(raw: string, workspacePath: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return raw; // leave as-is; recovery steps will handle parse failure
+  }
+
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return raw;
+  }
+
+  const record = parsed as Record<string, unknown>;
+  const absoluteBase = path.resolve(workspacePath).replace(/\\/g, "/");
+
+  function stripWorkspacePrefix(value: unknown): unknown {
+    if (typeof value !== "string") return value;
+    const normalized = value.replace(/\\/g, "/");
+    if (normalized.startsWith(absoluteBase + "/")) {
+      return normalized.slice(absoluteBase.length + 1);
+    }
+    return value;
+  }
+
+  if (Array.isArray(record.actions)) {
+    record.actions = (record.actions as unknown[]).map((action) => {
+      if (typeof action === "object" && action !== null) {
+        const a = action as Record<string, unknown>;
+        return { ...a, target: stripWorkspacePrefix(a.target) };
+      }
+      return action;
+    });
+  }
+
+  if (Array.isArray(record.proposedChanges)) {
+    record.proposedChanges = (record.proposedChanges as unknown[]).map((change) => {
+      if (typeof change === "object" && change !== null) {
+        const c = change as Record<string, unknown>;
+        return { ...c, file: stripWorkspacePrefix(c.file) };
+      }
+      return change;
+    });
+  }
+
+  if (Array.isArray(record.contextRequests)) {
+    record.contextRequests = (record.contextRequests as unknown[]).map((req) => {
+      if (typeof req === "object" && req !== null) {
+        const r = req as Record<string, unknown>;
+        return { ...r, path: stripWorkspacePrefix(r.path) };
+      }
+      return req;
+    });
+  }
+
+  return JSON.stringify(record);
 }
 
 function buildDegradedAgentFallback(
@@ -328,4 +409,79 @@ function buildDegradedAgentFallback(
   });
 
   return fallback;
+}
+
+function validateAgentResponseSemantics(
+  response: AgentResponse,
+  messagesForModel: ChatSession["messages"]
+): string[] {
+  const issues: string[] = [];
+  const task = extractCurrentTask(messagesForModel);
+  const analysisIntent = isAnalysisIntent(task);
+
+  if (analysisIntent && response.actions.some((action) => action.type === "modify")) {
+    issues.push("analysis intent should not include modify actions");
+  }
+
+  if (analysisIntent && response.proposedChanges.length > 0) {
+    issues.push("analysis intent should not include proposedChanges");
+  }
+
+  // Execution-claim check: only applies to pure analysis tasks where no
+  // repository changes were requested. Mutation tasks (add/fix/update/…)
+  // may legitimately use past tense to summarise their proposal.
+  if (analysisIntent) {
+    if (containsExecutionClaim(response.summary)) {
+      issues.push("analysis task: summary must not claim changes were already applied");
+    }
+    if (containsExecutionClaim(response.finalMessage)) {
+      issues.push("analysis task: finalMessage must not claim changes were already applied");
+    }
+  }
+
+  // Mutation-intent check: if the user asked for a change, expect at least
+  // a modify action or a proposedChange describing what would be done.
+  if (!analysisIntent) {
+    const hasMutationAction = response.actions.some((a) => a.type === "modify");
+    if (!hasMutationAction && response.proposedChanges.length === 0) {
+      issues.push("mutation task: response should include a modify action or at least one proposedChange");
+    }
+  }
+
+  return issues;
+}
+
+function extractCurrentTask(messagesForModel: ChatSession["messages"]): string {
+  for (let i = messagesForModel.length - 1; i >= 0; i -= 1) {
+    const message = messagesForModel[i];
+    if (message.role !== "user") continue;
+
+    const taskLine = message.content
+      .split("\n")
+      .find((line) => line.toLowerCase().startsWith("task:"));
+
+    if (taskLine) {
+      return taskLine.slice("Task:".length).trim();
+    }
+
+    return message.content.trim();
+  }
+
+  return "";
+}
+
+function isAnalysisIntent(task: string): boolean {
+  const normalized = task.toLowerCase();
+  if (!normalized) return false;
+
+  const analysisPattern = /\b(analy[sz]e|analysis|review|inspect|explain|understand|diagnos(?:e|is)|analizy)\b/;
+  const mutationPattern = /\b(add|change|modify|update|fix|implement|create|remove|delete|refactor|write|insert|patch)\b/;
+
+  return analysisPattern.test(normalized) && !mutationPattern.test(normalized);
+}
+
+function containsExecutionClaim(text: string): boolean {
+  const executionPattern =
+    /\b(added|updated|modified|changed|implemented|fixed|removed|created|wrote|inserted|applied|done)\b/i;
+  return executionPattern.test(text);
 }
