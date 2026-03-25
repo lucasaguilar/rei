@@ -1,7 +1,12 @@
 import * as path from "path";
+import { jsonrepair } from "jsonrepair";
 import type { ModelProvider } from "../providers/model-provider.js";
 import type { ChatSession } from "../chat/types.js";
-import { parseAgentResponse } from "../contracts/agent-response.types.js";
+import {
+  parseAgentResponse,
+  validateAgentResponse,
+  type AgentResponse,
+} from "../contracts/agent-response.types.js";
 import { buildSystemMessage } from "../prompts/prompt-builder.js";
 import { buildTurnContext, type TurnContext } from "../context/context-builder.js";
 import { buildMessagesForModel } from "../chat/message-builder.js";
@@ -15,6 +20,8 @@ export type TurnStatus = "building_context" | "calling_model" | "producing_respo
 type StreamTurnOptions = {
   onStatus?: (status: TurnStatus) => void;
 };
+
+type ParseRecoveryStage = "direct" | "sanitized" | "repaired";
 
 export class Agent {
   private scanCache?: {
@@ -149,7 +156,11 @@ export class Agent {
 
     for (let attempt = 0; attempt <= AGENT_JSON_REPAIR_RETRIES; attempt += 1) {
       try {
-        return normalizeAssistantResponse(mode, rawResponse);
+        const recovered = parseAgentResponseWithRecovery(rawResponse);
+        if (recovered.stage !== "direct") {
+          console.warn(`[REI debug] Agent JSON recovered via: ${recovered.stage}`);
+        }
+        return JSON.stringify(recovered.response, null, 2);
       } catch (error: unknown) {
         if (!(error instanceof Error)) {
           throw error;
@@ -172,9 +183,11 @@ export class Agent {
       }
     }
 
-    throw new Error(
-      `Agent mode could not produce a valid JSON response after ${AGENT_JSON_REPAIR_RETRIES + 1} attempt(s): ${lastError?.message ?? "unknown validation error"}`
+    console.warn(
+      `[REI debug] Agent mode fallback engaged after ${AGENT_JSON_REPAIR_RETRIES + 1} attempt(s): ${lastError?.message ?? "unknown validation error"}`
     );
+
+    return JSON.stringify(buildDegradedAgentFallback(rawResponse, lastError), null, 2);
   }
 }
 
@@ -219,13 +232,33 @@ function debugContext(context: TurnContext): void {
   if (fileList) console.log(fileList);
 }
 
-function normalizeAssistantResponse(mode: ChatSession["mode"], rawResponse: string): string {
-  if (mode !== "agent") {
-    return rawResponse;
+function parseAgentResponseWithRecovery(rawResponse: string): {
+  response: AgentResponse;
+  stage: ParseRecoveryStage;
+} {
+  try {
+    return { response: parseAgentResponse(rawResponse), stage: "direct" };
+  } catch {
+    // continue with conservative recovery steps
   }
 
-  const validated = parseAgentResponse(rawResponse);
-  return JSON.stringify(validated, null, 2);
+  const sanitized = sanitizeAgentJsonText(rawResponse);
+  if (sanitized) {
+    try {
+      return { response: parseAgentResponse(sanitized), stage: "sanitized" };
+    } catch {
+      // continue with syntactic repair
+    }
+
+    try {
+      const repaired = jsonrepair(sanitized);
+      return { response: parseAgentResponse(repaired), stage: "repaired" };
+    } catch {
+      // fall through to throw original parse error below
+    }
+  }
+
+  return { response: parseAgentResponse(rawResponse), stage: "direct" };
 }
 
 function buildAgentRepairPrompt(validationError: string): string {
@@ -238,4 +271,61 @@ function buildAgentRepairPrompt(validationError: string): string {
     "Your response must not contain triple backticks anywhere.",
     "Keep the same intent and include every required field from the AGENT contract.",
   ].join("\n");
+}
+
+function sanitizeAgentJsonText(rawResponse: string): string {
+  let candidate = rawResponse.trim();
+  if (!candidate) return "";
+
+  // Strip UTF-8 BOM when present.
+  if (candidate.charCodeAt(0) === 0xfeff) {
+    candidate = candidate.slice(1);
+  }
+
+  // Remove markdown fences if model wrapped JSON in a code block.
+  candidate = candidate
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+
+  // If additional prose exists, extract the likely JSON object region.
+  const firstBrace = candidate.indexOf("{");
+  const lastBrace = candidate.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    candidate = candidate.slice(firstBrace, lastBrace + 1).trim();
+  }
+
+  return candidate;
+}
+
+function buildDegradedAgentFallback(
+  rawResponse: string,
+  error?: Error
+): AgentResponse {
+  const excerpt = sanitizeAgentJsonText(rawResponse).slice(0, 240);
+  const detail = error?.message ?? "unknown parsing/validation error";
+
+  const fallback: AgentResponse = validateAgentResponse({
+    version: "1.0",
+    mode: "agent",
+    summary:
+      "The model returned a non-conforming AGENT response; REI produced a degraded fallback.",
+    confidence: 0,
+    needsMoreContext: false,
+    contextRequests: [],
+    actions: [],
+    proposedChanges: [],
+    risks: [
+      {
+        label: "non-conforming-agent-output",
+        detail: `Model output could not be parsed/validated (${detail}).`,
+      },
+    ],
+    finalMessage: excerpt
+      ? `The model response was not valid for the AGENT contract. Sanitized excerpt: ${excerpt}`
+      : "The model response was not valid for the AGENT contract and could not be recovered.",
+  });
+
+  return fallback;
 }
