@@ -13,7 +13,7 @@ import { buildMessagesForModel } from "../chat/message-builder.js";
 import { scanWorkspace, type FileMeta } from "../workspace/workspace-scanner.js";
 
 const SCAN_CACHE_TTL_MS = 30_000;
-const AGENT_JSON_REPAIR_RETRIES = 1;
+const AGENT_JSON_REPAIR_RETRIES = 2;
 
 export type TurnStatus = "building_context" | "calling_model" | "producing_response";
 
@@ -64,7 +64,7 @@ export class Agent {
 
     // session.messages holds the complete history; send only a trimmed
     // window to the provider to keep prompt size under control.
-    const messagesForModel = buildMessagesForModel(session.messages);
+    const messagesForModel = buildMessagesForModel(session.messages, session.mode);
     const response = await this.generateAssistantResponse(session.mode, messagesForModel);
     session.messages.push({ role: "assistant", content: response });
     return response;
@@ -97,7 +97,7 @@ export class Agent {
 
     session.messages.push({ role: "user", content: enrichedMessage });
 
-    const messagesForModel = buildMessagesForModel(session.messages);
+    const messagesForModel = buildMessagesForModel(session.messages, session.mode);
     options?.onStatus?.("calling_model");
 
     if (session.mode === "agent") {
@@ -148,7 +148,28 @@ export class Agent {
     messagesForModel: ChatSession["messages"]
   ): Promise<string> {
     if (mode !== "agent") {
-      return this.provider.completeChat(messagesForModel);
+      const raw = await this.provider.completeChat(messagesForModel);
+      if (looksLikeAgentJson(raw)) {
+        console.warn(`[REI debug] ${mode} mode: model returned agent JSON, retrying for plain text`);
+        const retryMessages: ChatSession["messages"] = [
+          ...messagesForModel,
+          { role: "assistant", content: raw },
+          {
+            role: "user",
+            content:
+              `You are in ${mode} mode. Your previous response was a JSON object. ` +
+              "That is not valid for this mode. " +
+              "Return a plain text answer only. Do not output JSON. Do not use markdown code blocks.",
+          },
+        ];
+        const retried = await this.provider.completeChat(retryMessages);
+        if (looksLikeAgentJson(retried)) {
+          console.warn(`[REI debug] ${mode} mode: retry also returned agent JSON — stripping to plain fallback`);
+          return `I'm in ${mode} mode and my response came out as structured JSON, which is not valid here. Please rephrase your question or switch to agent mode if you need structured output.`;
+        }
+        return retried;
+      }
+      return raw;
     }
 
     let rawResponse = await this.provider.completeChat(messagesForModel);
@@ -211,6 +232,11 @@ export function buildTurnUserMessage(params: {
   lines.push(context.repoSummary);
 
   if (context.relevantFiles.length > 0) {
+    lines.push(``);
+    lines.push(`The following files are ALREADY included in this message. Do NOT request them via contextRequests:`);
+    for (const file of context.relevantFiles) {
+      lines.push(`  - ${file.path}`);
+    }
     lines.push(``);
     lines.push(`Important: The file excerpts below may be partial or truncated.
 Use only the visible content. Do not reconstruct omitted code.`);
@@ -419,32 +445,14 @@ function validateAgentResponseSemantics(
   const task = extractCurrentTask(messagesForModel);
   const analysisIntent = isAnalysisIntent(task);
 
-  if (analysisIntent && response.actions.some((action) => action.type === "modify")) {
-    issues.push("analysis intent should not include modify actions");
-  }
-
-  if (analysisIntent && response.proposedChanges.length > 0) {
-    issues.push("analysis intent should not include proposedChanges");
-  }
-
-  // Execution-claim check: only applies to pure analysis tasks where no
-  // repository changes were requested. Mutation tasks (add/fix/update/…)
-  // may legitimately use past tense to summarise their proposal.
+  // Only check for execution claims: the model must not report changes as
+  // already applied (past tense) since REI operates in preview-first mode.
   if (analysisIntent) {
     if (containsExecutionClaim(response.summary)) {
       issues.push("analysis task: summary must not claim changes were already applied");
     }
     if (containsExecutionClaim(response.finalMessage)) {
       issues.push("analysis task: finalMessage must not claim changes were already applied");
-    }
-  }
-
-  // Mutation-intent check: if the user asked for a change, expect at least
-  // a modify action or a proposedChange describing what would be done.
-  if (!analysisIntent) {
-    const hasMutationAction = response.actions.some((a) => a.type === "modify");
-    if (!hasMutationAction && response.proposedChanges.length === 0) {
-      issues.push("mutation task: response should include a modify action or at least one proposedChange");
     }
   }
 
@@ -474,14 +482,40 @@ function isAnalysisIntent(task: string): boolean {
   const normalized = task.toLowerCase();
   if (!normalized) return false;
 
-  const analysisPattern = /\b(analy[sz]e|analysis|review|inspect|explain|understand|diagnos(?:e|is)|analizy)\b/;
-  const mutationPattern = /\b(add|change|modify|update|fix|implement|create|remove|delete|refactor|write|insert|patch)\b/;
+  const analysisPattern =
+    /\b(analy[sz]e|analysis|review|inspect|explain|understand|diagnos(?:e|is)|analizy|revis[ae]|revisar|verific[ae]|verificar|mostr[ae]|mostrar|pass?arme|dame|dime|decime|tell me|show me|find|busca[r]?|encontr[ae]|listar?)\b/;
+  const mutationPattern =
+    /\b(add|change|modify|update|fix|implement|create|remove|delete|refactor|write|insert|patch|agrega[r]?|cambia[r]?|modifica[r]?|actualiza[r]?|arregla[r]?|implementa[r]?|crea[r]?|elimina[r]?|borra[r]?|reescrib[ei]r?)\b/;
 
-  return analysisPattern.test(normalized) && !mutationPattern.test(normalized);
+  // If there are explicit mutation verbs, it's a mutation task regardless of
+  // analysis words also being present.
+  if (mutationPattern.test(normalized)) return false;
+
+  // If there are analysis verbs, it's analysis.
+  if (analysisPattern.test(normalized)) return true;
+
+  // Default: treat as analysis (read-only) unless mutation verbs appear.
+  // This makes the mutation check opt-in rather than the fallback.
+  return true;
 }
 
 function containsExecutionClaim(text: string): boolean {
   const executionPattern =
     /\b(added|updated|modified|changed|implemented|fixed|removed|created|wrote|inserted|applied|done)\b/i;
   return executionPattern.test(text);
+}
+
+/**
+ * Heuristic to detect when a non-agent mode response looks like an agent
+ * JSON contract object. Checks for the structural fingerprint of AgentResponse
+ * (top-level keys "version", "mode", "actions") without full parsing.
+ */
+function looksLikeAgentJson(raw: string): boolean {
+  const trimmed = raw.trimStart();
+  if (!trimmed.startsWith("{")) return false;
+  return (
+    /"version"\s*:/.test(trimmed) &&
+    /"mode"\s*:\s*"agent"/.test(trimmed) &&
+    /"actions"\s*:/.test(trimmed)
+  );
 }

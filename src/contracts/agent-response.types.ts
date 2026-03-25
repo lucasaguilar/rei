@@ -96,6 +96,23 @@ const AGENT_ACTION_COMPAT_KEY_SET = new Set<string>(AGENT_ACTION_COMPAT_KEYS);
 const AGENT_PROPOSED_CHANGE_KEYS = ["file", "description"] as const;
 const AGENT_RISK_KEYS = ["label", "detail"] as const;
 
+/**
+ * Top-level fields the model commonly adds on its own that have no meaning in
+ * the contract. They are silently stripped before structural validation so they
+ * do not trigger a retry loop.
+ */
+const AGENT_RESPONSE_IGNORED_KEYS = new Set([
+  "nextStep",
+  "next_step",
+  "notes",
+  "rationale",
+  "reasoning",
+  "thinking",
+  "metadata",
+  "thought",
+  "plan",
+]);
+
 const ACTION_TYPE_ALIASES: Record<string, AgentAction["type"]> = {
   inspect: "inspect",
   analyze: "inspect",
@@ -144,6 +161,21 @@ function assertExactKeys(
   }
 
   for (const key of allowedKeys) {
+    assert(key in value, `Invalid AGENT mode response: missing field ${path}.${key}`);
+  }
+}
+
+/**
+ * Only checks that the required keys are present; silently ignores any extra
+ * fields the model may add. Used for sub-objects where strict shape enforcement
+ * would cause too many spurious validation failures.
+ */
+function requireKeys(
+  value: JsonRecord,
+  requiredKeys: readonly string[],
+  path: string
+): void {
+  for (const key of requiredKeys) {
     assert(key in value, `Invalid AGENT mode response: missing field ${path}.${key}`);
   }
 }
@@ -203,10 +235,16 @@ function expectNumber(value: unknown, path: string): number {
 
 function validateContextRequest(value: unknown, path: string): AgentContextRequest {
   assert(isRecord(value), `Invalid AGENT mode response: ${path} must be an object`);
-  assertExactKeys(value, AGENT_CONTEXT_REQUEST_KEYS, path);
+  // Accept "file" as an alias for "path" (common model substitution).
+  const normalized: JsonRecord =
+    !("path" in value) && "file" in value
+      ? { ...value, path: value.file }
+      : value;
+  assert("path" in normalized, `Invalid AGENT mode response: missing field ${path}.path`);
   return {
-    path: expectRelativeWorkspacePath(value.path, `${path}.path`),
-    reason: expectString(value.reason, `${path}.reason`),
+    path: expectRelativeWorkspacePath(normalized.path, `${path}.path`),
+    // "reason" is required by the contract but tolerated as absent to avoid spurious retries.
+    reason: typeof normalized.reason === "string" ? normalized.reason : "",
   };
 }
 
@@ -248,7 +286,7 @@ function validateAction(value: unknown, path: string): AgentAction {
 
 function validateProposedChange(value: unknown, path: string): AgentProposedChange {
   assert(isRecord(value), `Invalid AGENT mode response: ${path} must be an object`);
-  assertExactKeys(value, AGENT_PROPOSED_CHANGE_KEYS, path);
+  requireKeys(value, AGENT_PROPOSED_CHANGE_KEYS, path);
   return {
     file: expectRelativeWorkspacePath(value.file, `${path}.file`),
     description: expectString(value.description, `${path}.description`),
@@ -257,7 +295,7 @@ function validateProposedChange(value: unknown, path: string): AgentProposedChan
 
 function validateRisk(value: unknown, path: string): AgentRisk {
   assert(isRecord(value), `Invalid AGENT mode response: ${path} must be an object`);
-  assertExactKeys(value, AGENT_RISK_KEYS, path);
+  requireKeys(value, AGENT_RISK_KEYS, path);
   return {
     label: expectString(value.label, `${path}.label`),
     detail: expectString(value.detail, `${path}.detail`),
@@ -271,7 +309,12 @@ function expectArray(value: unknown, path: string): unknown[] {
 
 export function validateAgentResponse(value: unknown): AgentResponse {
   assert(isRecord(value), "Invalid AGENT mode response: root value must be an object");
-  assertExactKeys(value, AGENT_RESPONSE_KEYS, "response");
+
+  // Strip silently-ignored extra fields the model may add (e.g. nextStep, notes).
+  const stripped: JsonRecord = Object.fromEntries(
+    Object.entries(value).filter(([k]) => !AGENT_RESPONSE_IGNORED_KEYS.has(k))
+  );
+  assertExactKeys(stripped, AGENT_RESPONSE_KEYS, "response");
 
   const version = expectLiteral(value.version, "1.0" as const, "response.version");
   const mode = expectLiteral(value.mode, "agent" as const, "response.mode");
@@ -282,15 +325,21 @@ export function validateAgentResponse(value: unknown): AgentResponse {
     "Invalid AGENT mode response: response.confidence must be between 0 and 1"
   );
 
+  const needsMoreContext = expectBoolean(value.needsMoreContext, "response.needsMoreContext");
+
   return {
     version,
     mode,
     summary: expectString(value.summary, "response.summary"),
     confidence,
-    needsMoreContext: expectBoolean(value.needsMoreContext, "response.needsMoreContext"),
-    contextRequests: expectArray(value.contextRequests, "response.contextRequests").map(
-      (item, index) => validateContextRequest(item, `response.contextRequests[${index}]`)
-    ),
+    needsMoreContext,
+    // When needsMoreContext is false the model should send an empty array but
+    // sometimes sends a malformed one. Ignore the contents in that case.
+    contextRequests: needsMoreContext
+      ? expectArray(value.contextRequests, "response.contextRequests").map(
+          (item, index) => validateContextRequest(item, `response.contextRequests[${index}]`)
+        )
+      : [],
     actions: expectArray(value.actions, "response.actions").map((item, index) =>
       validateAction(item, `response.actions[${index}]`)
     ),
@@ -328,24 +377,23 @@ export function parseAgentResponse(raw: string): AgentResponse {
  * to keep the contract machine-verifiable and easy to evolve.
  */
 export function buildAgentContractBlock(): string {
+  // NOTE: all values here are deliberately unrelated to any real code task.
+  // They exist only to show the JSON structure — the model must NOT copy them.
   const example: AgentResponse = {
     version: "1.0",
     mode: "agent",
-    summary: "Propose to add a console.log statement to src/main.ts",
-    confidence: 0.9,
+    summary: "Propose to inspect the project README to verify the installation steps.",
+    confidence: 0.85,
     needsMoreContext: false,
     contextRequests: [],
     actions: [
-      { type: "inspect", target: "src/main.ts", description: "Locate the entry point function to determine where to insert the log" },
-      { type: "modify", target: "src/main.ts", description: "Add console.log call at the start of the main function" },
+      { type: "inspect", target: "README.md", description: "Read the installation section to verify the steps are complete" },
     ],
-    proposedChanges: [
-      { file: "src/main.ts", description: "Insert console.log at the top of the main() function body" },
-    ],
+    proposedChanges: [],
     risks: [
-      { label: "debug output in production", detail: "console.log left in production code may expose internals; consider guarding with an env check" },
+      { label: "outdated documentation", detail: "The README may not reflect recent dependency changes; cross-check with package.json" },
     ],
-    finalMessage: "Propose to add a console.log statement at the entry point of src/main.ts. Review the proposed change before applying.",
+    finalMessage: "Propose to review README.md to confirm the installation steps are up to date.",
   };
 
   return [
@@ -354,8 +402,12 @@ export function buildAgentContractBlock(): string {
     "- Do NOT use markdown fences (no ```json). Output raw JSON only.",
     "- Do NOT greet, explain, or summarize in prose. JSON is the only valid output.",
     "",
-    "The JSON object must conform to this exact shape:",
+    "The JSON object must conform to this exact shape (STRUCTURAL EXAMPLE ONLY — all values below are FICTIONAL and unrelated to your task):",
     JSON.stringify(example, null, 2),
+    "",
+    "IMPORTANT: Do NOT copy any value from the structural example above into your response.",
+    "Replace every string, number, and path with content that reflects the ACTUAL user task.",
+    "Copying example values verbatim (e.g. \"Propose to add a console.log...\") is always wrong.",
     "",
     "Additional rules:",
     "- All fields in the example object must be present. Use empty arrays for lists that do not apply (e.g. contextRequests when needsMoreContext is false).",

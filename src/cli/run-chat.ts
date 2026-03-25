@@ -78,7 +78,14 @@ export async function runChat(agent: Agent): Promise<void> {
       if (modeMatch) {
         const requested = modeMatch[1];
         if (requested === "ask" || requested === "planning" || requested === "agent") {
+          const previousMode = session.mode;
           session.mode = requested as SessionMode;
+          // Soft-reset: when leaving agent mode, drop the non-system history so the
+          // new mode's prompt is not polluted by agent JSON from previous turns.
+          if (previousMode === "agent" && session.mode !== "agent") {
+            const systemMessages = session.messages.filter((m) => m.role === "system");
+            session.messages = systemMessages;
+          }
           console.log(`[REI] Mode switched to: ${session.mode}`);
         } else {
           console.log(`Unknown mode: ${requested}. Available modes: ask, planning, agent`);

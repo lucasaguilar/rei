@@ -12,7 +12,7 @@ interface OllamaChatResponse {
 
 const OLLAMA_FETCH_MAX_RETRIES = 1;
 const OLLAMA_FETCH_RETRY_DELAY_MS = 700;
-const DEFAULT_OLLAMA_REQUEST_TIMEOUT_MS = 130_000;
+const DEFAULT_OLLAMA_REQUEST_TIMEOUT_MS = 200_000;
 
 export class OllamaProvider implements ModelProvider {
   private readonly baseUrl: string;
@@ -136,9 +136,7 @@ export class OllamaProvider implements ModelProvider {
         messages,
         stream,
         options: {
-          num_ctx: 4096,   // Limit context length to balance performance and memory usage
-          num_thread: 8,   // Use 8 threads (adjust as needed for your hardware)
-          temperature: 0   // Low temperature for more deterministic JSON output
+          temperature: 0,  // Low temperature for more deterministic JSON output
         }
       }),
     };
