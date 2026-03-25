@@ -153,8 +153,6 @@ export class OllamaProvider implements ModelProvider {
           break;
         }
         await sleep(OLLAMA_FETCH_RETRY_DELAY_MS);
-      } finally {
-        clearTimeout(timeout);
       }
     }
 
