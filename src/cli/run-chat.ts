@@ -82,7 +82,7 @@ export async function runChat(agent: Agent): Promise<void> {
           session.mode = requested as SessionMode;
           // Soft-reset: when leaving agent mode, drop the non-system history so the
           // new mode's prompt is not polluted by agent JSON from previous turns.
-          if (previousMode !== session.mode) {
+          if (previousMode === "agent" && session.mode !== "agent") {
             const systemMessages = session.messages.filter((m) => m.role === "system");
             session.messages = systemMessages;
           }
