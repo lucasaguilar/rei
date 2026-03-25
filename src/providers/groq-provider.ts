@@ -127,6 +127,27 @@ export class GroqProvider implements ModelProvider {
         lineBreak = buffer.indexOf("\n");
       }
     }
+
+    const finalLine = buffer.trim();
+    if (finalLine && finalLine.startsWith("data: ")) {
+      const payload = finalLine.slice(6).trim();
+      if (payload !== "[DONE]") {
+        try {
+          const data = JSON.parse(payload) as GroqStreamChunk;
+          if (data.error) {
+            throw new Error(`Groq stream error: ${data.error.message ?? JSON.stringify(data.error)}`);
+          }
+          const content = data.choices?.[0]?.delta?.content;
+          if (content) {
+            yield content;
+          }
+        } catch (err) {
+          if (!(err instanceof SyntaxError)) {
+            throw err;
+          }
+        }
+      }
+    }
   }
 
   private fetchChat(params: { messages: ChatMessage[]; stream: boolean }): Promise<Response> {
