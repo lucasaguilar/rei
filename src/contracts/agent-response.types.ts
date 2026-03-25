@@ -170,6 +170,12 @@ function expectRelativeWorkspacePath(value: unknown, path: string): string {
     `Invalid AGENT mode response: ${path} must be a workspace-relative path`
   );
 
+  // Disallow directory traversal segments to ensure the path is truly workspace-root-relative.
+  const segments = raw.split(/[\\/]+/);
+  assert(
+    !segments.includes(".."),
+    `Invalid AGENT mode response: ${path} must not contain ".." path traversal segments`
+  );
   return raw;
 }
 
