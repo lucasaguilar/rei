@@ -40,11 +40,27 @@ export async function generateAgentModeResponse(params: {
 
     const response = result.response;
 
-    // If the model is satisfied or has no requests, return immediately.
-    if (!response.needsMoreContext || response.contextRequests.length === 0) {
+    // If the model is satisfied, return immediately.
+    if (!response.needsMoreContext) {
       return JSON.stringify(response, null, 2);
     }
 
+    // If the model claims it needs more context but provides no requests,
+    // treat this as a semantic contract violation and fall back.
+    if (response.needsMoreContext && response.contextRequests.length === 0) {
+      console.warn(
+        `[REI debug] Agent context loop: needsMoreContext=true but no contextRequests provided, engaging fallback`
+      );
+      return JSON.stringify(
+        buildDegradedAgentFallback(
+          result.rawResponse,
+          new Error("needsMoreContext is true but contextRequests is empty"),
+          "semantic"
+        ),
+        null,
+        2
+      );
+    }
     // If we've exhausted context rounds, fall back gracefully.
     if (round === MAX_CONTEXT_ROUNDS) {
       console.warn(
