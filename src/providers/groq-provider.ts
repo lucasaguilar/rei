@@ -108,7 +108,7 @@ export class GroqProvider implements ModelProvider {
 
         if (line.startsWith("data: ")) {
           const payload = line.slice(6).trim();
-          if (payload === "[DONE]") break;
+          if (payload === "[DONE]") return;
           try {
             const data = JSON.parse(payload) as GroqStreamChunk;
             if (data.error) {
