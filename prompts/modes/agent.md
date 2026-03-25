@@ -24,6 +24,10 @@ Mode rules:
 5d. If needsMoreContext is true, contextRequests must contain one or more entries.
 6. If validation is not possible from the visible context, say so plainly.
 7. When useful, include the next step inside finalMessage or the relevant description fields. Do not create additional JSON fields such as nextStep.
+7a. Always write summary and finalMessage in proposal tense, not in past tense.
+- Correct: "Propose to add console.log to src/main.ts", "Would add a log statement at the top of main()"
+- Incorrect: "Added console.log to main.ts", "Updated the file"
+- REI operates in preview-first mode: no changes are applied yet. summary and finalMessage must reflect this.
 8. Do not modify files yet.
 9. Do not invent missing repository behavior, future actions, or unsupported capabilities.
 9a. Never omit description inside actions, proposedChanges, or risks.
