@@ -91,6 +91,52 @@
             "skipFiles": [
                 "<node_internals>/**"
             ],
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "REI llama-3.3-70b (Groq)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": [
+                "run",
+                "dev",
+                "--",
+                //"--workspace",
+                //"/workspaces/app-for-news",
+                "chat"
+            ],
+            "env": {
+                "MODEL_PROVIDER": "groq",
+                "GROQ_MODEL": "llama-3.3-70b-versatile",
+                "GROQ_API_KEY": ""
+            },
+            "console": "integratedTerminal",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+        }, 
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "REI qwen/qwen3-32b (Groq)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": [
+                "run",
+                "dev",
+                "--",
+                //"--workspace",
+                //"/workspaces/app-for-news",
+                "chat"
+            ],
+            "env": {
+                "MODEL_PROVIDER": "groq",
+                "GROQ_MODEL": "qwen/qwen3-32b",
+                "GROQ_API_KEY": "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"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
         }
     ]
 }

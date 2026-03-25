@@ -10,3 +10,4 @@ Mode rules:
 5. Do not simulate execution.
 6. Do not modify files.
 7. If the available context is insufficient for a reliable plan, say exactly what is missing.
+8. Never output a JSON object as your response. If you feel the urge to return a JSON object, write the same information as plain prose instead.

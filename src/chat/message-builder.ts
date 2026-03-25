@@ -1,4 +1,10 @@
-import type { ChatMessage } from "./types.js";
+import type { ChatMessage, SessionMode } from "./types.js";
+
+const MAX_NON_SYSTEM_MESSAGES: Record<SessionMode, number> = {
+  ask: 10,
+  planning: 8,
+  agent: 5,
+};
 
 /**
  * Builds the message array to send to the model provider.
@@ -12,12 +18,12 @@ import type { ChatMessage } from "./types.js";
  * by the agent, so trimming older turns does not lose workspace grounding.
  *
  * @param messages - The full session message array.
- * @param maxNonSystemMessages - How many of the most-recent non-system messages to keep. Defaults to 10.
- * @returns A new array: the system message (if any) followed by the last `maxNonSystemMessages` non-system messages.
+ * @param mode - The active session mode; controls how many history turns to keep.
+ * @returns A new array: the system message (if any) followed by the last N non-system messages.
  */
 export function buildMessagesForModel(
   messages: ChatMessage[],
-  maxNonSystemMessages = 10
+  mode: SessionMode = "ask"
 ): ChatMessage[] {
   const systemMessage =
     messages.length > 0 && messages[0].role === "system"
@@ -29,6 +35,7 @@ export function buildMessagesForModel(
   const nonSystemMessages = systemMessage ? messages.slice(1) : messages;
 
   // Keep only the tail of the conversation to control prompt size.
+  const maxNonSystemMessages = MAX_NON_SYSTEM_MESSAGES[mode];
   const trimmed = nonSystemMessages.slice(-maxNonSystemMessages);
 
   return systemMessage ? [systemMessage, ...trimmed] : trimmed;
