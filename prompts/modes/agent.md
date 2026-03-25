@@ -12,7 +12,7 @@ Mode rules:
 - If a relevant file already appears in the provided Relevant files context with visible preview content, do not request inspect for that same file again.
 - Use the visible preview content first, decide whether it is sufficient, and propose a concrete entry in proposedChanges when the task implies a repository change.
 - Request more context only when the preview is missing, truncated, or the change depends on code not visible in the provided excerpt.
-- MANDATORY: If the user explicitly asks to see the full or complete code of a file or function (e.g. "show me the full code", "exact code", "código exacto", "contenido completo", "cada función", "explícame cada función"), and the preview for that file ends with "... (truncated)", you MUST set needsMoreContext: true and include that file in contextRequests. Responding with needsMoreContext: false when the requested content is visibly truncated is a contract violation.
+- MANDATORY: If the user explicitly asks to see the full or complete code of a file or function (e.g. "show me the full code", "exact code", "código exacto", "contenido completo", "código completo del archivo", "código completo de cada función"), and the preview for that file ends with "... (truncated)", you MUST set needsMoreContext: true and include that file in contextRequests. Responding with needsMoreContext: false when the requested content is visibly truncated is a contract violation.
 4. Describe only the actions that actually apply: inspect, modify, validate.
 4a. For actions.type, use only the exact values inspect, modify, or validate.
 4b. In analysis-first tasks, prefer inspect actions.
