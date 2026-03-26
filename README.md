@@ -50,10 +50,12 @@ Starts a persistent conversation loop. Type any message and press Enter to get a
 
 ## Model provider
 
-REI supports two providers selected via environment variable:
+REI supports providers selected via environment variable:
 
 - `MODEL_PROVIDER=mock` (default)
 - `MODEL_PROVIDER=ollama`
+- `MODEL_PROVIDER=groq`
+- `MODEL_PROVIDER=gemini`
 
 ### Ollama setup
 
@@ -85,6 +87,22 @@ Optional configuration:
 
 - `OLLAMA_BASE_URL` (default: `http://127.0.0.1:11434`)
 - `OLLAMA_MODEL` (default: `llama3.2`)
+
+### Gemini setup
+
+1. Create an API key in Google AI Studio.
+
+2. Run REI with Gemini:
+
+```bash
+MODEL_PROVIDER=gemini GEMINI_API_KEY=your-key GEMINI_MODEL=gemini-2.5-flash npm run dev -- chat
+```
+
+Optional configuration:
+
+- `GEMINI_API_KEY` (required)
+- `GEMINI_MODEL` (default: `gemini-2.5-flash`)
+- `GEMINI_REQUEST_TIMEOUT_MS` (default: `120000`)
 
 Example with explicit base URL:
 

@@ -45,7 +45,8 @@ export function buildAgentRepairPrompt(validationError: string): string {
 
   if (isSemantic) {
     extra.push(
-      "IMPORTANT: Write summary and finalMessage in proposal tense (e.g. \"Propose to add…\", \"Would add…\"), not as if the change already happened.",
+      "IMPORTANT: Write summary and finalMessage in proposal tense (e.g. \"Propose to add…\", \"Would add…\") for change-oriented analysis tasks.",
+      "Exception: for read-only inspection tasks that ask to show or explain existing code/content, summary and finalMessage may describe the inspection as completed, but must not claim repository modifications were applied.",
       "If the task requests a repository change, include at least one modify action or one proposedChange."
     );
   }

@@ -25,9 +25,10 @@ Mode rules:
 5d. If needsMoreContext is true, contextRequests must contain one or more entries.
 6. If validation is not possible from the visible context, say so plainly.
 7. When useful, include the next step inside finalMessage or the relevant description fields. Do not create additional JSON fields such as nextStep.
-7a. For analysis-intent tasks, always write summary and finalMessage in proposal tense, not in past tense.
+7a. For analysis-intent tasks, write summary and finalMessage in proposal tense by default, not in past tense.
 - Correct (analysis-intent): "Propose to add console.log to src/main.ts", "Would add a log statement at the top of main()"
 - Incorrect (analysis-intent): "Added console.log to main.ts", "Updated the file"
+- Exception: for read-only inspection tasks that explicitly ask to show or explain existing code/content, summary and finalMessage may describe the inspection as completed (for example: "Provided the exact code for ... and explained each function"). Even in that case, do not claim that repository modifications were applied.
 - For analysis-intent tasks, REI operates in preview-first mode: no changes are applied yet, and summary and finalMessage must reflect this.
 8. Do not modify files yet.
 9. Do not invent missing repository behavior, future actions, or unsupported capabilities.
