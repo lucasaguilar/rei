@@ -1,8 +1,9 @@
 # rei
 
-REI is a minimal personal AI agent CLI built with TypeScript and Node.js. It provides a simple, extensible foundation for running AI-powered tasks from the command line.
+REI is a repository-aware AI CLI built with TypeScript and Node.js.
+It supports question answering, planning, and an agent-style workflow that can ask for more repository context before producing a final answer.
 
-## Install dependencies
+## Install
 
 ```bash
 npm install
@@ -12,9 +13,9 @@ npm install
 
 Global option:
 
-- `--workspace <path>`: target workspace REI should analyze (defaults to current working directory)
+- `--workspace <path>`: target workspace REI should analyze. Defaults to the current working directory.
 
-### `plan` — one-shot task breakdown
+### `plan` — one-shot planning
 
 ```bash
 npm run dev -- plan "create a worktree helper CLI"
@@ -25,8 +26,6 @@ With explicit workspace:
 ```bash
 npm run dev -- --workspace /workspaces/another-repo plan "create a worktree helper CLI"
 ```
-
-Sends a single prompt to the model and prints the response.
 
 ### `chat` — interactive session
 
@@ -40,32 +39,51 @@ With explicit workspace:
 npm run dev -- --workspace /workspaces/another-repo chat
 ```
 
-If only `--workspace` is provided, REI defaults to `chat` mode:
+If only `--workspace` is provided, REI defaults to `chat`:
 
 ```bash
 npm run dev -- --workspace /workspaces/another-repo
 ```
 
-Starts a persistent conversation loop. Type any message and press Enter to get a response. The full conversation history is kept in memory for the duration of the session.
+### Interactive commands
 
-## Model provider
+| Command | Description |
+|---|---|
+| `/help` | Show available commands |
+| `/clear` | Clear conversation history |
+| `/exit` | End the session |
+| `/mode ask` | Switch to ask mode |
+| `/mode planning` | Switch to planning mode |
+| `/mode agent` | Switch to agent mode |
 
-REI supports providers selected via environment variable:
+## Modes
 
-- `MODEL_PROVIDER=mock` (default)
+REI has three response modes:
+
+- `ask`: explanation and Q&A. Returns a normal text answer.
+- `planning`: analysis and implementation planning. Returns a normal text answer.
+- `agent`: repository-aware agent flow. Internally performs a context decision step, may ask for more file content, and then returns a normal markdown answer.
+
+The active mode can be changed during a chat session with `/mode <mode>`.
+
+## Model providers
+
+Provider selection is controlled by `MODEL_PROVIDER`:
+
+- `MODEL_PROVIDER=mock`
 - `MODEL_PROVIDER=ollama`
 - `MODEL_PROVIDER=groq`
 - `MODEL_PROVIDER=gemini`
 
 ### Ollama setup
 
-1. Install Ollama (Linux/macOS):
+1. Install Ollama:
 
 ```bash
 curl -fsSL https://ollama.com/install.sh | sh
 ```
 
-2. Start Ollama server (usually starts automatically after install):
+2. Start the server:
 
 ```bash
 ollama serve
@@ -77,7 +95,7 @@ ollama serve
 ollama pull llama3.2
 ```
 
-4. Run REI with Ollama:
+4. Run REI:
 
 ```bash
 MODEL_PROVIDER=ollama OLLAMA_MODEL=llama3.2 npm run dev -- chat
@@ -85,14 +103,13 @@ MODEL_PROVIDER=ollama OLLAMA_MODEL=llama3.2 npm run dev -- chat
 
 Optional configuration:
 
-- `OLLAMA_BASE_URL` (default: `http://127.0.0.1:11434`)
-- `OLLAMA_MODEL` (default: `llama3.2`)
+- `OLLAMA_BASE_URL` default: `http://127.0.0.1:11434`
+- `OLLAMA_MODEL` default: `llama3.2`
 
 ### Gemini setup
 
 1. Create an API key in Google AI Studio.
-
-2. Run REI with Gemini:
+2. Run REI:
 
 ```bash
 MODEL_PROVIDER=gemini GEMINI_API_KEY=your-key GEMINI_MODEL=gemini-2.5-flash npm run dev -- chat
@@ -100,115 +117,219 @@ MODEL_PROVIDER=gemini GEMINI_API_KEY=your-key GEMINI_MODEL=gemini-2.5-flash npm 
 
 Optional configuration:
 
-- `GEMINI_API_KEY` (required)
-- `GEMINI_MODEL` (default: `gemini-2.5-flash`)
-- `GEMINI_REQUEST_TIMEOUT_MS` (default: `120000`)
+- `GEMINI_API_KEY` required
+- `GEMINI_MODEL` default: `gemini-2.5-flash`
+- `GEMINI_REQUEST_TIMEOUT_MS` default: `120000`
 
-Example with explicit base URL:
+## Terminal output
 
-```bash
-MODEL_PROVIDER=ollama OLLAMA_BASE_URL=http://127.0.0.1:11434 OLLAMA_MODEL=llama3.2 npm run dev -- plan "summarize this repo"
-```
+The interactive chat renders the final answer as formatted markdown in the terminal:
 
-#### ⌨️ CLI Commands
+- headings with ANSI styling
+- inline code formatting
+- syntax-highlighted code blocks
+- preserved markdown structure instead of raw token spam
 
-| Command          | Description                                             |
-|------------------|---------------------------------------------------------|
-| `/help`          | Show available commands                                 |
-| `/clear`         | Clear conversation history                              |
-| `/exit`          | End the session                                         |
-| `/mode ask`      | Switch to ask mode (explanation and Q&A)                |
-| `/mode planning` | Switch to planning mode (analysis and implementation plan) |
-| `/mode agent`    | Switch to agent mode (execution-oriented reasoning)     |
+The spinner still runs while the model is generating, and the final formatted answer is printed when the turn completes.
 
-## 🧠 Modes
+## Repository-aware context
 
-REI supports three modes that shape how the assistant reasons and responds:
+On every user turn, REI rebuilds repository context and injects it into the last user message before calling the provider.
 
-- **`ask`** — Explanation mode. REI answers questions and explains code. No planning or execution mindset unless explicitly requested. Default output is plain text.
+### Turn context pipeline
 
-- **`planning`** — Analysis and plan mode. REI analyzes the codebase, identifies relevant parts, and proposes a step-by-step implementation plan. No execution simulation. Default output is plain text.
-
-- **`agent`** — Execution-oriented reasoning mode. REI thinks like a coding agent: it describes actions to inspect, modify, and validate code, and produces an operational execution plan. Files are not modified at this stage. Output must be valid JSON matching the agent contract.
-
-The active mode can be changed at any time during a chat session with `/mode <mode>`.
-
-## 🗂️ Repository-aware context
-
-On every user turn, REI builds contextual information from the local workspace and enriches the prompt before calling the model.
-
-### How it works
-
-1. **Workspace scanning** — REI scans the workspace recursively (capped at 200 files) and collects file metadata. Binary files, lock files, and directories like `node_modules`, `.git`, `dist`, `build`, `coverage`, `.next`, and `out` are automatically ignored.
-
-2. **Relevant file selection** — REI scores every scanned file against the user's message using a simple heuristic: keyword matches in the filename score highest, path matches score lower, and the active mode applies a small boost (source files for `agent`/`planning`, docs for `planning`). The top 6 files are selected.
-
-3. **Partial file previews** — Each selected file is read up to a 900-character preview. Truncated files are labelled so the model knows the content was cut.
-
-4. **Prompt enrichment** — The original user message is replaced with an enriched version that includes:
+1. Scan the workspace.
+2. Select the most relevant files for the current input.
+3. Read partial previews for those files.
+4. Build an enriched user message containing:
    - the original task
-   - the workspace path
-   - a brief repo summary (project markers, top-level folders, total files scanned)
-   - a list of relevant files with their scores and previews
+   - workspace path
+   - repository summary
+   - selected file previews
 
-Context is **regenerated on every turn** — it is a function of `(userInput, mode, session, workspace)`, not a one-time snapshot.
+This context is regenerated on every turn. It is not a one-time snapshot.
 
-### Debug output
+### Preview sizes
 
-Each turn prints a brief debug summary to the console:
+REI uses different preview sizes depending on mode and user intent:
 
+- default: `900` chars
+- agent mode: `4000` chars
+- explicit content requests: up to `20000` chars in agent mode
+
+Explicit content requests include prompts such as “exact code”, “código exacto”, “full code”, “contenido completo”, or “all functions”.
+
+When a preview is cut, REI appends:
+
+```text
+... (truncated)
 ```
+
+That marker is important for the agent decision step.
+
+## Agent mode: current flow
+
+Agent mode no longer uses a user-visible JSON response contract.
+Instead, it runs in three phases:
+
+### Phase 1: internal context decision
+
+REI sends a small internal prompt whose only job is to decide:
+
+- is the currently visible context enough?
+- is this an inspection task or a change-planning task?
+- which additional files are needed, if any?
+
+The model must return a small internal JSON object:
+
+```json
+{
+  "ready": false,
+  "taskType": "inspection",
+  "contextRequests": [
+    {
+      "path": "src/agent-mode/semantic-validation.ts",
+      "reason": "need full code to explain all functions"
+    }
+  ]
+}
+```
+
+This object is parsed by `parseAgentDecision()` and is never shown to the user.
+
+If parsing fails, REI sanitizes the response, retries with a repair prompt, and eventually falls back to a safe default that skips context expansion.
+
+### Phase 2: deterministic context resolution
+
+If the decision requests more files, REI resolves them without asking the model to guess paths.
+
+Guardrails applied before any file is injected:
+
+- only files already discovered during workspace scanning are allowed
+- sensitive filenames and extensions are denied
+- symlink escapes outside the workspace are denied
+- duplicate requests are ignored
+- file reads are capped
+
+Resolved content is appended to the last user message as additional context.
+
+### Phase 3: final free-text answer
+
+After the extra context is injected, REI performs the final provider call and returns a normal markdown answer.
+
+Important properties of the final phase:
+
+- no top-level JSON contract
+- no user-visible orchestration object
+- inspection tasks can show exact code from the visible context
+- change-planning tasks can describe concrete edits and risks
+- the final text is what the terminal renders and what the user sees
+
+In other words:
+
+- the internal JSON exists only to negotiate context
+- the visible answer comes from the final free-text provider call
+
+## How REI decides it needs more context
+
+The key signal is whether the currently visible preview is sufficient for the request.
+
+Typical examples where REI should request more context:
+
+- the user asks for exact code and the preview ends with `... (truncated)`
+- the user asks to explain all functions in a file but only part of the file is visible
+- the user asks for a modification plan that depends on code paths not yet visible
+
+Typical examples where REI should answer immediately:
+
+- the selected previews already include the relevant function or type in full
+- the user asks a high-level question that does not require reading a whole file
+
+## Message trimming
+
+REI keeps full chat history in memory, but sends only a reduced window to the provider.
+
+Current limits by mode:
+
+- `ask`: last `10` non-system messages
+- `planning`: last `8` non-system messages
+- `agent`: last `5` non-system messages
+
+The system message is always preserved.
+Repository context is re-injected each turn, so trimming older turns does not remove workspace grounding.
+
+## Prompt system
+
+The main system prompt is built in two different ways:
+
+### Regular modes
+
+For `ask` and `planning`, `buildSystemMessage(mode)` composes:
+
+1. shared base prompt
+2. shared response rules
+3. mode-specific prompt
+4. mode-specific output format
+
+### Agent mode
+
+Agent mode uses two prompts depending on the phase:
+
+- decision phase: shared base prompt + `agent-decision`
+- answer phase: shared base prompt + shared response rules + `agent-answer`
+
+This split is what lets REI keep the orchestration contract internal while still returning normal markdown to the user.
+
+## Debug output
+
+Each turn prints a brief context summary, and agent mode also prints internal decision logs.
+
+Example:
+
+```text
 [REI debug] Workspace: /path/to/project
 [REI debug] Relevant files selected: 3
   - src/core/agent.ts (score: 6)
   - src/prompts/prompt-builder.ts (score: 4)
   - README.md (score: 2)
+[REI debug] Agent decision: taskType=inspection, ready=false, contextRequests=[src/foo.ts]
+[REI debug] Agent context resolved 1 file(s), injecting into answer phase
 ```
 
-### Current limitations
+## Current limitations
 
-- No embeddings or semantic search yet — file selection is purely heuristic
-- No persistent repository index — the workspace is scanned fresh on every turn
-- No file writing or command execution yet
-- No provider fallback policy yet (provider errors are surfaced directly)
-- Agent mode includes one JSON repair retry when contract validation fails
+- relevant file selection is still heuristic, not semantic
+- there is no persistent repository index yet
+- there is no file patch application yet
+- there is no command execution flow inside REI yet
+- context expansion currently reads and injects file content, but does not produce executable edit plans or diffs
 
-### Next planned step
+## Next step: patch generation with diff output
 
-Harden response reliability across local models (especially in `agent` mode) with better recovery and prompt-shaping strategies while preserving strict contract validation.
+The next logical step is to keep the current three-phase agent flow and add a fourth internal layer for proposed edits.
 
----
+A practical direction is:
 
-## ✂️ Message trimming
+1. keep Phase 1 as context negotiation
+2. keep Phase 2 as deterministic file resolution
+3. keep Phase 3 as the final user-facing explanation or plan
+4. add an internal patch proposal step that returns a structured edit plan per file
+5. compile that plan into a unified diff or git-style patch
+6. validate the patch before any future apply step
 
-REI stores the **full conversation history** in `session.messages` for the duration of a session. However, only a **trimmed message window** is sent to the model provider on each turn.
+Suggested shape for that future patch layer:
 
-### Why this matters
+- internal contract containing target file, intent, and exact before/after snippets
+- deterministic diff synthesis on the REI side instead of trusting raw model diffs blindly
+- validation with exact-match anchors and optional `git apply --check`
+- explicit approval gate before any future write/apply operation
 
-Repository-aware context (workspace summary + file previews) is re-injected into every user message. Without trimming, the prompt sent to the model would grow linearly with the number of turns, quickly exceeding the context window of local models like Ollama.
+That preserves the current design principle:
 
-### How it works
-
-Before calling `provider.completeChat`, the agent passes `session.messages` through `buildMessagesForModel` (defined in `src/chat/message-builder.ts`):
-
-- The **system message** at index 0 is always preserved.
-- Only the **last 10 non-system messages** are kept (configurable via `maxNonSystemMessages`).
-- The original `session.messages` array is **never mutated** — full history is retained internally.
-- Repository context is **recalculated per turn**, so trimming older messages does not lose workspace grounding.
-
-This is especially important when using local models (including Ollama) that have limited context windows.
-
----
-
-## 🧱 Prompt System
-
-The system prompt sent to the model is built by `src/prompts/prompt-builder.ts` and is composed of two parts:
-
-- **Base instructions** — Applied in every mode. Establish REI's identity as a repository-aware assistant, enforce grounding (only use provided context), prohibit hallucination of files or APIs, and require clarity and technical precision.
-
-- **Mode instructions** — Appended after the base instructions. Describe the goals, reasoning style, and constraints specific to the active mode (`ask`, `planning`, or `agent`).
-
-The composed message is produced by `buildSystemMessage(mode)` and is always placed at index 0 of the conversation history so the model always sees the current mode context.
+- model decides what context it needs
+- runtime resolves files safely
+- user sees clean markdown output
+- future patching stays explicit, reviewable, and deterministic
 
 ## Type check
 
@@ -216,95 +337,24 @@ The composed message is produced by `buildSystemMessage(mode)` and is always pla
 npm run check
 ```
 
-## Technical notes
-
-### Design decisions
-
-- **`ChatMessage` / `ChatSession` types** (`src/chat/types.ts`): A shared message structure with `role` (`system | user | assistant`) and `content` enables history-aware conversations and is compatible with standard LLM chat APIs.
-
-- **`ModelProvider` interface** (`src/providers/model-provider.ts`): Extended with `completeChat(messages: ChatMessage[]): Promise<string>` alongside the existing `complete(prompt: string)`. The `complete` method is preserved so the `plan` command and any existing code keep working unchanged.
-
-- **`Agent.runTurn`** (`src/core/agent.ts`): Now builds a `TurnContext` via `buildTurnContext` before appending the user message. The raw input is replaced by an enriched message (task + workspace summary + relevant file previews). The system message, session history, and `ModelProvider.completeChat` contract are unchanged.
-
-- **`buildTurnContext`** (`src/context/context-builder.ts`): Orchestrates scanning → selection → preview reading and returns a `TurnContext` object used to enrich the prompt.
-
-- **`scanWorkspace`** (`src/workspace/workspace-scanner.ts`): Recursively walks the workspace, skipping ignored directories and binary/unhelpful file extensions, capped at 200 files.
-
-- **`selectRelevantFiles`** (`src/workspace/file-selector.ts`): Scores files by keyword/filename/path matching against the user input, with small mode-specific boosts. Returns up to 6 ranked files.
-
-- **`readFilePreview`** (`src/workspace/file-preview.ts`): Reads file content up to 900 characters, truncating safely if needed.
-
-- **`Agent.generateAssistantResponse`** (`src/core/agent.ts`): Centralizes mode-specific response handling. In `agent` mode it enforces contract validation and performs one repair retry if JSON output is invalid.
-
-- **`MockProvider.completeChat`** (`src/providers/mock-provider.ts`): Echoes the last user message so the chat loop works without any real model.
-
-### Chat flow (main runtime)
+## Runtime overview
 
 ```mermaid
 flowchart TD
-  A[User runs npm run dev chat] --> B[run chat entrypoint]
-  B --> C[Create chat session messages empty]
-    B --> D[Instantiate Agent]
-  D --> E[Inject model provider from factory]
-
-    C --> F[Read user input in loop]
-  F --> G{Internal command}
-  G -->|help| H[Print help]
-  G -->|clear| I[Reset session messages]
-  G -->|exit| J[End process]
-  G -->|message| K[Agent runTurn]
-
-  K --> SC[Scan workspace]
-  SC --> FS[Select relevant files]
-  FS --> FP[Read file previews]
-  FP --> CB[Build TurnContext]
-  CB --> EM[Build enriched user message]
-  EM --> L[Append user message role user]
-  L --> M[Call provider completeChat]
-    M --> N[Model generates assistant text]
-    N --> O[Return response to Agent]
-  O --> P[Append assistant message role assistant]
-    P --> Q[Print response in terminal]
-    Q --> F
-
-    subgraph Core
-      D
-      K
-    end
-
-    subgraph Context pipeline
-      SC
-      FS
-      FP
-      CB
-      EM
-    end
-
-    subgraph Provider layer
-      E
-      M
-      N
-    end
-
-    subgraph Chat state
-      C
-      L
-      P
-      I
-    end
+  A[User enters message] --> B[Build system prompt for current mode]
+  B --> C[Scan workspace and select relevant files]
+  C --> D[Read previews and enrich last user message]
+  D --> E{Mode is agent}
+  E -->|No| F[Call provider and return normal text]
+  E -->|Yes| G[Phase 1: internal AgentDecision JSON]
+  G --> H{Need more context}
+  H -->|Yes| I[Phase 2: resolve requested files safely]
+  I --> J[Append extra context to last user message]
+  H -->|No| J
+  J --> K[Phase 3: final free-text markdown answer]
+  K --> L[Render formatted output in terminal]
 ```
 
-### Ollama provider implementation status
+## Documentation rule
 
-`OllamaProvider` is already implemented in `src/providers/ollama-provider.ts` and supports:
-
-- `completeChat(messages)` via `POST /api/chat` with `stream: false`
-- `streamChat(messages)` via `POST /api/chat` with `stream: true`
-- configurable `OLLAMA_BASE_URL` and `OLLAMA_MODEL`
-- clear error surfacing for HTTP and payload-level failures
-
-Provider selection is done through `MODEL_PROVIDER` using `src/providers/provider-factory.ts`.
-
-## 📝 Documentation rule
-
-When core behaviors change (modes, prompt system, context, tools), the README must be updated accordingly.
+When core runtime behavior changes, update the README in the same change set.
