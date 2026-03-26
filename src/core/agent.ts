@@ -8,7 +8,6 @@ import { buildMessagesForModel } from "../chat/message-builder.js";
 import { scanWorkspace, type FileMeta } from "../workspace/workspace-scanner.js";
 
 const SCAN_CACHE_TTL_MS = 30_000;
-const AGENT_JSON_REPAIR_RETRIES = 2;
 
 export type TurnStatus = "building_context" | "calling_model" | "producing_response";
 
@@ -169,7 +168,6 @@ export class Agent {
       provider: this.provider,
       messagesForModel,
       workspacePath: this.workspacePath,
-      repairRetries: AGENT_JSON_REPAIR_RETRIES,
       scannedFiles: this.getWorkspaceFiles(),
     });
   }

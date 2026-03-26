@@ -1,6 +1,5 @@
 import type { SessionMode } from "../chat/types.js";
 import { loadPrompt } from "./loader.js";
-import { buildAgentContractBlock } from "../contracts/agent-response.types.js";
 
 export function buildSystemMessage(mode: SessionMode): string {
   const sections: string[] = [
@@ -8,18 +7,26 @@ export function buildSystemMessage(mode: SessionMode): string {
     "",
     `Active mode: ${mode}`,
     "",
+    loadPrompt("shared/response-rules"),
+    "",
   ];
 
-  // For agent mode, inject the JSON contract BEFORE the general response rules
-  // so its "override all response rules" instruction takes priority.
   if (mode === "agent") {
-    sections.push(buildAgentContractBlock(), "");
+    sections.push(loadPrompt("modes/agent-answer"));
   } else {
-    sections.push(loadPrompt("shared/response-rules"), "");
+    sections.push(loadPrompt(`modes/${mode}`), "");
+    sections.push(loadPrompt(`formats/${mode}-format`));
   }
 
-  sections.push(loadPrompt(`modes/${mode}`), "");
-  sections.push(loadPrompt(`formats/${mode}-format`));
-
   return sections.join("\n");
+}
+
+export function buildAgentDecisionSystemMessage(): string {
+  return [
+    loadPrompt("shared/base"),
+    "",
+    "Active mode: agent (context evaluation)",
+    "",
+    loadPrompt("modes/agent-decision"),
+  ].join("\n");
 }

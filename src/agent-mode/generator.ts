@@ -1,181 +1,111 @@
 import type { ChatSession } from "../chat/types.js";
-import type { AgentResponse } from "../contracts/agent-response.types.js";
 import type { ModelProvider } from "../providers/model-provider.js";
 import type { FileMeta } from "../workspace/workspace-scanner.js";
+import { parseAgentDecision, type AgentDecision } from "../contracts/agent-decision.types.js";
 import { resolveContextRequests } from "./context-resolution.js";
-import {
-  buildAgentRepairPrompt,
-  buildDegradedAgentFallback,
-  normalizeAgentResponsePathsOnParsed,
-  parseAgentResponseWithRecovery,
-} from "./response-handler.js";
-import { validateAgentResponseSemantics } from "./semantic-validation.js";
+import { sanitizeAgentJsonText } from "./response-handler.js";
+import { buildAgentDecisionSystemMessage } from "../prompts/prompt-builder.js";
 
-const MAX_CONTEXT_ROUNDS = 2;
+const DECISION_RETRIES = 2;
 
 export async function generateAgentModeResponse(params: {
   provider: ModelProvider;
   messagesForModel: ChatSession["messages"];
   workspacePath: string;
-  repairRetries: number;
   scannedFiles: FileMeta[];
 }): Promise<string> {
-  const { provider, messagesForModel, workspacePath, repairRetries, scannedFiles } = params;
+  const { provider, messagesForModel, workspacePath, scannedFiles } = params;
 
-  // alreadyResolved tracks absolute paths provided across all context rounds
-  // to prevent re-sending the same files on subsequent rounds.
-  const alreadyResolved = new Set<string>();
+  // --- Phase 1: Context Decision ---
+  const decision = await runDecisionPhase(provider, messagesForModel);
+  console.warn(
+    `[REI debug] Agent decision: taskType=${decision.taskType}, ready=${decision.ready}, contextRequests=[${decision.contextRequests.map((r) => r.path).join(", ")}]`
+  );
 
-  let currentMessages: ChatSession["messages"] = messagesForModel;
-
-  for (let round = 0; round <= MAX_CONTEXT_ROUNDS; round += 1) {
-    const result = await runAgentPipeline({
-      provider,
-      messagesForModel: currentMessages,
-      workspacePath,
-      repairRetries,
-    });
-
-    if (result.kind === "fallback") {
-      return result.json;
-    }
-
-    const response = result.response;
-
-    // If the model is satisfied, return immediately.
-    if (!response.needsMoreContext) {
-      return JSON.stringify(response, null, 2);
-    }
-
-    // If the model claims it needs more context but provides no requests,
-    // treat this as a semantic contract violation and fall back.
-    if (response.needsMoreContext && response.contextRequests.length === 0) {
-      console.warn(
-        `[REI debug] Agent context loop: needsMoreContext=true but no contextRequests provided, engaging fallback`
-      );
-      return JSON.stringify(
-        buildDegradedAgentFallback(
-          result.rawResponse,
-          new Error("needsMoreContext is true but contextRequests is empty"),
-          "semantic"
-        ),
-        null,
-        2
-      );
-    }
-    // If we've exhausted context rounds, fall back gracefully.
-    if (round === MAX_CONTEXT_ROUNDS) {
-      console.warn(
-        `[REI debug] Agent context loop exhausted after ${MAX_CONTEXT_ROUNDS} round(s), engaging fallback`
-      );
-      return JSON.stringify(
-        buildDegradedAgentFallback(
-          result.rawResponse,
-          new Error(`needsMoreContext still true after ${MAX_CONTEXT_ROUNDS} context round(s)`),
-          "semantic"
-        ),
-        null,
-        2
-      );
-    }
-
-    const requestedPaths = response.contextRequests.map((r) => r.path);
-    console.warn(
-      `[REI debug] Agent context round ${round + 1}/${MAX_CONTEXT_ROUNDS} — resolving ${response.contextRequests.length} request(s): [${requestedPaths.join(", ")}]`
-    );
-
+  // --- Phase 2: Context Resolution ---
+  let answerMessages = messagesForModel;
+  if (decision.contextRequests.length > 0) {
+    const alreadyResolved = new Set<string>();
     const { contextMessage, resolved } = await resolveContextRequests(
-      response.contextRequests,
+      decision.contextRequests,
       workspacePath,
       alreadyResolved,
       scannedFiles
     );
-
-    if (resolved.length === 0) {
-      console.warn(`[REI debug] Agent context loop: no new paths resolved, stopping`);
-      return JSON.stringify(response, null, 2);
+    if (resolved.length > 0 && contextMessage) {
+      console.warn(
+        `[REI debug] Agent context resolved ${resolved.length} file(s), injecting into answer phase`
+      );
+      answerMessages = appendContextToLastUserMessage(messagesForModel, contextMessage);
     }
-
-    currentMessages = [
-      ...currentMessages,
-      { role: "assistant", content: JSON.stringify(response, null, 2) },
-      { role: "user", content: contextMessage },
-    ];
   }
 
-  // Unreachable — loop always returns above.
-  /* istanbul ignore next */
-  throw new Error("Unexpected exit from context resolution loop");
+  // --- Phase 3: Answer ---
+  // Free-text response. No JSON contract, no semantic validation.
+  return provider.completeChat(answerMessages);
 }
 
 // ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
 
-type PipelineSuccess = { kind: "success"; response: AgentResponse; rawResponse: string };
-type PipelineFallback = { kind: "fallback"; json: string };
-type PipelineResult = PipelineSuccess | PipelineFallback;
+async function runDecisionPhase(
+  provider: ModelProvider,
+  messagesForModel: ChatSession["messages"]
+): Promise<AgentDecision> {
+  const lastUserMessage = [...messagesForModel].reverse().find((m) => m.role === "user");
+  const decisionMessages: ChatSession["messages"] = [
+    { role: "system", content: buildAgentDecisionSystemMessage() },
+    ...(lastUserMessage ? [lastUserMessage] : []),
+  ];
 
-async function runAgentPipeline(params: {
-  provider: ModelProvider;
-  messagesForModel: ChatSession["messages"];
-  workspacePath: string;
-  repairRetries: number;
-}): Promise<PipelineResult> {
-  const { provider, messagesForModel, workspacePath, repairRetries } = params;
+  let raw = await provider.completeChat(decisionMessages);
 
-  let rawResponse = await provider.completeChat(messagesForModel);
-  let lastError: Error | undefined;
-  let lastFailureKind: "structural" | "semantic" = "structural";
-
-  for (let attempt = 0; attempt <= repairRetries; attempt += 1) {
+  for (let attempt = 0; attempt <= DECISION_RETRIES; attempt += 1) {
     try {
-      const recovered = parseAgentResponseWithRecovery(rawResponse);
-      const response = normalizeAgentResponsePathsOnParsed(recovered.response, workspacePath);
-      const semanticIssues = validateAgentResponseSemantics(response, messagesForModel);
-      if (semanticIssues.length > 0) {
-        lastFailureKind = "semantic";
-        throw new Error(`Invalid AGENT mode semantic response: ${semanticIssues.join("; ")}`);
+      const sanitized = sanitizeAgentJsonText(raw) || raw;
+      const decision = parseAgentDecision(sanitized);
+      if (attempt > 0) {
+        console.warn(`[REI debug] Agent decision parsed after ${attempt + 1} attempt(s)`);
       }
-      if (recovered.stage !== "direct") {
-        console.warn(`[REI debug] Agent JSON recovered via: ${recovered.stage}`);
-      }
-      return { kind: "success", response, rawResponse };
-    } catch (error: unknown) {
-      if (!(error instanceof Error)) {
-        throw error;
-      }
-      lastError = error;
-      if (!error.message.includes("semantic")) {
-        lastFailureKind = "structural";
-      }
-
-      console.warn(
-        `[REI debug] Agent ${lastFailureKind} retry ${attempt + 1}/${repairRetries + 1} failed: ${error.message}`
-      );
-
-      if (attempt === repairRetries) {
-        break;
+      return decision;
+    } catch (err) {
+      if (attempt === DECISION_RETRIES) {
+        console.warn(
+          `[REI debug] Agent decision parsing failed after ${DECISION_RETRIES + 1} attempt(s), proceeding without context resolution`
+        );
+        return { ready: true, taskType: "inspection", contextRequests: [] };
       }
 
       const repairMessages: ChatSession["messages"] = [
-        ...messagesForModel,
+        ...decisionMessages,
+        { role: "assistant", content: raw },
         {
           role: "user",
-          content: buildAgentRepairPrompt(error.message),
+          content: [
+            "Your response was not valid JSON for the context evaluation step.",
+            `Error: ${err instanceof Error ? err.message : String(err)}`,
+            'Return only a JSON object with exactly these fields: ready (boolean), taskType ("inspection" or "change-planning"), contextRequests (array of {path, reason} objects).',
+            "No markdown fences, no prose. First character must be { and last must be }.",
+          ].join("\n"),
         },
       ];
-
-      rawResponse = await provider.completeChat(repairMessages);
+      raw = await provider.completeChat(repairMessages);
     }
   }
 
-  console.warn(
-    `[REI debug] Agent mode fallback engaged after ${repairRetries + 1} attempt(s) [${lastFailureKind}]: ${lastError?.message ?? "unknown validation error"}`
-  );
+  /* istanbul ignore next */
+  return { ready: true, taskType: "inspection", contextRequests: [] };
+}
 
-  return {
-    kind: "fallback",
-    json: JSON.stringify(buildDegradedAgentFallback(rawResponse, lastError, lastFailureKind), null, 2),
-  };
+function appendContextToLastUserMessage(
+  messages: ChatSession["messages"],
+  contextAddendum: string
+): ChatSession["messages"] {
+  const result = [...messages];
+  for (let i = result.length - 1; i >= 0; i -= 1) {
+    if (result[i].role === "user") {
+      result[i] = { ...result[i], content: result[i].content + "\n\n" + contextAddendum };
+      return result;
+    }
+  }
+  return result;
 }

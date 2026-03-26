@@ -2,6 +2,7 @@ import * as readline from "readline";
 import type { Agent, TurnStatus } from "../core/agent.js";
 import type { ChatSession, SessionMode } from "../chat/types.js";
 import { REI_LOGO } from "./rei-logo.js";
+import { renderMarkdown } from "./markdown-renderer.js";
 
 const getWelcomeMessage = (mode: SessionMode): string => `${REI_LOGO}
 REI — Repository-Aware AI Agent
@@ -123,6 +124,7 @@ export async function runChat(agent: Agent): Promise<void> {
         };
 
         try {
+          let buffer = "";
           for await (const token of agent.streamTurn(session, trimmed, {
             onStatus: (status) => {
               if (lastStatus === status) return;
@@ -134,11 +136,10 @@ export async function runChat(agent: Agent): Promise<void> {
               }
             },
           })) {
-            stopThinking();
-            process.stdout.write(token);
+            buffer += token;
           }
           stopThinking();
-          process.stdout.write("\n");
+          process.stdout.write("\n" + renderMarkdown(buffer) + "\n\n");
         } catch (err: unknown) {
           stopThinking();
           process.stdout.write("\n");

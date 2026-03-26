@@ -1,10 +1,12 @@
 import * as fs from "fs/promises";
 
-const DEFAULT_MAX_CHARS = 200;
+export const PREVIEW_MAX_CHARS_DEFAULT = 900;
+export const PREVIEW_MAX_CHARS_AGENT = 4000;
+export const PREVIEW_MAX_CHARS_FULL = 20_000;
 
 export async function readFilePreview(
   filePath: string,
-  maxChars = DEFAULT_MAX_CHARS
+  maxChars = PREVIEW_MAX_CHARS_DEFAULT
 ): Promise<string> {
   try {
     const content = await fs.readFile(filePath, "utf-8");
