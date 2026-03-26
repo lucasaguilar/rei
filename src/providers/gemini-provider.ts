@@ -196,9 +196,16 @@ function buildGeminiRequestBody(messages: ChatMessage[]): Record<string, unknown
   return body;
 }
 
-function buildGeminiUrl(model: string, method: string, sse = false): string {
+function buildGeminiUrl(
+  model: string,
+  method: string,
+  sse = false,
+  apiKey?: string
+): string {
   const endpoint = `${GEMINI_API_BASE_URL}/models/${encodeURIComponent(model)}:${method}`;
-  const query = new URLSearchParams({ key: process.env.GEMINI_API_KEY ?? "" });
+  const query = new URLSearchParams({
+    key: apiKey ?? process.env.GEMINI_API_KEY ?? "",
+  });
   if (sse) {
     query.set("alt", "sse");
   }
