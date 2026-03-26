@@ -51,10 +51,10 @@ export function parseAgentDecision(raw: string): AgentDecision {
 
   if (obj.taskType !== "inspection" && obj.taskType !== "change-planning") {
     // Tolerate common alias variations.
-    const raw = String(obj.taskType ?? "").toLowerCase();
-    if (raw.includes("inspect") || raw.includes("analys") || raw.includes("explain")) {
+    const taskTypeRaw = String(obj.taskType ?? "").toLowerCase();
+    if (taskTypeRaw.includes("inspect") || taskTypeRaw.includes("analys") || taskTypeRaw.includes("explain")) {
       obj.taskType = "inspection";
-    } else if (raw.includes("change") || raw.includes("plan") || raw.includes("implement")) {
+    } else if (taskTypeRaw.includes("change") || taskTypeRaw.includes("plan") || taskTypeRaw.includes("implement")) {
       obj.taskType = "change-planning";
     } else {
       // Default to inspection rather than reject — less disruptive.
