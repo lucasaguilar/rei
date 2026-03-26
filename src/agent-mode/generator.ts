@@ -1,11 +1,12 @@
 import type { ChatSession } from "../chat/types.js";
 import type { AgentResponse } from "../contracts/agent-response.types.js";
 import type { ModelProvider } from "../providers/model-provider.js";
+import type { FileMeta } from "../workspace/workspace-scanner.js";
 import { resolveContextRequests } from "./context-resolution.js";
 import {
   buildAgentRepairPrompt,
   buildDegradedAgentFallback,
-  normalizeAgentResponsePaths,
+  normalizeAgentResponsePathsOnParsed,
   parseAgentResponseWithRecovery,
 } from "./response-handler.js";
 import { validateAgentResponseSemantics } from "./semantic-validation.js";
@@ -17,8 +18,9 @@ export async function generateAgentModeResponse(params: {
   messagesForModel: ChatSession["messages"];
   workspacePath: string;
   repairRetries: number;
+  scannedFiles: FileMeta[];
 }): Promise<string> {
-  const { provider, messagesForModel, workspacePath, repairRetries } = params;
+  const { provider, messagesForModel, workspacePath, repairRetries, scannedFiles } = params;
 
   // alreadyResolved tracks absolute paths provided across all context rounds
   // to prevent re-sending the same files on subsequent rounds.
@@ -85,7 +87,8 @@ export async function generateAgentModeResponse(params: {
     const { contextMessage, resolved } = await resolveContextRequests(
       response.contextRequests,
       workspacePath,
-      alreadyResolved
+      alreadyResolved,
+      scannedFiles
     );
 
     if (resolved.length === 0) {
@@ -127,9 +130,9 @@ async function runAgentPipeline(params: {
 
   for (let attempt = 0; attempt <= repairRetries; attempt += 1) {
     try {
-      const normalized = normalizeAgentResponsePaths(rawResponse, workspacePath);
-      const recovered = parseAgentResponseWithRecovery(normalized);
-      const semanticIssues = validateAgentResponseSemantics(recovered.response, messagesForModel);
+      const recovered = parseAgentResponseWithRecovery(rawResponse);
+      const response = normalizeAgentResponsePathsOnParsed(recovered.response, workspacePath);
+      const semanticIssues = validateAgentResponseSemantics(response, messagesForModel);
       if (semanticIssues.length > 0) {
         lastFailureKind = "semantic";
         throw new Error(`Invalid AGENT mode semantic response: ${semanticIssues.join("; ")}`);
@@ -137,7 +140,7 @@ async function runAgentPipeline(params: {
       if (recovered.stage !== "direct") {
         console.warn(`[REI debug] Agent JSON recovered via: ${recovered.stage}`);
       }
-      return { kind: "success", response: recovered.response, rawResponse };
+      return { kind: "success", response, rawResponse };
     } catch (error: unknown) {
       if (!(error instanceof Error)) {
         throw error;
