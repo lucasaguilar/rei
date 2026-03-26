@@ -5,7 +5,7 @@ import { resolveContextRequests } from "./context-resolution.js";
 import {
   buildAgentRepairPrompt,
   buildDegradedAgentFallback,
-  normalizeAgentResponsePaths,
+  normalizeAgentResponsePathsOnParsed,
   parseAgentResponseWithRecovery,
 } from "./response-handler.js";
 import { validateAgentResponseSemantics } from "./semantic-validation.js";
@@ -127,9 +127,9 @@ async function runAgentPipeline(params: {
 
   for (let attempt = 0; attempt <= repairRetries; attempt += 1) {
     try {
-      const normalized = normalizeAgentResponsePaths(rawResponse, workspacePath);
-      const recovered = parseAgentResponseWithRecovery(normalized);
-      const semanticIssues = validateAgentResponseSemantics(recovered.response, messagesForModel);
+      const recovered = parseAgentResponseWithRecovery(rawResponse);
+      const response = normalizeAgentResponsePathsOnParsed(recovered.response, workspacePath);
+      const semanticIssues = validateAgentResponseSemantics(response, messagesForModel);
       if (semanticIssues.length > 0) {
         lastFailureKind = "semantic";
         throw new Error(`Invalid AGENT mode semantic response: ${semanticIssues.join("; ")}`);
@@ -137,7 +137,7 @@ async function runAgentPipeline(params: {
       if (recovered.stage !== "direct") {
         console.warn(`[REI debug] Agent JSON recovered via: ${recovered.stage}`);
       }
-      return { kind: "success", response: recovered.response, rawResponse };
+      return { kind: "success", response, rawResponse };
     } catch (error: unknown) {
       if (!(error instanceof Error)) {
         throw error;

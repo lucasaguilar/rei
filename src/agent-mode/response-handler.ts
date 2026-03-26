@@ -91,6 +91,37 @@ export function sanitizeAgentJsonText(rawResponse: string): string {
   return candidate;
 }
 
+export function normalizeAgentResponsePathsOnParsed(
+  response: AgentResponse,
+  workspacePath: string
+): AgentResponse {
+  const absoluteBase = path.resolve(workspacePath).replace(/\\/g, "/");
+
+  function stripWorkspacePrefix(value: string): string {
+    const normalized = value.replace(/\\/g, "/");
+    if (normalized.startsWith(absoluteBase + "/")) {
+      return normalized.slice(absoluteBase.length + 1);
+    }
+    return value;
+  }
+
+  return {
+    ...response,
+    actions: response.actions.map((action) => ({
+      ...action,
+      target: stripWorkspacePrefix(action.target),
+    })),
+    proposedChanges: response.proposedChanges.map((change) => ({
+      ...change,
+      file: stripWorkspacePrefix(change.file),
+    })),
+    contextRequests: response.contextRequests.map((req) => ({
+      ...req,
+      path: stripWorkspacePrefix(req.path),
+    })),
+  };
+}
+
 export function normalizeAgentResponsePaths(raw: string, workspacePath: string): string {
   let parsed: unknown;
   try {
