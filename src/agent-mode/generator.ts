@@ -1,6 +1,7 @@
 import type { ChatSession } from "../chat/types.js";
 import type { AgentResponse } from "../contracts/agent-response.types.js";
 import type { ModelProvider } from "../providers/model-provider.js";
+import type { FileMeta } from "../workspace/workspace-scanner.js";
 import { resolveContextRequests } from "./context-resolution.js";
 import {
   buildAgentRepairPrompt,
@@ -17,8 +18,9 @@ export async function generateAgentModeResponse(params: {
   messagesForModel: ChatSession["messages"];
   workspacePath: string;
   repairRetries: number;
+  scannedFiles: FileMeta[];
 }): Promise<string> {
-  const { provider, messagesForModel, workspacePath, repairRetries } = params;
+  const { provider, messagesForModel, workspacePath, repairRetries, scannedFiles } = params;
 
   // alreadyResolved tracks absolute paths provided across all context rounds
   // to prevent re-sending the same files on subsequent rounds.
@@ -85,7 +87,8 @@ export async function generateAgentModeResponse(params: {
     const { contextMessage, resolved } = await resolveContextRequests(
       response.contextRequests,
       workspacePath,
-      alreadyResolved
+      alreadyResolved,
+      scannedFiles
     );
 
     if (resolved.length === 0) {

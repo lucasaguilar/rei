@@ -170,6 +170,7 @@ export class Agent {
       messagesForModel,
       workspacePath: this.workspacePath,
       repairRetries: AGENT_JSON_REPAIR_RETRIES,
+      scannedFiles: this.getWorkspaceFiles(),
     });
   }
 }
