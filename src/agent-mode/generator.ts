@@ -12,7 +12,6 @@ export async function generateAgentModeResponse(params: {
   provider: ModelProvider;
   messagesForModel: ChatSession["messages"];
   workspacePath: string;
-  repairRetries: number;
   scannedFiles: FileMeta[];
 }): Promise<string> {
   const { provider, messagesForModel, workspacePath, scannedFiles } = params;
