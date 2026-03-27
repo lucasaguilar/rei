@@ -63,7 +63,7 @@ export async function generateAgentModeResponse(params: {
 
   // If change-planning produced no valid patch, run one focused patch-synthesis attempt.
   if (decision.taskType === "change-planning" && patchValidation.every((item) => !item.validation.valid)) {
-    const synthesized = await synthesizePatchesFromContext(provider, messagesForModel);
+    const synthesized = await synthesizePatchesFromContext(provider, answerMessages);
     if (synthesized.length > 0) {
       const synthesizedValidation = await validateDecisionProposedPatches(
         {
