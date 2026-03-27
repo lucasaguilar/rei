@@ -1,3 +1,15 @@
+/**
+ * ⚠️  DEPRECATED — Legacy semantic validation for the old AgentResponse contract.
+ *
+ * Current Architecture: REI now uses a 3-phase agent pipeline (see src/agent-mode/generator.ts):
+ * - Phase 1 (context decision): Lightweight AgentDecision JSON (ready, taskType, contextRequests)
+ * - Phase 2 (file resolution): Deterministic context gathering (no model)
+ * - Phase 3 (final answer): Free-text markdown (no JSON contract, no semantic validation)
+ *
+ * This module is kept for reference only. Semantic validation is no longer performed
+ * in Phase 3 — the model returns plain text that is rendered directly.
+ */
+
 import type { ChatSession } from "../chat/types.js";
 import type { AgentResponse } from "../contracts/agent-response.types.js";
 

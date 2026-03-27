@@ -8,6 +8,7 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
+    "diff": "^8.0.4",
     "jsonrepair": "^3.13.3",
     "marked": "^15.0.12",
     "marked-terminal": "^7.3.0",

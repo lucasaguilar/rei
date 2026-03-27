@@ -1,3 +1,15 @@
+/**
+ * ⚠️  DEPRECATED — Legacy agent response parsing for the old AgentResponse contract.
+ *
+ * Current Architecture: REI now uses a 3-phase agent pipeline (see src/agent-mode/generator.ts):
+ * - Phase 1 (context decision): Lightweight AgentDecision JSON (ready, taskType, contextRequests)
+ * - Phase 2 (file resolution): Deterministic context gathering (no model)
+ * - Phase 3 (final answer): Free-text markdown (no JSON contract, no semantic validation)
+ *
+ * This module is kept for reference only.
+ * New agent workflows should use src/contracts/agent-decision.types.ts instead.
+ */
+
 import * as path from "path";
 import { jsonrepair } from "jsonrepair";
 import {

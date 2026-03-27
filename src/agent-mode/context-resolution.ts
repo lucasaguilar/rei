@@ -1,6 +1,6 @@
 import * as fs from "fs/promises";
 import * as path from "path";
-import type { AgentContextRequest } from "../contracts/agent-response.types.js";
+import type { AgentContextRequest } from "../contracts/agent-decision.types.js";
 import type { FileMeta } from "../workspace/workspace-scanner.js";
 
 const FULL_READ_MAX_CHARS = 8000;
@@ -138,7 +138,7 @@ export async function resolveContextRequests(
 
   const contextMessage =
     sections.length > 0
-      ? `Here is the additional context you requested:\n\n${sections.join("\n\n")}\n\nPlease now provide your final response with needsMoreContext: false.`
+      ? `Here is the additional context you requested:\n\n${sections.join("\n\n")}`
       : "";
 
   return { contextMessage, resolved };

@@ -13,6 +13,15 @@ export interface AgentContextRequest {
   reason: string;
 }
 
+export interface AgentProposedPatch {
+  /** Workspace-relative target file path. */
+  file: string;
+  /** Human-readable explanation of intent. */
+  description: string;
+  /** Unified diff patch text for this file. */
+  patch: string;
+}
+
 export type AgentTaskType = "inspection" | "change-planning";
 
 export interface AgentDecision {
@@ -22,6 +31,8 @@ export interface AgentDecision {
   taskType: AgentTaskType;
   /** Files to read fully when ready is false. Must be empty when ready is true. */
   contextRequests: AgentContextRequest[];
+  /** Optional patch proposals for change-planning tasks. */
+  proposedPatches?: AgentProposedPatch[];
 }
 
 export function parseAgentDecision(raw: string): AgentDecision {
@@ -79,9 +90,25 @@ export function parseAgentDecision(raw: string): AgentDecision {
     }
   }
 
+  let proposedPatches: AgentProposedPatch[] | undefined;
+  if (Array.isArray(obj.proposedPatches)) {
+    const parsedPatches: AgentProposedPatch[] = [];
+    for (const item of obj.proposedPatches) {
+      if (typeof item !== "object" || item === null) continue;
+      const patchObj = item as Record<string, unknown>;
+      const file = typeof patchObj.file === "string" ? patchObj.file : "";
+      const description = typeof patchObj.description === "string" ? patchObj.description : "";
+      const patch = typeof patchObj.patch === "string" ? patchObj.patch : "";
+      if (!file || !patch) continue;
+      parsedPatches.push({ file, description, patch });
+    }
+    proposedPatches = parsedPatches;
+  }
+
   return {
     ready: obj.ready as boolean,
     taskType: obj.taskType as AgentTaskType,
     contextRequests,
+    ...(proposedPatches ? { proposedPatches } : {}),
   };
 }

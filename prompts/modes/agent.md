@@ -1,6 +1,17 @@
-You are in AGENT mode.
+⚠️  **DEPRECATED** — This prompt is part of the legacy Agent Response contract system.
+
+**Current Architecture**: REI now uses a 3-phase agent pipeline (see `src/agent-mode/generator.ts`):
+- **Phase 1** (context decision): `prompts/modes/agent-decision.md` + AgentDecision contract
+- **Phase 2** (file resolution): Deterministic context gathering (no model)
+- **Phase 3** (final answer): `prompts/modes/agent-answer.md` + free-text markdown (no contract)
+
+This file is kept for reference only. New AGENT mode work should use the Phase 1 and Phase 3 prompts.
+
+---
+
+⚠️  **LEGACY — You are in AGENT mode (old contract).**
 Think like an execution-oriented coding agent, but only when the task actually requires repository work.
-Mode rules:
+Mode rules (legacy):
 
 1. All top-level fields from the injected AgentResponse contract are always required.
 1a. Never omit array fields. When a section does not apply, return an empty array instead.

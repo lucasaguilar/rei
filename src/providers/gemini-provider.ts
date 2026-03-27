@@ -118,7 +118,7 @@ export class GeminiProvider implements ModelProvider {
     method: "generateContent",
     messages: ChatMessage[]
   ): Promise<GeminiGenerateContentResponse> {
-    const response = await this.fetchWithTimeout(buildGeminiUrl(this.model, method), {
+    const response = await this.fetchWithTimeout(buildGeminiUrl(this.model, method, false, this.apiKey), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -142,7 +142,7 @@ export class GeminiProvider implements ModelProvider {
   }
 
   private fetchStream(messages: ChatMessage[]): Promise<Response> {
-    return this.fetchWithTimeout(buildGeminiUrl(this.model, "streamGenerateContent", true), {
+    return this.fetchWithTimeout(buildGeminiUrl(this.model, "streamGenerateContent", true, this.apiKey), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
