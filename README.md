@@ -74,6 +74,7 @@ Provider selection is controlled by `MODEL_PROVIDER`:
 - `MODEL_PROVIDER=ollama`
 - `MODEL_PROVIDER=groq`
 - `MODEL_PROVIDER=gemini`
+- `MODEL_PROVIDER=openrouter`
 
 ### Ollama setup
 
@@ -120,6 +121,27 @@ Optional configuration:
 - `GEMINI_API_KEY` required
 - `GEMINI_MODEL` default: `gemini-2.5-flash`
 - `GEMINI_REQUEST_TIMEOUT_MS` default: `120000`
+
+### OpenRouter setup
+
+1. Create an API key at [openrouter.ai/keys](https://openrouter.ai/keys).
+2. Run REI:
+
+```bash
+MODEL_PROVIDER=openrouter OPENROUTER_API_KEY=your-key npm run dev -- chat
+```
+
+To use a specific model:
+
+```bash
+MODEL_PROVIDER=openrouter OPENROUTER_API_KEY=your-key OPENROUTER_MODEL=anthropic/claude-3.5-sonnet npm run dev -- chat
+```
+
+Optional configuration:
+
+- `OPENROUTER_API_KEY` required
+- `OPENROUTER_MODEL` default: `openai/gpt-4o-mini`
+- `OPENROUTER_REQUEST_TIMEOUT_MS` default: `120000`
 
 ## Terminal output
 
