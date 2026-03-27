@@ -121,9 +121,14 @@ export function validateFileTarget(
 
   // Check 3: Not in denied list
   const inDenied = policy.deniedFiles.some((denied) => {
+    // Convert simple glob patterns (with "*" wildcards) to a safe RegExp:
+    // 1. Split on "*" (wildcard)
+    // 2. Escape regex metacharacters in each literal segment
+    // 3. Join segments with ".*" to represent the "*" wildcard
     const pattern = denied
-      .replace(/\*/g, ".*")
-      .replace(/\./g, "\\.");
+      .split("*")
+      .map((segment) => segment.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
+      .join(".*");
     return new RegExp(`^${pattern}$`).test(normalized);
   });
   if (inDenied) {
