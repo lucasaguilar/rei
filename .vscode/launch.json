@@ -137,6 +137,75 @@
             "skipFiles": [
                 "<node_internals>/**"
             ],
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "REI openai/gpt-4o-mini (OpenRouter)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": [
+                "run",
+                "dev",
+                "--",
+                //"--workspace",
+                //"/workspaces/app-for-news",
+                "chat"
+            ],
+            "env": {
+                "MODEL_PROVIDER": "openrouter",
+                "OPENROUTER_MODEL": "openai/gpt-4o-mini",
+                "OPENROUTER_API_KEY": "${env:OPENROUTER_API_KEY}"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "REI anthropic/claude-3.5-sonnet (OpenRouter)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": [
+                "run",
+                "dev",
+                "--",
+                //"--workspace",
+                //"/workspaces/app-for-news",
+                "chat"
+            ],
+            "env": {
+                "MODEL_PROVIDER": "openrouter",
+                "OPENROUTER_MODEL": "anthropic/claude-3.5-sonnet",
+                "OPENROUTER_API_KEY": "${env:OPENROUTER_API_KEY}"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "REI meta-llama/llama-3.3-70b-instruct (OpenRouter)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": [
+                "run",
+                "dev",
+                "--",
+                //"--workspace",
+                //"/workspaces/app-for-news",
+                "chat"
+            ],
+            "env": {
+                "MODEL_PROVIDER": "openrouter",
+                "OPENROUTER_MODEL": "meta-llama/llama-3.3-70b-instruct",
+                "OPENROUTER_API_KEY": "${env:OPENROUTER_API_KEY}"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
         }
     ]
 }
