@@ -3,6 +3,7 @@ import type { Agent, TurnStatus } from "../core/agent.js";
 import type { ChatSession, SessionMode } from "../chat/types.js";
 import { REI_LOGO } from "./rei-logo.js";
 import { renderMarkdown } from "./markdown-renderer.js";
+import { formatPatchForTerminal } from "../tools/patch-generator.js";
 
 const getWelcomeMessage = (mode: SessionMode): string => `${REI_LOGO}
 REI — Repository-Aware AI Agent
@@ -12,6 +13,10 @@ Commands:
   /mode ask
   /mode planning
   /mode agent
+  /pending
+  /confirm
+  /confirm --dry-run
+  /discard
   /exit
 
 Ready.`;
@@ -22,7 +27,11 @@ const HELP_TEXT = `Commands:
   /help           - show this help
   /mode ask       - switch to ask mode
   /mode planning  - switch to planning mode
-  /mode agent     - switch to agent mode`;
+  /mode agent     - switch to agent mode
+  /pending        - show currently queued validated patches
+  /confirm        - apply queued patches
+  /confirm --dry-run - validate/apply-check queued patches only
+  /discard        - clear queued patches without applying`;
 
 const MODE_PROMPTS: Record<SessionMode, string> = {
   ask: "ask > ",
@@ -72,6 +81,74 @@ export async function runChat(agent: Agent): Promise<void> {
       if (trimmed === "/help") {
         console.log(HELP_TEXT);
         prompt();
+        return;
+      }
+
+      if (trimmed === "/pending") {
+        const pending = agent.getPendingPatches();
+        if (pending.length === 0) {
+          console.log("No pending patches.");
+          prompt();
+          return;
+        }
+
+        console.log(`Pending patches: ${pending.length}`);
+        for (const proposal of pending) {
+          console.log(`\nFile: ${proposal.file}`);
+          console.log(`Reason: ${proposal.description || "(no description)"}`);
+          console.log(formatPatchForTerminal(proposal.patch));
+        }
+        console.log("\nUse /confirm to apply, or /discard to clear them.");
+        prompt();
+        return;
+      }
+
+      if (trimmed === "/discard") {
+        const discarded = agent.clearPendingPatches();
+        console.log(discarded > 0 ? `Discarded ${discarded} pending patch(es).` : "No pending patches.");
+        prompt();
+        return;
+      }
+
+      if (trimmed === "/confirm" || trimmed === "/confirm --dry-run") {
+        const dryRun = trimmed.includes("--dry-run");
+        const pending = agent.getPendingPatches();
+        if (pending.length === 0) {
+          console.log("No pending patches to apply.");
+          prompt();
+          return;
+        }
+
+        (async () => {
+          try {
+            const result = await agent.applyPendingPatches({ dryRun });
+            if (result.results.length === 0) {
+              console.log("No pending patches to apply.");
+              prompt();
+              return;
+            }
+
+            console.log(
+              dryRun
+                ? "Patch dry-run completed."
+                : (result.success ? "Patches applied." : "Patch apply completed with errors.")
+            );
+
+            for (const item of result.results) {
+              const status = item.applied ? "applied" : (item.skipped ? "skipped" : "failed");
+              console.log(`- ${item.file}: ${status}`);
+              if (item.validationErrors.length > 0) {
+                console.log(`  validation: ${item.validationErrors.join(" | ")}`);
+              }
+              if (item.stderr) {
+                console.log(`  stderr: ${item.stderr.trim()}`);
+              }
+            }
+          } catch (err: unknown) {
+            console.error("Error:", err instanceof Error ? err.message : String(err));
+          }
+          prompt();
+        })();
         return;
       }
 

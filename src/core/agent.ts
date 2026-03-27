@@ -6,6 +6,8 @@ import { buildSystemMessage } from "../prompts/prompt-builder.js";
 import { buildTurnContext, type TurnContext } from "../context/context-builder.js";
 import { buildMessagesForModel } from "../chat/message-builder.js";
 import { scanWorkspace, type FileMeta } from "../workspace/workspace-scanner.js";
+import { applyPatchBatch, type BatchPatchApplyResult } from "../tools/patch-applier.js";
+import type { AgentProposedPatch } from "../contracts/agent-decision.types.js";
 
 const SCAN_CACHE_TTL_MS = 30_000;
 
@@ -21,6 +23,7 @@ export class Agent {
     files: FileMeta[];
     timestamp: number;
   };
+  private pendingProposedPatches: AgentProposedPatch[] = [];
 
   constructor(
     private readonly provider: ModelProvider,
@@ -29,6 +32,40 @@ export class Agent {
 
   async run(prompt: string): Promise<string> {
     return this.provider.complete(prompt);
+  }
+
+  hasPendingPatches(): boolean {
+    return this.pendingProposedPatches.length > 0;
+  }
+
+  getPendingPatches(): AgentProposedPatch[] {
+    return [...this.pendingProposedPatches];
+  }
+
+  clearPendingPatches(): number {
+    const count = this.pendingProposedPatches.length;
+    this.pendingProposedPatches = [];
+    return count;
+  }
+
+  async applyPendingPatches(options?: { dryRun?: boolean }): Promise<BatchPatchApplyResult> {
+    if (this.pendingProposedPatches.length === 0) {
+      return {
+        success: false,
+        dryRun: options?.dryRun ?? true,
+        results: [],
+      };
+    }
+
+    const result = await applyPatchBatch(this.pendingProposedPatches, this.workspacePath, {
+      dryRun: options?.dryRun ?? true,
+    });
+
+    if (!options?.dryRun && result.success && result.results.every((r) => r.applied)) {
+      this.pendingProposedPatches = [];
+    }
+
+    return result;
   }
 
   async runTurn(session: ChatSession, userInput: string): Promise<string> {
@@ -169,6 +206,9 @@ export class Agent {
       messagesForModel,
       workspacePath: this.workspacePath,
       scannedFiles: this.getWorkspaceFiles(),
+    }).then((outcome) => {
+      this.pendingProposedPatches = outcome.validProposedPatches;
+      return outcome.response;
     });
   }
 }

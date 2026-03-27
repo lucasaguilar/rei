@@ -13,6 +13,8 @@ For CHANGE-PLANNING tasks (implement, modify, create, fix, refactor):
 - Describe exactly what to change: which file, which section, what logic
 - Include concise code snippets to clarify intent
 - Identify risks and edge cases based on the visible context
+- If the user requests a concrete edit in a specific file/function, answer with that concrete edit first (not a high-level architecture summary)
+- Do not provide generic phase overviews when the user asks for a specific code change
 
 General rules:
 1. Answer the user's actual question first, directly and completely.

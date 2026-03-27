@@ -1,6 +1,6 @@
 import * as fs from "fs/promises";
 import * as path from "path";
-import type { AgentContextRequest } from "../contracts/agent-response.types.js";
+import type { AgentContextRequest } from "../contracts/agent-decision.types.js";
 import type { FileMeta } from "../workspace/workspace-scanner.js";
 
 const FULL_READ_MAX_CHARS = 8000;
