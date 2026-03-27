@@ -207,7 +207,12 @@ export class Agent {
       workspacePath: this.workspacePath,
       scannedFiles: this.getWorkspaceFiles(),
     }).then((outcome) => {
-      this.pendingProposedPatches = outcome.validProposedPatches;
+      if (outcome.validProposedPatches && outcome.validProposedPatches.length > 0) {
+        this.pendingProposedPatches = [
+          ...(this.pendingProposedPatches ?? []),
+          ...outcome.validProposedPatches,
+        ];
+      }
       return outcome.response;
     });
   }
