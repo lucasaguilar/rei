@@ -127,7 +127,12 @@ export async function commitAppliedPatches(
   filePaths?: string[]
 ): Promise<{ committed: boolean; stdout: string; stderr: string }> {
   try {
-    const addArgs = ["-C", workspacePath, "add", ...(filePaths && filePaths.length > 0 ? filePaths : ["-A"] )];
+    const addArgs = ["-C", workspacePath, "add"];
+    if (filePaths && filePaths.length > 0) {
+      addArgs.push("--", ...filePaths);
+    } else {
+      addArgs.push("-A");
+    }
     await execFileAsync("git", addArgs);
 
     const { stdout, stderr } = await execFileAsync("git", [
