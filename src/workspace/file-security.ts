@@ -177,9 +177,23 @@ export function isWithinWorkspace(absPath: string, absWorkspace: string): boolea
   const resolved = path.resolve(absPath);
   const resolvedWorkspace = path.resolve(absWorkspace);
   const relative = path.relative(resolvedWorkspace, resolved);
-  
-  // If relative path starts with "..", it escapes the workspace
-  return !relative.startsWith("..");
+
+  // Treat empty or current-directory relative paths as inside the workspace
+  if (relative === "" || relative === ".") {
+    return true;
+  }
+
+  // Guard against unexpected absolute relative paths
+  if (path.isAbsolute(relative)) {
+    return false;
+  }
+
+  // Reject paths that escape the workspace via parent-directory segments
+  if (relative === ".." || relative.startsWith(".." + path.sep)) {
+    return false;
+  }
+
+  return true;
 }
 
 /**
