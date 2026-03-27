@@ -346,7 +346,11 @@ function shouldRetryForMissingChangePatch(
   if (decision.contextRequests.length > 0) return false;
 
   if (explicitTaskPaths.size === 0) return false;
-  return [...explicitTaskPaths].every((p) => pathCoveredByTaskOrContext(p, explicitTaskPaths, providedContextPaths));
+  // Only retry if all explicit task paths are actually covered by the provided context,
+  // to avoid triggering retries based solely on the presence of explicitTaskPaths.
+  return [...explicitTaskPaths].every((p) =>
+    pathCoveredByTaskOrContext(p, new Set<string>(), providedContextPaths)
+  );
 }
 
 function extractPathLikeTokens(text: string): Set<string> {
