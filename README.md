@@ -55,6 +55,10 @@ npm run dev -- --workspace /workspaces/another-repo
 | `/mode ask` | Switch to ask mode |
 | `/mode planning` | Switch to planning mode |
 | `/mode agent` | Switch to agent mode |
+| `/pending` | Show currently queued validated patches |
+| `/confirm` | Apply all queued patches to the filesystem |
+| `/confirm --dry-run` | Validate patches with `git apply --check` without writing |
+| `/discard` | Clear queued patches without applying |
 
 ## Modes
 
@@ -198,6 +202,68 @@ The model must return a small internal JSON object:
 This object is parsed by `parseAgentDecision()` and is never shown to the user.
 
 If parsing fails, REI sanitizes the response, retries with a repair prompt, and eventually falls back to a safe default that skips context expansion.
+
+### Phase 2: main answer
+
+REI generates the final markdown answer using the (possibly expanded) context. The answer is rendered with ANSI styling in the terminal.
+
+If the task is a change-planning task, the agent may also emit a structured patch proposal embedded in the response. REI extracts and enqueues it automatically.
+
+---
+
+## Patch workflow
+
+When REI is in agent mode and the model proposes file changes, the changes go through a multi-stage pipeline before they can be applied.
+
+### 1. Patch generation
+
+`src/tools/patch-generator.ts` produces unified diff output from before/after string pairs:
+
+- `generateUnifiedDiff(filePath, before, after)` — returns a unified diff string (RFC 3881 format).
+- `formatPatchForTerminal(diff)` — colorizes the diff for terminal display (green additions, red deletions, yellow hunk headers, cyan file headers).
+- `extractFileFromPatch(patch)` — reads the target file path and hunk count from the diff headers.
+
+### 2. Patch validation
+
+`src/tools/patch-validator.ts` runs a two-stage check before the patch is queued:
+
+**Semantic validation** (`validatePatchSemantics`):
+- Patch is non-empty.
+- Exactly one `---` / `+++` header pair (multi-file patches are rejected).
+- At least one hunk (`@@` header).
+- No merge conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`).
+
+**Security validation** (`validateFileTarget`, from `file-security.ts`):
+- Target file is inside the workspace.
+- Target is inside an allowed directory (`src/`, `prompts/`, `docs/`).
+- Target is not a denied file (`package.json`, `tsconfig.json`, `.env`, lock files, etc.).
+- No symlink traversal.
+
+**Git applicability check** (`validatePatchWithGit`):
+- Runs `git apply --check` on the patch without writing to disk.
+- Confirms the patch applies cleanly to the current working tree.
+
+Only patches that pass all three stages are enqueued.
+
+### 3. Patch queue
+
+Validated patches are stored in memory on the `Agent` instance as `AgentProposedPatch[]`. The queue survives across turns until explicitly confirmed or discarded.
+
+```
+/pending        — inspect queue (shows colorized diff)
+/confirm        — apply all queued patches to disk
+/confirm --dry-run — re-run git apply --check without writing
+/discard        — drop all pending patches
+```
+
+### 4. Patch application
+
+`src/tools/patch-applier.ts` applies the queue through `git apply`:
+
+- `applyPatchToFS(patchText, workspacePath, { dryRun })` — writes the patch to a temp file and runs `git apply` (or `git apply --check` for dry-run). Cleans up the temp file regardless of outcome.
+- `applyPatchBatch(proposals, workspacePath, options)` — iterates the queue, re-validates each patch, and calls `applyPatchToFS` per entry. Returns a `BatchPatchApplyResult` with per-file status.
+
+After a successful real apply (`dryRun: false`, all entries applied), the queue is automatically cleared.
 
 ### Phase 2: deterministic context resolution
 
