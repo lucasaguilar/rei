@@ -1,226 +1,154 @@
-# Patch Workflow — 6-Phase Implementation Roadmap
+# Patch Workflow - Current Implementation
 
 ## Vision
 
-REI should allow agents to **propose concrete patches** to repository files, display them with a clear **confirmation gate**, and apply them safely with **security validation** and **git integration**.
+REI allows agent mode to propose concrete patches, validate them safely, queue them for review, and apply them only after an explicit CLI confirmation step.
 
-## Current State: Phase 1 ✅ COMPLETE
+## Status
 
-**What's Done:**
-- ✅ `src/workspace/file-security.ts` — Security validation layer
-  - Workspace containment checks
-  - Directory allowlist enforcement
-  - File denylist protection
-  - Symlink containment
-  - Readability validation
+All six patch-workflow phases are implemented.
 
-**Files Created:**
-- `src/workspace/file-security.ts` — Core security module (210 lines)
-- `src/workspace/file-security.integration.ts` — Integration examples
-- `docs/security-layer-phase-1.md` — Security documentation
+The active runtime flow is:
 
-**Compilation:** ✅ Clean
-
-**Security Policy:**
-- Allowed dirs: `["src/", "prompts/", "docs/"]`
-- Denied files: `package.json`, `tsconfig.json`, `.env`, lock files, etc.
-- Symlinks: Not allowed (containment)
+1. Agent mode evaluates whether the visible context is enough and may emit proposed patches.
+2. Additional files are resolved safely from the scanned workspace only.
+3. Proposed patches are normalized, validated, and optionally repaired.
+4. Valid patches are queued on the Agent instance.
+5. The CLI exposes review and confirmation commands.
 
 ---
 
-## Phase 2: Patch Generation ✅ COMPLETE
+## Phase 1: Security Layer
 
-**Goal:** Generate unified diff format from before/after code.
+What's implemented:
 
-**Files Created:**
-```
-src/tools/patch-generator.ts
-  - generateUnifiedDiff(filePath, before, after, options?): string
-  - formatPatchForTerminal(diffText): string
-  - extractFileFromPatch(diffText): ExtractedPatchInfo | null
-```
+- src/workspace/file-security.ts validates workspace containment.
+- Directory allowlists are enforced.
+- Denied files such as package metadata, lockfiles, and env files are blocked.
+- Symlink traversal is rejected.
 
-**Integration Point:**
-- Phase 1 validates file target
-- Phase 2 generates actual diff text
-- Output: Unified diff (RFC 3881 format)
+Security policy summary:
 
-**Dependencies:** `diff` npm package for `createTwoFilesPatch`
-
-**Compilation:** ✅ Clean
+- Allowed dirs: ["src/", "prompts/", "docs/"]
+- Denied files include package.json, tsconfig.json, .env, and lockfiles.
+- Symlink escapes are denied.
 
 ---
 
-## Phase 3: Patch Validation ✅ COMPLETE
+## Phase 2: Patch Generation
 
-**Goal:** Validate patches before showing to user.
+Implemented in src/tools/patch-generator.ts:
 
-**Files Created:**
-```
-src/tools/patch-validator.ts
-  - validatePatchSemantics(patchText): PatchSemanticValidationResult
-  - validatePatchWithGit(patchText, workspacePath): Promise<GitPatchValidationResult>
-  - detectMergeConflicts(patchText): string[]
-  - validatePatchProposal(proposal, workspacePath, policy?): Promise<PatchProposalValidationResult>
-```
+- generateUnifiedDiff(filePath, before, after)
+- formatPatchForTerminal(diffText)
+- extractFileFromPatch(diffText)
 
-**Checks:**
-- Syntax: Valid unified diff format with exactly one file header pair
-- Semantics: Merge conflict marker detection, file target extraction
-- Security: Runs Phase 1 `validateFileTarget()` on the patch target file
-- Applicability: `git apply --check` with a temp file in a tmpdir
-
-**Compilation:** ✅ Clean
+This phase is used both for direct diff handling and for synthesized edits that REI converts into a unified diff before validation.
 
 ---
 
-## Phase 4: Patch Application ✅ COMPLETE
+## Phase 3: Patch Validation
 
-**Goal:** Apply patches to filesystem safely.
+Implemented in src/tools/patch-validator.ts:
 
-**Files Created:**
-```
-src/tools/patch-applier.ts
-  - applyPatchToFS(patchText, workspacePath, options?): Promise<PatchApplyResult>
-  - applyPatchBatch(proposals, workspacePath, options?): Promise<BatchPatchApplyResult>
-  - commitAppliedPatches(workspacePath, message, filePaths?): Promise<{committed, stdout, stderr}>
-```
+- validatePatchSemantics(patchText)
+- validatePatchWithGit(patchText, workspacePath)
+- detectMergeConflicts(patchText)
+- validatePatchProposal(proposal, workspacePath, policy?)
 
-**Flow:**
-1. Dry-run: `git apply --check` on each patch
-2. Real run: `git apply` to write to filesystem
-3. Commit: `git add -- <files>` + `git commit` with patch metadata
+Validation stages:
 
-**Return:** Detailed per-patch results (applied/skipped/failed, validation errors, stdout/stderr)
+1. Semantic validation checks diff structure, hunks, and conflict markers.
+2. Security validation checks the target file against workspace policy.
+3. Git applicability runs git apply --check without writing to disk.
 
-**Compilation:** ✅ Clean
+Only patches that pass all stages can enter the pending queue.
 
 ---
 
-## Phase 5: Extend AgentDecision Contract ✅ COMPLETE
+## Phase 4: Patch Application
 
-**Goal:** Allow agents to propose patches in the decision phase.
+Implemented in src/tools/patch-applier.ts:
 
-**Modified Files:**
-```
-src/contracts/agent-decision.types.ts
-  - Added AgentProposedPatch interface { file, description, patch }
-  - Added proposedPatches?: AgentProposedPatch[] to AgentDecision
+- applyPatchToFS(patchText, workspacePath, options?)
+- applyPatchBatch(proposals, workspacePath, options?)
+- commitAppliedPatches(workspacePath, message, filePaths?)
 
-src/agent-mode/generator.ts
-  - Validates proposedPatches from decision via validatePatchProposal()
-  - Runs a patch-synthesis retry for change-planning tasks with no valid patches
-  - Passes validProposedPatches back to Agent via AgentModeOutcome
-  - Appends patch summary section to the final answer
+Active CLI behavior:
 
-src/core/agent.ts
-  - Accumulates validProposedPatches into pendingProposedPatches queue
-  - Exposes getPendingPatches() and clearPendingPatches() accessors
-  - Exposes applyPendingPatches(options?) that calls applyPatchBatch()
-```
+1. /confirm --dry-run re-validates and runs git apply --check only.
+2. /confirm applies validated patches with git apply.
+3. If every patch applies successfully in a real run, the queue is cleared.
 
-**When Used:**
-- Decision phase: Model returns AgentDecision with `proposedPatches`
-- Validation phase (2.5): Security + semantic + `git apply --check` run on each patch
-- Answer phase: Valid patches surfaced in response and queued on the Agent
+Important:
 
-**Compilation:** ✅ Clean
+- commitAppliedPatches exists as a helper, but it is not part of the default interactive CLI flow.
 
 ---
 
-## Phase 6: CLI Confirmation Gate ✅ COMPLETE
+## Phase 5: AgentDecision Extension
 
-**Goal:** Display patches to user, request confirmation, apply on approval.
+Implemented in src/contracts/agent-decision.types.ts and src/agent-mode/generator.ts.
 
-**Modified Files:**
-```
-src/cli/run-chat.ts
-  - /pending  — display queued patches with ANSI-colored diffs
-  - /confirm  — apply queued patches via agent.applyPendingPatches()
-  - /confirm --dry-run  — run git apply --check only, no filesystem writes
-  - /discard  — clear the patch queue without applying
-```
+The decision contract supports:
 
-**Patch Display (formatPatchForTerminal in patch-generator.ts):**
-- Green: Addition lines (+)
-- Red: Deletion lines (-)
-- Cyan: File headers (--- / +++)
-- Yellow: Hunk headers (@@)
+- ready
+- taskType
+- contextRequests
+- proposedPatches
 
-**Flow:**
-```
-User message → Agent decision (with proposedPatches)
-    ↓
-Phase 2.5: validate patches → queue valid ones on Agent
-    ↓
-/pending  → show colored diffs + "Use /confirm to apply"
-    ↓
-/confirm  → applyPatchBatch() → per-patch status (applied/skipped/failed)
-/discard  → clear queue, return to conversation
-```
+Current generator behavior:
+
+- validates proposedPatches returned by the decision phase
+- normalizes headers, paths, and escaped newlines before validation
+- retries some invalid patches through a critic loop
+- can synthesize search/replace edits from visible context and convert them into diffs
+- returns valid proposed patches to the Agent queue
+- appends a patch section to the final answer when relevant
+
+This means patch generation is no longer just a passive model output; REI actively repairs and validates patch proposals before surfacing them as actionable.
 
 ---
 
-## Implementation Order
+## Phase 6: CLI Confirmation Gate
 
-| Phase | Feature | Est. LOC | Dependencies | Priority |
-|-------|---------|---------|--------------|----------|
-| **1** | **Security Layer** | **~210** | **fs, path** | **✅ DONE** |
-| **2** | **Patch Generation** | **~112** | **Phase 1, diff** | **✅ DONE** |
-| **3** | **Patch Validation** | **~227** | **Phase 1, 2** | **✅ DONE** |
-| **4** | **Patch Application** | **~161** | **Phase 1, 2, 3** | **✅ DONE** |
-| **5** | **AgentDecision Extension** | **~80** | **Phase 1-4** | **✅ DONE** |
-| **6** | **CLI + Display** | **~70** | **Phase 1-5** | **✅ DONE** |
+Implemented in src/cli/run-chat.ts.
+
+Available commands:
+
+- /pending - display queued patches with ANSI-colored diffs
+- /confirm - apply queued patches
+- /confirm --dry-run - validate queued patches without writing
+- /discard - clear queued patches
+
+Display behavior from formatPatchForTerminal:
+
+- Green additions
+- Red deletions
+- Cyan file headers
+- Yellow hunk headers
 
 ---
 
-## Execution Checklist
+## End-to-End Flow
 
-### Phase 1 ✅
-- [x] Create security module
-- [x] Validate path containment
-- [x] Implement denylist/allowlist
-- [x] Symlink checks
-- [x] File readability checks
-- [x] Integration examples
-- [x] TypeScript check passes
+```text
+User message
+  -> Agent decision (may include proposedPatches)
+  -> Context resolution for approved file requests
+  -> Patch normalization / validation / recovery
+  -> Queue valid patches on Agent
+  -> /pending to inspect
+  -> /confirm or /confirm --dry-run
+```
 
-### Phase 2 ✅
-- [x] Create patch-generator.ts
-- [x] Implement generateUnifiedDiff()
-- [x] Add formatPatchForTerminal()
-- [x] Add extractFileFromPatch()
-- [x] TypeScript check passes
+For change-planning tasks, Phase 2.5 in the runtime effectively sits between context resolution and the final answer:
 
-### Phase 3 ✅
-- [x] Create patch-validator.ts
-- [x] Implement validatePatchSemantics()
-- [x] Implement git apply --check wrapper (validatePatchWithGit)
-- [x] Add conflict detection (detectMergeConflicts)
-- [x] Add end-to-end validatePatchProposal()
-- [x] TypeScript check passes
-
-### Phase 4 ✅
-- [x] Create patch-applier.ts
-- [x] Implement applyPatchToFS() with dry-run support
-- [x] Implement applyPatchBatch() with per-patch validation
-- [x] Add commitAppliedPatches() with -- path separator hardening
-- [x] TypeScript check passes
-
-### Phase 5 ✅
-- [x] Add AgentProposedPatch interface to agent-decision.types.ts
-- [x] Add proposedPatches? field to AgentDecision
-- [x] Wire patch validation into generator.ts (Phase 2.5)
-- [x] Accumulate validProposedPatches in Agent queue
-- [x] Expose getPendingPatches / clearPendingPatches / applyPendingPatches on Agent
-- [x] TypeScript check passes
-
-### Phase 6 ✅
-- [x] Add /pending command (display queued patches with ANSI colors)
-- [x] Add /confirm command (apply patches via applyPendingPatches)
-- [x] Add /confirm --dry-run command (git apply --check only)
-- [x] Add /discard command (clear patch queue)
-- [x] TypeScript check passes
+- patch normalization
+- semantic validation
+- security validation
+- git apply --check
+- retry / synthesis when possible
 
 ---
 
@@ -228,82 +156,123 @@ Phase 2.5: validate patches → queue valid ones on Agent
 
 | Risk | Mitigation |
 |------|-----------|
-| Path traversal escapes | Phase 1 validates `isWithinWorkspace()` |
-| Symlink breakouts | Phase 1 bans symlinks, checks entire path |
-| Corrupted diffs | Phase 3 pre-validates with `git apply --check` |
-| User accidentally applies | Phase 6 requires explicit `/confirm` command |
-| Untracked changes lost | Phase 4 commits patches with metadata |
-| Performance on large files | Phase 4 implements dryRun before real apply |
+| Path traversal escapes | Target validation keeps paths inside the workspace |
+| Symlink breakouts | Real-path containment checks reject escapes |
+| Corrupted diffs | Validation runs git apply --check before queue/apply |
+| Unsafe targets | Denylists and directory policy block sensitive files |
+| Accidental writes | The CLI requires explicit /confirm |
+| Hidden auto-commit behavior | Commits are not automatic in the CLI flow |
 
 ---
 
-## All Phases Complete
+## How To Exercise The Flow
 
-The full patch workflow is implemented and active. To exercise the flow:
 ```bash
-# Build and run REI in agent mode
-npm run build
-node dist/main.js --mode agent
+npm run dev -- chat
+```
 
-# In the CLI session:
-agent > implement feature X in src/foo.ts
-# REI proposes patches, validates them, queues them
+Inside the REI session:
 
-agent > /pending         # review queued patches with colored diffs
-agent > /confirm         # apply patches to filesystem
-agent > /confirm --dry-run  # dry-run only (no filesystem writes)
-agent > /discard         # clear queue without applying
+```text
+/mode agent
+implement feature X in src/foo.ts
+/pending
+/confirm --dry-run
+/confirm
+/discard
 ```
 
 ---
 
 ## Architecture Diagram
 
-The runtime pipeline uses numbered *steps* that correspond to the implementation phases above.
+The runtime steps below map to the implemented phases above.
 
-```
+```text
 ┌──────────────────────────────────────────────────────────────┐
-│ Agent Mode: 3-Phase + Patch Workflow  — ALL PHASES COMPLETE  │
+│ Agent Mode: 4-Phase + Patch Workflow                        │
 └──────────────────────────────────────────────────────────────┘
 
-Step 1 — Agent Decision
-  System: agent-decision.md
-  Output: AgentDecision {ready, taskType, contextRequests, proposedPatches?}
+Step 1 - Agent Decision
+  Output: AgentDecision { ready, taskType, contextRequests, proposedPatches? }
 
-  ↓ If proposedPatches exist:
+  ↓ if contextRequests exist
 
-Step 2 — Security Check  (Phase 1: file-security.ts) ✅
-  Validate: validateFileTarget() on each patch.file
-  Rejects: out-of-workspace paths, denied files, symlinks
-  
-  ↓ If valid:
+Step 2 - Context Resolution
+  Resolve only scanned workspace files
+  Reject denied files, sensitive extensions, and symlink escapes
 
-Step 3 — Patch Generation  (Phase 2: patch-generator.ts) ✅
-  Generate: generateUnifiedDiff() for each file change
-  
+  ↓ if proposedPatches exist
+
+Step 3 - Patch Normalization / Generation
+  Normalize headers, canonical paths, escaped newlines
+  Generate unified diffs for synthesized edits
+
   ↓
 
-Step 4 — Patch Validation  (Phase 3: patch-validator.ts) ✅
-  Check: validatePatchSemantics() + validatePatchWithGit() (git apply --check)
-  Queue: valid proposals onto Agent.pendingProposedPatches
-  
-  ↓ After /confirm:
+Step 4 - Patch Validation / Recovery
+  validatePatchSemantics() + validatePatchWithGit()
+  Retry repairable failures through the critic loop
+  Queue valid proposals on Agent.pendingProposedPatches
 
-Step 5 — Patch Application  (Phase 4: patch-applier.ts) ✅
-  Dry-run: applyPatchToFS(dryRun=true) or /confirm --dry-run
-  Real:    applyPatchToFS(dryRun=false) on /confirm
-  Commit:  commitAppliedPatches() with -- path separator hardening
-  
-  ↓ In CLI loop (Phase 6: run-chat.ts) ✅:
+  ↓ after /confirm
 
-Step 6 — CLI Confirmation Gate
-  /pending        — display colored diffs (formatPatchForTerminal)
-  /confirm        — apply queued patches via applyPendingPatches()
-  /confirm --dry-run — git apply --check only
-  /discard        — clear patch queue without applying
+Step 5 - Patch Application
+  applyPatchToFS(dryRun=true) for /confirm --dry-run
+  applyPatchToFS(dryRun=false) for /confirm
 
-┌──────────────────────────────────────────────────────────────┐
-│ All 6 phases complete. End-to-end patch workflow active.      │
-└──────────────────────────────────────────────────────────────┘
+  ↓ in CLI loop
+
+Step 6 - Confirmation Gate
+  /pending
+  /confirm
+  /confirm --dry-run
+  /discard
 ```
+
+---
+
+## Agent Loop And Skill Activation
+
+The current repository has two different skill-related paths:
+
+- planningSkill is actively invoked by the CLI `plan` command.
+- weather/SKILL.md exists as a skill asset, but it is not currently auto-activated anywhere in the runtime chat or agent loop.
+
+```mermaid
+flowchart TD
+  A[User input] --> B{CLI command}
+
+  B -->|plan| C[run-cli.ts]
+  C --> D[planningSkill(agent, task)]
+  D --> E[agent.run(prompt)]
+  E --> F[Provider complete()]
+  F --> G[Planning output]
+
+  B -->|chat| H[run-chat.ts]
+  H --> I{Session mode}
+
+  I -->|ask/planning| J[buildSystemMessage(mode)]
+  J --> K[buildTurnContext()]
+  K --> L[provider.completeChat or streamChat]
+  L --> M[Rendered answer]
+
+  I -->|agent| N[buildTurnContext()]
+  N --> O[prepareAgentContext()]
+  O --> P[Phase 1 decision]
+  P --> Q[Phase 2 context resolution]
+  Q --> R[Phase 2.5 patch validation and recovery]
+  R --> S[Final provider call]
+  S --> T[Queue valid patches if any]
+  T --> U[Rendered answer plus patch section]
+
+  V[weather/SKILL.md] -. skill file exists in repo .-> W[No runtime activation yet]
+  W -. not connected to chat or agent dispatch .-> H
+```
+
+Notes:
+
+- The agent loop currently does not include a general skill router.
+- `planningSkill` is a direct TypeScript wrapper, not a prompt-file skill loaded dynamically.
+- `weather/SKILL.md` documents a capability, but the current CLI/runtime does not inspect user intent and auto-dispatch to it.
 

@@ -1,7 +1,7 @@
 # rei
 
 REI is a repository-aware AI CLI built with TypeScript and Node.js.
-It supports question answering, planning, and an agent-style workflow that can ask for more repository context before producing a final answer.
+It supports question answering, planning, and an agent-style workflow with a full-screen interactive terminal UI, contextual file mentions, and a validated patch queue.
 
 ## Install
 
@@ -149,12 +149,20 @@ Optional configuration:
 
 ## Terminal output
 
-The interactive chat renders the final answer as formatted markdown in the terminal:
+The interactive chat runs in a full-screen terminal UI (alternate screen buffer) and renders the final answer as formatted markdown:
 
 - headings with ANSI styling
 - inline code formatting
 - syntax-highlighted code blocks
 - preserved markdown structure instead of raw token spam
+
+Input and navigation UX:
+
+- command palette for `/` commands with arrow selection
+- `@` mention palette for workspace paths (`Tab` to complete)
+- input history (`Up`/`Down`) and reverse search (`Ctrl+R`)
+- transcript scrolling (`Ctrl+U`/`Ctrl+D`, `PageUp`/`PageDown`, `Shift+Up`/`Shift+Down`)
+- `Esc` closes palettes/search and returns focus to the input
 
 The spinner still runs while the model is generating, and the final formatted answer is printed when the turn completes.
 
@@ -172,6 +180,8 @@ On every user turn, REI rebuilds repository context and injects it into the last
    - workspace path
    - repository summary
    - selected file previews
+
+If the user includes `@path/to/file` in chat, that token is preserved in the task text and can improve relevance scoring because selection is keyword/path based.
 
 This context is regenerated on every turn. It is not a one-time snapshot.
 
@@ -196,7 +206,7 @@ That marker is important for the agent decision step.
 ## Agent mode: current flow
 
 Agent mode no longer uses a user-visible JSON response contract.
-Instead, it runs in three phases:
+Instead, it runs in four phases:
 
 ### Phase 1: internal context decision
 
@@ -225,11 +235,30 @@ This object is parsed by `parseAgentDecision()` and is never shown to the user.
 
 If parsing fails, REI sanitizes the response, retries with a repair prompt, and eventually falls back to a safe default that skips context expansion.
 
-### Phase 2: main answer
+### Phase 2: deterministic context resolution
 
-REI generates the final markdown answer using the (possibly expanded) context. The answer is rendered with ANSI styling in the terminal.
+If the decision requests more files, REI resolves them without asking the model to guess paths.
 
-If the task is a change-planning task, the agent may also emit a structured patch proposal embedded in the response. REI extracts and enqueues it automatically.
+Guardrails applied before any file is injected:
+
+- only files already discovered during workspace scanning are allowed
+- sensitive filenames and extensions are denied
+- symlink escapes outside the workspace are denied
+- duplicate requests are ignored
+- file reads are capped
+
+Resolved content is appended to the last user message as additional context.
+
+### Phase 2.5: patch validation and recovery
+
+For `change-planning` tasks, REI validates model-proposed patches before they are shown as actionable:
+
+- normalize and canonicalize paths/headers
+- validate semantics + security + `git apply --check`
+- retry invalid patches through a critic loop
+- if needed, synthesize search/replace edits from visible context and convert them into unified diffs
+
+Only valid patches are queued for `/pending` and `/confirm`.
 
 ---
 
@@ -247,7 +276,7 @@ When REI is in agent mode and the model proposes file changes, the changes go th
 
 ### 2. Patch validation
 
-`src/tools/patch-validator.ts` runs a two-stage check before the patch is queued:
+`src/tools/patch-validator.ts` runs a three-stage check before the patch is queued:
 
 **Semantic validation** (`validatePatchSemantics`):
 - Patch is non-empty.
@@ -286,20 +315,6 @@ Validated patches are stored in memory on the `Agent` instance as `AgentProposed
 - `applyPatchBatch(proposals, workspacePath, options)` — iterates the queue, re-validates each patch, and calls `applyPatchToFS` per entry. Returns a `BatchPatchApplyResult` with per-file status.
 
 After a successful real apply (`dryRun: false`, all entries applied), the queue is automatically cleared.
-
-### Phase 2: deterministic context resolution
-
-If the decision requests more files, REI resolves them without asking the model to guess paths.
-
-Guardrails applied before any file is injected:
-
-- only files already discovered during workspace scanning are allowed
-- sensitive filenames and extensions are denied
-- symlink escapes outside the workspace are denied
-- duplicate requests are ignored
-- file reads are capped
-
-Resolved content is appended to the last user message as additional context.
 
 ### Phase 3: final free-text answer
 
@@ -388,36 +403,17 @@ Example:
 
 - relevant file selection is still heuristic, not semantic
 - there is no persistent repository index yet
-- there is no file patch application yet
-- there is no command execution flow inside REI yet
-- context expansion currently reads and injects file content, but does not produce executable edit plans or diffs
+- patch proposals are only applied manually through `/confirm` (explicit approval gate)
+- model-proposed diffs may still be rejected if validation or `git apply --check` fails
+- no built-in command-execution toolchain inside REI runtime yet (focus is context + patch workflow)
 
-## Next step: patch generation with diff output
+## Next steps
 
-The next logical step is to keep the current three-phase agent flow and add a fourth internal layer for proposed edits.
+Near-term priorities:
 
-A practical direction is:
-
-1. keep Phase 1 as context negotiation
-2. keep Phase 2 as deterministic file resolution
-3. keep Phase 3 as the final user-facing explanation or plan
-4. add an internal patch proposal step that returns a structured edit plan per file
-5. compile that plan into a unified diff or git-style patch
-6. validate the patch before any future apply step
-
-Suggested shape for that future patch layer:
-
-- internal contract containing target file, intent, and exact before/after snippets
-- deterministic diff synthesis on the REI side instead of trusting raw model diffs blindly
-- validation with exact-match anchors and optional `git apply --check`
-- explicit approval gate before any future write/apply operation
-
-That preserves the current design principle:
-
-- model decides what context it needs
-- runtime resolves files safely
-- user sees clean markdown output
-- future patching stays explicit, reviewable, and deterministic
+1. improve relevance selection with semantic/indexed retrieval
+2. make `@` mentions first-class context pins (not only keyword hints)
+3. add richer patch diagnostics/fix suggestions when validation fails
 
 ## Type check
 
@@ -439,8 +435,48 @@ flowchart TD
   H -->|Yes| I[Phase 2: resolve requested files safely]
   I --> J[Append extra context to last user message]
   H -->|No| J
-  J --> K[Phase 3: final free-text markdown answer]
-  K --> L[Render formatted output in terminal]
+  J --> K[Phase 2.5: validate and recover patch proposals]
+  K --> L[Phase 3: final free-text markdown answer]
+  L --> M[Render formatted output in terminal]
+```
+
+## Agent loop and skills
+
+Current skill activation is explicit, not generic.
+
+- `planningSkill` is invoked directly by the `plan` CLI command.
+- `src/skills/weather/SKILL.md` exists in the repository, but it is not auto-dispatched by the current chat or agent runtime.
+
+```mermaid
+flowchart TD
+  A[User input] --> B{CLI command}
+
+  B -->|plan| C[run-cli.ts]
+  C --> D[planningSkill<br/>agent task]
+  D --> E[agent.run<br/>prompt]
+  E --> F[Provider<br/>complete]
+  F --> G["📋 Planning<br/>output"]
+
+  B -->|chat| H[run-chat.ts]
+  H --> I{Session<br/>mode}
+
+  I -->|ask/planning| J["🔨 buildSystemMessage"]
+  J --> K[buildTurnContext]
+  K --> L["🤖 provider<br/>chat/stream"]
+  L --> M["✨ Rendered<br/>answer"]
+
+  I -->|agent| N[buildTurnContext]
+  N --> O[prepareAgentContext]
+  O --> P["⚙️ Phase 1<br/>decision"]
+  P --> Q["📂 Phase 2<br/>context resolution"]
+  Q --> R["🔧 Phase 2.5<br/>patch validation"]
+  R --> S[Final provider<br/>call]
+  S --> T{Valid<br/>patches?}
+  T -->|Yes| U["✅ Answer +<br/>patch section"]
+  T -->|No| U
+
+  style V fill:#f0f0f0,stroke:#999
+  V["🌦️ src/skills/weather/<br/>SKILL.md<br/><br/>(exists, not active)"]
 ```
 
 ## Documentation rule

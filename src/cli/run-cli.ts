@@ -40,7 +40,7 @@ export async function runCli(args: string[]): Promise<void> {
   }
 
   if (command === "chat") {
-    await runChat(agent);
+    await runChat(agent, workspacePath);
     return;
   }
 
