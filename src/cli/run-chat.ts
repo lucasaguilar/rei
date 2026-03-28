@@ -998,6 +998,10 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
   };
 
   const onExit = (): void => cleanup();
+  const onSigint = (): void => {
+    cleanup();
+    process.exit(130); // conventional exit code for SIGINT (128 + 2)
+  };
   const onUncaughtException = (err: Error): void => {
     cleanup();
     // Re-throw so Node prints the error and exits with a non-zero code.
@@ -1005,7 +1009,7 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
   };
 
   process.once("exit", onExit);
-  process.once("SIGINT", onExit);
+  process.once("SIGINT", onSigint);
   process.once("uncaughtException", onUncaughtException);
 
   process.stdin.on("keypress", onKeypress);
@@ -1024,7 +1028,7 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
     }
   } finally {
     process.off("exit", onExit);
-    process.off("SIGINT", onExit);
+    process.off("SIGINT", onSigint);
     process.off("uncaughtException", onUncaughtException);
     cleanup();
   }
