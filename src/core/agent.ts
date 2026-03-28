@@ -1,4 +1,3 @@
-import * as path from "path";
 import type { ModelProvider } from "../providers/model-provider.js";
 import type { ChatSession } from "../chat/types.js";
 import { generateAgentModeResponse, prepareAgentContext, buildAgentFinalResponse } from "../agent-mode/generator.js";
@@ -186,6 +185,9 @@ export class Agent {
         }
       } else {
         answer = await this.provider.completeChat(prelude.answerMessages);
+        // In the non-streaming branch, yield the full answer so callers receive
+        // the main assistant output before any additional patch section.
+        yield answer;
       }
 
       const outcome = buildAgentFinalResponse(answer, prelude);

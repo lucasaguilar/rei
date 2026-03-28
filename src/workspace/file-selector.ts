@@ -86,7 +86,7 @@ function scoreFile(file: FileMeta, keywords: string[], mode: SessionMode): numbe
 
   // Mode-based boosts: agent mode prefers source files, planning mode prefers docs
   if (mode === "agent" || mode === "planning" || mode === "ask") {
-    if (file.extension === ".ts" || file.extension === ".js") score += 1;
+    if (SOURCE_EXTENSIONS.has(file.extension)) score += 1;
   }
   if (mode === "planning") {
     if (nameLower === "readme.md" || nameLower === "package.json") score += 2;
