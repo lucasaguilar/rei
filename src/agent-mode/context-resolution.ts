@@ -3,7 +3,7 @@ import * as path from "path";
 import type { AgentContextRequest } from "../contracts/agent-decision.types.js";
 import type { FileMeta } from "../workspace/workspace-scanner.js";
 
-const FULL_READ_MAX_CHARS = 8000;
+const FULL_READ_MAX_CHARS = 20_000;
 
 // Denylist of sensitive file names (exact, case-insensitive) that must never be served.
 const SENSITIVE_FILE_NAMES = new Set([

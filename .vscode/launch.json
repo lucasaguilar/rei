@@ -17,6 +17,7 @@
                 //"/workspaces/app-for-news",
                 "chat"
             ],
+            "envFile": "${workspaceFolder}/.env",
             "env": {
                 "MODEL_PROVIDER": "ollama",
                 "OLLAMA_MODEL": "llama3.2:1b"
@@ -39,6 +40,7 @@
                 //"/workspaces/app-for-news",
                 "chat"
             ],
+            "envFile": "${workspaceFolder}/.env",
             "env": {
                 "MODEL_PROVIDER": "ollama",
                 "OLLAMA_MODEL": "llama3.2"
@@ -61,6 +63,7 @@
                 //"/workspaces/app-for-news",
                 "chat"
             ],
+            "envFile": "${workspaceFolder}/.env",
             "env": {
                 "MODEL_PROVIDER": "ollama",
                 "OLLAMA_MODEL": "qwen2.5-coder:3b"
@@ -83,6 +86,7 @@
                 //"/workspaces/app-for-news",
                 "chat"
             ],
+            "envFile": "${workspaceFolder}/.env",
             "env": {
                 "MODEL_PROVIDER": "ollama",
                 "OLLAMA_MODEL": "deepseek-coder-v2:16b"
@@ -105,10 +109,10 @@
                 //"/workspaces/app-for-news",
                 "chat"
             ],
+            "envFile": "${workspaceFolder}/.env",
             "env": {
                 "MODEL_PROVIDER": "groq",
-                "GROQ_MODEL": "llama-3.3-70b-versatile",
-                "GROQ_API_KEY": ""
+                "GROQ_MODEL": "llama-3.3-70b-versatile"
             },
             "console": "integratedTerminal",
             "skipFiles": [
@@ -128,10 +132,10 @@
                 //"/workspaces/app-for-news",
                 "chat"
             ],
+            "envFile": "${workspaceFolder}/.env",
             "env": {
                 "MODEL_PROVIDER": "groq",
-                "GROQ_MODEL": "qwen/qwen3-32b",
-                "GROQ_API_KEY": "${env:GROQ_API_KEY}"
+                "GROQ_MODEL": "qwen/qwen3-32b"
             },
             "console": "integratedTerminal",
             "skipFiles": [
@@ -151,10 +155,10 @@
                 //"/workspaces/app-for-news",
                 "chat"
             ],
+            "envFile": "${workspaceFolder}/.env",
             "env": {
                 "MODEL_PROVIDER": "openrouter",
-                "OPENROUTER_MODEL": "openai/gpt-4o-mini",
-                "OPENROUTER_API_KEY": "${env:OPENROUTER_API_KEY}"
+                "OPENROUTER_MODEL": "openai/gpt-4o-mini"
             },
             "console": "integratedTerminal",
             "skipFiles": [
@@ -174,10 +178,10 @@
                 //"/workspaces/app-for-news",
                 "chat"
             ],
+            "envFile": "${workspaceFolder}/.env",
             "env": {
                 "MODEL_PROVIDER": "openrouter",
-                "OPENROUTER_MODEL": "anthropic/claude-3.5-sonnet",
-                "OPENROUTER_API_KEY": "${env:OPENROUTER_API_KEY}"
+                "OPENROUTER_MODEL": "anthropic/claude-3.5-sonnet"
             },
             "console": "integratedTerminal",
             "skipFiles": [
@@ -197,15 +201,141 @@
                 //"/workspaces/app-for-news",
                 "chat"
             ],
+            "envFile": "${workspaceFolder}/.env",
             "env": {
                 "MODEL_PROVIDER": "openrouter",
-                "OPENROUTER_MODEL": "meta-llama/llama-3.3-70b-instruct",
-                "OPENROUTER_API_KEY": "${env:OPENROUTER_API_KEY}"
+                "OPENROUTER_MODEL": "meta-llama/llama-3.3-70b-instruct"
             },
             "console": "integratedTerminal",
             "skipFiles": [
                 "<node_internals>/**"
             ],
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "REI deepseek/deepseek-r1:free (OpenRouter)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev", "--", "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "openrouter",
+                "OPENROUTER_MODEL": "deepseek/deepseek-r1:free"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "REI meta-llama/llama-3.3-70b-instruct:free (OpenRouter)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev", "--", "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "openrouter",
+                "OPENROUTER_MODEL": "meta-llama/llama-3.3-70b-instruct:free"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "REI qwen/qwen2.5-vl-72b-instruct:free (OpenRouter)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev", "--", "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "openrouter",
+                "OPENROUTER_MODEL": "qwen/qwen2.5-vl-72b-instruct:free"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "REI qwen/qwen3-coder:free (OpenRouter)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev", "--", "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "openrouter",
+                "OPENROUTER_MODEL": "qwen/qwen3-coder:free"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "REI meta-llama/llama-3.3-70b-instruct:free (OpenRouter)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev", "--", "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "openrouter",
+                "OPENROUTER_MODEL": "meta-llama/llama-3.3-70b-instruct:free"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "REI openai/gpt-oss-120b:free (OpenRouter)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev", "--", "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "openrouter",
+                "OPENROUTER_MODEL": "openai/gpt-oss-120b:free"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "REI nvidia/nemotron-3-super-120b-a12b:free (OpenRouter)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev", "--", "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "openrouter",
+                "OPENROUTER_MODEL": "nvidia/nemotron-3-super-120b-a12b:free"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "REI mistralai/mistral-small-3.1-24b-instruct:free (OpenRouter)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev", "--", "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "openrouter",
+                "OPENROUTER_MODEL": "mistralai/mistral-small-3.1-24b-instruct:free"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "REI google/gemma-3-27b-it:free (OpenRouter)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev", "--", "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "openrouter",
+                "OPENROUTER_MODEL": "google/gemma-3-27b-it:free"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
         }
     ]
 }
