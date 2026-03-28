@@ -731,31 +731,30 @@ async function buildPatchesFromEdits(
       continue; // File doesn't exist or path is invalid, skip
     }
 
-    let after = before;
+    let after = before.replace(/\r\n/g, "\n");
     const appliedDescriptions: string[] = [];
 
     for (const edit of fileEdits) {
       // Normalize line endings for matching
-      const normalizedAfter = after.replace(/\r\n/g, "\n");
       const normalizedSearch = edit.search.replace(/\r\n/g, "\n");
 
-      const idx = normalizedAfter.indexOf(normalizedSearch);
+      const idx = after.indexOf(normalizedSearch);
       if (idx === -1) {
         // Try trimmed match as fallback (whitespace differences)
         const trimmedSearch = normalizedSearch.split("\n").map(l => l.trimEnd()).join("\n");
-        const trimmedAfter = normalizedAfter.split("\n").map(l => l.trimEnd()).join("\n");
+        const trimmedAfter = after.split("\n").map(l => l.trimEnd()).join("\n");
         const trimmedIdx = trimmedAfter.indexOf(trimmedSearch);
         if (trimmedIdx === -1) continue;
 
         // Map trimmedIdx back to original string offset
         // Count newlines up to trimmedIdx to find the line
         const lineNum = trimmedAfter.slice(0, trimmedIdx).split("\n").length - 1;
-        const lines = normalizedAfter.split("\n");
+        const lines = after.split("\n");
         const searchLines = normalizedSearch.split("\n");
         const originalSlice = lines.slice(lineNum, lineNum + searchLines.length).join("\n");
         after = after.replace(originalSlice, edit.replace.replace(/\r\n/g, "\n"));
       } else {
-        after = normalizedAfter.slice(0, idx) + edit.replace.replace(/\r\n/g, "\n") + normalizedAfter.slice(idx + normalizedSearch.length);
+        after = after.slice(0, idx) + edit.replace.replace(/\r\n/g, "\n") + after.slice(idx + normalizedSearch.length);
       }
       appliedDescriptions.push(edit.description);
     }
