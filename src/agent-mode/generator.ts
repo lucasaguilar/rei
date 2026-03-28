@@ -29,6 +29,9 @@ const RETRYABLE_PATCH_CODES = new Set<PatchValidationIssue["code"]>([
 ]);
 const CHANGE_INTENT_PATTERN =
   /\b(add|change|modify|update|fix|implement|create|remove|delete|refactor|write|insert|patch|comment|disable|rename|cleanup|agreg\w*|cambi\w*|modific\w*|actualiz\w*|arregl\w*|implement\w*|cre\w*|elimin\w*|borr\w*|coment\w*|deshabilit\w*|renombr\w*|refactoriz\w*|reescrib\w*)\b/;
+const INSPECTION_INTENT_PATTERN =
+  /\b(explain|how|why|what|show|review|inspect|analy[sz]e|necesito saber|explica|como funciona|cómo funciona|que palabras|qué palabras|solo|sin cambiar|read-only|read only)\b/;
+const DEPRECATED_EDIT_OVERRIDE_TOKEN = "ALLOW_DEPRECATED_EDIT";
 
 export interface AgentModeOutcome {
   response: string;
@@ -48,6 +51,8 @@ export async function prepareAgentContext(params: {
   scannedFiles: FileMeta[];
 }): Promise<AgentContextPrelude> {
   const { provider, messagesForModel, workspacePath, scannedFiles } = params;
+  const lastUserMessage = [...messagesForModel].reverse().find((m) => m.role === "user");
+  const currentTask = extractCurrentTask(lastUserMessage?.content ?? "");
 
   // --- Phase 1: Context Decision ---
   const decision = await runDecisionPhase(provider, messagesForModel);
@@ -71,7 +76,8 @@ export async function prepareAgentContext(params: {
   let patchValidation = await validateDecisionProposedPatches(
     decision,
     workspacePath,
-    scannedFiles
+    scannedFiles,
+    currentTask
   );
 
   // 2.5.a: Critic loop — intenta corregir patches inválidos con códigos reintentables
@@ -92,7 +98,8 @@ export async function prepareAgentContext(params: {
       let synthesizedValidation = await validateDecisionProposedPatches(
         { ...decision, proposedPatches: synthesized },
         workspacePath,
-        scannedFiles
+        scannedFiles,
+        currentTask
       );
 
       // Run critic loop on synthesized patches that failed validation
@@ -300,13 +307,39 @@ function normalizePatch(patch: string, expectedFile: string): string {
 async function validateDecisionProposedPatches(
   decision: AgentDecision,
   workspacePath: string,
-  scannedFiles: FileMeta[]
+  scannedFiles: FileMeta[],
+  currentTask: string
 ): Promise<Array<{ proposal: AgentProposedPatch; validation: PatchProposalValidationResult }>> {
   const proposals = expandPatchProposals(decision.proposedPatches ?? []);
   const results: Array<{ proposal: AgentProposedPatch; validation: PatchProposalValidationResult }> = [];
 
   for (const proposal of proposals) {
     const canonicalFile = canonicalizePathAgainstScannedFiles(proposal.file, scannedFiles);
+    if (await isDeprecatedTargetBlocked(canonicalFile, workspacePath, currentTask)) {
+      results.push({
+        proposal: { ...proposal, file: canonicalFile },
+        validation: {
+          valid: false,
+          file: canonicalFile,
+          issues: [
+            {
+              code: "SECURITY_POLICY",
+              message:
+                `Target file "${canonicalFile}" is marked DEPRECATED. ` +
+                "Explicitly request deprecated edits if this change is intentional.",
+            },
+          ],
+          semantic: { valid: false, file: canonicalFile, issues: [] },
+          git: {
+            valid: false,
+            stdout: "",
+            stderr: "Skipped git apply --check due to deprecated target policy",
+          },
+        },
+      });
+      continue;
+    }
+
     const canonicalProposal = {
       ...proposal,
       file: canonicalFile,
@@ -559,7 +592,38 @@ function extractProvidedContextPaths(messageContent: string): Set<string> {
 
 function isChangeIntentTask(task: string): boolean {
   const normalized = task.toLowerCase();
-  return CHANGE_INTENT_PATTERN.test(normalized);
+  const hasChangeIntent = CHANGE_INTENT_PATTERN.test(normalized);
+  if (!hasChangeIntent) return false;
+
+  const hasExplicitTarget =
+    extractPathLikeTokens(task).size > 0 ||
+    /\b(file|function|class|component|archivo|funci[oó]n|clase|componente)\b/i.test(task);
+
+  const looksLikeInspection = INSPECTION_INTENT_PATTERN.test(normalized) && !hasExplicitTarget;
+  if (looksLikeInspection) return false;
+
+  return true;
+}
+
+function allowsDeprecatedEdit(task: string): boolean {
+  return task.includes(DEPRECATED_EDIT_OVERRIDE_TOKEN);
+}
+
+async function isDeprecatedTargetBlocked(
+  filePath: string,
+  workspacePath: string,
+  task: string
+): Promise<boolean> {
+  if (allowsDeprecatedEdit(task)) return false;
+
+  const absolutePath = path.resolve(workspacePath, filePath);
+  try {
+    const content = await fs.readFile(absolutePath, "utf-8");
+    const head = content.slice(0, 2500);
+    return /\bDEPRECATED\b/i.test(head);
+  } catch {
+    return false;
+  }
 }
 
 function pathCoveredByTaskOrContext(
@@ -712,50 +776,37 @@ async function buildPatchesFromEdits(
     const absPath = path.join(workspacePath, file);
     let before: string;
     try {
-      const workspaceRealPath = await fs.realpath(workspacePath);
-      const fileRealPath = await fs.realpath(absPath);
-
-      // Ensure the resolved file path stays within the workspace
-      if (!fileRealPath.startsWith(workspaceRealPath + path.sep)) {
-        continue;
-      }
-
-      // Basic denylist for sensitive files
-      const baseName = path.basename(fileRealPath);
-      if (baseName === ".env" || baseName === "package.json") {
-        continue;
-      }
-
-      before = await fs.readFile(fileRealPath, "utf-8");
+      before = await fs.readFile(absPath, "utf-8");
     } catch {
-      continue; // File doesn't exist or path is invalid, skip
+      continue; // File doesn't exist, skip
     }
 
-    let after = before.replace(/\r\n/g, "\n");
+    let after = before;
     const appliedDescriptions: string[] = [];
 
     for (const edit of fileEdits) {
       // Normalize line endings for matching
+      const normalizedAfter = after.replace(/\r\n/g, "\n");
       const normalizedSearch = edit.search.replace(/\r\n/g, "\n");
 
-      const idx = after.indexOf(normalizedSearch);
+      const idx = normalizedAfter.indexOf(normalizedSearch);
       if (idx === -1) {
-        // Try trimmed match as fallback (whitespace differences)
-        const trimmedSearch = normalizedSearch.split("\n").map(l => l.trimEnd()).join("\n");
-        const trimmedAfter = after.split("\n").map(l => l.trimEnd()).join("\n");
-        const trimmedIdx = trimmedAfter.indexOf(trimmedSearch);
-        if (trimmedIdx === -1) continue;
-
-        // Map trimmedIdx back to original string offset
-        // Count newlines up to trimmedIdx to find the line
-        const lineNum = trimmedAfter.slice(0, trimmedIdx).split("\n").length - 1;
-        const lines = after.split("\n");
-        const searchLines = normalizedSearch.split("\n");
-        const originalSlice = lines.slice(lineNum, lineNum + searchLines.length).join("\n");
-        after = after.replace(originalSlice, edit.replace.replace(/\r\n/g, "\n"));
-      } else {
-        after = after.slice(0, idx) + edit.replace.replace(/\r\n/g, "\n") + after.slice(idx + normalizedSearch.length);
+        // Strict safety: do not apply approximate/trimmed matches.
+        continue;
       }
+
+      const firstOccurrence = idx;
+      const secondOccurrence = normalizedAfter.indexOf(normalizedSearch, firstOccurrence + 1);
+      if (secondOccurrence !== -1) {
+        // Ambiguous match. Require exactly one contiguous block.
+        continue;
+      }
+
+      after =
+        normalizedAfter.slice(0, firstOccurrence) +
+        edit.replace.replace(/\r\n/g, "\n") +
+        normalizedAfter.slice(firstOccurrence + normalizedSearch.length);
+
       appliedDescriptions.push(edit.description);
     }
 

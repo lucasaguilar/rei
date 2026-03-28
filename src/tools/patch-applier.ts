@@ -10,6 +10,7 @@ const execFileAsync = promisify(execFile);
 
 export interface PatchApplyOptions {
   dryRun?: boolean;
+  reverse?: boolean;
 }
 
 export interface PatchApplyResult {
@@ -33,6 +34,26 @@ export interface BatchPatchApplyResult {
   results: BatchPatchApplyItemResult[];
 }
 
+export async function runWorkspaceTypecheck(workspacePath: string): Promise<{ ok: boolean; stdout: string; stderr: string }> {
+  try {
+    const { stdout, stderr } = await execFileAsync("npm", ["run", "check"], {
+      cwd: workspacePath,
+    });
+    return { ok: true, stdout, stderr };
+  } catch (error) {
+    const err = error as {
+      stdout?: string;
+      stderr?: string;
+      message?: string;
+    };
+    return {
+      ok: false,
+      stdout: err.stdout ?? "",
+      stderr: err.stderr ?? err.message ?? "npm run check failed",
+    };
+  }
+}
+
 /**
  * Apply a unified diff patch through git apply.
  * Uses --check in dryRun mode for safe preflight.
@@ -43,6 +64,7 @@ export async function applyPatchToFS(
   options: PatchApplyOptions = {}
 ): Promise<PatchApplyResult> {
   const dryRun = options.dryRun ?? true;
+  const reverse = options.reverse ?? false;
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "rei-patch-apply-"));
   const patchPath = path.join(tmpDir, "apply.patch");
 
@@ -51,6 +73,7 @@ export async function applyPatchToFS(
 
     const args = ["-C", workspacePath, "apply"];
     if (dryRun) args.push("--check");
+    if (reverse) args.push("-R");
     args.push("--whitespace=nowarn", patchPath);
 
     const { stdout, stderr } = await execFileAsync("git", args);
@@ -84,6 +107,29 @@ export async function applyPatchBatch(
   const dryRun = options.dryRun ?? true;
   const results: BatchPatchApplyItemResult[] = [];
 
+  // Safety gate: before real apply, ensure workspace currently type-checks.
+  if (!dryRun) {
+    const quality = await runWorkspaceTypecheck(workspacePath);
+    if (!quality.ok) {
+      for (const proposal of proposals) {
+        results.push({
+          file: proposal.file,
+          applied: false,
+          skipped: true,
+          validationErrors: ["Quality gate failed: npm run check"],
+          stdout: quality.stdout,
+          stderr: quality.stderr,
+        });
+      }
+
+      return {
+        success: false,
+        dryRun,
+        results,
+      };
+    }
+  }
+
   for (const proposal of proposals) {
     const validation = await validatePatchProposal(proposal, workspacePath);
 
@@ -100,6 +146,28 @@ export async function applyPatchBatch(
     }
 
     const applied = await applyPatchToFS(proposal.patch, workspacePath, { dryRun });
+    if (applied.applied && !dryRun) {
+      const quality = await runWorkspaceTypecheck(workspacePath);
+      if (!quality.ok) {
+        const reverted = await applyPatchToFS(proposal.patch, workspacePath, {
+          dryRun: false,
+          reverse: true,
+        });
+
+        results.push({
+          file: proposal.file,
+          applied: false,
+          skipped: false,
+          validationErrors: [
+            "Post-apply quality gate failed: npm run check (patch reverted)",
+          ],
+          stdout: [applied.stdout, quality.stdout, reverted.stdout].filter(Boolean).join("\n"),
+          stderr: [applied.stderr, quality.stderr, reverted.stderr].filter(Boolean).join("\n"),
+        });
+        continue;
+      }
+    }
+
     results.push({
       file: proposal.file,
       applied: applied.applied,

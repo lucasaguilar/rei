@@ -52,7 +52,8 @@ const THINKING_TEXT: Record<TurnStatus, string> = {
 };
 
 const SPINNER_FRAMES = ["|", "/", "-", "\\"];
-const SHORTCUT_HINT = "Shortcuts: Up/Down history | Ctrl+U/D scroll | / commands | @ files | Tab complete | Esc close | Ctrl+R search";
+const SHORTCUT_HINT = "Shortcuts: Up/Down history (at bottom) | Ctrl+U/D scroll | / commands | @ files | Tab complete | Esc close | Ctrl+R search";
+const MOUSE_SCROLL_STEP = 3;
 
 const COMMANDS: Array<{ command: string; description: string; requiresArgs?: boolean }> = [
   { command: "/exit", description: "end the session" },
@@ -171,6 +172,25 @@ function toPosixPath(input: string): string {
   return input.replace(/\\/g, "/");
 }
 
+function isMouseSgrSequence(str: string, key: readline.Key): boolean {
+  const keyWithSequence = key as readline.Key & { sequence?: string };
+  const sequence = keyWithSequence.sequence ?? str;
+  return /\x1b\[<\d+;\d+;\d+[mM]/.test(sequence);
+}
+
+function looksLikeAnsiNoise(str: string, key: readline.Key): boolean {
+  const keyWithSequence = key as readline.Key & { sequence?: string };
+  const sequence = keyWithSequence.sequence ?? str;
+
+  // Full ANSI escape sequences or CSI fragments that may arrive split.
+  if (sequence.includes("\x1b")) return true;
+  if (sequence.startsWith("[<")) return true;
+  if (sequence.startsWith("\x1b[M")) return true; // legacy mouse protocol
+  if (/^\[<\d*;?\d*;?\d*[mM]?$/.test(sequence)) return true;
+  if (/^[\[<;\dMm]+$/.test(sequence) && sequence.length <= 8) return true;
+  return false;
+}
+
 function buildMentionEntries(workspacePath: string): MentionEntry[] {
   const files = scanWorkspace(workspacePath);
   const fileSet = new Set<string>();
@@ -204,11 +224,11 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
   const session: ChatSession = { messages: [], mode: "ask" };
   const mentionEntries = buildMentionEntries(workspacePath);
 
-  // Ensure we only start the full-screen, raw-keypress UI in an interactive TTY.
+  // Ensure we only run the full-screen interactive UI when both stdin and stdout are TTYs.
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     console.error(
-      "Error: The interactive chat UI requires both stdin and stdout to be TTYs.\n" +
-      "Run this command in an interactive terminal, or use a non-interactive CLI mode for CI or redirected environments."
+      "Error: The interactive chat UI requires both stdin and stdout to be TTYs. " +
+        "Please run this command in an interactive terminal."
     );
     return;
   }
@@ -232,6 +252,7 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
   let historySearchIndex: number | undefined;
   let historySearchSnapshot = { buffer: "", cursor: 0 };
   let scrollOffset = 0; // lines scrolled up from bottom; 0 = bottom
+  let suppressAnsiInputUntil = 0;
   const transcript: string[] = [];
 
   const pushTranscript = (value: string): void => {
@@ -517,12 +538,25 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
         return true;
       }
 
+      const assessment = await agent.assessPendingPatchesSafety();
       pushTranscript(`Pending patches: ${pending.length}`);
-      for (const proposal of pending) {
-        pushTranscript(`File: ${proposal.file}`);
-        pushTranscript(`Reason: ${proposal.description || "(no description)"}`);
-        pushTranscript(formatPatchForTerminal(proposal.patch));
+      pushTranscript(`Workspace quality: ${assessment.workspaceQualityOk ? "ok" : "failed"}`);
+
+      for (const item of assessment.items) {
+        pushTranscript(`File: ${item.proposal.file}`);
+        pushTranscript(`Reason: ${item.proposal.description || "(no description)"}`);
+        pushTranscript(`Applicable: ${item.applicable ? "yes" : "no"}`);
+        pushTranscript(`Safe: ${item.safe ? "yes" : "no"}`);
+        if (item.issues.length > 0) {
+          pushTranscript(`Issues: ${item.issues.join(" | ")}`);
+        }
+        pushTranscript(formatPatchForTerminal(item.proposal.patch));
       }
+
+      if (!assessment.workspaceQualityOk && assessment.workspaceQualityStderr) {
+        pushTranscript(`Workspace check stderr: ${assessment.workspaceQualityStderr.trim()}`);
+      }
+
       pushTranscript("Use /confirm to apply, or /discard to clear them.");
       return true;
     }
@@ -729,6 +763,24 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
   const onKeypress = (str: string, key: readline.Key): void => {
     if (!running) return;
 
+    const keyWithSequence = key as readline.Key & { sequence?: string };
+    const sequence = keyWithSequence.sequence ?? str;
+
+    if (sequence.includes("\x1b[<") || sequence.startsWith("\x1b[M")) {
+      suppressAnsiInputUntil = Date.now() + 250;
+      return;
+    }
+
+    // Mouse data also generates keypress events; suppress ANSI fragments for a short window.
+    if (Date.now() < suppressAnsiInputUntil && looksLikeAnsiNoise(str, key)) {
+      return;
+    }
+
+    // Ignore terminal mouse SGR sequences so they never leak into input text.
+    if (isMouseSgrSequence(str, key)) {
+      return;
+    }
+
     if (key.ctrl && key.name === "c") {
       if (historySearchMode) {
         clearHistorySearch(true);
@@ -834,6 +886,22 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
 
     const activePalette = getActivePalette();
     const palette = activePalette.items;
+
+    // Native-feeling behavior: if transcript is scrolled and input is idle,
+    // use Up/Down to continue scrolling results. At bottom, Up/Down returns to history/palette.
+    if (palette.length === 0 && inputBuffer.length === 0 && !historySearchMode) {
+      if (key.name === "up" && scrollOffset > 0) {
+        scrollOffset += 1;
+        draw();
+        return;
+      }
+      if (key.name === "down" && scrollOffset > 0) {
+        scrollOffset = Math.max(0, scrollOffset - 1);
+        draw();
+        return;
+      }
+    }
+
     if (key.name === "up") {
       if (historyCursor !== undefined) {
         historyCursor = Math.max(0, historyCursor - 1);
@@ -984,52 +1052,60 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
     draw();
   };
 
-  let cleanedUp = false;
-  const cleanup = (): void => {
-    if (cleanedUp) return;
-    cleanedUp = true;
-    stopSpinner();
-    process.stdin.off("keypress", onKeypress);
-    process.stdout.off("resize", onResize);
-    if (process.stdin.isTTY) {
-      process.stdin.setRawMode(false);
+  // SGR mouse protocol parser. We only care about wheel events:
+  // 64 = wheel up, 65 = wheel down.
+  const onMouseData = (chunk: Buffer): void => {
+    const data = chunk.toString("utf8");
+    if (!data.includes("\x1b[<") && !data.includes("\x1b[M")) return;
+
+    // Prevent split ANSI fragments from being interpreted as typed text.
+    suppressAnsiInputUntil = Date.now() + 250;
+
+    const matches = data.matchAll(/\x1b\[<(\d+);(\d+);(\d+)([mM])/g);
+    let changed = false;
+
+    for (const match of matches) {
+      const code = Number(match[1]);
+      if (Number.isNaN(code)) continue;
+
+      if (code === 64) {
+        scrollOffset += MOUSE_SCROLL_STEP;
+        changed = true;
+      } else if (code === 65) {
+        scrollOffset = Math.max(0, scrollOffset - MOUSE_SCROLL_STEP);
+        changed = true;
+      }
     }
-    process.stdout.write("\x1b[?1049l\x1b[?25h"); // exit alternate screen buffer, show cursor
-  };
 
-  const onExit = (): void => cleanup();
-  const onSigint = (): void => {
-    cleanup();
-    process.exit(130); // conventional exit code for SIGINT (128 + 2)
+    if (changed) {
+      draw();
+    }
   };
-  const onUncaughtException = (err: Error): void => {
-    cleanup();
-    // Re-throw so Node prints the error and exits with a non-zero code.
-    throw err;
-  };
-
-  process.once("exit", onExit);
-  process.once("SIGINT", onSigint);
-  process.once("uncaughtException", onUncaughtException);
 
   process.stdin.on("keypress", onKeypress);
+  process.stdin.on("data", onMouseData);
   process.stdout.on("resize", onResize);
+  // Enable mouse reporting globally in alternate screen so wheel scrolling
+  // works without requiring click/focus in a specific area.
+  process.stdout.write("\x1b[?1000h\x1b[?1006h");
+  process.stdout.write("\x1b[?1049h"); // enter alternate screen buffer
 
-  try {
-    process.stdout.write("\x1b[?1049h"); // enter alternate screen buffer
+  pushTranscript(getWelcomeMessage(session.mode));
+  draw();
 
-    pushTranscript(getWelcomeMessage(session.mode));
-    draw();
-
-    while (running) {
-      // Keep loop alive while keypress handlers drive the UI.
-      // eslint-disable-next-line no-await-in-loop
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  } finally {
-    process.off("exit", onExit);
-    process.off("SIGINT", onSigint);
-    process.off("uncaughtException", onUncaughtException);
-    cleanup();
+  while (running) {
+    // Keep loop alive while keypress handlers drive the UI.
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((resolve) => setTimeout(resolve, 50));
   }
+
+  stopSpinner();
+  process.stdin.off("keypress", onKeypress);
+  process.stdin.off("data", onMouseData);
+  process.stdout.off("resize", onResize);
+  if (process.stdin.isTTY) {
+    process.stdin.setRawMode(false);
+  }
+  process.stdout.write("\x1b[?1000l\x1b[?1006l"); // disable mouse reporting
+  process.stdout.write("\x1b[?1049l\x1b[?25h"); // exit alternate screen buffer, show cursor
 }

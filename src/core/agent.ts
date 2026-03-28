@@ -5,7 +5,8 @@ import { buildSystemMessage } from "../prompts/prompt-builder.js";
 import { buildTurnContext, type TurnContext } from "../context/context-builder.js";
 import { buildMessagesForModel } from "../chat/message-builder.js";
 import { scanWorkspace, type FileMeta } from "../workspace/workspace-scanner.js";
-import { applyPatchBatch, type BatchPatchApplyResult } from "../tools/patch-applier.js";
+import { applyPatchBatch, runWorkspaceTypecheck, type BatchPatchApplyResult } from "../tools/patch-applier.js";
+import { validatePatchProposal } from "../tools/patch-validator.js";
 import type { AgentProposedPatch } from "../contracts/agent-decision.types.js";
 
 const SCAN_CACHE_TTL_MS = 30_000;
@@ -15,6 +16,19 @@ export type TurnStatus = "building_context" | "calling_model" | "producing_respo
 type StreamTurnOptions = {
   onStatus?: (status: TurnStatus) => void;
 };
+
+export interface PendingPatchAssessmentItem {
+  proposal: AgentProposedPatch;
+  applicable: boolean;
+  safe: boolean;
+  issues: string[];
+}
+
+export interface PendingPatchAssessment {
+  workspaceQualityOk: boolean;
+  workspaceQualityStderr: string;
+  items: PendingPatchAssessmentItem[];
+}
 
 export class Agent {
   private scanCache?: {
@@ -65,6 +79,34 @@ export class Agent {
     }
 
     return result;
+  }
+
+  async assessPendingPatchesSafety(): Promise<PendingPatchAssessment> {
+    const quality = await runWorkspaceTypecheck(this.workspacePath);
+    const items: PendingPatchAssessmentItem[] = [];
+
+    for (const proposal of this.pendingProposedPatches) {
+      const validation = await validatePatchProposal(proposal, this.workspacePath);
+      const applicable = validation.valid;
+      const safe = applicable && quality.ok;
+      const issues = validation.issues.map((issue) => issue.message);
+      if (!quality.ok) {
+        issues.push("Workspace quality gate failed: npm run check");
+      }
+
+      items.push({
+        proposal,
+        applicable,
+        safe,
+        issues,
+      });
+    }
+
+    return {
+      workspaceQualityOk: quality.ok,
+      workspaceQualityStderr: quality.stderr,
+      items,
+    };
   }
 
   async runTurn(session: ChatSession, userInput: string): Promise<string> {
