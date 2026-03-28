@@ -1,7 +1,7 @@
 import * as path from "path";
 import type { ModelProvider } from "../providers/model-provider.js";
 import type { ChatSession } from "../chat/types.js";
-import { generateAgentModeResponse } from "../agent-mode/generator.js";
+import { generateAgentModeResponse, prepareAgentContext, buildAgentFinalResponse } from "../agent-mode/generator.js";
 import { buildSystemMessage } from "../prompts/prompt-builder.js";
 import { buildTurnContext, type TurnContext } from "../context/context-builder.js";
 import { buildMessagesForModel } from "../chat/message-builder.js";
@@ -85,8 +85,6 @@ export class Agent {
       scannedFiles: this.getWorkspaceFiles(),
     });
 
-    debugContext(context);
-
     const enrichedMessage = buildTurnUserMessage({ userInput, context });
 
     session.messages.push({ role: "user", content: enrichedMessage });
@@ -120,8 +118,6 @@ export class Agent {
       scannedFiles: this.getWorkspaceFiles(),
     });
 
-    debugContext(context);
-
     const enrichedMessage = buildTurnUserMessage({ userInput, context });
 
     session.messages.push({ role: "user", content: enrichedMessage });
@@ -130,10 +126,42 @@ export class Agent {
     options?.onStatus?.("calling_model");
 
     if (session.mode === "agent") {
-      const response = await this.generateAssistantResponse(session.mode, messagesForModel);
-      session.messages.push({ role: "assistant", content: response });
+      const prelude = await prepareAgentContext({
+        provider: this.provider,
+        messagesForModel,
+        workspacePath: this.workspacePath,
+        scannedFiles: this.getWorkspaceFiles(),
+      });
+
       options?.onStatus?.("producing_response");
-      yield response;
+
+      let answer: string;
+      if (this.provider.streamChat) {
+        answer = "";
+        for await (const token of this.provider.streamChat(prelude.answerMessages)) {
+          answer += token;
+          yield token;
+        }
+      } else {
+        answer = await this.provider.completeChat(prelude.answerMessages);
+      }
+
+      const outcome = buildAgentFinalResponse(answer, prelude);
+
+      if (outcome.validProposedPatches.length > 0) {
+        this.pendingProposedPatches = [
+          ...(this.pendingProposedPatches ?? []),
+          ...outcome.validProposedPatches,
+        ];
+      }
+
+      // Yield patch section as extra chunk if present
+      const patchSection = outcome.response.slice(answer.length);
+      if (patchSection) {
+        yield patchSection;
+      }
+
+      session.messages.push({ role: "assistant", content: outcome.response });
       return;
     }
 
@@ -179,7 +207,6 @@ export class Agent {
     if (mode !== "agent") {
       const raw = await this.provider.completeChat(messagesForModel);
       if (looksLikeAgentJson(raw)) {
-        console.warn(`[REI debug] ${mode} mode: model returned agent JSON, retrying for plain text`);
         const retryMessages: ChatSession["messages"] = [
           ...messagesForModel,
           { role: "assistant", content: raw },
@@ -193,7 +220,6 @@ export class Agent {
         ];
         const retried = await this.provider.completeChat(retryMessages);
         if (looksLikeAgentJson(retried)) {
-          console.warn(`[REI debug] ${mode} mode: retry also returned agent JSON — stripping to plain fallback`);
           return `I'm in ${mode} mode and my response came out as structured JSON, which is not valid here. Please rephrase your question or switch to agent mode if you need structured output.`;
         }
         return retried;
@@ -250,18 +276,6 @@ Use only the visible content. Do not reconstruct omitted code.`);
   }
 
   return lines.join("\n");
-}
-
-function debugContext(context: TurnContext): void {
-  const scannedNote = `[REI debug] Workspace: ${path.resolve(context.workspacePath)}`;
-  const filesNote = `[REI debug] Relevant files selected: ${context.relevantFiles.length}`;
-  const fileList = context.relevantFiles
-    .map((f) => `  - ${f.path} (score: ${f.score})`)
-    .join("\n");
-
-  console.log(scannedNote);
-  console.log(filesNote);
-  if (fileList) console.log(fileList);
 }
 
 /**

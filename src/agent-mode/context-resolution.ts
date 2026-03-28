@@ -80,7 +80,6 @@ export async function resolveContextRequests(
     // --- Security check 1: allowlist ---
     // Only serve files that were discovered during workspace scanning.
     if (!allowedPaths.has(relativePath)) {
-      console.warn(`[REI debug] Context request denied (not in scanned file list): ${relativePath}`);
       continue;
     }
 
@@ -88,13 +87,11 @@ export async function resolveContextRequests(
     const fileName = path.basename(relativePath).toLowerCase();
     const fileExt = path.extname(relativePath).toLowerCase();
     if (SENSITIVE_FILE_NAMES.has(fileName) || SENSITIVE_EXTENSIONS.has(fileExt)) {
-      console.warn(`[REI debug] Context request denied (sensitive file): ${relativePath}`);
       continue;
     }
 
     // Skip if already provided in a previous round.
     if (alreadyResolved.has(absolutePath)) {
-      console.warn(`[REI debug] Context request skipped (already resolved): ${relativePath}`);
       continue;
     }
 
@@ -104,7 +101,6 @@ export async function resolveContextRequests(
     try {
       realAbsolutePath = await fs.realpath(absolutePath);
     } catch {
-      console.warn(`[REI debug] Context request skipped (not found): ${relativePath}`);
       continue;
     }
 
@@ -113,7 +109,6 @@ export async function resolveContextRequests(
       realAbsolutePath === normalizedWorkspace ||
       realAbsolutePath.startsWith(normalizedWorkspace + path.sep);
     if (!withinWorkspace) {
-      console.warn(`[REI debug] Context request denied (path escapes workspace): ${relativePath}`);
       continue;
     }
 
@@ -126,7 +121,6 @@ export async function resolveContextRequests(
         content = raw.slice(0, FULL_READ_MAX_CHARS) + "\n... (truncated)";
       }
     } catch {
-      console.warn(`[REI debug] Context request skipped (read error): ${relativePath}`);
       continue;
     }
 
