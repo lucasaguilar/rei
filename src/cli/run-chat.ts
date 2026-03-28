@@ -984,24 +984,48 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
     draw();
   };
 
+  let cleanedUp = false;
+  const cleanup = (): void => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    stopSpinner();
+    process.stdin.off("keypress", onKeypress);
+    process.stdout.off("resize", onResize);
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(false);
+    }
+    process.stdout.write("\x1b[?1049l\x1b[?25h"); // exit alternate screen buffer, show cursor
+  };
+
+  const onExit = (): void => cleanup();
+  const onUncaughtException = (err: Error): void => {
+    cleanup();
+    // Re-throw so Node prints the error and exits with a non-zero code.
+    throw err;
+  };
+
+  process.once("exit", onExit);
+  process.once("SIGINT", onExit);
+  process.once("uncaughtException", onUncaughtException);
+
   process.stdin.on("keypress", onKeypress);
   process.stdout.on("resize", onResize);
-  process.stdout.write("\x1b[?1049h"); // enter alternate screen buffer
 
-  pushTranscript(getWelcomeMessage(session.mode));
-  draw();
+  try {
+    process.stdout.write("\x1b[?1049h"); // enter alternate screen buffer
 
-  while (running) {
-    // Keep loop alive while keypress handlers drive the UI.
-    // eslint-disable-next-line no-await-in-loop
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    pushTranscript(getWelcomeMessage(session.mode));
+    draw();
+
+    while (running) {
+      // Keep loop alive while keypress handlers drive the UI.
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  } finally {
+    process.off("exit", onExit);
+    process.off("SIGINT", onExit);
+    process.off("uncaughtException", onUncaughtException);
+    cleanup();
   }
-
-  stopSpinner();
-  process.stdin.off("keypress", onKeypress);
-  process.stdout.off("resize", onResize);
-  if (process.stdin.isTTY) {
-    process.stdin.setRawMode(false);
-  }
-  process.stdout.write("\x1b[?1049l\x1b[?25h"); // exit alternate screen buffer, show cursor
 }
