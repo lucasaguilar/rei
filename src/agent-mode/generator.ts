@@ -712,9 +712,23 @@ async function buildPatchesFromEdits(
     const absPath = path.join(workspacePath, file);
     let before: string;
     try {
-      before = await fs.readFile(absPath, "utf-8");
+      const workspaceRealPath = await fs.realpath(workspacePath);
+      const fileRealPath = await fs.realpath(absPath);
+
+      // Ensure the resolved file path stays within the workspace
+      if (!fileRealPath.startsWith(workspaceRealPath + path.sep)) {
+        continue;
+      }
+
+      // Basic denylist for sensitive files
+      const baseName = path.basename(fileRealPath);
+      if (baseName === ".env" || baseName === "package.json") {
+        continue;
+      }
+
+      before = await fs.readFile(fileRealPath, "utf-8");
     } catch {
-      continue; // File doesn't exist, skip
+      continue; // File doesn't exist or path is invalid, skip
     }
 
     let after = before;
