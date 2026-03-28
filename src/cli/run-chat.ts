@@ -204,11 +204,17 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
   const session: ChatSession = { messages: [], mode: "ask" };
   const mentionEntries = buildMentionEntries(workspacePath);
 
-  readline.emitKeypressEvents(process.stdin);
-  if (process.stdin.isTTY) {
-    process.stdin.setRawMode(true);
+  // Ensure we only start the full-screen, raw-keypress UI in an interactive TTY.
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    console.error(
+      "Error: The interactive chat UI requires both stdin and stdout to be TTYs.\n" +
+      "Run this command in an interactive terminal, or use a non-interactive CLI mode for CI or redirected environments."
+    );
+    return;
   }
 
+  readline.emitKeypressEvents(process.stdin);
+  process.stdin.setRawMode(true);
   let running = true;
   let busy = false;
   let inputBuffer = "";
