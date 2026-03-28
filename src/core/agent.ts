@@ -1,4 +1,3 @@
-import * as path from "path";
 import type { ModelProvider } from "../providers/model-provider.js";
 import type { ChatSession } from "../chat/types.js";
 import { generateAgentModeResponse, prepareAgentContext, buildAgentFinalResponse } from "../agent-mode/generator.js";
