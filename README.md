@@ -203,6 +203,23 @@ When a preview is cut, REI appends:
 
 That marker is important for the agent decision step.
 
+## External Knowledge Layer (RAG)
+
+REI features a zero-dependency Retrieval-Augmented Generation (RAG) layer to fetch official documentation when the local model lacks specialized knowledge. This avoids hallucination on frameworks without needing a fine-tuned model.
+
+### Keyword Domain Detection
+When the user's prompt matches a strict set of heuristic triggers (e.g. `signal store`, `zoneless`), REI automatically invokes its internet search pipeline. 
+
+### Web Fetching
+REI runs concurrent separate queries via a lightweight DuckDuckGo Lite scraper. It targets exclusively official domains. Supported providers currently include:
+- **Angular / NgRx / RxJS** (`angular.dev`, `ngrx.io`, `rxjs.dev`)
+- **Spring Boot** (`spring.io`)
+- **TypeScript** (`typescriptlang.org`)
+- **Node.js** (`nodejs.org`)
+
+### Injecting Context
+The retrieved HTML pages are cleaned, evaluated, and synthesized using a background model summarizer. The summarized knowledge chunks are then invisibly injected into the main context bundle *before* the model answers the user. The interactive terminal UI displays a `Searching official docs...` spinner while the search resolves.
+
 ## Agent mode: current flow
 
 Agent mode no longer uses a user-visible JSON response contract.
@@ -427,7 +444,11 @@ npm run check
 flowchart TD
   A[User enters message] --> B[Build system prompt for current mode]
   B --> C[Scan workspace and select relevant files]
-  C --> D[Read previews and enrich last user message]
+  C --> C2{Keywords match official docs?}
+  C2 -->|Yes| C3[Fetch, rank, and summarize internet docs]
+  C3 --> D[Read previews and enrich last user message]
+  C2 -->|No| D
+
   D --> E{Mode is agent}
   E -->|No| F[Call provider and return normal text]
   E -->|Yes| G[Phase 1: internal AgentDecision JSON]
