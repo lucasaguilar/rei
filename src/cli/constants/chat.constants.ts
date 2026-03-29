@@ -40,6 +40,7 @@ export const MODE_PROMPTS: Record<SessionMode, string> = {
 
 export const THINKING_TEXT: Record<TurnStatus, string> = {
   building_context: "Building context...",
+  fetching_external_knowledge: "Searching official docs...",
   calling_model: "Calling model...",
   producing_response: "Producing response...",
 };

@@ -8,10 +8,11 @@ import { scanWorkspace, type FileMeta } from "../workspace/workspace-scanner.js"
 import { applyPatchBatch, runWorkspaceTypecheck, type BatchPatchApplyResult } from "../tools/patch-applier.js";
 import { validatePatchProposal } from "../tools/patch-validator.js";
 import type { AgentProposedPatch } from "../contracts/agent-decision.types.js";
+import { KnowledgeOrchestrator } from "../knowledge/orchestrator.js";
 
 const SCAN_CACHE_TTL_MS = 30_000;
 
-export type TurnStatus = "building_context" | "calling_model" | "producing_response";
+export type TurnStatus = "building_context" | "fetching_external_knowledge" | "calling_model" | "producing_response";
 
 type StreamTurnOptions = {
   onStatus?: (status: TurnStatus) => void;
@@ -37,11 +38,14 @@ export class Agent {
     timestamp: number;
   };
   private pendingProposedPatches: AgentProposedPatch[] = [];
+  private knowledgeOrchestrator: KnowledgeOrchestrator;
 
   constructor(
     private readonly provider: ModelProvider,
     private readonly workspacePath: string = process.cwd()
-  ) { }
+  ) { 
+    this.knowledgeOrchestrator = new KnowledgeOrchestrator(this.provider);
+  }
 
   async run(prompt: string): Promise<string> {
     return this.provider.complete(prompt);
@@ -124,6 +128,7 @@ export class Agent {
       userInput,
       mode: session.mode,
       scannedFiles: this.getWorkspaceFiles(),
+      knowledgeOrchestrator: this.knowledgeOrchestrator,
     });
 
     const enrichedMessage = buildTurnUserMessage({ userInput, context });
@@ -157,6 +162,8 @@ export class Agent {
       userInput,
       mode: session.mode,
       scannedFiles: this.getWorkspaceFiles(),
+      knowledgeOrchestrator: this.knowledgeOrchestrator,
+      onStatus: options?.onStatus,
     });
 
     const enrichedMessage = buildTurnUserMessage({ userInput, context });
@@ -301,6 +308,18 @@ export function buildTurnUserMessage(params: {
   lines.push(``);
   lines.push(`Repository summary:`);
   lines.push(context.repoSummary);
+
+  if (context.externalKnowledge && context.externalKnowledge.length > 0) {
+    lines.push(``);
+    lines.push(`External Official Documentation:`);
+    lines.push(`These are officially sourced technical references related to the user's task.`);
+    context.externalKnowledge.forEach((knowledge, idx) => {
+      lines.push(`${idx + 1}. [${knowledge.domain}] ${knowledge.title}`);
+      lines.push(`   Source: ${knowledge.url}`);
+      lines.push(`   Summary:\n   ${knowledge.content.split('\\n').join('\\n   ')}`);
+      lines.push(``);
+    });
+  }
 
   if (context.relevantFiles.length > 0) {
     lines.push(``);
