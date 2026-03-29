@@ -18,6 +18,7 @@ export type TurnContext = {
     score: number;
     preview: string;
   }>;
+  externalKnowledge: import("../knowledge/types.js").KnowledgeChunk[];
 };
 
 const PROJECT_MARKERS = [
@@ -36,6 +37,8 @@ export async function buildTurnContext(params: {
   userInput: string;
   mode: SessionMode;
   scannedFiles?: FileMeta[];
+  knowledgeOrchestrator?: import("../knowledge/orchestrator.js").KnowledgeOrchestrator;
+  onStatus?: (status: import("../core/agent.js").TurnStatus) => void;
 }): Promise<TurnContext> {
   const { workspacePath, userInput, mode, scannedFiles } = params;
 
@@ -61,7 +64,15 @@ export async function buildTurnContext(params: {
     }))
   );
 
-  return { workspacePath, repoSummary, relevantFiles };
+  if (params.knowledgeOrchestrator) {
+    params.onStatus?.("fetching_external_knowledge");
+  }
+
+  const externalKnowledge = params.knowledgeOrchestrator
+    ? await params.knowledgeOrchestrator.getExternalKnowledge(userInput)
+    : [];
+
+  return { workspacePath, repoSummary, relevantFiles, externalKnowledge };
 }
 
 function isExplicitContentRequest(userInput: string): boolean {
