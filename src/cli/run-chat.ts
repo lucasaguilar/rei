@@ -1,230 +1,20 @@
 import * as readline from "readline";
 import * as path from "path";
-import wrapAnsi from "wrap-ansi";
 import type { Agent, TurnStatus } from "../core/agent.js";
-import type { ChatSession, SessionMode } from "../chat/types.js";
-import { REI_LOGO } from "./rei-logo.js";
-import { renderMarkdown } from "./markdown-renderer.js";
-import { formatPatchForTerminal } from "../tools/patch-generator.js";
-import { scanWorkspace } from "../workspace/workspace-scanner.js";
+import type { ChatSession } from "../chat/types.js";
 
-const getWelcomeMessage = (mode: SessionMode): string => {
-
-  return `${REI_LOGO}
-REI — Repository-Aware AI Agent
-
-Mode: ${mode}
-Commands:
-  /mode ask
-  /mode planning
-  /mode agent
-  /pending
-  /confirm
-  /confirm --dry-run
-  /discard
-  /exit
-
-Ready.`;
-};
-
-const HELP_TEXT = `Commands:
-  /exit           - end the session
-  /clear          - clear conversation history
-  /help           - show this help
-  /mode ask       - switch to ask mode
-  /mode planning  - switch to planning mode
-  /mode agent     - switch to agent mode
-  /pending        - show currently queued validated patches
-  /confirm        - apply queued patches
-  /confirm --dry-run - validate/apply-check queued patches only
-  /discard        - clear queued patches without applying`;
-
-const MODE_PROMPTS: Record<SessionMode, string> = {
-  ask: "ask > ",
-  planning: "plan > ",
-  agent: "agent > ",
-};
-
-const THINKING_TEXT: Record<TurnStatus, string> = {
-  building_context: "Building context...",
-  calling_model: "Calling model...",
-  producing_response: "Producing response...",
-};
-
-const SPINNER_FRAMES = ["|", "/", "-", "\\"];
-const SHORTCUT_HINT = "Shortcuts: Up/Down history (at bottom) | Ctrl+U/D scroll | / commands | @ files | Tab complete | Esc close | Ctrl+R search";
-const MOUSE_SCROLL_STEP = 3;
-
-const COMMANDS: Array<{ command: string; description: string; requiresArgs?: boolean }> = [
-  { command: "/exit", description: "end the session" },
-  { command: "/clear", description: "clear conversation history" },
-  { command: "/help", description: "show available commands" },
-  { command: "/mode ask", description: "switch to ask mode" },
-  { command: "/mode planning", description: "switch to planning mode" },
-  { command: "/mode agent", description: "switch to agent mode" },
-  { command: "/pending", description: "show queued patches" },
-  { command: "/confirm", description: "apply queued patches" },
-  { command: "/confirm --dry-run", description: "validate queued patches only" },
-  { command: "/discard", description: "clear queued patches" },
-];
-
-type MentionEntry = {
-  value: string;
-  description: string;
-  isDir: boolean;
-};
-
-type CommandEntry = { command: string; description: string; requiresArgs?: boolean };
-
-type ActivePalette =
-  | {
-    kind: "command";
-    items: CommandEntry[];
-  }
-  | {
-    kind: "mention";
-    items: MentionEntry[];
-  }
-  | {
-    kind: "none";
-    items: [];
-  };
-
-const ANSI_REGEX = /\x1B\[[0-?]*[ -/]*[@-~]/g;
-
-function stripAnsi(value: string): string {
-  return value.replace(ANSI_REGEX, "");
-}
-
-function visibleLength(value: string): number {
-  return stripAnsi(value).length;
-}
-
-function takeVisible(value: string, width: number): string {
-  if (width <= 0) return "";
-
-  let out = "";
-  let visible = 0;
-
-  for (let i = 0; i < value.length; i += 1) {
-    if (value[i] === "\u001b") {
-      const rest = value.slice(i);
-      const match = /^\x1B\[[0-?]*[ -/]*[@-~]/.exec(rest);
-      if (match) {
-        out += match[0];
-        i += match[0].length - 1;
-        continue;
-      }
-    }
-
-    if (visible >= width) {
-      break;
-    }
-
-    out += value[i];
-    visible += 1;
-  }
-
-  return out;
-}
-
-function fitLine(value: string, width: number): string {
-  // Return an empty string if the width is non-positive
-  if (width <= 0) return "";
-
-  // If the visible length of the value is less than or equal to the width, return the value as is
-  if (visibleLength(value) <= width) return value;
-
-  // If the width is 1, return a single dot
-  if (width === 1) return ".";
-
-  // Otherwise, truncate the value to fit the width and append a dot
-  return `${takeVisible(value, width - 1)}.`;
-}
-
-function padRight(value: string, width: number): string {
-  const len = visibleLength(value);
-  if (len >= width) return value;
-  return value + " ".repeat(width - len);
-}
-
-function viewportForInput(text: string, cursor: number, width: number): { visible: string; start: number } {
-  if (width <= 0) {
-    return { visible: "", start: 0 };
-  }
-
-  if (text.length <= width) {
-    return { visible: text, start: 0 };
-  }
-
-  const start = Math.min(Math.max(0, cursor - width + 1), text.length - width);
-  return {
-    visible: text.slice(start, start + width),
-    start,
-  };
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
-}
-
-function toPosixPath(input: string): string {
-  return input.replace(/\\/g, "/");
-}
-
-function isMouseSgrSequence(str: string, key: readline.Key): boolean {
-  const keyWithSequence = key as readline.Key & { sequence?: string };
-  const sequence = keyWithSequence.sequence ?? str;
-  return /\x1b\[<\d+;\d+;\d+[mM]/.test(sequence);
-}
-
-function looksLikeAnsiNoise(str: string, key: readline.Key): boolean {
-  const keyWithSequence = key as readline.Key & { sequence?: string };
-  const sequence = keyWithSequence.sequence ?? str;
-
-  // Full ANSI escape sequences or CSI fragments that may arrive split.
-  if (sequence.includes("\x1b")) return true;
-  if (sequence.startsWith("[<")) return true;
-  if (sequence.startsWith("\x1b[M")) return true; // legacy mouse protocol
-  if (/^\[<\d*;?\d*;?\d*[mM]?$/.test(sequence)) return true;
-  if (/^[\[<;\dMm]+$/.test(sequence) && sequence.length <= 8) return true;
-  return false;
-}
-
-function buildMentionEntries(workspacePath: string): MentionEntry[] {
-  const files = scanWorkspace(workspacePath);
-  const fileSet = new Set<string>();
-  const dirSet = new Set<string>();
-
-  for (const file of files) {
-    const filePath = toPosixPath(file.path);
-    fileSet.add(filePath);
-
-    let currentDir = path.posix.dirname(filePath);
-    while (currentDir && currentDir !== ".") {
-      dirSet.add(`${currentDir}/`);
-      const parent = path.posix.dirname(currentDir);
-      if (parent === currentDir) break;
-      currentDir = parent;
-    }
-  }
-
-  const dirs = Array.from(dirSet)
-    .sort((a, b) => a.localeCompare(b))
-    .map((value) => ({ value, description: "folder", isDir: true }));
-
-  const regularFiles = Array.from(fileSet)
-    .sort((a, b) => a.localeCompare(b))
-    .map((value) => ({ value, description: "file", isDir: false }));
-
-  return [...dirs, ...regularFiles];
-}
+import { getWelcomeMessage, COMMANDS } from "./constants/chat.constants.js";
+import { ActivePalette, CommandEntry, MentionEntry, ChatRendererState, ChatUIState, KeyboardActions } from "./models/chat.types.js";
+import { clamp } from "./helpers/terminal.helpers.js";
+import { buildMentionEntries } from "./helpers/chat.helpers.js";
+import { ChatRenderer } from "./ui/chat-renderer.js";
+import { KeyboardHandler } from "./ui/keyboard-handler.js";
+import { InputHandler, InputHandlerContext } from "./ui/input-handler.js";
 
 export async function runChat(agent: Agent, workspacePath = process.cwd()): Promise<void> {
   const session: ChatSession = { messages: [], mode: "ask" };
   const mentionEntries = buildMentionEntries(workspacePath);
 
-  // Ensure we only run the full-screen interactive UI when both stdin and stdout are TTYs.
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     console.error(
       "Error: The interactive chat UI requires both stdin and stdout to be TTYs. " +
@@ -235,27 +25,36 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
 
   readline.emitKeypressEvents(process.stdin);
   process.stdin.setRawMode(true);
-  let running = true;
-  let busy = false;
-  let inputBuffer = "";
-  let inputCursor = 0;
-  let spinnerIndex = 0;
-  let activeStatus: TurnStatus | undefined;
+
   let spinnerTimer: NodeJS.Timeout | undefined;
-  let selectedCommandIndex = 0;
-  let paletteClosed = false;
-  const inputHistory: string[] = [];
-  let historyCursor: number | undefined;
-  let historyDraft = "";
-  let historySearchMode = false;
-  let historySearchQuery = "";
-  let historySearchIndex: number | undefined;
-  let historySearchSnapshot = { buffer: "", cursor: 0 };
-  let scrollOffset = 0; // lines scrolled up from bottom; 0 = bottom
-  let suppressAnsiInputUntil = 0;
   const transcript: string[] = [];
+  const MOUSE_SCROLL_STEP = 3;
+
+  const state: ChatUIState = {
+    running: true,
+    busy: false,
+    activeStatus: undefined,
+    spinnerIndex: 0,
+    suppressAnsiInputUntil: 0,
+
+    historySearchMode: false,
+    historySearchQuery: "",
+    historySearchIndex: undefined,
+    historySearchSnapshot: { buffer: "", cursor: 0 },
+
+    inputBuffer: "",
+    inputCursor: 0,
+    inputHistory: [],
+    historyCursor: undefined,
+    historyDraft: "",
+
+    selectedCommandIndex: 0,
+    paletteClosed: false,
+    scrollOffset: 0,
+  };
 
   const pushTranscript = (value: string): void => {
+    // NOTE: Normalize Windows line endings to standard line feeds
     const normalized = value.replace(/\r\n/g, "\n");
     for (const line of normalized.split("\n")) {
       transcript.push(line);
@@ -266,28 +65,30 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
   };
 
   const getCommandPalette = (): CommandEntry[] => {
-    const trimmed = inputBuffer.trim().toLowerCase();
-    if (!trimmed.startsWith("/") || busy || paletteClosed) return [];
+    const trimmed = state.inputBuffer.trim().toLowerCase();
+    if (!trimmed.startsWith("/") || state.busy || state.paletteClosed) return [];
     if (trimmed === "/") return COMMANDS;
 
     return COMMANDS.filter((entry) => entry.command.startsWith(trimmed));
   };
 
   const getMentionContext = (): { start: number; end: number; query: string } | undefined => {
-    if (busy || paletteClosed) return undefined;
+    if (state.busy || state.paletteClosed) return undefined;
 
-    let start = inputCursor - 1;
-    while (start >= 0 && !/\s/.test(inputBuffer[start])) {
+    let start = state.inputCursor - 1;
+    // NOTE: Walk backward until a whitespace character is found
+    while (start >= 0 && !/\s/.test(state.inputBuffer[start])) {
       start -= 1;
     }
     start += 1;
 
-    let end = inputCursor;
-    while (end < inputBuffer.length && !/\s/.test(inputBuffer[end])) {
+    let end = state.inputCursor;
+    // NOTE: Walk forward until a whitespace character is found
+    while (end < state.inputBuffer.length && !/\s/.test(state.inputBuffer[end])) {
       end += 1;
     }
 
-    const token = inputBuffer.slice(start, end);
+    const token = state.inputBuffer.slice(start, end);
     if (!token.startsWith("@")) return undefined;
 
     return {
@@ -354,9 +155,9 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
     const q = query.trim().toLowerCase();
     if (!q) return undefined;
 
-    let index = startIndex ?? (inputHistory.length - 1);
+    let index = startIndex ?? (state.inputHistory.length - 1);
     while (index >= 0) {
-      if (inputHistory[index].toLowerCase().includes(q)) {
+      if (state.inputHistory[index].toLowerCase().includes(q)) {
         return index;
       }
       index -= 1;
@@ -366,110 +167,40 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
 
   const clearHistorySearch = (restoreSnapshot: boolean): void => {
     if (restoreSnapshot) {
-      inputBuffer = historySearchSnapshot.buffer;
-      inputCursor = historySearchSnapshot.cursor;
+      state.inputBuffer = state.historySearchSnapshot.buffer;
+      state.inputCursor = state.historySearchSnapshot.cursor;
     }
-    historySearchMode = false;
-    historySearchQuery = "";
-    historySearchIndex = undefined;
+    state.historySearchMode = false;
+    state.historySearchQuery = "";
+    state.historySearchIndex = undefined;
   };
 
   const draw = (): void => {
-    const cols = Math.max(40, (process.stdout.columns || 80) - 1);
-    const rows = Math.max(12, process.stdout.rows || 24);
-    const activePalette = getActivePalette();
-    const paletteItems = activePalette.items;
-    const paletteVisible = paletteItems.length > 0;
-    selectedCommandIndex = clamp(selectedCommandIndex, 0, Math.max(0, paletteItems.length - 1));
+    const renderState: ChatRendererState = {
+      cols: process.stdout.columns || 80,
+      rows: process.stdout.rows || 24,
+      activePalette: getActivePalette(),
+      selectedCommandIndex: state.selectedCommandIndex,
+      historySearchMode: state.historySearchMode,
+      historySearchQuery: state.historySearchQuery,
+      historySearchIndex: state.historySearchIndex,
+      inputHistory: state.inputHistory,
+      busy: state.busy,
+      activeStatus: state.activeStatus,
+      spinnerIndex: state.spinnerIndex,
+      scrollOffset: state.scrollOffset,
+      transcript,
+      sessionMode: session.mode,
+      inputBuffer: state.inputBuffer,
+      inputCursor: state.inputCursor,
+    };
+    
+    // selectedCommandIndex can be adjusted by draw
+    const paletteItems = renderState.activePalette.items;
+    state.selectedCommandIndex = clamp(state.selectedCommandIndex, 0, Math.max(0, paletteItems.length - 1));
+    renderState.selectedCommandIndex = state.selectedCommandIndex;
 
-    const inputHeight = 3;
-    const maxPaletteItems = Math.min(5, paletteItems.length);
-    const paletteHeight = paletteVisible ? maxPaletteItems + 2 : 0;
-    const outputHeight = Math.max(1, rows - inputHeight - paletteHeight);
-
-    const statusLine = historySearchMode
-      ? (() => {
-        const head = `(reverse-i-search)\`${historySearchQuery}\`: `;
-        if (historySearchIndex === undefined) {
-          return `${head}no match`;
-        }
-        return `${head}${inputHistory[historySearchIndex]}`;
-      })()
-      : (busy && activeStatus
-        ? `[REI] Thinking ${SPINNER_FRAMES[spinnerIndex % SPINNER_FRAMES.length]} ${THINKING_TEXT[activeStatus]}`
-        : scrollOffset > 0
-          ? `↑ Scrolled up ${scrollOffset} lines — Ctrl+D to scroll down`
-          : SHORTCUT_HINT);
-
-    const messageSlots = statusLine ? outputHeight - 1 : outputHeight;
-    const wrappedTranscriptLines = transcript.flatMap((line) =>
-      wrapAnsi(line, cols, { hard: true, trim: false, wordWrap: true }).split("\n")
-    );
-    const totalWrapped = wrappedTranscriptLines.length;
-    const maxScrollOffset = Math.max(0, totalWrapped - messageSlots);
-    const effectiveOffset = Math.min(scrollOffset, maxScrollOffset);
-    const endIdx = totalWrapped - effectiveOffset;
-    const startIdx = Math.max(0, endIdx - messageSlots);
-    const outputLines = wrappedTranscriptLines.slice(startIdx, endIdx);
-
-    const screen: string[] = [];
-    const remaining = Math.max(0, messageSlots - outputLines.length);
-    for (let i = 0; i < remaining; i += 1) {
-      screen.push(" ".repeat(cols));
-    }
-    for (const line of outputLines) {
-      screen.push(padRight(fitLine(line, cols), cols));
-    }
-    if (statusLine) {
-      screen.push(padRight(fitLine(statusLine, cols), cols));
-    }
-
-    if (paletteVisible) {
-      const innerWidth = Math.max(1, cols - 4);
-      const listStart = Math.max(0, Math.min(selectedCommandIndex - maxPaletteItems + 1, paletteItems.length - maxPaletteItems));
-      const visibleItems = paletteItems.slice(listStart, listStart + maxPaletteItems);
-      screen.push(`+${"-".repeat(cols - 2)}+`);
-      for (let i = 0; i < visibleItems.length; i += 1) {
-        const entry = visibleItems[i];
-        const absoluteIndex = listStart + i;
-        const marker = absoluteIndex === selectedCommandIndex ? ">" : " ";
-        let text: string;
-        if (activePalette.kind === "mention") {
-          const mentionEntry = entry as MentionEntry;
-          text = `${marker} @${mentionEntry.value} - ${mentionEntry.description}`;
-        } else {
-          const commandEntry = entry as CommandEntry;
-          text = `${marker} ${commandEntry.command} - ${commandEntry.description}`;
-        }
-        screen.push(`| ${padRight(fitLine(text, innerWidth), innerWidth)} |`);
-      }
-      screen.push(`+${"-".repeat(cols - 2)}+`);
-    }
-
-    const promptText = MODE_PROMPTS[session.mode];
-    const fullInput = `${promptText}${inputBuffer}`;
-    const inputInnerWidth = Math.max(1, cols - 4);
-    const inputAbsoluteCursor = promptText.length + inputCursor;
-    const viewport = viewportForInput(fullInput, inputAbsoluteCursor, inputInnerWidth);
-    const cursorInViewport = clamp(inputAbsoluteCursor - viewport.start, 0, Math.max(0, viewport.visible.length));
-
-    screen.push(`-${"-".repeat(cols - 2)}-`);
-    screen.push(`| ${padRight(viewport.visible, inputInnerWidth)} |`);
-    screen.push(`-${"-".repeat(cols - 2)}-`);
-
-    while (screen.length < rows) {
-      screen.unshift(" ".repeat(cols));
-    }
-    if (screen.length > rows) {
-      screen.splice(0, screen.length - rows);
-    }
-
-    process.stdout.write("\x1b[?25l\x1b[H\x1b[2J");
-    process.stdout.write(screen.join("\r\n"));
-
-    const inputLineRow = rows - 1;
-    const inputColumn = 3 + cursorInViewport;
-    process.stdout.write(`\x1b[${inputLineRow};${inputColumn}H\x1b[?25h`);
+    ChatRenderer.draw(renderState);
   };
 
   const stopSpinner = (): void => {
@@ -481,586 +212,81 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
   const startSpinner = (): void => {
     stopSpinner();
     spinnerTimer = setInterval(() => {
-      spinnerIndex += 1;
+      state.spinnerIndex += 1;
       draw();
     }, 100);
   };
 
   const resetInput = (): void => {
     clearHistorySearch(false);
-    inputBuffer = "";
-    inputCursor = 0;
-    selectedCommandIndex = 0;
-    paletteClosed = false;
-    historyCursor = undefined;
-    historyDraft = "";
-    scrollOffset = 0; // snap to bottom on submit
+    state.inputBuffer = "";
+    state.inputCursor = 0;
+    state.selectedCommandIndex = 0;
+    state.paletteClosed = false;
+    state.historyCursor = undefined;
+    state.historyDraft = "";
+    state.scrollOffset = 0; // snap to bottom on submit
   };
 
   const rememberHistory = (value: string): void => {
     const trimmed = value.trim();
     if (!trimmed) return;
-    const last = inputHistory[inputHistory.length - 1];
+    const last = state.inputHistory[state.inputHistory.length - 1];
     if (last !== value) {
-      inputHistory.push(value);
+      state.inputHistory.push(value);
     }
-    if (inputHistory.length > 300) {
-      inputHistory.splice(0, inputHistory.length - 300);
+    if (state.inputHistory.length > 300) {
+      state.inputHistory.splice(0, state.inputHistory.length - 300);
     }
-    historyCursor = undefined;
-    historyDraft = "";
+    state.historyCursor = undefined;
+    state.historyDraft = "";
   };
 
-  const handleCommand = async (trimmed: string): Promise<boolean> => {
-    if (trimmed === "/exit") {
-      pushTranscript("Goodbye!");
-      draw();
-      running = false;
-      return true;
-    }
-
-    if (trimmed === "/clear") {
-      session.messages = [];
-      transcript.length = 0;
-      pushTranscript("History cleared.");
-      return true;
-    }
-
-    if (trimmed === "/help") {
-      pushTranscript(HELP_TEXT);
-      return true;
-    }
-
-    if (trimmed === "/pending") {
-      const pending = agent.getPendingPatches();
-      if (pending.length === 0) {
-        pushTranscript("No pending patches.");
-        return true;
-      }
-
-      const assessment = await agent.assessPendingPatchesSafety();
-      pushTranscript(`Pending patches: ${pending.length}`);
-      pushTranscript(`Workspace quality: ${assessment.workspaceQualityOk ? "ok" : "failed"}`);
-
-      for (const item of assessment.items) {
-        pushTranscript(`File: ${item.proposal.file}`);
-        pushTranscript(`Reason: ${item.proposal.description || "(no description)"}`);
-        pushTranscript(`Applicable: ${item.applicable ? "yes" : "no"}`);
-        pushTranscript(`Safe: ${item.safe ? "yes" : "no"}`);
-        if (item.issues.length > 0) {
-          pushTranscript(`Issues: ${item.issues.join(" | ")}`);
-        }
-        pushTranscript(formatPatchForTerminal(item.proposal.patch));
-      }
-
-      if (!assessment.workspaceQualityOk && assessment.workspaceQualityStderr) {
-        pushTranscript(`Workspace check stderr: ${assessment.workspaceQualityStderr.trim()}`);
-      }
-
-      pushTranscript("Use /confirm to apply, or /discard to clear them.");
-      return true;
-    }
-
-    if (trimmed === "/discard") {
-      const discarded = agent.clearPendingPatches();
-      pushTranscript(discarded > 0 ? `Discarded ${discarded} pending patch(es).` : "No pending patches.");
-      return true;
-    }
-
-    if (trimmed === "/confirm" || trimmed === "/confirm --dry-run") {
-      const dryRun = trimmed.includes("--dry-run");
-      const pending = agent.getPendingPatches();
-      if (pending.length === 0) {
-        pushTranscript("No pending patches to apply.");
-        return true;
-      }
-
-      busy = true;
-      activeStatus = "producing_response";
-      startSpinner();
-      draw();
-
-      try {
-        const result = await agent.applyPendingPatches({ dryRun });
-        if (result.results.length === 0) {
-          pushTranscript("No pending patches to apply.");
-          return true;
-        }
-
-        pushTranscript(
-          dryRun
-            ? "Patch dry-run completed."
-            : (result.success ? "Patches applied." : "Patch apply completed with errors.")
-        );
-
-        for (const item of result.results) {
-          const status = item.applied ? "applied" : (item.skipped ? "skipped" : "failed");
-          pushTranscript(`- ${item.file}: ${status}`);
-          if (item.validationErrors.length > 0) {
-            pushTranscript(`  validation: ${item.validationErrors.join(" | ")}`);
-          }
-          if (item.stderr) {
-            pushTranscript(`  stderr: ${item.stderr.trim()}`);
-          }
-        }
-      } catch (err: unknown) {
-        pushTranscript(`Error: ${err instanceof Error ? err.message : String(err)}`);
-      } finally {
-        busy = false;
-        activeStatus = undefined;
-        stopSpinner();
-      }
-
-      return true;
-    }
-
-    const modeMatch = trimmed.match(/^\/mode\s+(\S+)$/);
-    if (modeMatch) {
-      const requested = modeMatch[1];
-      if (requested === "ask" || requested === "planning" || requested === "agent") {
-        const previousMode = session.mode;
-        session.mode = requested as SessionMode;
-        if (previousMode === "agent" && session.mode !== "agent") {
-          const systemMessages = session.messages.filter((m) => m.role === "system");
-          session.messages = systemMessages;
-        }
-        pushTranscript(`[REI] Mode switched to: ${session.mode}`);
-      } else {
-        pushTranscript(`Unknown mode: ${requested}. Available modes: ask, planning, agent`);
-      }
-      return true;
-    }
-
-    return false;
-  };
-
-  const handleUserTurn = async (trimmed: string): Promise<void> => {
-    busy = true;
-    activeStatus = "building_context";
-    spinnerIndex = 0;
-    startSpinner();
-    draw();
-
-    try {
-      let lastStatus: TurnStatus | undefined;
-      let buffer = "";
-      let liveStart = -1;
-
-      for await (const token of agent.streamTurn(session, trimmed, {
-        onStatus: (status) => {
-          if (lastStatus === status) return;
-          lastStatus = status;
-          activeStatus = status;
-
-          if (status === "producing_response" && liveStart < 0) {
-            pushTranscript("");
-            pushTranscript(`You: ${trimmed}`);
-            pushTranscript("");
-            liveStart = transcript.length;
-            transcript.push(""); // live placeholder — spinner will redraw
-          }
-        },
-      })) {
-        buffer += token;
-        if (liveStart >= 0) {
-          const lines = buffer.split("\n");
-          transcript.splice(liveStart, transcript.length - liveStart, ...lines);
-          // No draw() here — spinner fires every 100ms and handles redraws.
-          // Calling draw() per-token causes terminal artifact floods.
-        }
-      }
-
-      if (liveStart >= 0) {
-        // Finalize: replace raw streaming lines with rendered markdown
-        const rendered = renderMarkdown(buffer);
-        const lines = rendered.split("\n");
-        transcript.splice(liveStart, transcript.length - liveStart, ...lines);
-      } else {
-        pushTranscript("");
-        pushTranscript(`You: ${trimmed}`);
-        pushTranscript("");
-        pushTranscript(renderMarkdown(buffer));
-      }
-      pushTranscript("");
-    } catch (err: unknown) {
-      pushTranscript(`Error: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      busy = false;
-      activeStatus = undefined;
-      stopSpinner();
-      draw();
+  const inputContext: InputHandlerContext = {
+    state,
+    agent,
+    session,
+    transcript,
+    actions: {
+      pushTranscript,
+      draw,
+      startSpinner,
+      stopSpinner,
+      resetInput,
+      rememberHistory,
+      getActivePalette,
+      getMentionContext,
     }
   };
 
   const submitInput = async (): Promise<void> => {
-    if (busy) return;
+    await InputHandler.submitInput(inputContext);
+  };
 
-    const activePalette = getActivePalette();
-    const palette = activePalette.items;
-    const submittedInput = inputBuffer;
-    const trimmed = inputBuffer.trim();
-
-    if (activePalette.kind === "mention" && palette.length > 0) {
-      const mentionContext = getMentionContext();
-      if (mentionContext) {
-        const selected = activePalette.items[clamp(selectedCommandIndex, 0, activePalette.items.length - 1)];
-        const selectedText = `@${selected.value}`;
-        const trailing = inputBuffer.slice(mentionContext.end);
-        const needsSpace = !selected.isDir && (trailing.length === 0 || !/^\s/.test(trailing));
-        const suffix = needsSpace ? " " : "";
-        inputBuffer =
-          `${inputBuffer.slice(0, mentionContext.start)}${selectedText}${suffix}${inputBuffer.slice(mentionContext.end)}`;
-        inputCursor = mentionContext.start + selectedText.length + suffix.length;
-        selectedCommandIndex = 0;
-        paletteClosed = !selected.isDir;
-        draw();
-      }
-      return;
-    }
-
-    if (palette.length > 0 && trimmed === "/") {
-      if (activePalette.kind !== "command") {
-        draw();
-        return;
-      }
-      const selected = activePalette.items[clamp(selectedCommandIndex, 0, activePalette.items.length - 1)];
-      if (selected.requiresArgs) {
-        inputBuffer = selected.command;
-        inputCursor = inputBuffer.length;
-        selectedCommandIndex = 0;
-        paletteClosed = true;
-        historyCursor = undefined;
-        historyDraft = "";
-        draw();
-        return;
-      }
-      rememberHistory(selected.command);
-      resetInput();
-      const wasCommand = await handleCommand(selected.command);
-      draw();
-      if (!running || wasCommand) {
-        return;
-      }
-    }
-
-    resetInput();
-    draw();
-
-    if (!trimmed) {
-      return;
-    }
-
-    rememberHistory(submittedInput);
-    const wasCommand = await handleCommand(trimmed);
-    draw();
-    if (!running || wasCommand) {
-      return;
-    }
-
-    await handleUserTurn(trimmed);
+  const kbActions: KeyboardActions = {
+    draw,
+    clearHistorySearch,
+    findHistoryMatch,
+    submitInput,
+    getActivePalette,
+    getMentionContext,
   };
 
   const onKeypress = (str: string, key: readline.Key): void => {
-    if (!running) return;
-
-    const keyWithSequence = key as readline.Key & { sequence?: string };
-    const sequence = keyWithSequence.sequence ?? str;
-
-    if (sequence.includes("\x1b[<") || sequence.startsWith("\x1b[M")) {
-      suppressAnsiInputUntil = Date.now() + 250;
-      return;
-    }
-
-    // Mouse data also generates keypress events; suppress ANSI fragments for a short window.
-    if (Date.now() < suppressAnsiInputUntil && looksLikeAnsiNoise(str, key)) {
-      return;
-    }
-
-    // Ignore terminal mouse SGR sequences so they never leak into input text.
-    if (isMouseSgrSequence(str, key)) {
-      return;
-    }
-
-    if (key.ctrl && key.name === "c") {
-      if (historySearchMode) {
-        clearHistorySearch(true);
-        draw();
-        return;
-      }
-      running = false;
-      return;
-    }
-
-    if (key.ctrl && key.name === "r") {
-      if (inputHistory.length === 0) {
-        return;
-      }
-
-      if (!historySearchMode) {
-        historySearchSnapshot = { buffer: inputBuffer, cursor: inputCursor };
-        historySearchMode = true;
-        historySearchQuery = "";
-        historySearchIndex = undefined;
-      } else if (historySearchQuery.trim()) {
-        const start = historySearchIndex !== undefined ? historySearchIndex - 1 : inputHistory.length - 1;
-        historySearchIndex = findHistoryMatch(historySearchQuery, start);
-        if (historySearchIndex !== undefined) {
-          inputBuffer = inputHistory[historySearchIndex];
-          inputCursor = inputBuffer.length;
-        }
-      }
-
-      draw();
-      return;
-    }
-
-    if (historySearchMode) {
-      if (key.name === "return" || key.name === "enter") {
-        clearHistorySearch(false);
-        draw();
-        return;
-      }
-
-      if (key.name === "escape") {
-        clearHistorySearch(true);
-        draw();
-        return;
-      }
-
-      if (key.name === "backspace") {
-        if (historySearchQuery.length > 0) {
-          historySearchQuery = historySearchQuery.slice(0, -1);
-          historySearchIndex = findHistoryMatch(historySearchQuery);
-          if (historySearchIndex !== undefined) {
-            inputBuffer = inputHistory[historySearchIndex];
-            inputCursor = inputBuffer.length;
-          } else if (!historySearchQuery) {
-            inputBuffer = historySearchSnapshot.buffer;
-            inputCursor = historySearchSnapshot.cursor;
-          }
-        }
-        draw();
-        return;
-      }
-
-      if (str && !key.ctrl && !key.meta) {
-        historySearchQuery += str;
-        historySearchIndex = findHistoryMatch(historySearchQuery);
-        if (historySearchIndex !== undefined) {
-          inputBuffer = inputHistory[historySearchIndex];
-          inputCursor = inputBuffer.length;
-        }
-        draw();
-      }
-
-      return;
-    }
-
-    if (key.name === "return" || key.name === "enter") {
-      void submitInput();
-      return;
-    }
-
-    // Scroll keys work regardless of busy state.
-    // Ctrl+U = half page up, Ctrl+D = half page down (vim/less convention).
-    // Also support PageUp/PageDown and Shift+arrows as fallback.
-    if (key.name === "pageup" || (key.name === "up" && key.shift) || (key.ctrl && key.name === "u")) {
-      const rows = Math.max(12, process.stdout.rows || 24);
-      const pageSize = Math.max(1, Math.floor((rows - 4) / 2));
-      scrollOffset += pageSize;
-      draw();
-      return;
-    }
-
-    if (key.name === "pagedown" || (key.name === "down" && key.shift) || (key.ctrl && key.name === "d")) {
-      const rows = Math.max(12, process.stdout.rows || 24);
-      const pageSize = Math.max(1, Math.floor((rows - 4) / 2));
-      scrollOffset = Math.max(0, scrollOffset - pageSize);
-      draw();
-      return;
-    }
-
-    if (busy) {
-      return;
-    }
-
-    const activePalette = getActivePalette();
-    const palette = activePalette.items;
-
-    // Native-feeling behavior: if transcript is scrolled and input is idle,
-    // use Up/Down to continue scrolling results. At bottom, Up/Down returns to history/palette.
-    if (palette.length === 0 && inputBuffer.length === 0 && !historySearchMode) {
-      if (key.name === "up" && scrollOffset > 0) {
-        scrollOffset += 1;
-        draw();
-        return;
-      }
-      if (key.name === "down" && scrollOffset > 0) {
-        scrollOffset = Math.max(0, scrollOffset - 1);
-        draw();
-        return;
-      }
-    }
-
-    if (key.name === "up") {
-      if (historyCursor !== undefined) {
-        historyCursor = Math.max(0, historyCursor - 1);
-        inputBuffer = inputHistory[historyCursor];
-        inputCursor = inputBuffer.length;
-        selectedCommandIndex = 0;
-        paletteClosed = true;
-        draw();
-        return;
-      }
-
-      if (palette.length > 0) {
-        selectedCommandIndex = clamp(selectedCommandIndex - 1, 0, palette.length - 1);
-        draw();
-        return;
-      }
-
-      if (inputHistory.length === 0) {
-        return;
-      }
-      if (historyCursor === undefined) {
-        historyDraft = inputBuffer;
-        historyCursor = inputHistory.length - 1;
-      } else {
-        historyCursor = Math.max(0, historyCursor - 1);
-      }
-      inputBuffer = inputHistory[historyCursor];
-      inputCursor = inputBuffer.length;
-      selectedCommandIndex = 0;
-      paletteClosed = true;
-      draw();
-      return;
-    }
-
-    if (key.name === "down") {
-      if (historyCursor !== undefined) {
-        if (historyCursor < inputHistory.length - 1) {
-          historyCursor += 1;
-          inputBuffer = inputHistory[historyCursor];
-        } else {
-          historyCursor = undefined;
-          inputBuffer = historyDraft;
-          historyDraft = "";
-        }
-        inputCursor = inputBuffer.length;
-        selectedCommandIndex = 0;
-        paletteClosed = true;
-        draw();
-        return;
-      }
-
-      if (palette.length > 0) {
-        selectedCommandIndex = clamp(selectedCommandIndex + 1, 0, palette.length - 1);
-        draw();
-        return;
-      }
-
-      draw();
-      return;
-    }
-
-    if (palette.length > 0 && key.name === "tab") {
-      if (activePalette.kind === "mention") {
-        const selected = activePalette.items[clamp(selectedCommandIndex, 0, activePalette.items.length - 1)];
-        const mentionContext = getMentionContext();
-        if (!mentionContext) {
-          draw();
-          return;
-        }
-        const selectedText = `@${selected.value}`;
-        const trailing = inputBuffer.slice(mentionContext.end);
-        const needsSpace = !selected.isDir && (trailing.length === 0 || !/^\s/.test(trailing));
-        const suffix = needsSpace ? " " : "";
-        inputBuffer = `${inputBuffer.slice(0, mentionContext.start)}${selectedText}${suffix}${inputBuffer.slice(mentionContext.end)}`;
-        inputCursor = mentionContext.start + selectedText.length + suffix.length;
-        paletteClosed = !selected.isDir;
-      } else {
-        const selected = activePalette.items[clamp(selectedCommandIndex, 0, activePalette.items.length - 1)];
-        inputBuffer = selected.command;
-        inputCursor = inputBuffer.length;
-        paletteClosed = false;
-      }
-      selectedCommandIndex = 0;
-      draw();
-      return;
-    }
-
-    if (key.name === "left") {
-      inputCursor = Math.max(0, inputCursor - 1);
-      historyCursor = undefined;
-      historyDraft = "";
-      draw();
-      return;
-    }
-
-    if (key.name === "right") {
-      inputCursor = Math.min(inputBuffer.length, inputCursor + 1);
-      historyCursor = undefined;
-      historyDraft = "";
-      draw();
-      return;
-    }
-
-    if (key.name === "backspace") {
-      if (inputCursor > 0) {
-        inputBuffer = `${inputBuffer.slice(0, inputCursor - 1)}${inputBuffer.slice(inputCursor)}`;
-        inputCursor -= 1;
-        selectedCommandIndex = 0;
-        paletteClosed = false;
-        historyCursor = undefined;
-        historyDraft = "";
-      }
-      draw();
-      return;
-    }
-
-    if (key.name === "delete") {
-      if (inputCursor < inputBuffer.length) {
-        inputBuffer = `${inputBuffer.slice(0, inputCursor)}${inputBuffer.slice(inputCursor + 1)}`;
-        selectedCommandIndex = 0;
-        paletteClosed = false;
-        historyCursor = undefined;
-        historyDraft = "";
-      }
-      draw();
-      return;
-    }
-
-    if (key.name === "escape") {
-      selectedCommandIndex = 0;
-      paletteClosed = true;
-      draw();
-      return;
-    }
-
-    if (str && !key.ctrl && !key.meta) {
-      inputBuffer = `${inputBuffer.slice(0, inputCursor)}${str}${inputBuffer.slice(inputCursor)}`;
-      inputCursor += str.length;
-      selectedCommandIndex = 0;
-      paletteClosed = false;
-      historyCursor = undefined;
-      historyDraft = "";
-      draw();
-    }
+    KeyboardHandler.handleKeypress(str, key, state, kbActions);
   };
 
   const onResize = (): void => {
     draw();
   };
 
-  // SGR mouse protocol parser. We only care about wheel events:
-  // 64 = wheel up, 65 = wheel down.
   const onMouseData = (chunk: Buffer): void => {
     const data = chunk.toString("utf8");
     if (!data.includes("\x1b[<") && !data.includes("\x1b[M")) return;
 
-    // Prevent split ANSI fragments from being interpreted as typed text.
-    suppressAnsiInputUntil = Date.now() + 250;
-
+    state.suppressAnsiInputUntil = Date.now() + 250;
+    
+    // NOTE: Parse the SGR mouse data string to obtain action ID (e.g. 64/65 for wheel)
     const matches = data.matchAll(/\x1b\[<(\d+);(\d+);(\d+)([mM])/g);
     let changed = false;
 
@@ -1069,10 +295,10 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
       if (Number.isNaN(code)) continue;
 
       if (code === 64) {
-        scrollOffset += MOUSE_SCROLL_STEP;
+        state.scrollOffset += MOUSE_SCROLL_STEP;
         changed = true;
       } else if (code === 65) {
-        scrollOffset = Math.max(0, scrollOffset - MOUSE_SCROLL_STEP);
+        state.scrollOffset = Math.max(0, state.scrollOffset - MOUSE_SCROLL_STEP);
         changed = true;
       }
     }
@@ -1085,16 +311,16 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
   process.stdin.on("keypress", onKeypress);
   process.stdin.on("data", onMouseData);
   process.stdout.on("resize", onResize);
-  // Enable mouse reporting globally in alternate screen so wheel scrolling
-  // works without requiring click/focus in a specific area.
+
+  // NOTE: Enable mouse click (1000h) and SGR mouse reporting (1006h)
   process.stdout.write("\x1b[?1000h\x1b[?1006h");
-  process.stdout.write("\x1b[?1049h"); // enter alternate screen buffer
+  // NOTE: Enter alternate screen buffer (1049h)
+  process.stdout.write("\x1b[?1049h");
 
   pushTranscript(getWelcomeMessage(session.mode));
   draw();
 
-  while (running) {
-    // Keep loop alive while keypress handlers drive the UI.
+  while (state.running) {
     // eslint-disable-next-line no-await-in-loop
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
@@ -1103,9 +329,12 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
   process.stdin.off("keypress", onKeypress);
   process.stdin.off("data", onMouseData);
   process.stdout.off("resize", onResize);
+  
   if (process.stdin.isTTY) {
     process.stdin.setRawMode(false);
   }
-  process.stdout.write("\x1b[?1000l\x1b[?1006l"); // disable mouse reporting
-  process.stdout.write("\x1b[?1049l\x1b[?25h"); // exit alternate screen buffer, show cursor
+  // NOTE: Disable mouse click (1000l) and SGR mouse reporting (1006l)
+  process.stdout.write("\x1b[?1000l\x1b[?1006l");
+  // NOTE: Exit alternate screen buffer (1049l) and show cursor (?25h)
+  process.stdout.write("\x1b[?1049l\x1b[?25h");
 }
