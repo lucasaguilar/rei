@@ -20,7 +20,16 @@ export abstract class BaseOfficialProvider implements KnowledgeProvider {
     searchClient: WebSearchClient,
     summarize: SummarizeFunction
   ): Promise<KnowledgeChunk[]> {
-    const results = await searchClient.search(query, this.allowedDomains);
+    const q = query.toLowerCase();
+    const matchedKeywords = this.triggerKeywords.filter((kw) => {
+      const regex = new RegExp(`\\b${kw.toLowerCase()}\\b`, "i");
+      return regex.test(q) || q.includes(kw.toLowerCase());
+    });
+    
+    // We only send the matched technical terms to the search engine.
+    // Sending the user's full natural language sentence (especially in Spanish) guarantees 0 matches on DuckDuckGo.
+    const optimizedQuery = matchedKeywords.slice(0, 3).join(" ");
+    const results = await searchClient.search(optimizedQuery, this.allowedDomains);
     if (!results || results.length === 0) return [];
 
     // Focus on the absolute best result (top 2)

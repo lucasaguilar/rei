@@ -1,4 +1,5 @@
 import * as https from "https";
+import * as fs from "fs";
 import { SearchResult, WebSearchClient } from "../types.js";
 
 /**
@@ -68,7 +69,10 @@ export class DuckDuckGoLiteClient implements WebSearchClient {
             data += chunk;
           });
 
-          res.on("end", () => resolve(data));
+          res.on("end", () => {
+            try { fs.writeFileSync(".rei-debug.html", data); } catch(e){}
+            resolve(data);
+          });
         }
       );
 

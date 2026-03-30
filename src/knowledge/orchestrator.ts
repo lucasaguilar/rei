@@ -1,5 +1,8 @@
+import * as fs from "fs";
+import * as path from "path";
 import { KnowledgeChunk, KnowledgeProvider, WebSearchClient } from "./types.js";
 import { AngularOfficialProvider } from "./providers/angular-official.js";
+import { IonicOfficialProvider } from "./providers/ionic-official.js";
 import { SpringOfficialProvider } from "./providers/spring-official.js";
 import { TypeScriptOfficialProvider } from "./providers/typescript-official.js";
 import { NodeOfficialProvider } from "./providers/node-official.js";
@@ -10,6 +13,7 @@ import { ModelProvider } from "../providers/model-provider.js";
 export class KnowledgeOrchestrator {
   private providers: KnowledgeProvider[] = [
     new AngularOfficialProvider(),
+    new IonicOfficialProvider(),
     new SpringOfficialProvider(),
     new TypeScriptOfficialProvider(),
     new NodeOfficialProvider(),
@@ -55,7 +59,10 @@ export class KnowledgeOrchestrator {
 
         allChunks.push(...validChunks);
       } catch (err) {
-        // Silently ignore to avoid breaking CLI layout
+        fs.appendFileSync(
+          path.join(process.cwd(), ".rei-debug.log"),
+          `[${new Date().toISOString()}] Provider ${provider.name} error: ${err}\n`
+        );
       }
     }
 
