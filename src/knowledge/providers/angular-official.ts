@@ -5,8 +5,11 @@ export class AngularOfficialProvider extends BaseOfficialProvider {
   
   protected triggerKeywords = [
     "angular",
+    "angular material",
+    "mat-",
     "ngrx",
     "signal store",
+    "signalstore",
     "signals",
     "standalone component",
     "rxjs",
@@ -15,5 +18,5 @@ export class AngularOfficialProvider extends BaseOfficialProvider {
     "inject"
   ];
 
-  protected allowedDomains = ["angular.dev", "ngrx.io", "rxjs.dev"];
+  protected allowedDomains = ["angular.dev", "ngrx.io", "rxjs.dev", "material.angular.dev"];
 }
