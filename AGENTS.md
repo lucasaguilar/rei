@@ -25,17 +25,16 @@ eventually execute changes to their repositories.
 
 ---
 
-## Preview-First Approach
+## Execution & Validation Approach
 
-REI currently operates in a **preview-first** mode. This means:
+REI operates as an **execution-capable** agent with strict verification gates. This means:
 
-- REI can read and analyze repository files.
-- REI can explain, plan, and reason about code changes.
-- REI does **not** write, patch, or modify files yet.
+- REI can read, analyze, and map the semantic relationships of repository files using an AST dependency graph.
+- REI can explain, plan, and propose concrete code changes.
+- REI **validates patches in memory** via a semantic Critic Loop before presenting them.
+- Patches are safely queued and are **only applied** to the filesystem after explicit user confirmation (`/confirm`).
 
-This constraint is intentional. The goal is to build confidence and accuracy in context reasoning
-before enabling write operations. Future versions will introduce controlled file modification with
-explicit user confirmation.
+This constraint is intentional. The goal is to provide autonomous code generation that strictly adheres to the existing architecture while putting the highest authority (file modification) squarely in the developer's hands.
 
 ---
 
@@ -53,8 +52,8 @@ proposed changes. Do not simulate execution or modify files.
 
 ### agent
 Operate as an execution-oriented coding agent when the task requires repository work. Identify
-relevant files, describe applicable actions (inspect, modify, validate), and propose a concrete
-next-step plan. Still operates in preview-first mode — no actual file writes yet.
+relevant files, extract AST dependencies, describe applicable actions, and propose concrete
+patches. The agent internally validates patches via the Critic Loop and drops them into a pending queue.
 
 In agent mode, responses must conform to a strict JSON contract (see
 `src/contracts/agent-response.types.ts`) so that the CLI and future tooling can parse and act on

@@ -21,13 +21,17 @@ export async function extractAstDependencies(
   const project = new Project({
     tsConfigFilePath: fs.existsSync(tsconfigPath) ? tsconfigPath : undefined,
     skipAddingFilesFromTsConfig: true,
+    compilerOptions: {
+      allowJs: true,
+    },
   });
 
   const scrapedDependencies = new Set<string>();
   const outputLines: string[] = [];
 
   for (const relPath of filePaths) {
-    if (!relPath.endsWith(".ts") && !relPath.endsWith(".tsx")) continue;
+    const ext = relPath.split(".").pop()?.toLowerCase();
+    if (ext !== "ts" && ext !== "tsx" && ext !== "js" && ext !== "jsx") continue;
 
     const absPath = path.resolve(workspacePath, relPath);
     if (!fs.existsSync(absPath)) continue;

@@ -58,9 +58,10 @@ Implemented in src/tools/patch-validator.ts:
 
 Validation stages:
 
-1. Semantic validation checks diff structure, hunks, and conflict markers.
+1. Diff structure validation checks hunks, line counts, and conflict markers.
 2. Security validation checks the target file against workspace policy.
-3. Git applicability runs git apply --check without writing to disk.
+3. Git applicability runs `git apply --check` without writing to disk.
+4. AST Compilation Guard (TS/JS ONLY) runs `ts-morph` pre-emit diagnostics on the proposed patch to catch logic and type errors before queuing.
 
 Only patches that pass all stages can enter the pending queue.
 
@@ -145,9 +146,9 @@ User message
 For change-planning tasks, Phase 2.5 in the runtime effectively sits between context resolution and the final answer:
 
 - patch normalization
-- semantic validation
-- security validation
+- diff structure and security validation
 - git apply --check
+- AST compilation guard and Critic Loop (TS/JS ONLY)
 - retry / synthesis when possible
 
 ---
@@ -212,7 +213,8 @@ Step 3 - Patch Normalization / Generation
 
 Step 4 - Patch Validation / Recovery
   validatePatchSemantics() + validatePatchWithGit()
-  Retry repairable failures through the critic loop
+  validateWithAstGuard() via ts-morph (TS/JS only)
+  Retry repairable structural and compiler failures through the Critic Loop
   Queue valid proposals on Agent.pendingProposedPatches
 
   ↓ after /confirm
