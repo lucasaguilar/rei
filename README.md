@@ -3,6 +3,22 @@
 REI is a repository-aware AI CLI built with TypeScript and Node.js.
 It supports question answering, planning, and an agent-style workflow with a full-screen interactive terminal UI, contextual file mentions, and a validated patch queue.
 
+## 🌟 Why REI? (Unique Value Proposition)
+
+While commercial giants like Cursor and GitHub Copilot dominate the cloud IDE space, REI takes a radically different "Sniper" approach tailored for the terminal:
+
+- **100% Local & Privacy-First**: No more sending sensitive proprietary code to commercial APIs if you don't want to. REI is designed to run locally using `Ollama` (DeepSeek, Llama 3, Qwen) or any proxy. Your codebase never leaves your firewall.
+- **Editor Agnostic**: It lives in the terminal. No need to migrate from WebStorm, Android Studio, Vim, or Emacs to a VSCode fork. REI operates directly on your filesystem.
+- **AST Semantic Graphing**: Like Copilot's Language Server, REI uses `ts-morph` to automatically extract the `.d.ts`-style signatures of your codebase's dependencies in ~50ms and inject them into the LLM's prompt. This gives smaller local models the structural context to perform like GPT-4o!
+- **The AST Critic Loop (Auto-Healing)**: REI doesn't just auto-complete broken code. Our internal AST compiler validates LLM-generated patches in memory. If the model hallucinates a broken TypeScript method, REI secretly feeds the compiler error back to the LLM and forces it to self-correct *before* showing you the code.
+- **Absolute Transparency**: Unlike black-box commercial tools, REI logs its entire internal thought process, chunk resolutions, and "hidden prompts" to an append-only `.rei/logs/agent-flow.jsonl` file.
+
+## 🎯 Target Audience
+
+- **Privacy-Constrained Enterprises**: Fintech, Defense, Healthcare, and Cybersecurity teams that are legally blacklisted from using Copilot/Cursor due to IP leakage.
+- **Unix-Philosophy Developers**: Power users who live in tmux, Vim, and the CLI and refuse bloated GUI IDEs.
+- **Local AI Hackers**: Enthusiasts looking to connect their local LLM workflows to their existing repositories efficiently.
+
 ## Install
 
 ```bash

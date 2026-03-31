@@ -53,11 +53,7 @@ export class InputHandler {
       return;
     }
 
-    if (palette.length > 0 && trimmed === "/") {
-      if (activePalette.kind !== "command") {
-        actions.draw();
-        return;
-      }
+    if (palette.length > 0 && activePalette.kind === "command") {
       const selected = activePalette.items[clamp(state.selectedCommandIndex, 0, activePalette.items.length - 1)];
       if (selected.requiresArgs) {
         state.inputBuffer = selected.command;
@@ -71,6 +67,7 @@ export class InputHandler {
       }
       actions.rememberHistory(selected.command);
       actions.resetInput();
+      state.paletteClosed = true;
       const wasCommand = await InputHandler.handleCommand(selected.command, ctx);
       actions.draw();
       if (!state.running || wasCommand) {
