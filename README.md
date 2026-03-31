@@ -266,16 +266,21 @@ Guardrails applied before any file is injected:
 
 Resolved content is appended to the last user message as additional context.
 
-### Phase 2.5: patch validation and recovery
-
+### Phase 2.5: git applicability and validation
 For `change-planning` tasks, REI validates model-proposed patches before they are shown as actionable:
 
 - normalize and canonicalize paths/headers
-- validate semantics + security + `git apply --check`
-- retry invalid patches through a critic loop
-- if needed, synthesize search/replace edits from visible context and convert them into unified diffs
+- validate semantics + security
+- `git apply --check` test in memory
 
-Only valid patches are queued for `/pending` and `/confirm`.
+### Phase 2.6: AST Compiler Guard (The Critic Loop)
+If the patch targets TypeScript files (`.ts`, `.tsx`) and passes Git validation, REI invokes an **in-memory TypeScript Compiler (`ts-morph`)**:
+1. It copies the file to a `.tmp` location and applies the patch locally.
+2. It evaluates `getPreEmitDiagnostics()` on the patched file.
+3. If TypeScript throws an error (e.g. `TS2339: Property 'patatita' does not exist`), the patch is marked as `AST_VALIDATION_FAILED`.
+4. **Critic Loop**: REI secretly opens a background chat with the LLM, feeds it the compiler error, and demands a corrected patch via search & replace logic. It retries up to 2 times. If the LLM cannot fix the semantic error, the patch is permanently rejected, saving the user from a broken workspace.
+
+Only patches that pass all validation stages (including AST) are queued for `/pending` and `/confirm`.
 
 ---
 
@@ -432,8 +437,28 @@ Near-term priorities:
 2. make `@` mentions first-class context pins (not only keyword hints)
 3. add richer patch diagnostics/fix suggestions when validation fails
 
-## Type check
+## Diagnostic Traceability (Logging)
 
+REI records every turn's internal operations to a zero-dependency append-only JSON Lines file located at `.rei/logs/agent-flow.jsonl`. 
+Because Agent Mode has internal hidden loops (Phase 1 Decision, Phase 2.6 Critic Loop), this log is vital for transparency. It records:
+- The exact raw output from the LLM before JSON parsing.
+- The external URLs scraped by the Knowledge Orchestrator.
+- The exact raw strings of patches.
+- The TypeScript Compiler errors caught during the AST Guard phase.
+
+## Testing
+
+REI uses **Vitest** for extreme execution speed and ESM compatibility. 
+
+To run the unit test suites:
+```bash
+npm run test
+```
+To run in watch mode:
+```bash
+npm run test:watch
+```
+To trigger a full TypeScript type check without emitting:
 ```bash
 npm run check
 ```

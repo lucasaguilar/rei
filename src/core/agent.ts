@@ -9,6 +9,7 @@ import { applyPatchBatch, runWorkspaceTypecheck, type BatchPatchApplyResult } fr
 import { validatePatchProposal } from "../tools/patch-validator.js";
 import type { AgentProposedPatch } from "../contracts/agent-decision.types.js";
 import { KnowledgeOrchestrator } from "../knowledge/orchestrator.js";
+import { AgentLogger } from "./logger.js";
 
 const SCAN_CACHE_TTL_MS = 30_000;
 
@@ -39,12 +40,14 @@ export class Agent {
   };
   private pendingProposedPatches: AgentProposedPatch[] = [];
   private knowledgeOrchestrator: KnowledgeOrchestrator;
+  public logger: AgentLogger;
 
   constructor(
     private readonly provider: ModelProvider,
     private readonly workspacePath: string = process.cwd()
   ) { 
     this.knowledgeOrchestrator = new KnowledgeOrchestrator(this.provider);
+    this.logger = new AgentLogger(workspacePath);
   }
 
   async run(prompt: string): Promise<string> {
@@ -114,6 +117,7 @@ export class Agent {
   }
 
   async runTurn(session: ChatSession, userInput: string): Promise<string> {
+    this.logger.startTurn();
     const systemContent = buildSystemMessage(session.mode);
 
     // Keep the system message at position 0 reflecting the current mode.
@@ -148,6 +152,7 @@ export class Agent {
     userInput: string,
     options?: StreamTurnOptions
   ): AsyncIterable<string> {
+    this.logger.startTurn();
     options?.onStatus?.("building_context");
     const systemContent = buildSystemMessage(session.mode);
 
@@ -179,6 +184,7 @@ export class Agent {
         messagesForModel,
         workspacePath: this.workspacePath,
         scannedFiles: this.getWorkspaceFiles(),
+        logger: this.logger,
       });
 
       options?.onStatus?.("producing_response");
@@ -283,6 +289,7 @@ export class Agent {
       messagesForModel,
       workspacePath: this.workspacePath,
       scannedFiles: this.getWorkspaceFiles(),
+      logger: this.logger,
     }).then((outcome) => {
       if (outcome.validProposedPatches && outcome.validProposedPatches.length > 0) {
         this.pendingProposedPatches = [
