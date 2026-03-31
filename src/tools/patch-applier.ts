@@ -36,8 +36,13 @@ export interface BatchPatchApplyResult {
 
 export async function runWorkspaceTypecheck(workspacePath: string): Promise<{ ok: boolean; stdout: string; stderr: string }> {
   try {
+    const cleanEnv = { ...process.env };
+    delete cleanEnv.NODE_OPTIONS;
+    delete cleanEnv.VSCODE_INSPECTOR_OPTIONS;
+
     const { stdout, stderr } = await execFileAsync("npm", ["run", "check"], {
       cwd: workspacePath,
+      env: cleanEnv,
     });
     return { ok: true, stdout, stderr };
   } catch (error) {

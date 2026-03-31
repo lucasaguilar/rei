@@ -18,14 +18,18 @@ import {
   type PatchValidationIssue,
 } from "../tools/patch-validator.js";
 import { extractFileFromPatch, generateUnifiedDiff } from "../tools/patch-generator.js";
+import { validatePatchAst } from "../tools/ast-validator.js";
+import { extractAstDependencies } from "../context/ast-context.js";
+import type { AgentLogger } from "../core/logger.js";
 
 const DECISION_RETRIES = 2;
 const PATCH_CRITIC_RETRIES = 2;
-const RETRYABLE_PATCH_CODES = new Set<PatchValidationIssue["code"]>([
+const RETRYABLE_PATCH_CODES = new Set<string>([
   "GIT_APPLY_CHECK_FAILED",
   "INVALID_PATCH_HEADERS",
   "MISSING_HUNKS",
   "TARGET_FILE_MISMATCH",
+  "AST_VALIDATION_FAILED",
 ]);
 const CHANGE_INTENT_PATTERN =
   /\b(add|change|modify|update|fix|implement|create|remove|delete|refactor|write|insert|patch|comment|disable|rename|cleanup|agreg\w*|cambi\w*|modific\w*|actualiz\w*|arregl\w*|implement\w*|cre\w*|elimin\w*|borr\w*|coment\w*|deshabilit\w*|renombr\w*|refactoriz\w*|reescrib\w*)\b/;
@@ -49,16 +53,23 @@ export async function prepareAgentContext(params: {
   messagesForModel: ChatSession["messages"];
   workspacePath: string;
   scannedFiles: FileMeta[];
+  logger: AgentLogger;
 }): Promise<AgentContextPrelude> {
-  const { provider, messagesForModel, workspacePath, scannedFiles } = params;
+  const { provider, messagesForModel, workspacePath, scannedFiles, logger } = params;
   const lastUserMessage = [...messagesForModel].reverse().find((m) => m.role === "user");
   const currentTask = extractCurrentTask(lastUserMessage?.content ?? "");
 
   // --- Phase 1: Context Decision ---
-  const decision = await runDecisionPhase(provider, messagesForModel);
+  const decision = await runDecisionPhase(provider, messagesForModel, logger);
 
   // --- Phase 2: Context Resolution ---
   let answerMessages = messagesForModel;
+  const resolvedFiles = new Set<string>();
+
+  // Any files already embedded in the prompt context from Phase 0
+  const providedPaths = extractProvidedContextPaths(lastUserMessage?.content ?? "");
+  for (const p of providedPaths) resolvedFiles.add(p);
+
   if (decision.contextRequests.length > 0) {
     const alreadyResolved = new Set<string>();
     const { contextMessage, resolved } = await resolveContextRequests(
@@ -69,6 +80,25 @@ export async function prepareAgentContext(params: {
     );
     if (resolved.length > 0 && contextMessage) {
       answerMessages = appendContextToLastUserMessage(messagesForModel, contextMessage);
+      for (const p of resolved) resolvedFiles.add(p);
+    }
+  }
+
+  // --- Phase 2.1: Semantic AST Extraction (Graphing dependencies) ---
+  const uniqueFilesToScrape = Array.from(resolvedFiles);
+  if (uniqueFilesToScrape.length > 0) {
+    const astContext = await extractAstDependencies(workspacePath, uniqueFilesToScrape);
+    if (astContext.text) {
+      logger.logAstContext(astContext.filesScraped, astContext.dependenciesFound, astContext.text.length);
+      const astMessage = [
+        "### AST Dependency Graph",
+        "These are the exact skeletal signatures of the workspace dependencies imported by the files in your context.",
+        "Always use these actual valid signatures when calling imported methods or creating objects.",
+        "```typescript",
+        astContext.text,
+        "```"
+      ].join("\n");
+      answerMessages = appendContextToLastUserMessage(answerMessages, astMessage);
     }
   }
 
@@ -77,7 +107,8 @@ export async function prepareAgentContext(params: {
     decision,
     workspacePath,
     scannedFiles,
-    currentTask
+    currentTask,
+    logger
   );
 
   // 2.5.a: Critic loop — intenta corregir patches inválidos con códigos reintentables
@@ -87,7 +118,8 @@ export async function prepareAgentContext(params: {
       answerMessages,
       workspacePath,
       scannedFiles,
-      patchValidation
+      patchValidation,
+      logger
     );
   }
 
@@ -99,7 +131,8 @@ export async function prepareAgentContext(params: {
         { ...decision, proposedPatches: synthesized },
         workspacePath,
         scannedFiles,
-        currentTask
+        currentTask,
+        logger
       );
 
       // Run critic loop on synthesized patches that failed validation
@@ -109,7 +142,8 @@ export async function prepareAgentContext(params: {
           answerMessages,
           workspacePath,
           scannedFiles,
-          synthesizedValidation
+          synthesizedValidation,
+          logger
         );
       }
 
@@ -143,10 +177,11 @@ export async function generateAgentModeResponse(params: {
   messagesForModel: ChatSession["messages"];
   workspacePath: string;
   scannedFiles: FileMeta[];
+  logger: AgentLogger;
 }): Promise<AgentModeOutcome> {
-  const { provider, messagesForModel, workspacePath, scannedFiles } = params;
+  const { provider, messagesForModel, workspacePath, scannedFiles, logger } = params;
 
-  const prelude = await prepareAgentContext({ provider, messagesForModel, workspacePath, scannedFiles });
+  const prelude = await prepareAgentContext({ provider, messagesForModel, workspacePath, scannedFiles, logger });
   const answer = await provider.completeChat(prelude.answerMessages);
   return buildAgentFinalResponse(answer, prelude);
 }
@@ -155,7 +190,8 @@ export async function generateAgentModeResponse(params: {
 
 async function runDecisionPhase(
   provider: ModelProvider,
-  messagesForModel: ChatSession["messages"]
+  messagesForModel: ChatSession["messages"],
+  logger: AgentLogger
 ): Promise<AgentDecision> {
   const lastUserMessage = [...messagesForModel].reverse().find((m) => m.role === "user");
   const lastUserContent = lastUserMessage?.content ?? "";
@@ -173,6 +209,7 @@ async function runDecisionPhase(
   for (let attempt = 0; attempt <= DECISION_RETRIES; attempt += 1) {
     try {
       const parsed = parseDecisionWithRecovery(raw);
+      logger.logDecision(raw, parsed);
       const decision = normalizeDecision(parsed, currentTask, explicitTaskPaths, providedContextPaths);
 
       if (
@@ -308,7 +345,8 @@ async function validateDecisionProposedPatches(
   decision: AgentDecision,
   workspacePath: string,
   scannedFiles: FileMeta[],
-  currentTask: string
+  currentTask: string,
+  logger: AgentLogger
 ): Promise<Array<{ proposal: AgentProposedPatch; validation: PatchProposalValidationResult }>> {
   const proposals = expandPatchProposals(decision.proposedPatches ?? []);
   const results: Array<{ proposal: AgentProposedPatch; validation: PatchProposalValidationResult }> = [];
@@ -345,7 +383,8 @@ async function validateDecisionProposedPatches(
       file: canonicalFile,
       patch: normalizePatch(proposal.patch, canonicalFile),
     };
-    const validation = await validatePatchProposal(canonicalProposal, workspacePath);
+    logger.logPatchProposal(canonicalFile, canonicalProposal.patch);
+    const validation = await validateWithAstGuard(canonicalProposal, workspacePath, logger);
     results.push({ proposal: canonicalProposal, validation });
   }
 
@@ -830,7 +869,8 @@ async function runPatchCriticLoop(
   messagesForModel: ChatSession["messages"],
   workspacePath: string,
   scannedFiles: FileMeta[],
-  patchValidation: Array<{ proposal: AgentProposedPatch; validation: PatchProposalValidationResult }>
+  patchValidation: Array<{ proposal: AgentProposedPatch; validation: PatchProposalValidationResult }>,
+  logger: AgentLogger
 ): Promise<Array<{ proposal: AgentProposedPatch; validation: PatchProposalValidationResult }>> {
   const result = [...patchValidation];
 
@@ -898,25 +938,29 @@ async function runPatchCriticLoop(
 
         const patches = await buildPatchesFromEdits(edits, workspacePath);
         if (patches.length > 0) {
-          const validation = await validatePatchProposal(patches[0], workspacePath);
+          const validation = await validateWithAstGuard(patches[0], workspacePath, logger);
           if (validation.valid) {
             result[i] = { proposal: patches[0], validation };
             break;
+          } else {
+            // Push the retryable errors up immediately so next attempt sees them
+            item.validation = validation;
           }
         }
       }
 
-      // Fallback: if the model returned a raw patch instead
       if (typeof parsed.patch === "string") {
         const corrected: AgentProposedPatch = {
           file,
           patch: normalizePatch(parsed.patch as string, file),
           description,
         };
-        const validation = await validatePatchProposal(corrected, workspacePath);
+        const validation = await validateWithAstGuard(corrected, workspacePath, logger);
         if (validation.valid) {
           result[i] = { proposal: corrected, validation };
           break;
+        } else {
+           item.validation = validation;
         }
       }
 
@@ -937,4 +981,22 @@ async function runPatchCriticLoop(
   }
 
   return result;
+}
+
+async function validateWithAstGuard(proposal: AgentProposedPatch, workspacePath: string, logger?: AgentLogger): Promise<PatchProposalValidationResult> {
+  const validation = await validatePatchProposal(proposal, workspacePath);
+  
+  if (validation.valid && (proposal.file.endsWith(".ts") || proposal.file.endsWith(".tsx"))) {
+    const astResult = await validatePatchAst(proposal.patch, proposal.file, workspacePath);
+    if (!astResult.valid) {
+      validation.valid = false;
+      validation.issues.push({
+        code: "AST_VALIDATION_FAILED" as any,
+        message: `TypeScript Compiler validation failed:\n${astResult.errors.join("\n")}`
+      });
+      logger?.logCriticLoop(proposal.file, astResult.errors);
+    }
+  }
+  
+  return validation;
 }

@@ -5,19 +5,23 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/main.ts",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "diff": "^8.0.4",
     "jsonrepair": "^3.13.3",
     "marked": "^15.0.12",
     "marked-terminal": "^7.3.0",
+    "ts-morph": "^27.0.2",
     "tsx": "^4.19.2",
     "wrap-ansi": "^9.0.2"
   },
   "devDependencies": {
     "@types/marked-terminal": "^6.1.1",
     "@types/node": "^25.5.0",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^4.1.2"
   }
 }

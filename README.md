@@ -3,6 +3,22 @@
 REI is a repository-aware AI CLI built with TypeScript and Node.js.
 It supports question answering, planning, and an agent-style workflow with a full-screen interactive terminal UI, contextual file mentions, and a validated patch queue.
 
+## 🌟 Why REI? (Unique Value Proposition)
+
+While commercial giants like Cursor and GitHub Copilot dominate the cloud IDE space, REI takes a radically different "Sniper" approach tailored for the terminal:
+
+- **100% Local & Privacy-First**: No more sending sensitive proprietary code to commercial APIs if you don't want to. REI is designed to run locally using `Ollama` (DeepSeek, Llama 3, Qwen) or any proxy. Your codebase never leaves your firewall.
+- **Editor Agnostic**: It lives in the terminal. No need to migrate from WebStorm, Android Studio, Vim, or Emacs to a VSCode fork. REI operates directly on your filesystem.
+- **AST Semantic Graphing**: Like Copilot's Language Server, REI uses `ts-morph` to automatically extract the `.d.ts`-style signatures of your codebase's dependencies in ~50ms and inject them into the LLM's prompt. This gives smaller local models the structural context to perform like GPT-4o!
+- **The AST Critic Loop (Auto-Healing)**: REI doesn't just auto-complete broken code. Our internal AST compiler validates LLM-generated patches in memory. If the model hallucinates a broken TypeScript method, REI secretly feeds the compiler error back to the LLM and forces it to self-correct *before* showing you the code.
+- **Absolute Transparency**: Unlike black-box commercial tools, REI logs its entire internal thought process, chunk resolutions, and "hidden prompts" to an append-only `.rei/logs/agent-flow.jsonl` file.
+
+## 🎯 Target Audience
+
+- **Privacy-Constrained Enterprises**: Fintech, Defense, Healthcare, and Cybersecurity teams that are legally blacklisted from using Copilot/Cursor due to IP leakage.
+- **Unix-Philosophy Developers**: Power users who live in tmux, Vim, and the CLI and refuse bloated GUI IDEs.
+- **Local AI Hackers**: Enthusiasts looking to connect their local LLM workflows to their existing repositories efficiently.
+
 ## Install
 
 ```bash
@@ -266,16 +282,21 @@ Guardrails applied before any file is injected:
 
 Resolved content is appended to the last user message as additional context.
 
-### Phase 2.5: patch validation and recovery
-
+### Phase 2.5: git applicability and validation
 For `change-planning` tasks, REI validates model-proposed patches before they are shown as actionable:
 
 - normalize and canonicalize paths/headers
-- validate semantics + security + `git apply --check`
-- retry invalid patches through a critic loop
-- if needed, synthesize search/replace edits from visible context and convert them into unified diffs
+- validate semantics + security
+- `git apply --check` test in memory
 
-Only valid patches are queued for `/pending` and `/confirm`.
+### Phase 2.6: AST Compiler Guard (The Critic Loop)
+If the patch targets TypeScript files (`.ts`, `.tsx`) and passes Git validation, REI invokes an **in-memory TypeScript Compiler (`ts-morph`)**:
+1. It copies the file to a `.tmp` location and applies the patch locally.
+2. It evaluates `getPreEmitDiagnostics()` on the patched file.
+3. If TypeScript throws an error (e.g. `TS2339: Property 'patatita' does not exist`), the patch is marked as `AST_VALIDATION_FAILED`.
+4. **Critic Loop**: REI secretly opens a background chat with the LLM, feeds it the compiler error, and demands a corrected patch via search & replace logic. It retries up to 2 times. If the LLM cannot fix the semantic error, the patch is permanently rejected, saving the user from a broken workspace.
+
+Only patches that pass all validation stages (including AST) are queued for `/pending` and `/confirm`.
 
 ---
 
@@ -432,8 +453,28 @@ Near-term priorities:
 2. make `@` mentions first-class context pins (not only keyword hints)
 3. add richer patch diagnostics/fix suggestions when validation fails
 
-## Type check
+## Diagnostic Traceability (Logging)
 
+REI records every turn's internal operations to a zero-dependency append-only JSON Lines file located at `.rei/logs/agent-flow.jsonl`. 
+Because Agent Mode has internal hidden loops (Phase 1 Decision, Phase 2.6 Critic Loop), this log is vital for transparency. It records:
+- The exact raw output from the LLM before JSON parsing.
+- The external URLs scraped by the Knowledge Orchestrator.
+- The exact raw strings of patches.
+- The TypeScript Compiler errors caught during the AST Guard phase.
+
+## Testing
+
+REI uses **Vitest** for extreme execution speed and ESM compatibility. 
+
+To run the unit test suites:
+```bash
+npm run test
+```
+To run in watch mode:
+```bash
+npm run test:watch
+```
+To trigger a full TypeScript type check without emitting:
 ```bash
 npm run check
 ```
