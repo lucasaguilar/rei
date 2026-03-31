@@ -168,7 +168,7 @@ flowchart TD
   U --> V["Phase 1:<br/>AgentDecisionSystemMessage"]
   V --> VA["shared/base +<br/>modes/agent-decision"]
   VA --> Y["⚙️ Decision JSON<br/>taskType, contextRequests,<br/>proposedPatches?"]
-  Y --> Z["Phase 2 & 2.5:<br/>Context resolution<br/>+ patch validation"]
+  Y --> Z["Phase 2 & 2.5:<br/>Context resolution<br/>+ AST Semantics Extraction<br/>+ Git & Syntax validation<br/>+ AST Critic Loop (TS/JS)"]
   Z --> AA["Phase 3:<br/>buildSystemMessage agent"]
   AA --> AAA["shared/base +<br/>response-rules +<br/>modes/agent-answer"]
   AAA --> AE["🤖 provider<br/>stream/complete"]

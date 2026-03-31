@@ -1,7 +1,7 @@
 # rei
 
-REI is a repository-aware AI CLI built with TypeScript and Node.js.
-It supports question answering, planning, and an agent-style workflow with a full-screen interactive terminal UI, contextual file mentions, and a validated patch queue.
+**REI** is a next-generation, compiler-aware AI Coding Agent built directly for the terminal. 
+Engineered for privacy, precision, and local-first execution via `Ollama`, REI transcends basic text completion: it leverages an injected **AST Semantic Context Graph** to comprehend your codebase architecture, and an automated **Critic Loop** to natively compile and self-correct validation errors *before* delivering flawless patches to your repository.
 
 ## 🌟 Why REI? (Unique Value Proposition)
 
@@ -18,6 +18,14 @@ While commercial giants like Cursor and GitHub Copilot dominate the cloud IDE sp
 - **Privacy-Constrained Enterprises**: Fintech, Defense, Healthcare, and Cybersecurity teams that are legally blacklisted from using Copilot/Cursor due to IP leakage.
 - **Unix-Philosophy Developers**: Power users who live in tmux, Vim, and the CLI and refuse bloated GUI IDEs.
 - **Local AI Hackers**: Enthusiasts looking to connect their local LLM workflows to their existing repositories efficiently.
+
+## 🌍 Supported Languages & Polyglot Architecture
+
+REI is designed with an elegant degradation architecture. This means it can operate on **any codebase today**, while providing "God Mode" powers to its primary ecosystem:
+
+- **👑 Tier 1: TypeScript & JavaScript (God Mode)**: Full AST Semantic Extraction and Critic Loop Auto-Healing natively using `ts-morph`. The LLM receives strict structural blueprints, and REI compiles the LLM's patches in memory strictly checking for semantic errors before showing you the code.
+- **🛠 Tier 2: Python, Go, Java, Rust, PHP, etc. (Standard Mode)**: REI natively indexes all files in your workspace, searching for keywords and context. It behaves exactly like standard Copilot CLI agents, proposing patches based on pure text/prompt understanding.
+- **🚀 The v2.0 Roadmap (Universal AST)**: REI's architecture is strictly modular. The next step to making REI the ultimate polyglot expert involves integrating `Tree-Sitter` for universal AST skeleton extraction, and orchestrating native Language Servers (e.g., `mypy`, `go build`, `cargo check`) to execute semantic Critic Loops across all major programming languages!
 
 ## Install
 

@@ -985,16 +985,18 @@ async function runPatchCriticLoop(
 
 async function validateWithAstGuard(proposal: AgentProposedPatch, workspacePath: string, logger?: AgentLogger): Promise<PatchProposalValidationResult> {
   const validation = await validatePatchProposal(proposal, workspacePath);
-  
-  if (validation.valid && (proposal.file.endsWith(".ts") || proposal.file.endsWith(".tsx"))) {
-    const astResult = await validatePatchAst(proposal.patch, proposal.file, workspacePath);
-    if (!astResult.valid) {
-      validation.valid = false;
-      validation.issues.push({
-        code: "AST_VALIDATION_FAILED" as any,
-        message: `TypeScript Compiler validation failed:\n${astResult.errors.join("\n")}`
-      });
-      logger?.logCriticLoop(proposal.file, astResult.errors);
+  if (validation.valid) {
+    const ext = proposal.file.split(".").pop()?.toLowerCase();
+    if (ext === "ts" || ext === "tsx" || ext === "js" || ext === "jsx") {
+      const astResult = await validatePatchAst(proposal.patch, proposal.file, workspacePath);
+      if (!astResult.valid) {
+        validation.valid = false;
+        validation.issues.push({
+          code: "AST_VALIDATION_FAILED" as any,
+          message: `Compiler validation failed:\n${astResult.errors.join("\n")}`
+        });
+        logger?.logCriticLoop(proposal.file, astResult.errors);
+      }
     }
   }
   

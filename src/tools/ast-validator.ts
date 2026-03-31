@@ -47,6 +47,10 @@ export async function validatePatchAst(
     const project = new Project({
       tsConfigFilePath: fs.existsSync(tsconfigPath) ? tsconfigPath : undefined,
       skipAddingFilesFromTsConfig: true,
+      compilerOptions: {
+        allowJs: true,
+        checkJs: true,
+      },
     });
 
     const sourceFile = project.addSourceFileAtPath(fullTargetPath);
