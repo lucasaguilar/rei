@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>REI Debug Viewer</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --yellow: #d29922;
+      --red: #f85149;
+      --purple: #bc8cff;
+      --teal: #39d353;
+      --orange: #f0883e;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    header h1 {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: 0.5px;
+    }
+
+    .badge {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-weight: 600;
+    }
+
+    .controls {
+      margin-left: auto;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .controls input[type="file"] { display: none; }
+
+    button {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 5px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-family: inherit;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    button:hover { border-color: var(--accent); background: #1f2937; }
+
+    .filter-bar {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 24px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .filter-label { color: var(--muted); font-size: 11px; margin-right: 4px; }
+
+    .chip {
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid transparent;
+      opacity: 0.5;
+      transition: opacity 0.15s;
+    }
+    .chip.active { opacity: 1; border-color: currentColor; }
+
+    .chip-DECISION     { color: var(--accent);  background: #1c2d47; }
+    .chip-RAG_SEARCH   { color: var(--purple);  background: #1e1a2e; }
+    .chip-AST_CONTEXT_EXTRACTION { color: var(--green); background: #1a2d1e; }
+    .chip-AST_CRITIC_LOOP        { color: var(--yellow); background: #2a1f0a; }
+    .chip-KNOWLEDGE    { color: var(--orange); background: #2a1e0a; }
+    .chip-PATCH_PROPOSED { color: var(--teal); background: #0d2518; }
+    .chip-ERROR        { color: var(--red);   background: #2d1515; }
+
+    main {
+      padding: 20px 24px;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .empty {
+      text-align: center;
+      color: var(--muted);
+      padding: 80px 0;
+    }
+
+    .empty span { font-size: 36px; display: block; margin-bottom: 12px; }
+
+    .turn-group {
+      margin-bottom: 32px;
+    }
+
+    .turn-header {
+      font-size: 11px;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 6px;
+      margin-bottom: 14px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    .event-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 10px;
+      overflow: hidden;
+      transition: border-color 0.15s;
+    }
+
+    .event-card:hover { border-color: #484f58; }
+
+    .event-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .phase-tag {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .phase-DECISION     { color: var(--accent);  background: #1c2d47; }
+    .phase-RAG_SEARCH   { color: var(--purple);  background: #1e1a2e; }
+    .phase-AST_CONTEXT_EXTRACTION { color: var(--green); background: #1a2d1e; }
+    .phase-AST_CRITIC_LOOP        { color: var(--yellow); background: #2a1f0a; }
+    .phase-KNOWLEDGE    { color: var(--orange); background: #2a1e0a; }
+    .phase-PATCH_PROPOSED { color: var(--teal); background: #0d2518; }
+    .phase-ERROR        { color: var(--red);   background: #2d1515; }
+
+    .event-summary {
+      color: var(--text);
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .event-time {
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .chevron {
+      color: var(--muted);
+      font-size: 10px;
+      transition: transform 0.2s;
+    }
+    .event-card.open .chevron { transform: rotate(90deg); }
+
+    .event-body {
+      display: none;
+      border-top: 1px solid var(--border);
+      padding: 14px;
+    }
+    .event-card.open .event-body { display: block; }
+
+    /* RAG Hit Table */
+    .rag-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+    }
+    .rag-table th, .rag-table td {
+      text-align: left;
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+    }
+    .rag-table th { color: var(--muted); font-weight: 600; }
+    .rag-table tr:last-child td { border-bottom: none; }
+
+    .score-bar-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .score-bar {
+      height: 6px;
+      border-radius: 3px;
+      background: var(--purple);
+      flex-shrink: 0;
+    }
+
+    .query-box {
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 12px;
+      margin-bottom: 12px;
+      color: var(--accent);
+      font-size: 12px;
+    }
+
+    pre {
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      overflow-x: auto;
+      font-size: 11px;
+      color: var(--text);
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .stats-row {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    .stat {
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+    .stat span { color: var(--muted); margin-right: 4px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>⬡ REI Debug Viewer</h1>
+  <span class="badge" style="background:#1c2d47;color:#58a6ff">agent-flow.jsonl</span>
+  <div class="controls">
+    <button id="load-btn" onclick="document.getElementById('file-input').click()">📂 Load JSONL</button>
+    <input type="file" id="file-input" accept=".jsonl,.json" />
+    <button onclick="refresh()">↻ Refresh</button>
+    <button onclick="clearAll()">✕ Clear</button>
+  </div>
+</header>
+
+<div class="filter-bar" id="filter-bar">
+  <span class="filter-label">Filter:</span>
+  <!-- chips injected dynamically -->
+</div>
+
+<main id="main">
+  <div class="empty" id="drop-zone">
+    <span>⬡</span>
+    <p>Drag &amp; drop or load your log file</p>
+    <p style="margin-top:8px;font-size:11px;color:#484f58">Expected path: <code style="color:#58a6ff">.rei/logs/agent-flow.jsonl</code></p>
+  </div>
+</main>
+
+<script>
+  const ALL_PHASES = [
+    'DECISION', 'RAG_SEARCH', 'AST_CONTEXT_EXTRACTION',
+    'AST_CRITIC_LOOP', 'KNOWLEDGE', 'PATCH_PROPOSED', 'ERROR'
+  ];
+
+  let entries = [];
+  let activeFilters = new Set(ALL_PHASES);
+
+  // ─── File Loading ──────────────────────────────────────────────────────────
+  document.getElementById('file-input').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      parseAndRender(ev.target.result);
+    };
+    reader.readAsText(file);
+  });
+
+  // Drag-and-drop support
+  document.body.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+  document.body.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => parseAndRender(ev.target.result);
+    reader.readAsText(file);
+  });
+
+  function parseAndRender(text) {
+    entries = text.trim().split('\n')
+      .filter(Boolean)
+      .map(line => { try { return JSON.parse(line); } catch { return null; } })
+      .filter(Boolean);
+    buildFilterBar();
+    render();
+  }
+
+  function refresh() {
+    // Re-render with current data
+    render();
+  }
+
+  function clearAll() {
+    entries = [];
+    document.getElementById('filter-bar').innerHTML = '<span class="filter-label">Filter:</span>';
+    document.getElementById('main').innerHTML = `<div class="empty"><span>🔍</span><p>Load a <code>agent-flow.jsonl</code> file.</p></div>`;
+    document.getElementById('file-input').value = '';
+  }
+
+  // ─── Filter Bar ────────────────────────────────────────────────────────────
+  function buildFilterBar() {
+    const bar = document.getElementById('filter-bar');
+    const present = new Set(entries.map(e => e.phase));
+    bar.innerHTML = '<span class="filter-label">Filter:</span>';
+
+    for (const phase of ALL_PHASES) {
+      if (!present.has(phase)) continue;
+      const chip = document.createElement('span');
+      chip.className = `chip chip-${phase} active`;
+      chip.textContent = phase.replace(/_/g, ' ');
+      chip.dataset.phase = phase;
+      chip.addEventListener('click', () => {
+        if (activeFilters.has(phase)) {
+          activeFilters.delete(phase);
+          chip.classList.remove('active');
+        } else {
+          activeFilters.add(phase);
+          chip.classList.add('active');
+        }
+        render();
+      });
+      bar.appendChild(chip);
+    }
+  }
+
+  // ─── Main Render ───────────────────────────────────────────────────────────
+  function render() {
+    const main = document.getElementById('main');
+    const filtered = entries.filter(e => activeFilters.has(e.phase));
+    if (filtered.length === 0) {
+      main.innerHTML = `<div class="empty"><span>🔍</span><p>No events match the current filter.</p></div>`;
+      return;
+    }
+
+    // Group by turnId
+    const turns = {};
+    for (const entry of filtered) {
+      if (!turns[entry.turnId]) turns[entry.turnId] = [];
+      turns[entry.turnId].push(entry);
+    }
+
+    main.innerHTML = '';
+    for (const [turnId, events] of Object.entries(turns)) {
+      const group = document.createElement('div');
+      group.className = 'turn-group';
+      const firstTs = events[0].timestamp;
+      group.innerHTML = `<div class="turn-header">Turn ${turnId} — ${new Date(firstTs).toLocaleString()} (${events.length} events)</div>`;
+      for (const ev of events) {
+        group.appendChild(buildCard(ev));
+      }
+      main.appendChild(group);
+    }
+  }
+
+  // ─── Card Builder ──────────────────────────────────────────────────────────
+  function buildCard(entry) {
+    const card = document.createElement('div');
+    card.className = 'event-card';
+
+    const header = document.createElement('div');
+    header.className = 'event-header';
+    header.innerHTML = `
+      <span class="phase-tag phase-${entry.phase}">${entry.phase.replace(/_/g, ' ')}</span>
+      <span class="event-summary">${getSummary(entry)}</span>
+      <span class="event-time">${new Date(entry.timestamp).toLocaleTimeString()}</span>
+      <span class="chevron">▶</span>
+    `;
+    header.addEventListener('click', () => card.classList.toggle('open'));
+
+    const body = document.createElement('div');
+    body.className = 'event-body';
+    body.innerHTML = buildBody(entry);
+
+    card.appendChild(header);
+    card.appendChild(body);
+    return card;
+  }
+
+  function getSummary(entry) {
+    const d = entry.data;
+    switch (entry.phase) {
+      case 'RAG_SEARCH':
+        return `Query: "${d.query}" → ${d.hitsCount} hits`;
+      case 'AST_CONTEXT_EXTRACTION':
+        return `${d.filesScraped} files scraped, ${d.dependenciesFound} deps found, ${d.signatureLength} chars`;
+      case 'AST_CRITIC_LOOP':
+        return `${d.file} — ${d.errors.length} error(s)`;
+      case 'DECISION':
+        return `Agent decision logged`;
+      case 'KNOWLEDGE':
+        return `${d.provider}: "${d.query}" → ${d.hits} hits`;
+      case 'PATCH_PROPOSED':
+        return `Patch for: ${d.file}`;
+      case 'ERROR':
+        return `Error: ${d.message}`;
+      default:
+        return JSON.stringify(d).slice(0, 80);
+    }
+  }
+
+  function buildBody(entry) {
+    const d = entry.data;
+    if (entry.phase === 'RAG_SEARCH') {
+      const rows = (d.hits || []).map(h => {
+        const pct = Math.round(h.score * 100);
+        const barWidth = Math.max(4, pct);
+        return `<tr>
+          <td><span style="color:#bc8cff">[${h.nodeType}]</span> ${escHtml(h.nodeName)}</td>
+          <td style="color:#8b949e;font-size:11px">${escHtml(h.filePath)}</td>
+          <td>
+            <div class="score-bar-wrap">
+              <div class="score-bar" style="width:${barWidth}px"></div>
+              <span style="color:#bc8cff;font-weight:700">${pct}%</span>
+            </div>
+          </td>
+        </tr>`;
+      }).join('');
+      return `
+        <div class="query-box">🔎 ${escHtml(d.query)}</div>
+        <table class="rag-table">
+          <thead><tr><th>Node</th><th>File</th><th>Score</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+    }
+
+    if (entry.phase === 'AST_CONTEXT_EXTRACTION') {
+      return `
+        <div class="stats-row">
+          <div class="stat"><span>Files scraped:</span>${d.filesScraped}</div>
+          <div class="stat"><span>Dependencies:</span>${d.dependenciesFound}</div>
+          <div class="stat"><span>Signature chars:</span>${d.signatureLength}</div>
+        </div>`;
+    }
+
+    if (entry.phase === 'AST_CRITIC_LOOP') {
+      const errors = (d.errors || []).map(e => `<li style="color:#f85149;margin-top:4px">${escHtml(e)}</li>`).join('');
+      return `<div style="margin-bottom:8px;color:#8b949e">File: <span style="color:#c9d1d9">${escHtml(d.file)}</span></div>
+              <ul style="padding-left:18px">${errors || '<li style="color:#3fb950">No errors</li>'}</ul>`;
+    }
+
+    if (entry.phase === 'PATCH_PROPOSED') {
+      return `<div style="margin-bottom:8px;color:#8b949e">File: <span style="color:#39d353">${escHtml(d.file)}</span></div>
+              <pre>${escHtml(d.patchText || '')}</pre>`;
+    }
+
+    if (entry.phase === 'ERROR') {
+      return `<div style="color:#f85149;margin-bottom:8px">${escHtml(d.message)}</div>
+              ${d.stack ? `<pre style="color:#f85149">${escHtml(d.stack)}</pre>` : ''}`;
+    }
+
+    // Generic fallback
+    return `<pre>${escHtml(JSON.stringify(d, null, 2))}</pre>`;
+  }
+
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+</script>
+
+</body>
+</html>

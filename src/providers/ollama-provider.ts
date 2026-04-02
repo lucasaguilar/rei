@@ -1,5 +1,5 @@
 import type { ChatMessage } from "../chat/types.js";
-import type { ModelProvider } from "./model-provider.js";
+import type { ModelProvider, CompletionOptions } from "./model-provider.js";
 
 interface OllamaChatResponse {
   message?: {
@@ -21,26 +21,36 @@ export class OllamaProvider implements ModelProvider {
 
   constructor(params?: { baseUrl?: string; model?: string }) {
     this.baseUrl = normalizeBaseUrl(
-      params?.baseUrl ?? process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434"
+      params?.baseUrl ??
+        process.env.OLLAMA_BASE_URL ??
+        "http://127.0.0.1:11434",
     );
     this.model = params?.model ?? process.env.OLLAMA_MODEL ?? "llama3.2";
     this.requestTimeoutMs = parseRequestTimeoutMs(
       process.env.OLLAMA_REQUEST_TIMEOUT_MS,
-      DEFAULT_OLLAMA_REQUEST_TIMEOUT_MS
+      DEFAULT_OLLAMA_REQUEST_TIMEOUT_MS,
     );
   }
 
-  async complete(prompt: string): Promise<string> {
-    return this.completeChat([{ role: "user", content: prompt }]);
+  async complete(prompt: string, options?: CompletionOptions): Promise<string> {
+    return this.completeChat([{ role: "user", content: prompt }], options);
   }
 
-  async completeChat(messages: ChatMessage[]): Promise<string> {
-    const response = await this.fetchChat({ messages, stream: false, operation: "request" });
+  async completeChat(
+    messages: ChatMessage[],
+    options?: CompletionOptions,
+  ): Promise<string> {
+    const response = await this.fetchChat({
+      messages,
+      stream: false,
+      operation: "request",
+      modelOverride: options?.model,
+    });
 
     if (!response.ok) {
       const details = await safeReadText(response);
       throw new Error(
-        `Ollama request failed (${response.status} ${response.statusText})${details ? `: ${details}` : ""}`
+        `Ollama request failed (${response.status} ${response.statusText})${details ? `: ${details}` : ""}`,
       );
     }
 
@@ -54,24 +64,33 @@ export class OllamaProvider implements ModelProvider {
       const sanitizedDetails = JSON.stringify({
         hasMessage: !!data.message,
         hasContentProperty:
-          data.message != null && Object.prototype.hasOwnProperty.call(data.message, "content"),
+          data.message != null &&
+          Object.prototype.hasOwnProperty.call(data.message, "content"),
         contentType: typeof content,
       });
       throw new Error(
-        `Ollama response missing message content or content is not a string: ${sanitizedDetails}`
+        `Ollama response missing message content or content is not a string: ${sanitizedDetails}`,
       );
     }
 
     return content;
   }
 
-  async *streamChat(messages: ChatMessage[]): AsyncIterable<string> {
-    const response = await this.fetchChat({ messages, stream: true, operation: "stream" });
+  async *streamChat(
+    messages: ChatMessage[],
+    options?: CompletionOptions,
+  ): AsyncIterable<string> {
+    const response = await this.fetchChat({
+      messages,
+      stream: true,
+      operation: "stream",
+      modelOverride: options?.model,
+    });
 
     if (!response.ok) {
       const details = await safeReadText(response);
       throw new Error(
-        `Ollama stream failed (${response.status} ${response.statusText})${details ? `: ${details}` : ""}`
+        `Ollama stream failed (${response.status} ${response.statusText})${details ? `: ${details}` : ""}`,
       );
     }
 
@@ -122,8 +141,9 @@ export class OllamaProvider implements ModelProvider {
     messages: ChatMessage[];
     stream: boolean;
     operation: "request" | "stream";
+    modelOverride?: string;
   }): Promise<Response> {
-    const { messages, stream, operation } = params;
+    const { messages, stream, operation, modelOverride } = params;
     const endpoint = `${this.baseUrl}/api/chat`;
 
     const requestInit: RequestInit = {
@@ -132,19 +152,22 @@ export class OllamaProvider implements ModelProvider {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: this.model,
+        model: modelOverride ?? this.model,
         messages,
         stream,
         options: {
-          temperature: 0,  // Low temperature for more deterministic JSON output
-        }
+          temperature: 0, // Low temperature for more deterministic JSON output
+        },
       }),
     };
 
     let lastError: unknown;
     for (let attempt = 0; attempt <= OLLAMA_FETCH_MAX_RETRIES; attempt += 1) {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+      const timeout = setTimeout(
+        () => controller.abort(),
+        this.requestTimeoutMs,
+      );
       try {
         return await fetch(endpoint, {
           ...requestInit,
@@ -152,21 +175,26 @@ export class OllamaProvider implements ModelProvider {
         });
       } catch (error: unknown) {
         lastError = error;
-        if (attempt === OLLAMA_FETCH_MAX_RETRIES || !isRetryableFetchError(error)) {
+        if (
+          attempt === OLLAMA_FETCH_MAX_RETRIES ||
+          !isRetryableFetchError(error)
+        ) {
           break;
         }
         await sleep(OLLAMA_FETCH_RETRY_DELAY_MS);
       }
     }
 
-    throw new Error(buildOllamaFetchFailureMessage({
-      operation,
-      endpoint,
-      model: this.model,
-      error: lastError,
-      retries: OLLAMA_FETCH_MAX_RETRIES,
-      requestTimeoutMs: this.requestTimeoutMs,
-    }));
+    throw new Error(
+      buildOllamaFetchFailureMessage({
+        operation,
+        endpoint,
+        model: this.model,
+        error: lastError,
+        retries: OLLAMA_FETCH_MAX_RETRIES,
+        requestTimeoutMs: this.requestTimeoutMs,
+      }),
+    );
   }
 }
 
@@ -198,7 +226,14 @@ function buildOllamaFetchFailureMessage(params: {
   retries?: number;
   requestTimeoutMs?: number;
 }): string {
-  const { operation, endpoint, model, error, retries = 0, requestTimeoutMs } = params;
+  const {
+    operation,
+    endpoint,
+    model,
+    error,
+    retries = 0,
+    requestTimeoutMs,
+  } = params;
   const raw = error instanceof Error ? error.message : String(error);
   const lower = raw.toLowerCase();
 
@@ -218,19 +253,27 @@ function buildOllamaFetchFailureMessage(params: {
     lower.includes("context canceled")
   ) {
     hints.push(
-      "Hint: model runner timed out starting. Try a smaller model or pre-warm with `ollama run <model> \"hi\"`."
+      'Hint: model runner timed out starting. Try a smaller model or pre-warm with `ollama run <model> "hi"`.',
     );
   }
 
-  if (lower.includes("econnrefused") || lower.includes("connect") || lower.includes("fetch failed")) {
-    hints.push("Hint: check Ollama server with `ollama ps` and `curl http://127.0.0.1:11434/api/tags`.");
+  if (
+    lower.includes("econnrefused") ||
+    lower.includes("connect") ||
+    lower.includes("fetch failed")
+  ) {
+    hints.push(
+      "Hint: check Ollama server with `ollama ps` and `curl http://127.0.0.1:11434/api/tags`.",
+    );
   }
 
   return `Ollama ${operation} failed: ${raw}. ${hints.join(" | ")}`;
 }
 
 function isRetryableFetchError(error: unknown): boolean {
-  const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  const msg = (
+    error instanceof Error ? error.message : String(error)
+  ).toLowerCase();
   return (
     msg.includes("fetch failed") ||
     msg.includes("econnreset") ||
@@ -246,7 +289,10 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function parseRequestTimeoutMs(value: string | undefined, fallback: number): number {
+function parseRequestTimeoutMs(
+  value: string | undefined,
+  fallback: number,
+): number {
   if (!value) return fallback;
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 1000) {

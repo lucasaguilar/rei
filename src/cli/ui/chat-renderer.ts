@@ -1,8 +1,23 @@
 import wrapAnsi from "wrap-ansi";
-import { ActivePalette, CommandEntry, MentionEntry, ChatRendererState } from "../models/chat.types.js";
-import { MODE_PROMPTS, SPINNER_FRAMES, THINKING_TEXT, SHORTCUT_HINT } from "../constants/chat.constants.js";
-import { clamp, padRight, fitLine, viewportForInput } from "../helpers/terminal.helpers.js";
-import { TurnStatus } from "../../core/agent.js";
+import {
+  ActivePalette,
+  CommandEntry,
+  MentionEntry,
+  ChatRendererState,
+} from "../models/chat.types.js";
+import {
+  MODE_PROMPTS,
+  SPINNER_FRAMES,
+  THINKING_TEXT,
+  SHORTCUT_HINT,
+} from "../constants/chat.constants.js";
+import {
+  clamp,
+  padRight,
+  fitLine,
+  viewportForInput,
+} from "../helpers/terminal.helpers.js";
+import { TurnStatus } from "../../core/models/agent.types.js";
 import { SessionMode } from "../../chat/types.js";
 
 export class ChatRenderer {
@@ -13,7 +28,11 @@ export class ChatRenderer {
     const paletteItems = activePalette.items;
     const paletteVisible = paletteItems.length > 0;
 
-    const selectedCommandIndex = clamp(state.selectedCommandIndex, 0, Math.max(0, paletteItems.length - 1));
+    const selectedCommandIndex = clamp(
+      state.selectedCommandIndex,
+      0,
+      Math.max(0, paletteItems.length - 1),
+    );
 
     const inputHeight = 3;
     const maxPaletteItems = Math.min(5, paletteItems.length);
@@ -29,16 +48,18 @@ export class ChatRenderer {
           return `${head}${state.inputHistory[state.historySearchIndex]}`;
         })()
       : state.busy && state.activeStatus
-      ? `[REI] Thinking ${SPINNER_FRAMES[state.spinnerIndex % SPINNER_FRAMES.length]} ${
-          THINKING_TEXT[state.activeStatus as TurnStatus]
-        }`
-      : state.scrollOffset > 0
-      ? `↑ Scrolled up ${state.scrollOffset} lines — Ctrl+D to scroll down`
-      : SHORTCUT_HINT;
+        ? `[REI] Thinking ${SPINNER_FRAMES[state.spinnerIndex % SPINNER_FRAMES.length]} ${
+            THINKING_TEXT[state.activeStatus as TurnStatus]
+          }`
+        : state.scrollOffset > 0
+          ? `↑ Scrolled up ${state.scrollOffset} lines — Ctrl+D to scroll down`
+          : SHORTCUT_HINT;
 
     const messageSlots = statusLine ? outputHeight - 1 : outputHeight;
     const wrappedTranscriptLines = state.transcript.flatMap((line) =>
-      wrapAnsi(line, cols, { hard: true, trim: false, wordWrap: true }).split("\n")
+      wrapAnsi(line, cols, { hard: true, trim: false, wordWrap: true }).split(
+        "\n",
+      ),
     );
     const totalWrapped = wrappedTranscriptLines.length;
     const maxScrollOffset = Math.max(0, totalWrapped - messageSlots);
@@ -63,9 +84,15 @@ export class ChatRenderer {
       const innerWidth = Math.max(1, cols - 4);
       const listStart = Math.max(
         0,
-        Math.min(selectedCommandIndex - maxPaletteItems + 1, paletteItems.length - maxPaletteItems)
+        Math.min(
+          selectedCommandIndex - maxPaletteItems + 1,
+          paletteItems.length - maxPaletteItems,
+        ),
       );
-      const visibleItems = paletteItems.slice(listStart, listStart + maxPaletteItems);
+      const visibleItems = paletteItems.slice(
+        listStart,
+        listStart + maxPaletteItems,
+      );
       screen.push(`+${"-".repeat(cols - 2)}+`);
       for (let i = 0; i < visibleItems.length; i += 1) {
         const entry = visibleItems[i];
@@ -88,8 +115,16 @@ export class ChatRenderer {
     const fullInput = `${promptText}${state.inputBuffer}`;
     const inputInnerWidth = Math.max(1, cols - 4);
     const inputAbsoluteCursor = promptText.length + state.inputCursor;
-    const viewport = viewportForInput(fullInput, inputAbsoluteCursor, inputInnerWidth);
-    const cursorInViewport = clamp(inputAbsoluteCursor - viewport.start, 0, Math.max(0, viewport.visible.length));
+    const viewport = viewportForInput(
+      fullInput,
+      inputAbsoluteCursor,
+      inputInnerWidth,
+    );
+    const cursorInViewport = clamp(
+      inputAbsoluteCursor - viewport.start,
+      0,
+      Math.max(0, viewport.visible.length),
+    );
 
     screen.push(`-${"-".repeat(cols - 2)}-`);
     screen.push(`| ${padRight(viewport.visible, inputInnerWidth)} |`);

@@ -1,5 +1,5 @@
 import type { ChatMessage } from "../chat/types.js";
-import type { ModelProvider } from "./model-provider.js";
+import type { ModelProvider, CompletionOptions } from "./model-provider.js";
 
 interface OpenRouterChatChoice {
   message?: {
@@ -41,58 +41,70 @@ export class OpenRouterProvider implements ModelProvider {
     const apiKey = params?.apiKey ?? process.env.OPENROUTER_API_KEY ?? "";
     if (!apiKey) {
       throw new Error(
-        "OpenRouterProvider: missing API key. Set OPENROUTER_API_KEY environment variable or pass apiKey to the constructor."
+        "OpenRouterProvider: missing API key. Set OPENROUTER_API_KEY environment variable or pass apiKey to the constructor.",
       );
     }
     this.apiKey = apiKey;
     this.model =
-      params?.model ??
-      process.env.OPENROUTER_MODEL ??
-      DEFAULT_OPENROUTER_MODEL;
+      params?.model ?? process.env.OPENROUTER_MODEL ?? DEFAULT_OPENROUTER_MODEL;
     this.requestTimeoutMs = parseRequestTimeoutMs(
       process.env.OPENROUTER_REQUEST_TIMEOUT_MS,
-      DEFAULT_OPENROUTER_REQUEST_TIMEOUT_MS
+      DEFAULT_OPENROUTER_REQUEST_TIMEOUT_MS,
     );
   }
 
-  async complete(prompt: string): Promise<string> {
-    return this.completeChat([{ role: "user", content: prompt }]);
+  async complete(prompt: string, options?: CompletionOptions): Promise<string> {
+    return this.completeChat([{ role: "user", content: prompt }], options);
   }
 
-  async completeChat(messages: ChatMessage[]): Promise<string> {
-    const response = await this.fetchChat({ messages, stream: false });
+  async completeChat(
+    messages: ChatMessage[],
+    options?: CompletionOptions,
+  ): Promise<string> {
+    const response = await this.fetchChat({
+      messages,
+      stream: false,
+      modelOverride: options?.model,
+    });
 
     if (!response.ok) {
       const details = await safeReadText(response);
       throw new Error(
-        `OpenRouter request failed (${response.status} ${response.statusText})${details ? `: ${details}` : ""}`
+        `OpenRouter request failed (${response.status} ${response.statusText})${details ? `: ${details}` : ""}`,
       );
     }
 
     const data = (await response.json()) as OpenRouterChatResponse;
     if (data.error) {
       throw new Error(
-        `OpenRouter error: ${data.error.message ?? JSON.stringify(data.error)}`
+        `OpenRouter error: ${data.error.message ?? JSON.stringify(data.error)}`,
       );
     }
 
     const content = data.choices?.[0]?.message?.content;
     if (typeof content !== "string") {
       throw new Error(
-        `OpenRouter response missing message content (got ${typeof content})`
+        `OpenRouter response missing message content (got ${typeof content})`,
       );
     }
 
     return content;
   }
 
-  async *streamChat(messages: ChatMessage[]): AsyncIterable<string> {
-    const response = await this.fetchChat({ messages, stream: true });
+  async *streamChat(
+    messages: ChatMessage[],
+    options?: CompletionOptions,
+  ): AsyncIterable<string> {
+    const response = await this.fetchChat({
+      messages,
+      stream: true,
+      modelOverride: options?.model,
+    });
 
     if (!response.ok) {
       const details = await safeReadText(response);
       throw new Error(
-        `OpenRouter stream failed (${response.status} ${response.statusText})${details ? `: ${details}` : ""}`
+        `OpenRouter stream failed (${response.status} ${response.statusText})${details ? `: ${details}` : ""}`,
       );
     }
 
@@ -118,7 +130,7 @@ export class OpenRouterProvider implements ModelProvider {
             const data = JSON.parse(payload) as OpenRouterStreamChunk;
             if (data.error) {
               throw new Error(
-                `OpenRouter stream error: ${data.error.message ?? JSON.stringify(data.error)}`
+                `OpenRouter stream error: ${data.error.message ?? JSON.stringify(data.error)}`,
               );
             }
             const content = data.choices?.[0]?.delta?.content;
@@ -143,7 +155,7 @@ export class OpenRouterProvider implements ModelProvider {
           const data = JSON.parse(payload) as OpenRouterStreamChunk;
           if (data.error) {
             throw new Error(
-              `OpenRouter stream error: ${data.error.message ?? JSON.stringify(data.error)}`
+              `OpenRouter stream error: ${data.error.message ?? JSON.stringify(data.error)}`,
             );
           }
           const content = data.choices?.[0]?.delta?.content;
@@ -162,13 +174,11 @@ export class OpenRouterProvider implements ModelProvider {
   private fetchChat(params: {
     messages: ChatMessage[];
     stream: boolean;
+    modelOverride?: string;
   }): Promise<Response> {
-    const { messages, stream } = params;
+    const { messages, stream, modelOverride } = params;
     const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      this.requestTimeoutMs
-    );
+    const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
 
     return fetch(`${OPENROUTER_API_BASE_URL}/chat/completions`, {
       method: "POST",
@@ -177,7 +187,7 @@ export class OpenRouterProvider implements ModelProvider {
         Authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({
-        model: this.model,
+        model: modelOverride ?? this.model,
         messages,
         stream,
         temperature: 0,
@@ -197,7 +207,7 @@ async function safeReadText(response: Response): Promise<string> {
 
 function parseRequestTimeoutMs(
   value: string | undefined,
-  fallback: number
+  fallback: number,
 ): number {
   if (!value) return fallback;
   const parsed = Number(value);

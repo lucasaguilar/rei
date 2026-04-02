@@ -3,7 +3,7 @@ import * as path from "path";
 import type { AgentContextRequest } from "../contracts/agent-decision.types.js";
 import type { FileMeta } from "../workspace/workspace-scanner.js";
 
-const FULL_READ_MAX_CHARS = 20_000;
+const FULL_READ_MAX_CHARS = 100_000;
 
 // Denylist of sensitive file names (exact, case-insensitive) that must never be served.
 const SENSITIVE_FILE_NAMES = new Set([
@@ -56,13 +56,15 @@ export async function resolveContextRequests(
   requests: AgentContextRequest[],
   workspacePath: string,
   alreadyResolved: Set<string>,
-  scannedFiles: FileMeta[]
+  scannedFiles: FileMeta[],
 ): Promise<ContextResolutionResult> {
   const sections: string[] = [];
   const resolved: string[] = [];
 
   // Build a set of workspace-relative paths from the scan allowlist.
-  const allowedPaths = new Set(scannedFiles.map((f) => f.path.replace(/\\/g, "/")));
+  const allowedPaths = new Set(
+    scannedFiles.map((f) => f.path.replace(/\\/g, "/")),
+  );
 
   // Deduplicate incoming requests by path before resolution.
   const seen = new Set<string>();
@@ -86,7 +88,10 @@ export async function resolveContextRequests(
     // --- Security check 2: sensitive-file denylist ---
     const fileName = path.basename(relativePath).toLowerCase();
     const fileExt = path.extname(relativePath).toLowerCase();
-    if (SENSITIVE_FILE_NAMES.has(fileName) || SENSITIVE_EXTENSIONS.has(fileExt)) {
+    if (
+      SENSITIVE_FILE_NAMES.has(fileName) ||
+      SENSITIVE_EXTENSIONS.has(fileExt)
+    ) {
       continue;
     }
 
