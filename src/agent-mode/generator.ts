@@ -35,7 +35,6 @@ const CHANGE_INTENT_PATTERN =
   /\b(add|change|modify|update|fix|implement|create|remove|delete|refactor|write|insert|patch|comment|disable|rename|cleanup|agreg\w*|cambi\w*|modific\w*|actualiz\w*|arregl\w*|implement\w*|cre\w*|elimin\w*|borr\w*|coment\w*|deshabilit\w*|renombr\w*|refactoriz\w*|reescrib\w*)\b/;
 const INSPECTION_INTENT_PATTERN =
   /\b(explain|how|why|what|show|review|inspect|analy[sz]e|necesito saber|explica|como funciona|cómo funciona|que palabras|qué palabras|solo|sin cambiar|read-only|read only)\b/;
-const DEPRECATED_EDIT_OVERRIDE_TOKEN = "ALLOW_DEPRECATED_EDIT";
 
 export interface AgentModeOutcome {
   response: string;
@@ -353,30 +352,6 @@ async function validateDecisionProposedPatches(
 
   for (const proposal of proposals) {
     const canonicalFile = canonicalizePathAgainstScannedFiles(proposal.file, scannedFiles);
-    if (await isDeprecatedTargetBlocked(canonicalFile, workspacePath, currentTask)) {
-      results.push({
-        proposal: { ...proposal, file: canonicalFile },
-        validation: {
-          valid: false,
-          file: canonicalFile,
-          issues: [
-            {
-              code: "SECURITY_POLICY",
-              message:
-                `Target file "${canonicalFile}" is marked DEPRECATED. ` +
-                "Explicitly request deprecated edits if this change is intentional.",
-            },
-          ],
-          semantic: { valid: false, file: canonicalFile, issues: [] },
-          git: {
-            valid: false,
-            stdout: "",
-            stderr: "Skipped git apply --check due to deprecated target policy",
-          },
-        },
-      });
-      continue;
-    }
 
     const canonicalProposal = {
       ...proposal,
@@ -642,27 +617,6 @@ function isChangeIntentTask(task: string): boolean {
   if (looksLikeInspection) return false;
 
   return true;
-}
-
-function allowsDeprecatedEdit(task: string): boolean {
-  return task.includes(DEPRECATED_EDIT_OVERRIDE_TOKEN);
-}
-
-async function isDeprecatedTargetBlocked(
-  filePath: string,
-  workspacePath: string,
-  task: string
-): Promise<boolean> {
-  if (allowsDeprecatedEdit(task)) return false;
-
-  const absolutePath = path.resolve(workspacePath, filePath);
-  try {
-    const content = await fs.readFile(absolutePath, "utf-8");
-    const head = content.slice(0, 2500);
-    return /\bDEPRECATED\b/i.test(head);
-  } catch {
-    return false;
-  }
 }
 
 function pathCoveredByTaskOrContext(

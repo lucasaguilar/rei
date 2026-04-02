@@ -40,7 +40,8 @@ export async function runCli(args: string[]): Promise<void> {
   }
 
   if (command === "chat") {
-    await runChat(agent, workspacePath);
+    const autoIndex = !parsed.noAutoIndex;
+    await runChat(agent, workspacePath, autoIndex);
     return;
   }
 
@@ -53,9 +54,11 @@ function parseCliArgs(args: string[]): {
   workspaceInput?: string;
   command?: string;
   commandArgs: string[];
+  noAutoIndex: boolean;
 } {
   const positional: string[] = [];
   let workspaceInput: string | undefined;
+  let noAutoIndex = false;
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -81,6 +84,11 @@ function parseCliArgs(args: string[]): {
       continue;
     }
 
+    if (arg === "--no-auto-index") {
+      noAutoIndex = true;
+      continue;
+    }
+
     positional.push(arg);
   }
 
@@ -88,6 +96,7 @@ function parseCliArgs(args: string[]): {
     workspaceInput,
     command: positional[0],
     commandArgs: positional.slice(1),
+    noAutoIndex,
   };
 }
 

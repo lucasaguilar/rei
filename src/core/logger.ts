@@ -4,7 +4,7 @@ import * as path from "path";
 export interface LogEntry {
   timestamp: string;
   turnId: string;
-  phase: "DECISION" | "KNOWLEDGE" | "PATCH_PROPOSED" | "AST_CRITIC_LOOP" | "AST_CONTEXT_EXTRACTION" | "ERROR";
+  phase: "DECISION" | "KNOWLEDGE" | "PATCH_PROPOSED" | "AST_CRITIC_LOOP" | "AST_CONTEXT_EXTRACTION" | "RAG_SEARCH" | "ERROR";
   data: any;
 }
 
@@ -57,6 +57,10 @@ export class AgentLogger {
 
   public logAstContext(filesScraped: number, dependenciesFound: number, signatureLength: number) {
     this.write("AST_CONTEXT_EXTRACTION", { filesScraped, dependenciesFound, signatureLength });
+  }
+
+  public logRagSearch(query: string, hits: Array<{ filePath: string; nodeType: string; nodeName: string; score: number }>) {
+    this.write("RAG_SEARCH", { query, hitsCount: hits.length, hits });
   }
 
   public logCriticLoop(file: string, errors: string[]) {

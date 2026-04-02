@@ -1,5 +1,5 @@
 import type { ChatMessage } from "../chat/types.js";
-import type { ModelProvider } from "./model-provider.js";
+import type { ModelProvider, CompletionOptions } from "./model-provider.js";
 
 interface GeminiPart {
   text?: string;
@@ -40,34 +40,45 @@ export class GeminiProvider implements ModelProvider {
     const apiKey = params?.apiKey ?? process.env.GEMINI_API_KEY ?? "";
     if (!apiKey) {
       throw new Error(
-        "GeminiProvider: missing API key. Set GEMINI_API_KEY environment variable or pass apiKey to the constructor."
+        "GeminiProvider: missing API key. Set GEMINI_API_KEY environment variable or pass apiKey to the constructor.",
       );
     }
 
     this.apiKey = apiKey;
-    this.model = params?.model ?? process.env.GEMINI_MODEL ?? DEFAULT_GEMINI_MODEL;
+    this.model =
+      params?.model ?? process.env.GEMINI_MODEL ?? DEFAULT_GEMINI_MODEL;
     this.requestTimeoutMs = parseRequestTimeoutMs(
       process.env.GEMINI_REQUEST_TIMEOUT_MS,
-      DEFAULT_GEMINI_REQUEST_TIMEOUT_MS
+      DEFAULT_GEMINI_REQUEST_TIMEOUT_MS,
     );
   }
 
-  async complete(prompt: string): Promise<string> {
-    return this.completeChat([{ role: "user", content: prompt }]);
+  async complete(prompt: string, options?: CompletionOptions): Promise<string> {
+    return this.completeChat([{ role: "user", content: prompt }], options);
   }
 
-  async completeChat(messages: ChatMessage[]): Promise<string> {
-    const response = await this.fetchJson("generateContent", messages);
+  async completeChat(
+    messages: ChatMessage[],
+    options?: CompletionOptions,
+  ): Promise<string> {
+    const response = await this.fetchJson(
+      "generateContent",
+      messages,
+      options?.model,
+    );
     return extractGeminiText(response);
   }
 
-  async *streamChat(messages: ChatMessage[]): AsyncIterable<string> {
-    const response = await this.fetchStream(messages);
+  async *streamChat(
+    messages: ChatMessage[],
+    options?: CompletionOptions,
+  ): AsyncIterable<string> {
+    const response = await this.fetchStream(messages, options?.model);
 
     if (!response.ok) {
       const details = await safeReadText(response);
       throw new Error(
-        `Gemini stream failed (${response.status} ${response.statusText})${details ? `: ${details}` : ""}`
+        `Gemini stream failed (${response.status} ${response.statusText})${details ? `: ${details}` : ""}`,
       );
     }
 
@@ -116,42 +127,62 @@ export class GeminiProvider implements ModelProvider {
 
   private async fetchJson(
     method: "generateContent",
-    messages: ChatMessage[]
+    messages: ChatMessage[],
+    modelOverride?: string,
   ): Promise<GeminiGenerateContentResponse> {
-    const response = await this.fetchWithTimeout(buildGeminiUrl(this.model, method, false, this.apiKey), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+    const response = await this.fetchWithTimeout(
+      buildGeminiUrl(modelOverride ?? this.model, method, false, this.apiKey),
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(buildGeminiRequestBody(messages)),
       },
-      body: JSON.stringify(buildGeminiRequestBody(messages)),
-    });
+    );
 
     if (!response.ok) {
       const details = await safeReadText(response);
       throw new Error(
-        `Gemini request failed (${response.status} ${response.statusText})${details ? `: ${details}` : ""}`
+        `Gemini request failed (${response.status} ${response.statusText})${details ? `: ${details}` : ""}`,
       );
     }
 
     const data = (await response.json()) as GeminiGenerateContentResponse;
     if (data.error) {
-      throw new Error(`Gemini error: ${data.error.message ?? JSON.stringify(data.error)}`);
+      throw new Error(
+        `Gemini error: ${data.error.message ?? JSON.stringify(data.error)}`,
+      );
     }
 
     return data;
   }
 
-  private fetchStream(messages: ChatMessage[]): Promise<Response> {
-    return this.fetchWithTimeout(buildGeminiUrl(this.model, "streamGenerateContent", true, this.apiKey), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+  private fetchStream(
+    messages: ChatMessage[],
+    modelOverride?: string,
+  ): Promise<Response> {
+    return this.fetchWithTimeout(
+      buildGeminiUrl(
+        modelOverride ?? this.model,
+        "streamGenerateContent",
+        true,
+        this.apiKey,
+      ),
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(buildGeminiRequestBody(messages)),
       },
-      body: JSON.stringify(buildGeminiRequestBody(messages)),
-    });
+    );
   }
 
-  private async fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  private async fetchWithTimeout(
+    url: string,
+    init: RequestInit,
+  ): Promise<Response> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
 
@@ -166,7 +197,9 @@ export class GeminiProvider implements ModelProvider {
   }
 }
 
-function buildGeminiRequestBody(messages: ChatMessage[]): Record<string, unknown> {
+function buildGeminiRequestBody(
+  messages: ChatMessage[],
+): Record<string, unknown> {
   const systemText = messages
     .filter((message) => message.role === "system")
     .map((message) => message.content.trim())
@@ -200,7 +233,7 @@ function buildGeminiUrl(
   model: string,
   method: string,
   sse = false,
-  apiKey?: string
+  apiKey?: string,
 ): string {
   const endpoint = `${GEMINI_API_BASE_URL}/models/${encodeURIComponent(model)}:${method}`;
   const query = new URLSearchParams({
@@ -214,10 +247,12 @@ function buildGeminiUrl(
 
 function extractGeminiText(
   response: GeminiGenerateContentResponse,
-  throwOnMissing = true
+  throwOnMissing = true,
 ): string {
   if (response.error) {
-    throw new Error(`Gemini error: ${response.error.message ?? JSON.stringify(response.error)}`);
+    throw new Error(
+      `Gemini error: ${response.error.message ?? JSON.stringify(response.error)}`,
+    );
   }
 
   const text = response.candidates?.[0]?.content?.parts
@@ -240,7 +275,10 @@ async function safeReadText(response: Response): Promise<string> {
   }
 }
 
-function parseRequestTimeoutMs(value: string | undefined, fallback: number): number {
+function parseRequestTimeoutMs(
+  value: string | undefined,
+  fallback: number,
+): number {
   if (!value) return fallback;
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 1000) {

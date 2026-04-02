@@ -1,17 +1,22 @@
 # rei
 
-**REI** is a next-generation, compiler-aware AI Coding Agent built directly for the terminal. 
-Engineered for privacy, precision, and local-first execution via `Ollama`, REI transcends basic text completion: it leverages an injected **AST Semantic Context Graph** to comprehend your codebase architecture, and an automated **Critic Loop** to natively compile and self-correct validation errors *before* delivering flawless patches to your repository.
+**REI** is a next-generation, compiler-aware AI Coding Agent built directly for the terminal.
+Engineered for privacy, precision, and local-first execution, REI goes far beyond text completion: it builds a **local semantic vector index** of your codebase using AST-level chunking, performs **RAG-powered context retrieval** before every turn, auto-discovers caller files for cascade changes, and runs an **AST Critic Loop** that compiles and self-corrects patches in memory before you ever see them.
 
 ## 🌟 Why REI? (Unique Value Proposition)
 
 While commercial giants like Cursor and GitHub Copilot dominate the cloud IDE space, REI takes a radically different "Sniper" approach tailored for the terminal:
 
-- **100% Local & Privacy-First**: No more sending sensitive proprietary code to commercial APIs if you don't want to. REI is designed to run locally using `Ollama` (DeepSeek, Llama 3, Qwen) or any proxy. Your codebase never leaves your firewall.
-- **Editor Agnostic**: It lives in the terminal. No need to migrate from WebStorm, Android Studio, Vim, or Emacs to a VSCode fork. REI operates directly on your filesystem.
-- **AST Semantic Graphing**: Like Copilot's Language Server, REI uses `ts-morph` to automatically extract the `.d.ts`-style signatures of your codebase's dependencies in ~50ms and inject them into the LLM's prompt. This gives smaller local models the structural context to perform like GPT-4o!
-- **The AST Critic Loop (Auto-Healing)**: REI doesn't just auto-complete broken code. Our internal AST compiler validates LLM-generated patches in memory. If the model hallucinates a broken TypeScript method, REI secretly feeds the compiler error back to the LLM and forces it to self-correct *before* showing you the code.
-- **Absolute Transparency**: Unlike black-box commercial tools, REI logs its entire internal thought process, chunk resolutions, and "hidden prompts" to an append-only `.rei/logs/agent-flow.jsonl` file.
+- **100% Local & Privacy-First**: No more sending sensitive proprietary code to commercial APIs if you don't want to. REI runs locally using `Ollama` (DeepSeek, Llama 3, Qwen) or any proxy. Your codebase never leaves your firewall.
+- **Editor Agnostic**: It lives in the terminal. No need to migrate from WebStorm, Android Studio, Vim, or Emacs. REI operates directly on your filesystem.
+- **Local Semantic RAG Index**: REI builds a vector index of your entire codebase using `@xenova/transformers` (ONNX, runs 100% offline). Every function, class, and interface is embedded as a mathematical vector stored in `.rei/rag-index.json`. On each turn, REI finds the most semantically relevant code nodes — not just keyword matches.
+- **AST-Level Chunking**: The RAG index is not built from raw text blocks. It uses `ts-morph` to segment the codebase by actual AST nodes (functions, classes, interfaces). Each vector corresponds to a real, named code unit with exact line numbers.
+- **Caller Graph Discovery**: When you ask REI to change a function, it automatically scans the workspace for every file that references that symbol and pre-loads them into context — so cascade change proposals cover all affected files without you listing them.
+- **The AST Critic Loop (Auto-Healing)**: REI validates LLM-generated patches with the TypeScript compiler in memory. If the model produces broken code, REI feeds the compiler error back to the LLM and forces a correction before showing you anything.
+- **Post-Apply Compile Check**: After `/confirm`, REI runs a full `tsc` check across the project (via `ts-morph`) and reports any type errors passively — no shell invocation needed.
+- **Persistent Sessions**: Conversations are automatically saved to `.rei/sessions/current.json` and resumed on next launch. Older sessions can be archived and reloaded by ID.
+- **Conversation Compaction**: When a session grows beyond 20 messages, older turns are summarized using a configurable cheaper model, keeping context manageable without losing key decisions.
+- **Absolute Transparency**: REI logs its entire internal thought process to `.rei/logs/agent-flow.jsonl` — every RAG query, AST extraction, patch proposal, and compiler error, structured as JSON Lines.
 
 ## 🎯 Target Audience
 
@@ -83,6 +88,12 @@ npm run dev -- --workspace /workspaces/another-repo
 | `/confirm` | Apply all queued patches to the filesystem |
 | `/confirm --dry-run` | Validate patches with `git apply --check` without writing |
 | `/discard` | Clear queued patches without applying |
+| `/index` | Index (or re-index) the workspace for semantic RAG search |
+| `/compact` | Manually compact conversation memory into a summary |
+| `/session` | Show current session info (created date, mode, turn count) |
+| `/session list` | List all archived sessions for this workspace |
+| `/session load <id>` | Load an archived session by ID |
+| `/session new` | Archive the current session and start a fresh one |
 
 ## Modes
 
@@ -134,6 +145,16 @@ Optional configuration:
 
 - `OLLAMA_BASE_URL` default: `http://127.0.0.1:11434`
 - `OLLAMA_MODEL` default: `llama3.2`
+
+### Compactor model (optional)
+
+When conversation memory is compacted, REI can use a separate cheaper model for summarization instead of the main provider model. This is useful when the main model is expensive or slow.
+
+```bash
+COMPACTOR_MODEL=openai/gpt-4o-mini npm run dev -- chat
+```
+
+If not set, the compactor uses the same provider and model as the main session.
 
 ### Gemini setup
 
@@ -192,20 +213,18 @@ The spinner still runs while the model is generating, and the final formatted an
 
 ## Repository-aware context
 
-On every user turn, REI rebuilds repository context and injects it into the last user message before calling the provider.
+On every user turn, REI rebuilds and injects a rich context bundle into the last user message before calling the provider.
 
 ### Turn context pipeline
 
-1. Scan the workspace.
-2. Select the most relevant files for the current input.
-3. Read partial previews for those files.
-4. Build an enriched user message containing:
-   - the original task
-   - workspace path
-   - repository summary
-   - selected file previews
+1. **Workspace scan** — file tree is scanned and cached for 30 seconds.
+2. **Semantic RAG search** — the user input is embedded and the top-5 most relevant AST nodes are retrieved from the local vector index. Exact source code is extracted by line number.
+3. **Heuristic file selector** — keyword and path scoring fills any gaps left by RAG (de-duplicated, RAG results take priority).
+4. **Caller graph discovery** — when the prompt implies a change, REI extracts symbol names and scans the workspace for every file that references them.
+5. **External knowledge** — if the prompt triggers a known framework keyword, official docs are fetched and summarized.
+6. **Enriched user message** — assembled in priority order: RAG code snippets → external doc summaries → caller file previews → heuristic file previews.
 
-If the user includes `@path/to/file` in chat, that token is preserved in the task text and can improve relevance scoring because selection is keyword/path based.
+If you include `@path/to/file` in your message, that path is matched during the heuristic step and the file is prioritised. Using `@` for a specific file is always the most reliable way to guarantee it ends up in context.
 
 This context is regenerated on every turn. It is not a one-time snapshot.
 
@@ -217,7 +236,7 @@ REI uses different preview sizes depending on mode and user intent:
 - agent mode: `4000` chars
 - explicit content requests: up to `20000` chars in agent mode
 
-Explicit content requests include prompts such as “exact code”, “código exacto”, “full code”, “contenido completo”, or “all functions”.
+Explicit content requests include prompts such as "exact code", "código exacto", "full code", "contenido completo", or "all functions".
 
 When a preview is cut, REI appends:
 
@@ -227,12 +246,92 @@ When a preview is cut, REI appends:
 
 That marker is important for the agent decision step.
 
-## External Knowledge Layer (RAG)
+## Local Semantic RAG Index
 
-REI features a zero-dependency Retrieval-Augmented Generation (RAG) layer to fetch official documentation when the local model lacks specialized knowledge. This avoids hallucination on frameworks without needing a fine-tuned model.
+REI ships a built-in local vector database stored at `.rei/rag-index.json`. It runs entirely offline using `@xenova/transformers` (`Xenova/all-MiniLM-L6-v2`, ~22 MB, ONNX, cached after first download).
+
+### Building the index
+
+Run `/index` in any chat session to trigger (or re-trigger) indexing. REI walks the workspace using `ts-morph`, extracts every function, class, interface, and variable declaration as an individual chunk, and generates a 384-dimensional embedding vector for each. Non-TypeScript files are indexed as raw text.
+
+Indexing runs asynchronously in-process without blocking the chat. Any previous indexing run is aborted before a new one starts. The index is written atomically to disk (`.tmp` rename) when complete.
+
+### Query-time flow
+
+On every turn, before any LLM call, REI:
+
+1. Embeds the user message with the same ONNX model.
+2. Runs cosine-similarity search against all stored vectors (top-5 by default).
+3. Maps each result back to exact line numbers in the source file and extracts the verbatim code.
+4. Injects the code snippets directly into the user message — not just metadata, but the actual source.
+
+### Storage
+
+```
+.rei/
+  rag-index.json   — all vectors + metadata (add to .gitignore)
+```
+
+The index automatically detects stale entries when files change. Use `/index` to force a full rebuild.
+
+## Session persistence
+
+REI automatically saves the current conversation to `.rei/sessions/current.json` after every turn. On next launch, the session is restored transparently.
+
+### Session format
+
+```json
+{
+  "version": 1,
+  "workspace": "/path/to/project",
+  "mode": "agent",
+  "createdAt": "2026-04-01T00:00:00.000Z",
+  "updatedAt": "2026-04-01T00:00:00.000Z",
+  "messages": []
+}
+```
+
+### Session commands
+
+| Command | Description |
+|---|---|
+| `/session` | Show current session info |
+| `/session list` | List all archived sessions for this workspace |
+| `/session load <id>` | Restore an archived session |
+| `/session new` | Archive current session and start fresh |
+
+When you run `/session new`, the current session is copied to `.rei/sessions/<timestamp>.json` and a blank session starts.
+
+## Conversation compaction
+
+Long-running sessions accumulate history that eventually exceeds the provider's context window. REI compacts automatically when a session reaches **20 non-system messages**.
+
+### How it works
+
+- The last **8 turns** are kept verbatim (recent context preserved exactly).
+- All older turns are summarized into a single synthetic `assistant` message using the configured compactor model.
+- The compacted session replaces the in-memory history and is saved to disk.
+
+### Triggering manually
+
+```bash
+/compact
+```
+
+### Compactor model
+
+```bash
+COMPACTOR_MODEL=openai/gpt-4o-mini npm run dev -- chat
+```
+
+If `COMPACTOR_MODEL` is not set, the main session provider and model are used.
+
+## External Knowledge Layer
+
+REI features a zero-dependency layer to fetch official documentation when the local model lacks specialized knowledge. This avoids hallucination on framework-specific APIs without needing a fine-tuned model.
 
 ### Keyword Domain Detection
-When the user's prompt matches a strict set of heuristic triggers (e.g. `signal store`, `zoneless`), REI automatically invokes its internet search pipeline. 
+When the user's prompt matches a strict set of heuristic triggers (e.g. `signal store`, `zoneless`), REI automatically invokes its internet search pipeline.
 
 ### Web Fetching
 REI runs concurrent separate queries via a lightweight DuckDuckGo Lite scraper. It targets exclusively official domains. Supported providers currently include:
@@ -400,9 +499,9 @@ REI keeps full chat history in memory, but sends only a reduced window to the pr
 
 Current limits by mode:
 
-- `ask`: last `10` non-system messages
-- `planning`: last `8` non-system messages
-- `agent`: last `5` non-system messages
+- `ask`: last `14` non-system messages
+- `planning`: last `10` non-system messages
+- `agent`: last `10` non-system messages
 
 The system message is always preserved.
 Repository context is re-injected each turn, so trimming older turns does not remove workspace grounding.
@@ -447,19 +546,20 @@ Example:
 
 ## Current limitations
 
-- relevant file selection is still heuristic, not semantic
-- there is no persistent repository index yet
 - patch proposals are only applied manually through `/confirm` (explicit approval gate)
 - model-proposed diffs may still be rejected if validation or `git apply --check` fails
 - no built-in command-execution toolchain inside REI runtime yet (focus is context + patch workflow)
+- RAG index must be rebuilt manually after large refactors (`/index`)
+- external knowledge providers cover a limited set of frameworks
 
 ## Next steps
 
 Near-term priorities:
 
-1. improve relevance selection with semantic/indexed retrieval
-2. make `@` mentions first-class context pins (not only keyword hints)
-3. add richer patch diagnostics/fix suggestions when validation fails
+1. `/review` command — structured code review output (critical / warning / suggestion) per file or directory
+2. make `@` mentions first-class context pins (pre-loaded before RAG, not part of heuristic scoring)
+3. incremental RAG index updates (watch mode, re-embed only changed files)
+4. add richer patch diagnostics/fix suggestions when validation fails
 
 ## Diagnostic Traceability (Logging)
 
@@ -492,22 +592,31 @@ npm run check
 ```mermaid
 flowchart TD
   A[User enters message] --> B[Build system prompt for current mode]
-  B --> C[Scan workspace and select relevant files]
-  C --> C2{Keywords match official docs?}
+  B --> B1{RAG index exists?}
+  B1 -->|Yes| B2[Semantic RAG search top-5 nodes]
+  B1 -->|No| C
+  B2 --> C[Heuristic file selector fills gaps]
+  C --> CG[Caller graph discovery]
+  CG --> C2{Keywords match official docs?}
   C2 -->|Yes| C3[Fetch, rank, and summarize internet docs]
-  C3 --> D[Read previews and enrich last user message]
+  C3 --> D[Enrich user message: RAG snippets + docs + file previews]
   C2 -->|No| D
 
-  D --> E{Mode is agent}
+  D --> SC{needsCompaction?}
+  SC -->|Yes| SC2[Compact: summarize old turns]
+  SC2 --> E{Mode is agent}
+  SC -->|No| E
+
   E -->|No| F[Call provider and return normal text]
   E -->|Yes| G[Phase 1: internal AgentDecision JSON]
-  G --> H{Need more context}
+  G --> H{Need more context?}
   H -->|Yes| I[Phase 2: resolve requested files safely]
   I --> J[Append extra context to last user message]
   H -->|No| J
   J --> K[Phase 2.5: validate and recover patch proposals]
   K --> L[Phase 3: final free-text markdown answer]
   L --> M[Render formatted output in terminal]
+  F --> M
 ```
 
 ## Agent loop and skills
@@ -525,28 +634,34 @@ flowchart TD
   C --> D[planningSkill<br/>agent task]
   D --> E[agent.run<br/>prompt]
   E --> F[Provider<br/>complete]
-  F --> G["📋 Planning<br/>output"]
+  F --> G[Planning output]
 
   B -->|chat| H[run-chat.ts]
-  H --> I{Session<br/>mode}
+  H --> HS[Load session<br/>from disk]
+  HS --> AI{RAG index<br/>exists?}
+  AI -->|No| AI2[Auto-index<br/>workspace]
+  AI2 --> I{Session mode}
+  AI -->|Yes| I
 
-  I -->|ask/planning| J["🔨 buildSystemMessage"]
-  J --> K[buildTurnContext]
-  K --> L["🤖 provider<br/>chat/stream"]
-  L --> M["✨ Rendered<br/>answer"]
+  I -->|ask/planning| J[buildSystemMessage]
+  J --> K[buildTurnContext<br/>RAG + heuristic + caller graph]
+  K --> L[provider chat/stream]
+  L --> LS[Save session<br/>to disk]
+  LS --> M[Rendered answer]
 
-  I -->|agent| N[buildTurnContext]
+  I -->|agent| N[buildTurnContext<br/>RAG + heuristic + caller graph]
   N --> O[prepareAgentContext]
-  O --> P["⚙️ Phase 1<br/>decision"]
-  P --> Q["📂 Phase 2<br/>context resolution"]
-  Q --> R["🔧 Phase 2.5<br/>patch validation"]
-  R --> S[Final provider<br/>call]
-  S --> T{Valid<br/>patches?}
-  T -->|Yes| U["✅ Answer +<br/>patch section"]
+  O --> P[Phase 1 decision]
+  P --> Q[Phase 2 context resolution]
+  Q --> R[Phase 2.5 patch validation]
+  R --> S[Final provider call]
+  S --> SLS[Save session<br/>to disk]
+  SLS --> T{Valid patches?}
+  T -->|Yes| U[Answer + patch section]
   T -->|No| U
 
   style V fill:#f0f0f0,stroke:#999
-  V["🌦️ src/skills/weather/<br/>SKILL.md<br/><br/>(exists, not active)"]
+  V[src/skills/weather/SKILL.md - exists not active]
 ```
 
 ## Documentation rule

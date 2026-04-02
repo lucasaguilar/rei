@@ -1,5 +1,5 @@
 import type { ChatMessage } from "../chat/types.js";
-import type { ModelProvider } from "./model-provider.js";
+import type { ModelProvider, CompletionOptions } from "./model-provider.js";
 
 interface GroqChatChoice {
   message?: {
@@ -41,53 +41,69 @@ export class GroqProvider implements ModelProvider {
     const apiKey = params?.apiKey ?? process.env.GROQ_API_KEY ?? "";
     if (!apiKey) {
       throw new Error(
-        "GroqProvider: missing API key. Set GROQ_API_KEY environment variable or pass apiKey to the constructor."
+        "GroqProvider: missing API key. Set GROQ_API_KEY environment variable or pass apiKey to the constructor.",
       );
     }
     this.apiKey = apiKey;
     this.model = params?.model ?? process.env.GROQ_MODEL ?? DEFAULT_GROQ_MODEL;
     this.requestTimeoutMs = parseRequestTimeoutMs(
       process.env.GROQ_REQUEST_TIMEOUT_MS,
-      DEFAULT_GROQ_REQUEST_TIMEOUT_MS
+      DEFAULT_GROQ_REQUEST_TIMEOUT_MS,
     );
   }
 
-  async complete(prompt: string): Promise<string> {
-    return this.completeChat([{ role: "user", content: prompt }]);
+  async complete(prompt: string, options?: CompletionOptions): Promise<string> {
+    return this.completeChat([{ role: "user", content: prompt }], options);
   }
 
-  async completeChat(messages: ChatMessage[]): Promise<string> {
-    const response = await this.fetchChat({ messages, stream: false });
+  async completeChat(
+    messages: ChatMessage[],
+    options?: CompletionOptions,
+  ): Promise<string> {
+    const response = await this.fetchChat({
+      messages,
+      stream: false,
+      modelOverride: options?.model,
+    });
 
     if (!response.ok) {
       const details = await safeReadText(response);
       throw new Error(
-        `Groq request failed (${response.status} ${response.statusText})${details ? `: ${details}` : ""}`
+        `Groq request failed (${response.status} ${response.statusText})${details ? `: ${details}` : ""}`,
       );
     }
 
     const data = (await response.json()) as GroqChatResponse;
     if (data.error) {
-      throw new Error(`Groq error: ${data.error.message ?? JSON.stringify(data.error)}`);
+      throw new Error(
+        `Groq error: ${data.error.message ?? JSON.stringify(data.error)}`,
+      );
     }
 
     const content = data.choices?.[0]?.message?.content;
     if (typeof content !== "string") {
       throw new Error(
-        `Groq response missing message content (got ${typeof content})`
+        `Groq response missing message content (got ${typeof content})`,
       );
     }
 
     return content;
   }
 
-  async *streamChat(messages: ChatMessage[]): AsyncIterable<string> {
-    const response = await this.fetchChat({ messages, stream: true });
+  async *streamChat(
+    messages: ChatMessage[],
+    options?: CompletionOptions,
+  ): AsyncIterable<string> {
+    const response = await this.fetchChat({
+      messages,
+      stream: true,
+      modelOverride: options?.model,
+    });
 
     if (!response.ok) {
       const details = await safeReadText(response);
       throw new Error(
-        `Groq stream failed (${response.status} ${response.statusText})${details ? `: ${details}` : ""}`
+        `Groq stream failed (${response.status} ${response.statusText})${details ? `: ${details}` : ""}`,
       );
     }
 
@@ -112,7 +128,9 @@ export class GroqProvider implements ModelProvider {
           try {
             const data = JSON.parse(payload) as GroqStreamChunk;
             if (data.error) {
-              throw new Error(`Groq stream error: ${data.error.message ?? JSON.stringify(data.error)}`);
+              throw new Error(
+                `Groq stream error: ${data.error.message ?? JSON.stringify(data.error)}`,
+              );
             }
             const content = data.choices?.[0]?.delta?.content;
             if (content) {
@@ -135,7 +153,9 @@ export class GroqProvider implements ModelProvider {
         try {
           const data = JSON.parse(payload) as GroqStreamChunk;
           if (data.error) {
-            throw new Error(`Groq stream error: ${data.error.message ?? JSON.stringify(data.error)}`);
+            throw new Error(
+              `Groq stream error: ${data.error.message ?? JSON.stringify(data.error)}`,
+            );
           }
           const content = data.choices?.[0]?.delta?.content;
           if (content) {
@@ -150,8 +170,12 @@ export class GroqProvider implements ModelProvider {
     }
   }
 
-  private fetchChat(params: { messages: ChatMessage[]; stream: boolean }): Promise<Response> {
-    const { messages, stream } = params;
+  private fetchChat(params: {
+    messages: ChatMessage[];
+    stream: boolean;
+    modelOverride?: string;
+  }): Promise<Response> {
+    const { messages, stream, modelOverride } = params;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
 
@@ -162,7 +186,7 @@ export class GroqProvider implements ModelProvider {
         Authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({
-        model: this.model,
+        model: modelOverride ?? this.model,
         messages,
         stream,
         temperature: 0,
@@ -180,7 +204,10 @@ async function safeReadText(response: Response): Promise<string> {
   }
 }
 
-function parseRequestTimeoutMs(value: string | undefined, fallback: number): number {
+function parseRequestTimeoutMs(
+  value: string | undefined,
+  fallback: number,
+): number {
   if (!value) return fallback;
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 1000) {

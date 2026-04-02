@@ -1,36 +1,37 @@
 import type { ModelProvider } from "../providers/model-provider.js";
-import type { ChatSession } from "../chat/types.js";
-import { generateAgentModeResponse, prepareAgentContext, buildAgentFinalResponse } from "../agent-mode/generator.js";
+import {
+  generateAgentModeResponse,
+  prepareAgentContext,
+  buildAgentFinalResponse,
+} from "../agent-mode/generator.js";
 import { buildSystemMessage } from "../prompts/prompt-builder.js";
-import { buildTurnContext, type TurnContext } from "../context/context-builder.js";
+import { buildTurnContext } from "../context/context-builder.js";
 import { buildMessagesForModel } from "../chat/message-builder.js";
-import { scanWorkspace, type FileMeta } from "../workspace/workspace-scanner.js";
-import { applyPatchBatch, runWorkspaceTypecheck, type BatchPatchApplyResult } from "../tools/patch-applier.js";
+import { compactSession, needsCompaction } from "../chat/compactor.js";
+import { type ChatSession } from "../chat/types.js";
+import {
+  scanWorkspace,
+  type FileMeta,
+} from "../workspace/workspace-scanner.js";
+import {
+  applyPatchBatch,
+  runWorkspaceTypecheck,
+  type BatchPatchApplyResult,
+} from "../tools/patch-applier.js";
 import { validatePatchProposal } from "../tools/patch-validator.js";
 import type { AgentProposedPatch } from "../contracts/agent-decision.types.js";
 import { KnowledgeOrchestrator } from "../knowledge/orchestrator.js";
 import { AgentLogger } from "./logger.js";
-
-const SCAN_CACHE_TTL_MS = 30_000;
-
-export type TurnStatus = "building_context" | "fetching_external_knowledge" | "calling_model" | "producing_response";
-
-type StreamTurnOptions = {
-  onStatus?: (status: TurnStatus) => void;
-};
-
-export interface PendingPatchAssessmentItem {
-  proposal: AgentProposedPatch;
-  applicable: boolean;
-  safe: boolean;
-  issues: string[];
-}
-
-export interface PendingPatchAssessment {
-  workspaceQualityOk: boolean;
-  workspaceQualityStderr: string;
-  items: PendingPatchAssessmentItem[];
-}
+import { SCAN_CACHE_TTL_MS } from "./constants/agent.constants.js";
+import {
+  buildTurnUserMessage,
+  looksLikeAgentJson,
+} from "./helpers/turn-message.helpers.js";
+import type {
+  StreamTurnOptions,
+  PendingPatchAssessmentItem,
+  PendingPatchAssessment,
+} from "./models/agent.types.js";
 
 export class Agent {
   private scanCache?: {
@@ -41,11 +42,12 @@ export class Agent {
   private pendingProposedPatches: AgentProposedPatch[] = [];
   private knowledgeOrchestrator: KnowledgeOrchestrator;
   public logger: AgentLogger;
+  public readonly provider: ModelProvider;
+  private readonly workspacePath: string;
 
-  constructor(
-    private readonly provider: ModelProvider,
-    private readonly workspacePath: string = process.cwd()
-  ) { 
+  constructor(provider: ModelProvider, workspacePath: string = process.cwd()) {
+    this.provider = provider;
+    this.workspacePath = workspacePath;
     this.knowledgeOrchestrator = new KnowledgeOrchestrator(this.provider);
     this.logger = new AgentLogger(workspacePath);
   }
@@ -68,7 +70,9 @@ export class Agent {
     return count;
   }
 
-  async applyPendingPatches(options?: { dryRun?: boolean }): Promise<BatchPatchApplyResult> {
+  async applyPendingPatches(options?: {
+    dryRun?: boolean;
+  }): Promise<BatchPatchApplyResult> {
     if (this.pendingProposedPatches.length === 0) {
       return {
         success: false,
@@ -77,11 +81,19 @@ export class Agent {
       };
     }
 
-    const result = await applyPatchBatch(this.pendingProposedPatches, this.workspacePath, {
-      dryRun: options?.dryRun ?? true,
-    });
+    const result = await applyPatchBatch(
+      this.pendingProposedPatches,
+      this.workspacePath,
+      {
+        dryRun: options?.dryRun ?? true,
+      },
+    );
 
-    if (!options?.dryRun && result.success && result.results.every((r) => r.applied)) {
+    if (
+      !options?.dryRun &&
+      result.success &&
+      result.results.every((r) => r.applied)
+    ) {
       this.pendingProposedPatches = [];
     }
 
@@ -93,7 +105,10 @@ export class Agent {
     const items: PendingPatchAssessmentItem[] = [];
 
     for (const proposal of this.pendingProposedPatches) {
-      const validation = await validatePatchProposal(proposal, this.workspacePath);
+      const validation = await validatePatchProposal(
+        proposal,
+        this.workspacePath,
+      );
       const applicable = validation.valid;
       const safe = applicable && quality.ok;
       const issues = validation.issues.map((issue) => issue.message);
@@ -135,14 +150,40 @@ export class Agent {
       knowledgeOrchestrator: this.knowledgeOrchestrator,
     });
 
+    if (context.ragResults && context.ragResults.length > 0) {
+      this.logger.logRagSearch(
+        userInput,
+        context.ragResults.map((r) => ({
+          filePath: r.metadata.filePath,
+          nodeType: r.metadata.nodeType,
+          nodeName: r.metadata.nodeName,
+          score: r.score,
+        })),
+      );
+    }
+
     const enrichedMessage = buildTurnUserMessage({ userInput, context });
 
     session.messages.push({ role: "user", content: enrichedMessage });
 
+    if (needsCompaction(session.messages)) {
+      session.messages = await compactSession({
+        messages: session.messages,
+        provider: this.provider,
+        modelOverride: process.env.COMPACTOR_MODEL,
+      });
+    }
+
     // session.messages holds the complete history; send only a trimmed
     // window to the provider to keep prompt size under control.
-    const messagesForModel = buildMessagesForModel(session.messages, session.mode);
-    const response = await this.generateAssistantResponse(session.mode, messagesForModel);
+    const messagesForModel = buildMessagesForModel(
+      session.messages,
+      session.mode,
+    );
+    const response = await this.generateAssistantResponse(
+      session.mode,
+      messagesForModel,
+    );
     session.messages.push({ role: "assistant", content: response });
     return response;
   }
@@ -150,7 +191,7 @@ export class Agent {
   async *streamTurn(
     session: ChatSession,
     userInput: string,
-    options?: StreamTurnOptions
+    options?: StreamTurnOptions,
   ): AsyncIterable<string> {
     this.logger.startTurn();
     options?.onStatus?.("building_context");
@@ -171,11 +212,35 @@ export class Agent {
       onStatus: options?.onStatus,
     });
 
+    if (context.ragResults && context.ragResults.length > 0) {
+      this.logger.logRagSearch(
+        userInput,
+        context.ragResults.map((r) => ({
+          filePath: r.metadata.filePath,
+          nodeType: r.metadata.nodeType,
+          nodeName: r.metadata.nodeName,
+          score: r.score,
+        })),
+      );
+    }
+
     const enrichedMessage = buildTurnUserMessage({ userInput, context });
 
     session.messages.push({ role: "user", content: enrichedMessage });
 
-    const messagesForModel = buildMessagesForModel(session.messages, session.mode);
+    if (needsCompaction(session.messages)) {
+      options?.onStatus?.("compacting_memory");
+      session.messages = await compactSession({
+        messages: session.messages,
+        provider: this.provider,
+        modelOverride: process.env.COMPACTOR_MODEL,
+      });
+    }
+
+    const messagesForModel = buildMessagesForModel(
+      session.messages,
+      session.mode,
+    );
     options?.onStatus?.("calling_model");
 
     if (session.mode === "agent") {
@@ -192,7 +257,9 @@ export class Agent {
       let answer: string;
       if (this.provider.streamChat) {
         answer = "";
-        for await (const token of this.provider.streamChat(prelude.answerMessages)) {
+        for await (const token of this.provider.streamChat(
+          prelude.answerMessages,
+        )) {
           answer += token;
           yield token;
         }
@@ -259,7 +326,7 @@ export class Agent {
 
   private async generateAssistantResponse(
     mode: ChatSession["mode"],
-    messagesForModel: ChatSession["messages"]
+    messagesForModel: ChatSession["messages"],
   ): Promise<string> {
     if (mode !== "agent") {
       const raw = await this.provider.completeChat(messagesForModel);
@@ -291,7 +358,10 @@ export class Agent {
       scannedFiles: this.getWorkspaceFiles(),
       logger: this.logger,
     }).then((outcome) => {
-      if (outcome.validProposedPatches && outcome.validProposedPatches.length > 0) {
+      if (
+        outcome.validProposedPatches &&
+        outcome.validProposedPatches.length > 0
+      ) {
         this.pendingProposedPatches = [
           ...(this.pendingProposedPatches ?? []),
           ...outcome.validProposedPatches,
@@ -300,65 +370,4 @@ export class Agent {
       return outcome.response;
     });
   }
-}
-
-export function buildTurnUserMessage(params: {
-  userInput: string;
-  context: TurnContext;
-}): string {
-  const { userInput, context } = params;
-  const lines: string[] = [];
-
-  lines.push(`Task: ${userInput}`);
-  lines.push(``);
-  lines.push(`Workspace: ${context.workspacePath}`);
-  lines.push(``);
-  lines.push(`Repository summary:`);
-  lines.push(context.repoSummary);
-
-  if (context.externalKnowledge && context.externalKnowledge.length > 0) {
-    lines.push(``);
-    lines.push(`External Official Documentation:`);
-    lines.push(`These are officially sourced technical references related to the user's task.`);
-    context.externalKnowledge.forEach((knowledge, idx) => {
-      lines.push(`${idx + 1}. [${knowledge.domain}] ${knowledge.title}`);
-      lines.push(`   Source: ${knowledge.url}`);
-      lines.push(`   Summary:\n   ${knowledge.content.split('\\n').join('\\n   ')}`);
-      lines.push(``);
-    });
-  }
-
-  if (context.relevantFiles.length > 0) {
-    lines.push(``);
-    lines.push(`The following files are ALREADY included in this message. Do NOT request them via contextRequests:`);
-    for (const file of context.relevantFiles) {
-      lines.push(`  - ${file.path}`);
-    }
-    lines.push(``);
-    lines.push(`Important: The file excerpts below may be partial or truncated.
-Use only the visible content. Do not reconstruct omitted code.`);
-    lines.push(`Relevant files:`);
-    for (const file of context.relevantFiles) {
-      lines.push(``);
-      lines.push(`--- ${file.path} (score: ${file.score}) ---`);
-      lines.push(file.preview);
-    }
-  }
-
-  return lines.join("\n");
-}
-
-/**
- * Heuristic to detect when a non-agent mode response looks like an agent
- * JSON contract object. Checks for the structural fingerprint of AgentResponse
- * (top-level keys "version", "mode", "actions") without full parsing.
- */
-function looksLikeAgentJson(raw: string): boolean {
-  const trimmed = raw.trimStart();
-  if (!trimmed.startsWith("{")) return false;
-  return (
-    /"version"\s*:/.test(trimmed) &&
-    /"mode"\s*:\s*"agent"/.test(trimmed) &&
-    /"actions"\s*:/.test(trimmed)
-  );
 }

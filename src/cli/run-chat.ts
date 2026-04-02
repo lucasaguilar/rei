@@ -1,24 +1,53 @@
 import * as readline from "readline";
 import * as path from "path";
-import type { Agent, TurnStatus } from "../core/agent.js";
+import type { Agent } from "../core/agent.js";
+import type { TurnStatus } from "../core/models/agent.types.js";
 import type { ChatSession } from "../chat/types.js";
 
 import { getWelcomeMessage, COMMANDS } from "./constants/chat.constants.js";
-import { ActivePalette, CommandEntry, MentionEntry, ChatRendererState, ChatUIState, KeyboardActions } from "./models/chat.types.js";
+import {
+  ActivePalette,
+  CommandEntry,
+  MentionEntry,
+  ChatRendererState,
+  ChatUIState,
+  KeyboardActions,
+} from "./models/chat.types.js";
 import { clamp } from "./helpers/terminal.helpers.js";
 import { buildMentionEntries } from "./helpers/chat.helpers.js";
 import { ChatRenderer } from "./ui/chat-renderer.js";
 import { KeyboardHandler } from "./ui/keyboard-handler.js";
 import { InputHandler, InputHandlerContext } from "./ui/input-handler.js";
+import {
+  startIndexingWorker,
+  hasRagIndex,
+} from "../context/rag/rag-indexer.js";
+import {
+  loadCurrentSession,
+  saveSession,
+  archiveCurrentSession,
+} from "../chat/session-store.js";
 
-export async function runChat(agent: Agent, workspacePath = process.cwd()): Promise<void> {
-  const session: ChatSession = { messages: [], mode: "ask" };
+export async function runChat(
+  agent: Agent,
+  workspacePath = process.cwd(),
+  autoIndex = true,
+): Promise<void> {
+  const existing = loadCurrentSession(workspacePath);
+  const session: ChatSession = existing
+    ? {
+        messages: existing.messages,
+        mode: existing.mode,
+        createdAt: existing.createdAt,
+        summary: existing.summary,
+      }
+    : { messages: [], mode: "ask" };
   const mentionEntries = buildMentionEntries(workspacePath);
 
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     console.error(
       "Error: The interactive chat UI requires both stdin and stdout to be TTYs. " +
-        "Please run this command in an interactive terminal."
+        "Please run this command in an interactive terminal.",
     );
     return;
   }
@@ -66,13 +95,16 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
 
   const getCommandPalette = (): CommandEntry[] => {
     const trimmed = state.inputBuffer.trim().toLowerCase();
-    if (!trimmed.startsWith("/") || state.busy || state.paletteClosed) return [];
+    if (!trimmed.startsWith("/") || state.busy || state.paletteClosed)
+      return [];
     if (trimmed === "/") return COMMANDS;
 
     return COMMANDS.filter((entry) => entry.command.startsWith(trimmed));
   };
 
-  const getMentionContext = (): { start: number; end: number; query: string } | undefined => {
+  const getMentionContext = ():
+    | { start: number; end: number; query: string }
+    | undefined => {
     if (state.busy || state.paletteClosed) return undefined;
 
     let start = state.inputCursor - 1;
@@ -84,7 +116,10 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
 
     let end = state.inputCursor;
     // NOTE: Walk forward until a whitespace character is found
-    while (end < state.inputBuffer.length && !/\s/.test(state.inputBuffer[end])) {
+    while (
+      end < state.inputBuffer.length &&
+      !/\s/.test(state.inputBuffer[end])
+    ) {
       end += 1;
     }
 
@@ -112,7 +147,10 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
       if (!lowerQuery) return true;
 
       if (scopedPrefix) {
-        if (!valueLower.startsWith(scopedPrefix) || valueLower === scopedPrefix) {
+        if (
+          !valueLower.startsWith(scopedPrefix) ||
+          valueLower === scopedPrefix
+        ) {
           return false;
         }
 
@@ -151,11 +189,14 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
     return { kind: "none", items: [] };
   };
 
-  const findHistoryMatch = (query: string, startIndex?: number): number | undefined => {
+  const findHistoryMatch = (
+    query: string,
+    startIndex?: number,
+  ): number | undefined => {
     const q = query.trim().toLowerCase();
     if (!q) return undefined;
 
-    let index = startIndex ?? (state.inputHistory.length - 1);
+    let index = startIndex ?? state.inputHistory.length - 1;
     while (index >= 0) {
       if (state.inputHistory[index].toLowerCase().includes(q)) {
         return index;
@@ -194,10 +235,14 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
       inputBuffer: state.inputBuffer,
       inputCursor: state.inputCursor,
     };
-    
+
     // selectedCommandIndex can be adjusted by draw
     const paletteItems = renderState.activePalette.items;
-    state.selectedCommandIndex = clamp(state.selectedCommandIndex, 0, Math.max(0, paletteItems.length - 1));
+    state.selectedCommandIndex = clamp(
+      state.selectedCommandIndex,
+      0,
+      Math.max(0, paletteItems.length - 1),
+    );
     renderState.selectedCommandIndex = state.selectedCommandIndex;
 
     ChatRenderer.draw(renderState);
@@ -247,6 +292,7 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
     agent,
     session,
     transcript,
+    workspacePath,
     actions: {
       pushTranscript,
       draw,
@@ -256,7 +302,7 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
       rememberHistory,
       getActivePalette,
       getMentionContext,
-    }
+    },
   };
 
   const submitInput = async (): Promise<void> => {
@@ -285,7 +331,7 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
     if (!data.includes("\x1b[<") && !data.includes("\x1b[M")) return;
 
     state.suppressAnsiInputUntil = Date.now() + 250;
-    
+
     // NOTE: Parse the SGR mouse data string to obtain action ID (e.g. 64/65 for wheel)
     const matches = data.matchAll(/\x1b\[<(\d+);(\d+);(\d+)([mM])/g);
     let changed = false;
@@ -298,7 +344,10 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
         state.scrollOffset += MOUSE_SCROLL_STEP;
         changed = true;
       } else if (code === 65) {
-        state.scrollOffset = Math.max(0, state.scrollOffset - MOUSE_SCROLL_STEP);
+        state.scrollOffset = Math.max(
+          0,
+          state.scrollOffset - MOUSE_SCROLL_STEP,
+        );
         changed = true;
       }
     }
@@ -317,7 +366,35 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
   // NOTE: Enter alternate screen buffer (1049h)
   process.stdout.write("\x1b[?1049h");
 
-  pushTranscript(getWelcomeMessage(session.mode));
+  if (existing) {
+    const nonSystem = existing.messages.filter((m) => m.role !== "system");
+    const turnCount = Math.floor(nonSystem.length / 2);
+    pushTranscript(
+      `[REI] Resuming session from ${new Date(existing.updatedAt).toLocaleString()} (${turnCount} turns).`,
+    );
+    if (existing.summary) {
+      pushTranscript(`[REI] Summary: ${existing.summary}`);
+    }
+  } else {
+    pushTranscript(getWelcomeMessage(session.mode));
+  }
+
+  if (autoIndex && !hasRagIndex(workspacePath)) {
+    pushTranscript(
+      "[RAG] First run detected — starting background indexing...",
+    );
+    startIndexingWorker(workspacePath, {
+      onProgress: (indexed, total) => {
+        pushTranscript(`[RAG] Indexing... ${indexed}/${total} files`);
+        draw();
+      },
+      onDone: (message) => {
+        pushTranscript(`[RAG] ${message}`);
+        draw();
+      },
+    });
+  }
+
   draw();
 
   while (state.running) {
@@ -329,7 +406,7 @@ export async function runChat(agent: Agent, workspacePath = process.cwd()): Prom
   process.stdin.off("keypress", onKeypress);
   process.stdin.off("data", onMouseData);
   process.stdout.off("resize", onResize);
-  
+
   if (process.stdin.isTTY) {
     process.stdin.setRawMode(false);
   }

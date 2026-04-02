@@ -1,9 +1,13 @@
 import type { ChatMessage, SessionMode } from "./types.js";
 
+// NOTE: Position 0 in session.messages is always the system message and is
+// never included in this count — it is always prepended to the output.
+// Each user message already re-injects workspace context (files, RAG, AST),
+// so trimming old turns only loses conversational back-and-forth, not code grounding.
 const MAX_NON_SYSTEM_MESSAGES: Record<SessionMode, number> = {
-  ask: 10,
-  planning: 8,
-  agent: 5,
+  ask: 14,       // ~7 full exchanges
+  planning: 10,  // ~5 full exchanges
+  agent: 10,     // ~5 full exchanges — was 5, too short for multi-step tasks
 };
 
 /**

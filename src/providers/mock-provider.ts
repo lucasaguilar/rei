@@ -1,19 +1,26 @@
-import type { ModelProvider } from "./model-provider.js";
+import type { ModelProvider, CompletionOptions } from "./model-provider.js";
 import type { ChatMessage } from "../chat/types.js";
 
 export class MockProvider implements ModelProvider {
-  async complete(prompt: string): Promise<string> {
-    return `[mock response]\nPrompt received:\n${prompt}`;
+  async complete(
+    prompt: string,
+    _options?: CompletionOptions,
+  ): Promise<string> {
+    return `Mock completion for: ${prompt.slice(0, 50)}...`;
   }
 
-  async completeChat(messages: ChatMessage[]): Promise<string> {
-    const lastUser = [...messages].reverse().find((m) => m.role === "user");
-    return `[mock response] You said: ${lastUser?.content ?? ""}`;
+  async completeChat(
+    messages: ChatMessage[],
+    _options?: CompletionOptions,
+  ): Promise<string> {
+    return `Mock assistant response for ${messages.length} messages.`;
   }
 
-  async *streamChat(messages: ChatMessage[]): AsyncIterable<string> {
-    const lastUser = [...messages].reverse().find((m) => m.role === "user");
-    const response = `[mock response] You said: ${lastUser?.content ?? ""}`;
+  async *streamChat(
+    messages: ChatMessage[],
+    _options?: CompletionOptions,
+  ): AsyncIterable<string> {
+    const response = `Mock assistant response for ${messages.length} messages.`;
     const tokens = response.split(" ");
 
     // Simulate streaming by yielding one token at a time with a delay.
@@ -21,7 +28,5 @@ export class MockProvider implements ModelProvider {
       await new Promise((resolve) => setTimeout(resolve, 80));
       yield token + " ";
     }
-
-
   }
 }
