@@ -7,8 +7,8 @@ import { runChat } from "./run-chat.js";
 
 export async function runCli(args: string[]): Promise<void> {
   const parsed = parseCliArgs(args);
-
-  const command = parsed.command ?? (parsed.workspaceInput ? "chat" : undefined);
+  const command =
+    parsed.command ?? (parsed.workspaceInput ? "chat" : undefined);
   const rest = parsed.commandArgs;
 
   if (!command) {
@@ -31,7 +31,9 @@ export async function runCli(args: string[]): Promise<void> {
   if (command === "plan") {
     const task = rest.join(" ");
     if (!task) {
-      console.error("Usage: rei [--workspace <path>] plan \"<task description>\"");
+      console.error(
+        'Usage: rei [--workspace <path>] plan "<task description>"',
+      );
       process.exit(1);
     }
     const result = await planningSkill(agent, task);

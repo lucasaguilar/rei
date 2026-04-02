@@ -1,4 +1,3 @@
-import * as fs from "fs";
 import * as path from "path";
 import type { SessionMode } from "../chat/types.js";
 import type { KnowledgeChunk } from "../knowledge/types.js";
@@ -19,10 +18,11 @@ import {
   type RagSearchResult,
 } from "./rag/rag-indexer.js";
 import {
-  extractSymbolHints,
-  findSymbolCallers,
-  rankCallerFiles,
-} from "./caller-graph.js";
+  buildCallerFilesContext,
+  buildRagNodeSnippets,
+  buildRepoSummary,
+  isExplicitContentRequest,
+} from "./helpers/context-builder.helpers.js";
 
 export type RagNodeSnippet = {
   filePath: string;
@@ -49,17 +49,6 @@ export type TurnContext = {
   callerFiles?: Array<{ path: string; symbols: string[]; preview: string }>;
 };
 
-const PROJECT_MARKERS = [
-  "package.json",
-  "tsconfig.json",
-  "angular.json",
-  "README.md",
-  "Cargo.toml",
-  "go.mod",
-  "pyproject.toml",
-  "requirements.txt",
-];
-
 export async function buildTurnContext(params: {
   workspacePath: string;
   userInput: string;
@@ -73,10 +62,10 @@ export async function buildTurnContext(params: {
   const { workspacePath, userInput, mode, scannedFiles } = params;
 
   const files = scannedFiles ?? scanWorkspace(workspacePath);
-  const repoSummary = await buildRepoSummary(
+  const repoSummary = await buildRepoSummary({
     workspacePath,
-    files.map((f) => f.path),
-  );
+    fileCount: files.length,
+  });
 
   // RAG semantic search: if an index exists, find the most relevant AST nodes first
   let ragResults: RagSearchResult[] | undefined;
@@ -124,57 +113,12 @@ export async function buildTurnContext(params: {
     })),
   );
 
-  // Caller graph: when the input looks like a change request, find files that
-  // reference the symbols mentioned in the prompt and pre-load them into context.
-  const callerFiles: Array<{
-    path: string;
-    symbols: string[];
-    preview: string;
-  }> = [];
-  const isChangeIntent =
-    /\b(add|change|modify|update|fix|implement|create|remove|delete|refactor|agreg|cambi|modific|actualiz|arregl|implement|cre[ar]|elimin|borr)\w*/i.test(
-      userInput,
-    );
-
-  if (isChangeIntent) {
-    const symbolHints = extractSymbolHints(userInput);
-    if (symbolHints.length > 0) {
-      const callerRefs = findSymbolCallers({
-        workspacePath,
-        symbolNames: symbolHints,
-        scannedFiles: files,
-        maxResults: 15,
-      });
-
-      // Group symbols by file for the context entry
-      const symbolsByFile = new Map<string, string[]>();
-      for (const ref of callerRefs) {
-        const existing = symbolsByFile.get(ref.filePath) ?? [];
-        if (!existing.includes(ref.symbolName)) existing.push(ref.symbolName);
-        symbolsByFile.set(ref.filePath, existing);
-      }
-
-      const rankedCallerPaths = rankCallerFiles(callerRefs);
-      const alreadyIncluded = new Set(mergedPaths.map((f) => f.path));
-
-      for (const callerPath of rankedCallerPaths.slice(0, 5)) {
-        if (alreadyIncluded.has(callerPath)) continue;
-        try {
-          const preview = await readFilePreview(
-            path.join(workspacePath, callerPath),
-            PREVIEW_MAX_CHARS_AGENT,
-          );
-          callerFiles.push({
-            path: callerPath,
-            symbols: symbolsByFile.get(callerPath) ?? [],
-            preview,
-          });
-        } catch {
-          // File unreadable — skip
-        }
-      }
-    }
-  }
+  const callerFiles = await buildCallerFilesContext({
+    workspacePath,
+    userInput,
+    scannedFiles: files,
+    alreadyIncludedPaths: new Set(mergedPaths.map((file) => file.path)),
+  });
 
   if (params.knowledgeOrchestrator) {
     params.onStatus?.("fetching_external_knowledge");
@@ -184,33 +128,7 @@ export async function buildTurnContext(params: {
     ? await params.knowledgeOrchestrator.getExternalKnowledge(userInput)
     : [];
 
-  // Extract the actual source code of each RAG-retrieved AST node by line numbers
-  const ragNodeSnippets: RagNodeSnippet[] = [];
-  if (ragResults && ragResults.length > 0) {
-    for (const hit of ragResults) {
-      const { filePath, nodeType, nodeName, startLine, endLine } = hit.metadata;
-      if (!startLine || !endLine || endLine <= 0) continue;
-      try {
-        const absPath = path.join(workspacePath, filePath);
-        const fileContent = fs.readFileSync(absPath, "utf8");
-        const allLines = fileContent.split("\n");
-        // NOTE: ts-morph line numbers are 1-indexed; slice is 0-indexed
-        const codeLines = allLines.slice(startLine - 1, endLine);
-        const code = codeLines.join("\n").slice(0, 3000); // cap to avoid overloading context
-        ragNodeSnippets.push({
-          filePath,
-          nodeType,
-          nodeName,
-          startLine,
-          endLine,
-          score: hit.score,
-          code,
-        });
-      } catch {
-        // File may have been deleted since indexing — skip silently
-      }
-    }
-  }
+  const ragNodeSnippets = buildRagNodeSnippets({ workspacePath, ragResults });
 
   return {
     workspacePath,
@@ -221,46 +139,4 @@ export async function buildTurnContext(params: {
     ragNodeSnippets,
     callerFiles: callerFiles.length > 0 ? callerFiles : undefined,
   };
-}
-
-function isExplicitContentRequest(userInput: string): boolean {
-  const lower = userInput.toLowerCase();
-  return /c[oó]digo exacto|exact code|full code|complete code|contenido completo|c[oó]digo completo|full content|complete file|todas las funciones|all functions|show.{0,15}code|mostrame.{0,25}c[oó]digo|dame.{0,25}c[oó]digo/.test(
-    lower,
-  );
-}
-
-async function buildRepoSummary(
-  workspacePath: string,
-  filePaths: string[],
-): Promise<string> {
-  const lines: string[] = [];
-
-  const detectedMarkers = PROJECT_MARKERS.filter((marker) =>
-    fs.existsSync(path.join(workspacePath, marker)),
-  );
-  if (detectedMarkers.length > 0) {
-    lines.push(`Project markers: ${detectedMarkers.join(", ")}`);
-  }
-
-  const topLevelDirs: string[] = [];
-  try {
-    const entries = await fs.promises.readdir(workspacePath, {
-      withFileTypes: true,
-    });
-    for (const entry of entries) {
-      if (entry.isDirectory() && !entry.name.startsWith(".")) {
-        topLevelDirs.push(entry.name);
-      }
-    }
-  } catch {
-    // ignore
-  }
-  if (topLevelDirs.length > 0) {
-    lines.push(`Top-level folders: ${topLevelDirs.join(", ")}`);
-  }
-
-  lines.push(`Total files scanned: ${filePaths.length}`);
-
-  return lines.join("\n");
 }

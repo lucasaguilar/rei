@@ -1,12 +1,13 @@
-import { existsSync } from 'node:fs';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { Project } from 'ts-morph';
-import { scanWorkspace } from '../../workspace/workspace-scanner.js';
-import { VectorStore, VectorMetadata } from './vector-store.js';
-import { generateEmbedding } from './embedder.js';
-import type { VectorSearchResult } from './vector-store.js';
+import { existsSync } from "node:fs";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
+import { Project } from "ts-morph";
+import { scanWorkspace } from "../../workspace/workspace-scanner.js";
+import { supportsAstIndexingExtension } from "../../language/language-capabilities.js";
+import { VectorStore, VectorMetadata } from "./vector-store.js";
+import { generateEmbedding } from "./embedder.js";
+import type { VectorSearchResult } from "./vector-store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -19,8 +20,6 @@ export interface RagSearchResult extends VectorSearchResult {
   score: number;
 }
 
-const INDEXABLE_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx']);
-
 let indexingActive = false;
 let indexingAbortFlag = false;
 
@@ -32,7 +31,7 @@ let indexingAbortFlag = false;
  */
 export function startIndexingWorker(
   workspacePath: string,
-  options: RagIndexerOptions = {}
+  options: RagIndexerOptions = {},
 ): void {
   // NOTE: Abort any ongoing indexing before starting a new one
   if (indexingActive) {
@@ -46,14 +45,14 @@ export function startIndexingWorker(
 
 async function runIndexing(
   workspacePath: string,
-  options: RagIndexerOptions
+  options: RagIndexerOptions,
 ): Promise<void> {
   indexingActive = true;
   indexingAbortFlag = false;
 
   const files = scanWorkspace(workspacePath);
   if (files.length === 0) {
-    options.onDone?.('RAG: No files found to index.');
+    options.onDone?.("RAG: No files found to index.");
     indexingActive = false;
     return;
   }
@@ -61,7 +60,7 @@ async function runIndexing(
   const store = new VectorStore(workspacePath);
   await store.load();
 
-  const tsconfigPath = path.join(workspacePath, 'tsconfig.json');
+  const tsconfigPath = path.join(workspacePath, "tsconfig.json");
   const project = new Project({
     tsConfigFilePath: existsSync(tsconfigPath) ? tsconfigPath : undefined,
     skipAddingFilesFromTsConfig: true,
@@ -82,33 +81,76 @@ async function runIndexing(
 
     const absPath = path.resolve(workspacePath, file.path);
 
-    if (INDEXABLE_EXTS.has(file.extension)) {
+    if (supportsAstIndexingExtension(file.extension)) {
       try {
         const sourceFile = project.addSourceFileAtPath(absPath);
-        const chunks: Array<{ name: string; type: string; text: string; startLine: number; endLine: number }> = [];
+        const chunks: Array<{
+          name: string;
+          type: string;
+          text: string;
+          startLine: number;
+          endLine: number;
+        }> = [];
 
         for (const fn of sourceFile.getFunctions()) {
-          chunks.push({ name: fn.getName() ?? 'anonymous', type: 'function', text: fn.getText(), startLine: fn.getStartLineNumber(), endLine: fn.getEndLineNumber() });
+          chunks.push({
+            name: fn.getName() ?? "anonymous",
+            type: "function",
+            text: fn.getText(),
+            startLine: fn.getStartLineNumber(),
+            endLine: fn.getEndLineNumber(),
+          });
         }
         for (const cls of sourceFile.getClasses()) {
-          chunks.push({ name: cls.getName() ?? 'AnonymousClass', type: 'class', text: cls.getText(), startLine: cls.getStartLineNumber(), endLine: cls.getEndLineNumber() });
+          chunks.push({
+            name: cls.getName() ?? "AnonymousClass",
+            type: "class",
+            text: cls.getText(),
+            startLine: cls.getStartLineNumber(),
+            endLine: cls.getEndLineNumber(),
+          });
         }
         for (const iface of sourceFile.getInterfaces()) {
-          chunks.push({ name: iface.getName(), type: 'interface', text: iface.getText(), startLine: iface.getStartLineNumber(), endLine: iface.getEndLineNumber() });
+          chunks.push({
+            name: iface.getName(),
+            type: "interface",
+            text: iface.getText(),
+            startLine: iface.getStartLineNumber(),
+            endLine: iface.getEndLineNumber(),
+          });
         }
         for (const vs of sourceFile.getVariableStatements()) {
           for (const vd of vs.getDeclarations()) {
-            chunks.push({ name: vd.getName(), type: 'variable', text: vs.getText(), startLine: vs.getStartLineNumber(), endLine: vs.getEndLineNumber() });
+            chunks.push({
+              name: vd.getName(),
+              type: "variable",
+              text: vs.getText(),
+              startLine: vs.getStartLineNumber(),
+              endLine: vs.getEndLineNumber(),
+            });
           }
         }
         if (chunks.length === 0) {
-          chunks.push({ name: file.path, type: 'file_chunk', text: sourceFile.getText().slice(0, 4000), startLine: 1, endLine: 0 });
+          chunks.push({
+            name: file.path,
+            type: "file_chunk",
+            text: sourceFile.getText().slice(0, 4000),
+            startLine: 1,
+            endLine: 0,
+          });
         }
 
         for (const chunk of chunks) {
           if (!chunk.text.trim()) continue;
           const id = `${file.path}::${chunk.type}::${chunk.name}`;
-          const metadata: VectorMetadata = { id, filePath: file.path, nodeType: chunk.type, nodeName: chunk.name, startLine: chunk.startLine, endLine: chunk.endLine };
+          const metadata: VectorMetadata = {
+            id,
+            filePath: file.path,
+            nodeType: chunk.type,
+            nodeName: chunk.name,
+            startLine: chunk.startLine,
+            endLine: chunk.endLine,
+          };
           const vector = await generateEmbedding(chunk.text.slice(0, 2000));
           store.upsert(metadata, vector);
         }
@@ -119,10 +161,17 @@ async function runIndexing(
       }
     } else {
       try {
-        const rawText = fs.readFileSync(absPath, 'utf8').slice(0, 2000);
+        const rawText = fs.readFileSync(absPath, "utf8").slice(0, 2000);
         if (rawText.trim()) {
           const id = `${file.path}::file_chunk::raw`;
-          const metadata: VectorMetadata = { id, filePath: file.path, nodeType: 'file_chunk', nodeName: file.path, startLine: 1, endLine: 0 };
+          const metadata: VectorMetadata = {
+            id,
+            filePath: file.path,
+            nodeType: "file_chunk",
+            nodeName: file.path,
+            startLine: 1,
+            endLine: 0,
+          };
           const vector = await generateEmbedding(rawText);
           store.upsert(metadata, vector);
         }
@@ -149,7 +198,7 @@ async function runIndexing(
  * Checks whether a RAG index already exists for this workspace.
  */
 export function hasRagIndex(workspacePath: string): boolean {
-  return existsSync(path.join(workspacePath, '.rei', 'rag-index.json'));
+  return existsSync(path.join(workspacePath, ".rei", "rag-index.json"));
 }
 
 /**
@@ -158,7 +207,7 @@ export function hasRagIndex(workspacePath: string): boolean {
 export async function searchRag(
   workspacePath: string,
   query: string,
-  topK = 5
+  topK = 5,
 ): Promise<RagSearchResult[]> {
   const store = new VectorStore(workspacePath);
   await store.load();
