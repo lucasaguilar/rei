@@ -4,20 +4,28 @@ import type { Agent } from "../core/agent.js";
 import type { TurnStatus } from "../core/models/agent.types.js";
 import type { ChatSession } from "../chat/types.js";
 
-import { getWelcomeMessage, COMMANDS } from "./constants/chat.constants.js";
+import { getWelcomeMessage } from "./constants/chat.constants.js";
 import {
-  ActivePalette,
-  CommandEntry,
-  MentionEntry,
   ChatRendererState,
   ChatUIState,
   KeyboardActions,
 } from "./models/chat.types.js";
 import { clamp } from "./helpers/terminal.helpers.js";
 import { buildMentionEntries } from "./helpers/chat.helpers.js";
+import {
+  clearHistorySearchState,
+  findHistoryMatch,
+  getActivePalette,
+  getMentionContext,
+} from "./helpers/chat-input.helpers.js";
+import {
+  appendTranscriptLines,
+  applyMouseWheelScroll,
+} from "./helpers/chat-runtime.helpers.js";
 import { ChatRenderer } from "./ui/chat-renderer.js";
 import { KeyboardHandler } from "./ui/keyboard-handler.js";
-import { InputHandler, InputHandlerContext } from "./ui/input-handler.js";
+import { InputHandler } from "./ui/input-handler.js";
+import type { InputHandlerContext } from "./models/input-handler.types.js";
 import {
   startIndexingWorker,
   hasRagIndex,
@@ -83,144 +91,26 @@ export async function runChat(
   };
 
   const pushTranscript = (value: string): void => {
-    // NOTE: Normalize Windows line endings to standard line feeds
-    const normalized = value.replace(/\r\n/g, "\n");
-    for (const line of normalized.split("\n")) {
-      transcript.push(line);
-    }
-    if (transcript.length > 3000) {
-      transcript.splice(0, transcript.length - 3000);
-    }
+    appendTranscriptLines(transcript, value);
   };
 
-  const getCommandPalette = (): CommandEntry[] => {
-    const trimmed = state.inputBuffer.trim().toLowerCase();
-    if (!trimmed.startsWith("/") || state.busy || state.paletteClosed)
-      return [];
-    if (trimmed === "/") return COMMANDS;
+  const getPalette = () => getActivePalette(state, mentionEntries);
 
-    return COMMANDS.filter((entry) => entry.command.startsWith(trimmed));
-  };
-
-  const getMentionContext = ():
-    | { start: number; end: number; query: string }
-    | undefined => {
-    if (state.busy || state.paletteClosed) return undefined;
-
-    let start = state.inputCursor - 1;
-    // NOTE: Walk backward until a whitespace character is found
-    while (start >= 0 && !/\s/.test(state.inputBuffer[start])) {
-      start -= 1;
-    }
-    start += 1;
-
-    let end = state.inputCursor;
-    // NOTE: Walk forward until a whitespace character is found
-    while (
-      end < state.inputBuffer.length &&
-      !/\s/.test(state.inputBuffer[end])
-    ) {
-      end += 1;
-    }
-
-    const token = state.inputBuffer.slice(start, end);
-    if (!token.startsWith("@")) return undefined;
-
-    return {
-      start,
-      end,
-      query: token.slice(1).toLowerCase(),
-    };
-  };
-
-  const getMentionPalette = (): MentionEntry[] => {
-    const context = getMentionContext();
-    if (!context) return [];
-
-    const query = context.query;
-    const lowerQuery = query.toLowerCase();
-    const scopedPrefix = lowerQuery.endsWith("/") ? lowerQuery : undefined;
-
-    const items = mentionEntries.filter((entry) => {
-      const valueLower = entry.value.toLowerCase();
-
-      if (!lowerQuery) return true;
-
-      if (scopedPrefix) {
-        if (
-          !valueLower.startsWith(scopedPrefix) ||
-          valueLower === scopedPrefix
-        ) {
-          return false;
-        }
-
-        const remainder = valueLower.slice(scopedPrefix.length);
-        const segments = remainder.split("/").filter(Boolean);
-        return segments.length === 1;
-      }
-
-      return valueLower.includes(lowerQuery);
-    });
-
-    return items
-      .sort((a, b) => {
-        const aLower = a.value.toLowerCase();
-        const bLower = b.value.toLowerCase();
-        const aStarts = query ? aLower.startsWith(query) : false;
-        const bStarts = query ? bLower.startsWith(query) : false;
-        if (aStarts !== bStarts) return aStarts ? -1 : 1;
-        if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
-        return aLower.localeCompare(bLower);
-      })
-      .slice(0, 100);
-  };
-
-  const getActivePalette = (): ActivePalette => {
-    const mentionItems = getMentionPalette();
-    if (mentionItems.length > 0) {
-      return { kind: "mention", items: mentionItems };
-    }
-
-    const commandItems = getCommandPalette();
-    if (commandItems.length > 0) {
-      return { kind: "command", items: commandItems };
-    }
-
-    return { kind: "none", items: [] };
-  };
-
-  const findHistoryMatch = (
+  const findMatchingHistoryEntry = (
     query: string,
     startIndex?: number,
-  ): number | undefined => {
-    const q = query.trim().toLowerCase();
-    if (!q) return undefined;
-
-    let index = startIndex ?? state.inputHistory.length - 1;
-    while (index >= 0) {
-      if (state.inputHistory[index].toLowerCase().includes(q)) {
-        return index;
-      }
-      index -= 1;
-    }
-    return undefined;
-  };
+  ): number | undefined =>
+    findHistoryMatch(state.inputHistory, query, startIndex);
 
   const clearHistorySearch = (restoreSnapshot: boolean): void => {
-    if (restoreSnapshot) {
-      state.inputBuffer = state.historySearchSnapshot.buffer;
-      state.inputCursor = state.historySearchSnapshot.cursor;
-    }
-    state.historySearchMode = false;
-    state.historySearchQuery = "";
-    state.historySearchIndex = undefined;
+    clearHistorySearchState(state, restoreSnapshot);
   };
 
   const draw = (): void => {
     const renderState: ChatRendererState = {
       cols: process.stdout.columns || 80,
       rows: process.stdout.rows || 24,
-      activePalette: getActivePalette(),
+      activePalette: getPalette(),
       selectedCommandIndex: state.selectedCommandIndex,
       historySearchMode: state.historySearchMode,
       historySearchQuery: state.historySearchQuery,
@@ -300,22 +190,23 @@ export async function runChat(
       stopSpinner,
       resetInput,
       rememberHistory,
-      getActivePalette,
-      getMentionContext,
+      getActivePalette: getPalette,
+      getMentionContext: () => getMentionContext(state),
     },
   };
 
-  const submitInput = async (): Promise<void> => {
+  // Bridge the Enter key handler to the full input-processing pipeline.
+  const submitCurrentUserInput = async (): Promise<void> => {
     await InputHandler.submitInput(inputContext);
   };
 
   const kbActions: KeyboardActions = {
     draw,
     clearHistorySearch,
-    findHistoryMatch,
-    submitInput,
-    getActivePalette,
-    getMentionContext,
+    findHistoryMatch: findMatchingHistoryEntry,
+    submitCurrentUserInput,
+    getActivePalette: getPalette,
+    getMentionContext: () => getMentionContext(state),
   };
 
   const onKeypress = (str: string, key: readline.Key): void => {
@@ -328,33 +219,11 @@ export async function runChat(
 
   const onMouseData = (chunk: Buffer): void => {
     const data = chunk.toString("utf8");
-    if (!data.includes("\x1b[<") && !data.includes("\x1b[M")) return;
+    const changed = applyMouseWheelScroll(data, state, MOUSE_SCROLL_STEP);
+    if (!changed) return;
 
     state.suppressAnsiInputUntil = Date.now() + 250;
-
-    // NOTE: Parse the SGR mouse data string to obtain action ID (e.g. 64/65 for wheel)
-    const matches = data.matchAll(/\x1b\[<(\d+);(\d+);(\d+)([mM])/g);
-    let changed = false;
-
-    for (const match of matches) {
-      const code = Number(match[1]);
-      if (Number.isNaN(code)) continue;
-
-      if (code === 64) {
-        state.scrollOffset += MOUSE_SCROLL_STEP;
-        changed = true;
-      } else if (code === 65) {
-        state.scrollOffset = Math.max(
-          0,
-          state.scrollOffset - MOUSE_SCROLL_STEP,
-        );
-        changed = true;
-      }
-    }
-
-    if (changed) {
-      draw();
-    }
+    draw();
   };
 
   process.stdin.on("keypress", onKeypress);

@@ -133,46 +133,8 @@ export class Agent {
 
   async runTurn(session: ChatSession, userInput: string): Promise<string> {
     this.logger.startTurn();
-    const systemContent = buildSystemMessage(session.mode);
-
-    // Keep the system message at position 0 reflecting the current mode.
-    if (session.messages.length > 0 && session.messages[0].role === "system") {
-      session.messages[0] = { role: "system", content: systemContent };
-    } else {
-      session.messages.unshift({ role: "system", content: systemContent });
-    }
-
-    const context = await buildTurnContext({
-      workspacePath: this.workspacePath,
-      userInput,
-      mode: session.mode,
-      scannedFiles: this.getWorkspaceFiles(),
-      knowledgeOrchestrator: this.knowledgeOrchestrator,
-    });
-
-    if (context.ragResults && context.ragResults.length > 0) {
-      this.logger.logRagSearch(
-        userInput,
-        context.ragResults.map((r) => ({
-          filePath: r.metadata.filePath,
-          nodeType: r.metadata.nodeType,
-          nodeName: r.metadata.nodeName,
-          score: r.score,
-        })),
-      );
-    }
-
-    const enrichedMessage = buildTurnUserMessage({ userInput, context });
-
-    session.messages.push({ role: "user", content: enrichedMessage });
-
-    if (needsCompaction(session.messages)) {
-      session.messages = await compactSession({
-        messages: session.messages,
-        provider: this.provider,
-        modelOverride: process.env.COMPACTOR_MODEL,
-      });
-    }
+    await this.prepareSessionForTurn(session, userInput);
+    await this.compactSessionIfNeeded(session);
 
     // session.messages holds the complete history; send only a trimmed
     // window to the provider to keep prompt size under control.
@@ -194,48 +156,8 @@ export class Agent {
     options?: StreamTurnOptions,
   ): AsyncIterable<string> {
     this.logger.startTurn();
-    options?.onStatus?.("building_context");
-    const systemContent = buildSystemMessage(session.mode);
-
-    if (session.messages.length > 0 && session.messages[0].role === "system") {
-      session.messages[0] = { role: "system", content: systemContent };
-    } else {
-      session.messages.unshift({ role: "system", content: systemContent });
-    }
-
-    const context = await buildTurnContext({
-      workspacePath: this.workspacePath,
-      userInput,
-      mode: session.mode,
-      scannedFiles: this.getWorkspaceFiles(),
-      knowledgeOrchestrator: this.knowledgeOrchestrator,
-      onStatus: options?.onStatus,
-    });
-
-    if (context.ragResults && context.ragResults.length > 0) {
-      this.logger.logRagSearch(
-        userInput,
-        context.ragResults.map((r) => ({
-          filePath: r.metadata.filePath,
-          nodeType: r.metadata.nodeType,
-          nodeName: r.metadata.nodeName,
-          score: r.score,
-        })),
-      );
-    }
-
-    const enrichedMessage = buildTurnUserMessage({ userInput, context });
-
-    session.messages.push({ role: "user", content: enrichedMessage });
-
-    if (needsCompaction(session.messages)) {
-      options?.onStatus?.("compacting_memory");
-      session.messages = await compactSession({
-        messages: session.messages,
-        provider: this.provider,
-        modelOverride: process.env.COMPACTOR_MODEL,
-      });
-    }
+    await this.prepareSessionForTurn(session, userInput, options?.onStatus);
+    await this.compactSessionIfNeeded(session, options?.onStatus);
 
     const messagesForModel = buildMessagesForModel(
       session.messages,
@@ -271,13 +193,7 @@ export class Agent {
       }
 
       const outcome = buildAgentFinalResponse(answer, prelude);
-
-      if (outcome.validProposedPatches.length > 0) {
-        this.pendingProposedPatches = [
-          ...(this.pendingProposedPatches ?? []),
-          ...outcome.validProposedPatches,
-        ];
-      }
+      this.appendPendingProposedPatches(outcome.validProposedPatches ?? []);
 
       // Yield patch section as extra chunk if present
       const patchSection = outcome.response.slice(answer.length);
@@ -329,45 +245,123 @@ export class Agent {
     messagesForModel: ChatSession["messages"],
   ): Promise<string> {
     if (mode !== "agent") {
-      const raw = await this.provider.completeChat(messagesForModel);
-      if (looksLikeAgentJson(raw)) {
-        const retryMessages: ChatSession["messages"] = [
-          ...messagesForModel,
-          { role: "assistant", content: raw },
-          {
-            role: "user",
-            content:
-              `You are in ${mode} mode. Your previous response was a JSON object. ` +
-              "That is not valid for this mode. " +
-              "Return a plain text answer only. Do not output JSON. Do not use markdown code blocks.",
-          },
-        ];
-        const retried = await this.provider.completeChat(retryMessages);
-        if (looksLikeAgentJson(retried)) {
-          return `I'm in ${mode} mode and my response came out as structured JSON, which is not valid here. Please rephrase your question or switch to agent mode if you need structured output.`;
-        }
-        return retried;
-      }
+      return this.generateNonAgentAssistantResponse(mode, messagesForModel);
+    }
+
+    return this.generateAgentAssistantResponse(messagesForModel);
+  }
+
+  private ensureSystemMessage(session: ChatSession): void {
+    const systemContent = buildSystemMessage(session.mode);
+
+    if (session.messages.length > 0 && session.messages[0].role === "system") {
+      session.messages[0] = { role: "system", content: systemContent };
+    } else {
+      session.messages.unshift({ role: "system", content: systemContent });
+    }
+  }
+
+  private async prepareSessionForTurn(
+    session: ChatSession,
+    userInput: string,
+    onStatus?: StreamTurnOptions["onStatus"],
+  ): Promise<void> {
+    onStatus?.("building_context");
+    this.ensureSystemMessage(session);
+
+    const context = await buildTurnContext({
+      workspacePath: this.workspacePath,
+      scannedFiles: this.getWorkspaceFiles(),
+      userInput,
+      mode: session.mode,
+      knowledgeOrchestrator: this.knowledgeOrchestrator,
+      onStatus,
+    });
+
+    if (context.ragResults && context.ragResults.length > 0) {
+      this.logger.logRagSearch(
+        userInput,
+        context.ragResults.map((r) => ({
+          filePath: r.metadata.filePath,
+          nodeType: r.metadata.nodeType,
+          nodeName: r.metadata.nodeName,
+          score: r.score,
+        })),
+      );
+    }
+
+    const enrichedMessage = buildTurnUserMessage({ userInput, context });
+    session.messages.push({ role: "user", content: enrichedMessage });
+  }
+
+  private async compactSessionIfNeeded(
+    session: ChatSession,
+    onStatus?: StreamTurnOptions["onStatus"],
+  ): Promise<void> {
+    if (!needsCompaction(session.messages)) {
+      return;
+    }
+
+    onStatus?.("compacting_memory");
+    session.messages = await compactSession({
+      messages: session.messages,
+      provider: this.provider,
+      modelOverride: process.env.COMPACTOR_MODEL,
+    });
+  }
+
+  private appendPendingProposedPatches(patches: AgentProposedPatch[]): void {
+    if (patches.length === 0) {
+      return;
+    }
+
+    this.pendingProposedPatches = [
+      ...(this.pendingProposedPatches ?? []),
+      ...patches,
+    ];
+  }
+
+  private async generateNonAgentAssistantResponse(
+    mode: ChatSession["mode"],
+    messagesForModel: ChatSession["messages"],
+  ): Promise<string> {
+    const raw = await this.provider.completeChat(messagesForModel);
+    if (!looksLikeAgentJson(raw)) {
       return raw;
     }
 
-    return generateAgentModeResponse({
+    const retryMessages: ChatSession["messages"] = [
+      ...messagesForModel,
+      { role: "assistant", content: raw },
+      {
+        role: "user",
+        content:
+          `You are in ${mode} mode. Your previous response was a JSON object. ` +
+          "That is not valid for this mode. " +
+          "Return a plain text answer only. Do not output JSON. Do not use markdown code blocks.",
+      },
+    ];
+
+    const retried = await this.provider.completeChat(retryMessages);
+    if (looksLikeAgentJson(retried)) {
+      return `I'm in ${mode} mode and my response came out as structured JSON, which is not valid here. Please rephrase your question or switch to agent mode if you need structured output.`;
+    }
+
+    return retried;
+  }
+
+  private async generateAgentAssistantResponse(
+    messagesForModel: ChatSession["messages"],
+  ): Promise<string> {
+    const outcome = await generateAgentModeResponse({
       provider: this.provider,
       messagesForModel,
       workspacePath: this.workspacePath,
       scannedFiles: this.getWorkspaceFiles(),
       logger: this.logger,
-    }).then((outcome) => {
-      if (
-        outcome.validProposedPatches &&
-        outcome.validProposedPatches.length > 0
-      ) {
-        this.pendingProposedPatches = [
-          ...(this.pendingProposedPatches ?? []),
-          ...outcome.validProposedPatches,
-        ];
-      }
-      return outcome.response;
     });
+
+    this.appendPendingProposedPatches(outcome.validProposedPatches ?? []);
+    return outcome.response;
   }
 }

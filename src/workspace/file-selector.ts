@@ -1,17 +1,17 @@
 import type { FileMeta } from "./workspace-scanner.js";
 import type { SessionMode } from "../chat/types.js";
+import { isPreferredSourceExtension } from "../language/language-capabilities.js";
 
 export type RankedFile = FileMeta & {
   score: number;
 };
 
 const TOP_FILES_LIMIT = 6;
-const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]);
 
 export function selectRelevantFiles(
   files: FileMeta[],
   userInput: string,
-  mode: SessionMode
+  mode: SessionMode,
 ): RankedFile[] {
   const keywords = extractKeywords(userInput);
 
@@ -45,7 +45,7 @@ function fallbackAskFiles(files: FileMeta[]): RankedFile[] {
 
     let score = 0;
     if (pathLower.startsWith("src/")) score += 6;
-    if (SOURCE_EXTENSIONS.has(file.extension)) score += 4;
+    if (isPreferredSourceExtension(file.extension)) score += 4;
 
     for (let i = 0; i < priorityFiles.length; i += 1) {
       if (nameLower === priorityFiles[i].toLowerCase()) {
@@ -73,7 +73,11 @@ function extractKeywords(input: string): string[] {
     .filter((w) => w.length > 2);
 }
 
-function scoreFile(file: FileMeta, keywords: string[], mode: SessionMode): number {
+function scoreFile(
+  file: FileMeta,
+  keywords: string[],
+  mode: SessionMode,
+): number {
   let score = 0;
 
   const nameLower = file.name.toLowerCase();
@@ -86,7 +90,7 @@ function scoreFile(file: FileMeta, keywords: string[], mode: SessionMode): numbe
 
   // Mode-based boosts: agent mode prefers source files, planning mode prefers docs
   if (mode === "agent" || mode === "planning" || mode === "ask") {
-    if (SOURCE_EXTENSIONS.has(file.extension)) score += 1;
+    if (isPreferredSourceExtension(file.extension)) score += 1;
   }
   if (mode === "planning") {
     if (nameLower === "readme.md" || nameLower === "package.json") score += 2;

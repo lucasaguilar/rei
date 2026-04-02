@@ -1,8 +1,8 @@
-import * as path from 'node:path';
-import * as fs from 'node:fs';
-import { Project, ts } from 'ts-morph';
+import * as path from "node:path";
+import * as fs from "node:fs";
+import { Project, ts } from "ts-morph";
 
-export interface CompileDiagnostic {
+export interface TypeScriptCompileDiagnostic {
   filePath: string;
   line: number;
   column: number;
@@ -10,19 +10,24 @@ export interface CompileDiagnostic {
   code: number;
 }
 
-export interface CompileCheckResult {
+export interface TypeScriptCompileCheckResult {
   success: boolean;
-  diagnostics: CompileDiagnostic[];
+  diagnostics: TypeScriptCompileDiagnostic[];
   fileCount: number;
 }
 
 /**
- * Runs a full TypeScript compilation check on the workspace using the
- * TypeScript API directly (no child_process / shell required).
- * Returns all type errors found across the project.
+ * Tier 1 semantic validation for TypeScript/JavaScript workspaces.
+ *
+ * This check is intentionally TypeScript-specific: it uses ts-morph and the
+ * TypeScript compiler API, and it only runs when a tsconfig.json is present.
+ * Other languages currently degrade to text-level workflows and git-level
+ * patch validation only.
  */
-export async function runCompileCheck(workspacePath: string): Promise<CompileCheckResult> {
-  const tsconfigPath = path.join(workspacePath, 'tsconfig.json');
+export async function runTypeScriptCompileCheck(
+  workspacePath: string,
+): Promise<TypeScriptCompileCheckResult> {
+  const tsconfigPath = path.join(workspacePath, "tsconfig.json");
   if (!fs.existsSync(tsconfigPath)) {
     return { success: true, diagnostics: [], fileCount: 0 };
   }
@@ -33,7 +38,7 @@ export async function runCompileCheck(workspacePath: string): Promise<CompileChe
   });
 
   const allDiagnostics = project.getPreEmitDiagnostics();
-  const diagnostics: CompileDiagnostic[] = [];
+  const diagnostics: TypeScriptCompileDiagnostic[] = [];
 
   for (const d of allDiagnostics) {
     const sourceFile = d.getSourceFile();
@@ -43,21 +48,23 @@ export async function runCompileCheck(workspacePath: string): Promise<CompileChe
 
     const { line, column } = sourceFile.getLineAndColumnAtPos(start);
     const absPath = sourceFile.getFilePath();
-    const relPath = path.relative(workspacePath, absPath).replace(/\\/g, '/');
+    const relPath = path.relative(workspacePath, absPath).replace(/\\/g, "/");
 
-    // NOTE: Skip node_modules and generated declaration files
-    if (relPath.startsWith('node_modules') || relPath.startsWith('..')) continue;
+    if (relPath.startsWith("node_modules") || relPath.startsWith(".."))
+      continue;
 
     diagnostics.push({
       filePath: relPath,
       line,
       column,
-      message: ts.flattenDiagnosticMessageText(d.compilerObject.messageText, '\n'),
+      message: ts.flattenDiagnosticMessageText(
+        d.compilerObject.messageText,
+        "\n",
+      ),
       code: d.getCode(),
     });
   }
 
-  // Deduplicate by file+line+code (ts-morph can emit the same diagnostic twice)
   const seen = new Set<string>();
   const unique = diagnostics.filter((d) => {
     const key = `${d.filePath}:${d.line}:${d.code}`;
@@ -68,17 +75,18 @@ export async function runCompileCheck(workspacePath: string): Promise<CompileChe
 
   return {
     success: unique.length === 0,
-    diagnostics: unique.slice(0, 30), // cap to avoid overloading the terminal
+    diagnostics: unique.slice(0, 30),
     fileCount: project.getSourceFiles().length,
   };
 }
 
-/**
- * Formats compile diagnostics into lines ready for pushTranscript.
- */
-export function formatCompileResult(result: CompileCheckResult): string[] {
+export function formatTypeScriptCompileResult(
+  result: TypeScriptCompileCheckResult,
+): string[] {
   if (result.success) {
-    return [`[tsc] ✓ No type errors found (${result.fileCount} files checked).`];
+    return [
+      `[tsc] ✓ No type errors found (${result.fileCount} files checked).`,
+    ];
   }
 
   const lines: string[] = [
@@ -86,7 +94,9 @@ export function formatCompileResult(result: CompileCheckResult): string[] {
   ];
 
   for (const d of result.diagnostics) {
-    lines.push(`  ${d.filePath}:${d.line}:${d.column}  TS${d.code}: ${d.message}`);
+    lines.push(
+      `  ${d.filePath}:${d.line}:${d.column}  TS${d.code}: ${d.message}`,
+    );
   }
 
   if (result.diagnostics.length === 30) {

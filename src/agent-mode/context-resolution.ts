@@ -1,41 +1,16 @@
-import * as fs from "fs/promises";
 import * as path from "path";
 import type { AgentContextRequest } from "../contracts/agent-decision.types.js";
 import type { FileMeta } from "../workspace/workspace-scanner.js";
-
-const FULL_READ_MAX_CHARS = 100_000;
-
-// Denylist of sensitive file names (exact, case-insensitive) that must never be served.
-const SENSITIVE_FILE_NAMES = new Set([
-  ".env",
-  ".env.local",
-  ".env.development",
-  ".env.production",
-  ".env.test",
-  ".npmrc",
-  ".yarnrc",
-  ".yarnrc.yml",
-  ".netrc",
-  ".htpasswd",
-]);
-
-// Denylist of sensitive file extensions that must never be served.
-const SENSITIVE_EXTENSIONS = new Set([
-  ".pem",
-  ".key",
-  ".p12",
-  ".pfx",
-  ".crt",
-  ".cer",
-  ".der",
-]);
-
-export interface ContextResolutionResult {
-  /** Formatted string ready to be injected as a user message. */
-  contextMessage: string;
-  /** Absolute paths that were successfully resolved in this round. */
-  resolved: string[];
-}
+import type { ContextResolutionResult } from "./models/context-resolution.types.js";
+import {
+  buildAllowedPathSet,
+  buildContextMessage,
+  dedupeContextRequests,
+  isSensitiveContextPath,
+  normalizeWorkspaceRelativePath,
+  readContextFileContent,
+  resolveWorkspaceRealPath,
+} from "./helpers/context-resolution.helpers.js";
 
 /**
  * Resolves a list of AgentContextRequest items against the workspace filesystem.
@@ -48,9 +23,9 @@ export interface ContextResolutionResult {
  *
  * @param requests - Context requests from the model's response.
  * @param workspacePath - Absolute root of the workspace.
- * @param alreadyResolved - Set of absolute paths already included in prior rounds (deduplicate).
+ * @param alreadyResolved - Set of workspace-relative paths already included in prior rounds (deduplicate).
  * @param scannedFiles - Allowlist of files produced by scanWorkspace().
- * @returns Formatted context message + list of newly-resolved absolute paths.
+ * @returns Formatted context message + list of newly-resolved workspace-relative paths.
  */
 export async function resolveContextRequests(
   requests: AgentContextRequest[],
@@ -59,86 +34,46 @@ export async function resolveContextRequests(
   scannedFiles: FileMeta[],
 ): Promise<ContextResolutionResult> {
   const sections: string[] = [];
-  const resolved: string[] = [];
-
-  // Build a set of workspace-relative paths from the scan allowlist.
-  const allowedPaths = new Set(
-    scannedFiles.map((f) => f.path.replace(/\\/g, "/")),
-  );
-
-  // Deduplicate incoming requests by path before resolution.
-  const seen = new Set<string>();
-  const uniqueRequests = requests.filter((req) => {
-    const normalized = req.path.replace(/\\/g, "/").replace(/^\/+/, "");
-    if (seen.has(normalized)) return false;
-    seen.add(normalized);
-    return true;
-  });
+  const resolvedPaths: string[] = [];
+  const allowedPaths = buildAllowedPathSet(scannedFiles);
+  const uniqueRequests = dedupeContextRequests(requests);
 
   for (const req of uniqueRequests) {
-    const relativePath = req.path.replace(/\\/g, "/").replace(/^\/+/, "");
+    const relativePath = normalizeWorkspaceRelativePath(req.path);
     const absolutePath = path.resolve(workspacePath, relativePath);
 
-    // --- Security check 1: allowlist ---
-    // Only serve files that were discovered during workspace scanning.
     if (!allowedPaths.has(relativePath)) {
       continue;
     }
 
-    // --- Security check 2: sensitive-file denylist ---
-    const fileName = path.basename(relativePath).toLowerCase();
-    const fileExt = path.extname(relativePath).toLowerCase();
-    if (
-      SENSITIVE_FILE_NAMES.has(fileName) ||
-      SENSITIVE_EXTENSIONS.has(fileExt)
-    ) {
+    if (isSensitiveContextPath(relativePath)) {
       continue;
     }
 
-    // Skip if already provided in a previous round.
-    if (alreadyResolved.has(absolutePath)) {
+    if (alreadyResolved.has(relativePath)) {
       continue;
     }
 
-    // --- Security check 3: symlink-escape prevention ---
-    // Resolve the real path and verify it stays within workspacePath.
-    let realAbsolutePath: string;
-    try {
-      realAbsolutePath = await fs.realpath(absolutePath);
-    } catch {
+    const realAbsolutePath = await resolveWorkspaceRealPath(
+      absolutePath,
+      workspacePath,
+    );
+    if (!realAbsolutePath) {
       continue;
     }
 
-    const normalizedWorkspace = path.resolve(workspacePath);
-    const withinWorkspace =
-      realAbsolutePath === normalizedWorkspace ||
-      realAbsolutePath.startsWith(normalizedWorkspace + path.sep);
-    if (!withinWorkspace) {
-      continue;
-    }
-
-    let content: string;
-    try {
-      const raw = await fs.readFile(realAbsolutePath, "utf-8");
-      if (raw.length <= FULL_READ_MAX_CHARS) {
-        content = raw;
-      } else {
-        content = raw.slice(0, FULL_READ_MAX_CHARS) + "\n... (truncated)";
-      }
-    } catch {
+    const content = await readContextFileContent(realAbsolutePath);
+    if (content === null) {
       continue;
     }
 
     const reasonNote = req.reason ? ` — ${req.reason}` : "";
     sections.push(`--- ${relativePath}${reasonNote} ---\n${content}`);
-    resolved.push(absolutePath);
-    alreadyResolved.add(absolutePath);
+    resolvedPaths.push(relativePath);
+    alreadyResolved.add(relativePath);
   }
 
-  const contextMessage =
-    sections.length > 0
-      ? `Here is the additional context you requested:\n\n${sections.join("\n\n")}`
-      : "";
+  const contextMessage = buildContextMessage(sections);
 
-  return { contextMessage, resolved };
+  return { contextMessage, resolvedPaths };
 }

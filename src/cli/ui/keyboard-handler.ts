@@ -1,13 +1,17 @@
 import * as readline from "readline";
 import { ChatUIState, KeyboardActions } from "../models/chat.types.js";
-import { isMouseSgrSequence, looksLikeAnsiNoise, clamp } from "../helpers/terminal.helpers.js";
+import {
+  isMouseSgrSequence,
+  looksLikeAnsiNoise,
+  clamp,
+} from "../helpers/terminal.helpers.js";
 
 export class KeyboardHandler {
   public static handleKeypress(
     str: string,
     key: readline.Key,
     state: ChatUIState,
-    actions: KeyboardActions
+    actions: KeyboardActions,
   ): void {
     if (!state.running) return;
 
@@ -21,7 +25,10 @@ export class KeyboardHandler {
     }
 
     // Mouse data also generates keypress events; suppress ANSI fragments for a short window.
-    if (Date.now() < state.suppressAnsiInputUntil && looksLikeAnsiNoise(str, key)) {
+    if (
+      Date.now() < state.suppressAnsiInputUntil &&
+      looksLikeAnsiNoise(str, key)
+    ) {
       return;
     }
 
@@ -46,13 +53,22 @@ export class KeyboardHandler {
       }
 
       if (!state.historySearchMode) {
-        state.historySearchSnapshot = { buffer: state.inputBuffer, cursor: state.inputCursor };
+        state.historySearchSnapshot = {
+          buffer: state.inputBuffer,
+          cursor: state.inputCursor,
+        };
         state.historySearchMode = true;
         state.historySearchQuery = "";
         state.historySearchIndex = undefined;
       } else if (state.historySearchQuery.trim()) {
-        const start = state.historySearchIndex !== undefined ? state.historySearchIndex - 1 : state.inputHistory.length - 1;
-        state.historySearchIndex = actions.findHistoryMatch(state.historySearchQuery, start);
+        const start =
+          state.historySearchIndex !== undefined
+            ? state.historySearchIndex - 1
+            : state.inputHistory.length - 1;
+        state.historySearchIndex = actions.findHistoryMatch(
+          state.historySearchQuery,
+          start,
+        );
         if (state.historySearchIndex !== undefined) {
           state.inputBuffer = state.inputHistory[state.historySearchIndex];
           state.inputCursor = state.inputBuffer.length;
@@ -79,7 +95,9 @@ export class KeyboardHandler {
       if (key.name === "backspace") {
         if (state.historySearchQuery.length > 0) {
           state.historySearchQuery = state.historySearchQuery.slice(0, -1);
-          state.historySearchIndex = actions.findHistoryMatch(state.historySearchQuery);
+          state.historySearchIndex = actions.findHistoryMatch(
+            state.historySearchQuery,
+          );
           if (state.historySearchIndex !== undefined) {
             state.inputBuffer = state.inputHistory[state.historySearchIndex];
             state.inputCursor = state.inputBuffer.length;
@@ -94,7 +112,9 @@ export class KeyboardHandler {
 
       if (str && !key.ctrl && !key.meta) {
         state.historySearchQuery += str;
-        state.historySearchIndex = actions.findHistoryMatch(state.historySearchQuery);
+        state.historySearchIndex = actions.findHistoryMatch(
+          state.historySearchQuery,
+        );
         if (state.historySearchIndex !== undefined) {
           state.inputBuffer = state.inputHistory[state.historySearchIndex];
           state.inputCursor = state.inputBuffer.length;
@@ -106,14 +126,18 @@ export class KeyboardHandler {
     }
 
     if (key.name === "return" || key.name === "enter") {
-      void actions.submitInput();
+      void actions.submitCurrentUserInput();
       return;
     }
 
     // Scroll keys work regardless of busy state.
     // Ctrl+U = half page up, Ctrl+D = half page down (vim/less convention).
     // Also support PageUp/PageDown and Shift+arrows as fallback.
-    if (key.name === "pageup" || (key.name === "up" && key.shift) || (key.ctrl && key.name === "u")) {
+    if (
+      key.name === "pageup" ||
+      (key.name === "up" && key.shift) ||
+      (key.ctrl && key.name === "u")
+    ) {
       const rows = Math.max(12, process.stdout.rows || 24);
       const pageSize = Math.max(1, Math.floor((rows - 4) / 2));
       state.scrollOffset += pageSize;
@@ -121,7 +145,11 @@ export class KeyboardHandler {
       return;
     }
 
-    if (key.name === "pagedown" || (key.name === "down" && key.shift) || (key.ctrl && key.name === "d")) {
+    if (
+      key.name === "pagedown" ||
+      (key.name === "down" && key.shift) ||
+      (key.ctrl && key.name === "d")
+    ) {
       const rows = Math.max(12, process.stdout.rows || 24);
       const pageSize = Math.max(1, Math.floor((rows - 4) / 2));
       state.scrollOffset = Math.max(0, state.scrollOffset - pageSize);
@@ -138,7 +166,11 @@ export class KeyboardHandler {
 
     // Native-feeling behavior: if transcript is scrolled and input is idle,
     // use Up/Down to continue scrolling results. At bottom, Up/Down returns to history/palette.
-    if (palette.length === 0 && state.inputBuffer.length === 0 && !state.historySearchMode) {
+    if (
+      palette.length === 0 &&
+      state.inputBuffer.length === 0 &&
+      !state.historySearchMode
+    ) {
       if (key.name === "up" && state.scrollOffset > 0) {
         state.scrollOffset += 1;
         actions.draw();
@@ -163,7 +195,11 @@ export class KeyboardHandler {
       }
 
       if (palette.length > 0) {
-        state.selectedCommandIndex = clamp(state.selectedCommandIndex - 1, 0, palette.length - 1);
+        state.selectedCommandIndex = clamp(
+          state.selectedCommandIndex - 1,
+          0,
+          palette.length - 1,
+        );
         actions.draw();
         return;
       }
@@ -203,7 +239,11 @@ export class KeyboardHandler {
       }
 
       if (palette.length > 0) {
-        state.selectedCommandIndex = clamp(state.selectedCommandIndex + 1, 0, palette.length - 1);
+        state.selectedCommandIndex = clamp(
+          state.selectedCommandIndex + 1,
+          0,
+          palette.length - 1,
+        );
         actions.draw();
         return;
       }
@@ -214,7 +254,10 @@ export class KeyboardHandler {
 
     if (palette.length > 0 && key.name === "tab") {
       if (activePalette.kind === "mention") {
-        const selected = activePalette.items[clamp(state.selectedCommandIndex, 0, activePalette.items.length - 1)];
+        const selected =
+          activePalette.items[
+            clamp(state.selectedCommandIndex, 0, activePalette.items.length - 1)
+          ];
         const mentionContext = actions.getMentionContext();
         if (!mentionContext) {
           actions.draw();
@@ -222,13 +265,18 @@ export class KeyboardHandler {
         }
         const selectedText = `@${selected.value}`;
         const trailing = state.inputBuffer.slice(mentionContext.end);
-        const needsSpace = !selected.isDir && (trailing.length === 0 || !/^\s/.test(trailing));
+        const needsSpace =
+          !selected.isDir && (trailing.length === 0 || !/^\s/.test(trailing));
         const suffix = needsSpace ? " " : "";
         state.inputBuffer = `${state.inputBuffer.slice(0, mentionContext.start)}${selectedText}${suffix}${state.inputBuffer.slice(mentionContext.end)}`;
-        state.inputCursor = mentionContext.start + selectedText.length + suffix.length;
+        state.inputCursor =
+          mentionContext.start + selectedText.length + suffix.length;
         state.paletteClosed = !selected.isDir;
       } else {
-        const selected = activePalette.items[clamp(state.selectedCommandIndex, 0, activePalette.items.length - 1)];
+        const selected =
+          activePalette.items[
+            clamp(state.selectedCommandIndex, 0, activePalette.items.length - 1)
+          ];
         state.inputBuffer = selected.command;
         state.inputCursor = state.inputBuffer.length;
         state.paletteClosed = false;
@@ -247,7 +295,10 @@ export class KeyboardHandler {
     }
 
     if (key.name === "right") {
-      state.inputCursor = Math.min(state.inputBuffer.length, state.inputCursor + 1);
+      state.inputCursor = Math.min(
+        state.inputBuffer.length,
+        state.inputCursor + 1,
+      );
       state.historyCursor = undefined;
       state.historyDraft = "";
       actions.draw();

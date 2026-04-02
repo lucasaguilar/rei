@@ -70,7 +70,9 @@ export interface KeyboardActions {
   draw(): void;
   clearHistorySearch(restoreSnapshot: boolean): void;
   findHistoryMatch(query: string, startIndex?: number): number | undefined;
-  submitInput(): Promise<void> | void;
+  submitCurrentUserInput(): Promise<void> | void;
   getActivePalette(): ActivePalette;
-  getMentionContext(): { start: number; end: number; query: string } | undefined;
+  getMentionContext():
+    | { start: number; end: number; query: string }
+    | undefined;
 }
