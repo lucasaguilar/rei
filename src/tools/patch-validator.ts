@@ -75,7 +75,9 @@ export function detectMergeConflicts(patchText: string): string[] {
 /**
  * Validate patch structure and extract target file metadata.
  */
-export function validatePatchSemantics(patchText: string): PatchSemanticValidationResult {
+export function validatePatchSemantics(
+  patchText: string,
+): PatchSemanticValidationResult {
   const issues: PatchValidationIssue[] = [];
   const trimmed = patchText.trim();
 
@@ -142,7 +144,7 @@ export function validatePatchSemantics(patchText: string): PatchSemanticValidati
  */
 export async function validatePatchWithGit(
   patchText: string,
-  workspacePath: string
+  workspacePath: string,
 ): Promise<GitPatchValidationResult> {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "rei-patch-check-"));
   const patchPath = path.join(tmpDir, "candidate.patch");
@@ -183,7 +185,7 @@ export async function validatePatchWithGit(
 export async function validatePatchProposal(
   proposal: PatchProposal,
   workspacePath: string,
-  policy: FileModifyPolicy = DEFAULT_FILE_MODIFY_POLICY
+  policy: FileModifyPolicy = DEFAULT_FILE_MODIFY_POLICY,
 ): Promise<PatchProposalValidationResult> {
   const semantic = validatePatchSemantics(proposal.patch);
   const issues: PatchValidationIssue[] = [...semantic.issues];
@@ -211,9 +213,16 @@ export async function validatePatchProposal(
   const git =
     issues.length === 0
       ? await validatePatchWithGit(proposal.patch, workspacePath)
-      : { valid: false, stdout: "", stderr: "Skipped git apply --check due to prior validation issues" };
+      : {
+          valid: false,
+          stdout: "",
+          stderr: "Skipped git apply --check due to prior validation issues",
+        };
 
-  if (!git.valid && issues.every((issue) => issue.code !== "GIT_APPLY_CHECK_FAILED")) {
+  if (
+    !git.valid &&
+    issues.every((issue) => issue.code !== "GIT_APPLY_CHECK_FAILED")
+  ) {
     issues.push({
       code: "GIT_APPLY_CHECK_FAILED",
       message: git.stderr || "git apply --check failed",

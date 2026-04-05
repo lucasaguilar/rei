@@ -379,6 +379,20 @@
             "console": "integratedTerminal",
             "skipFiles": ["<node_internals>/**"]
         },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "REI gemini-3-flash-preview (Gemini)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev", "--", "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "gemini",
+                "GEMINI_MODEL": "gemini-3-flash-preview"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
          {
             "type": "node",
             "request": "launch",
@@ -389,6 +403,20 @@
             "env": {
                 "MODEL_PROVIDER": "openrouter",
                 "OPENROUTER_MODEL": "openrouter/free"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+          {
+            "type": "node",
+            "request": "launch",
+            "name": "REI liquid/lfm-2.5-1.2b-instruct:free (open router)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev", "--", "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "openrouter",
+                "OPENROUTER_MODEL": "liquid/lfm-2.5-1.2b-instruct:free"
             },
             "console": "integratedTerminal",
             "skipFiles": ["<node_internals>/**"]

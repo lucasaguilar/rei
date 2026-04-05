@@ -7,6 +7,7 @@ import {
 } from "../contracts/agent-decision.types.js";
 import { resolveContextRequests } from "./context-resolution.js";
 import { type PatchProposalValidationResult } from "../tools/patch-validator.js";
+import type { AstValidationOptions } from "../tools/typescript-ast-validator.js";
 import { extractAstDependencies } from "../context/ast-context.js";
 import type { AgentLogger } from "../core/logger.js";
 import {
@@ -44,7 +45,7 @@ export async function prepareAgentContext(params: {
     .find((m) => m.role === "user");
 
   // --- Phase 1: Context Decision ---
-  const decision = await runDecisionPhase({
+  let decision = await runDecisionPhase({
     provider,
     messagesForModel,
     logger,
@@ -77,6 +78,45 @@ export async function prepareAgentContext(params: {
       );
       for (const resolvedPath of resolvedPaths) {
         resolvedFiles.add(resolvedPath);
+      }
+    }
+  }
+
+  // --- Phase 2.0.1: Decision re-run after context injection ---
+  // When the first decision said ready=false with no patches, the model was asking
+  // for context. Now that context is injected, re-run the decision so the model can
+  // produce patches with the enriched messages instead of falling through to synthesis.
+  if (
+    !decision.ready &&
+    (decision.proposedPatches?.length ?? 0) === 0 &&
+    resolvedFiles.size > providedPaths.size
+  ) {
+    const redecision = await runDecisionPhase({
+      provider,
+      messagesForModel: answerMessages,
+      logger,
+      retryLimit: DECISION_RETRIES,
+      parseAgentDecision,
+    });
+    // Only adopt the new decision if it produced patches
+    if ((redecision.proposedPatches?.length ?? 0) > 0) {
+      decision = redecision;
+    }
+    // Also resolve any NEW context requests from the second pass
+    if (redecision.contextRequests.length > 0) {
+      const alreadyResolved2 = new Set(resolvedFiles);
+      const { contextMessage: ctx2, resolvedPaths: rp2 } =
+        await resolveContextRequests(
+          redecision.contextRequests,
+          workspacePath,
+          alreadyResolved2,
+          scannedFiles,
+        );
+      if (rp2.length > 0 && ctx2) {
+        answerMessages = appendContextToLastUserMessage(answerMessages, ctx2);
+        for (const resolvedPath of rp2) {
+          resolvedFiles.add(resolvedPath);
+        }
       }
     }
   }
@@ -118,6 +158,11 @@ export async function prepareAgentContext(params: {
     validateProposal: validateWithAstGuard,
   });
 
+  // Collect create targets for the critic loops to suppress TS2307 on sibling new files
+  const astOptions = buildAstOptionsFromProposals(
+    decision.proposedPatches ?? [],
+  );
+
   // 2.5.a: Critic loop — intenta corregir patches inválidos con códigos reintentables
   if (
     decision.taskType === "change-planning" &&
@@ -134,6 +179,7 @@ export async function prepareAgentContext(params: {
       retryLimit: PATCH_CRITIC_RETRIES,
       normalizePatch,
       validateProposal: validateWithAstGuard,
+      astOptions,
     });
   }
 
@@ -157,6 +203,8 @@ export async function prepareAgentContext(params: {
         validateProposal: validateWithAstGuard,
       });
 
+      const synthesizedAstOptions = buildAstOptionsFromProposals(synthesized);
+
       // Run critic loop on synthesized patches that failed validation
       if (synthesizedValidation.some((item) => !item.validation.valid)) {
         synthesizedValidation = await runPatchCriticLoop({
@@ -170,6 +218,7 @@ export async function prepareAgentContext(params: {
           retryLimit: PATCH_CRITIC_RETRIES,
           normalizePatch,
           validateProposal: validateWithAstGuard,
+          astOptions: synthesizedAstOptions,
         });
       }
 
@@ -221,4 +270,16 @@ export async function generateAgentModeResponse(params: {
   });
   const answer = await provider.completeChat(prelude.answerMessages);
   return buildAgentFinalResponse(answer, prelude);
+}
+
+function buildAstOptionsFromProposals(
+  proposals: AgentProposedPatch[],
+): AstValidationOptions | undefined {
+  const createTargets = new Set<string>();
+  for (const p of proposals) {
+    if (p.patch.trimStart().startsWith("--- /dev/null")) {
+      createTargets.add(p.file);
+    }
+  }
+  return createTargets.size > 0 ? { createTargets } : undefined;
 }

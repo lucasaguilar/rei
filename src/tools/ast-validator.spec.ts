@@ -13,11 +13,11 @@ describe("AST Validator", () => {
     vi.clearAllMocks();
   });
 
-  it("should fail validation if target file does not exist", async () => {
+  it("should fail validation if target file does not exist and is not a create patch", async () => {
     vi.spyOn(fs, "existsSync").mockReturnValue(false);
 
     const result = await validateTypeScriptPatchAst(
-      "mockPatch",
+      "--- a/nonexistent.ts\n+++ b/nonexistent.ts\n@@ -1 +1 @@\n-old\n+new",
       "nonexistent.ts",
       "/mocked/workspace",
     );

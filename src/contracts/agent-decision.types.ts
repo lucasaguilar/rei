@@ -40,7 +40,9 @@ export function parseAgentDecision(raw: string): AgentDecision {
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    throw new Error(`AgentDecision: not valid JSON — ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(
+      `AgentDecision: not valid JSON — ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
@@ -56,16 +58,26 @@ export function parseAgentDecision(raw: string): AgentDecision {
     } else if (obj.ready === "false") {
       obj.ready = false;
     } else {
-      throw new Error(`AgentDecision: 'ready' must be boolean, got ${typeof obj.ready}`);
+      throw new Error(
+        `AgentDecision: 'ready' must be boolean, got ${typeof obj.ready}`,
+      );
     }
   }
 
   if (obj.taskType !== "inspection" && obj.taskType !== "change-planning") {
     // Tolerate common alias variations.
     const taskTypeRaw = String(obj.taskType ?? "").toLowerCase();
-    if (taskTypeRaw.includes("inspect") || taskTypeRaw.includes("analys") || taskTypeRaw.includes("explain")) {
+    if (
+      taskTypeRaw.includes("inspect") ||
+      taskTypeRaw.includes("analys") ||
+      taskTypeRaw.includes("explain")
+    ) {
       obj.taskType = "inspection";
-    } else if (taskTypeRaw.includes("change") || taskTypeRaw.includes("plan") || taskTypeRaw.includes("implement")) {
+    } else if (
+      taskTypeRaw.includes("change") ||
+      taskTypeRaw.includes("plan") ||
+      taskTypeRaw.includes("implement")
+    ) {
       obj.taskType = "change-planning";
     } else {
       // Default to inspection rather than reject — less disruptive.
@@ -79,7 +91,12 @@ export function parseAgentDecision(raw: string): AgentDecision {
       if (typeof item === "object" && item !== null) {
         const r = item as Record<string, unknown>;
         // Accept "file" as alias for "path".
-        const p = typeof r.path === "string" ? r.path : (typeof r.file === "string" ? r.file : "");
+        const p =
+          typeof r.path === "string"
+            ? r.path
+            : typeof r.file === "string"
+              ? r.file
+              : "";
         if (p) {
           contextRequests.push({
             path: p,
@@ -92,8 +109,8 @@ export function parseAgentDecision(raw: string): AgentDecision {
 
   let proposedPatches: AgentProposedPatch[] | undefined;
   const parsedPatches = parsePatchArray(obj.proposedPatches);
-  const recoveredFromDuplicateKeys = extractDuplicateProposedPatchArrays(raw)
-    .flatMap(parsePatchArray);
+  const recoveredFromDuplicateKeys =
+    extractDuplicateProposedPatchArrays(raw).flatMap(parsePatchArray);
 
   const mergedPatches = dedupePatches([
     ...parsedPatches,
@@ -130,9 +147,7 @@ function parsePatchArray(value: unknown): AgentProposedPatch[] {
   return parsedPatches;
 }
 
-function dedupePatches(
-  patches: AgentProposedPatch[],
-): AgentProposedPatch[] {
+function dedupePatches(patches: AgentProposedPatch[]): AgentProposedPatch[] {
   const seen = new Set<string>();
   const deduped: AgentProposedPatch[] = [];
 

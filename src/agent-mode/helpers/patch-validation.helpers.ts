@@ -5,6 +5,11 @@ import type {
 import type { AgentLogger } from "../../core/logger.js";
 import type { FileMeta } from "../../workspace/workspace-scanner.js";
 import type { PatchProposalValidationResult } from "../../tools/patch-validator.js";
+import {
+  validateTypeScriptPatchBatch,
+  type AstValidationOptions,
+} from "../../tools/typescript-ast-validator.js";
+import { supportsSemanticValidationPath } from "../../language/language-capabilities.js";
 import { extractFileFromPatch } from "../../tools/patch-generator.js";
 import type { PatchValidationEntry } from "../models/patch.types.js";
 import { canonicalizePathAgainstScannedFiles } from "./decision-path.helpers.js";
@@ -18,12 +23,52 @@ export async function validateDecisionProposedPatches(params: {
     proposal: AgentProposedPatch,
     workspacePath: string,
     logger?: AgentLogger,
+    astOptions?: AstValidationOptions,
   ) => Promise<PatchProposalValidationResult>;
 }): Promise<PatchValidationEntry[]> {
   const { decision, workspacePath, scannedFiles, logger, validateProposal } =
     params;
   const proposals = expandPatchProposals(decision.proposedPatches ?? []);
   const results: PatchValidationEntry[] = [];
+
+  // Collect paths of files being created in this batch so sibling patches
+  // can suppress TS2307 errors for modules that don't exist on disk yet.
+  const createTargets = new Set<string>();
+  for (const proposal of proposals) {
+    if (proposal.patch.trimStart().startsWith("--- /dev/null")) {
+      const canonical = canonicalizePathAgainstScannedFiles(
+        proposal.file,
+        scannedFiles,
+      );
+      createTargets.add(canonical);
+    }
+  }
+  let astOptions: AstValidationOptions | undefined =
+    createTargets.size > 0 ? { createTargets } : undefined;
+
+  // When there are 2+ TypeScript/JavaScript files in the batch, validate them
+  // together in a single ts-morph Project so cross-file type references resolve
+  // correctly (e.g. File A importing a type from newly-created File B).
+  const tsCandidates = proposals.filter((p) =>
+    supportsSemanticValidationPath(
+      canonicalizePathAgainstScannedFiles(p.file, scannedFiles),
+    ),
+  );
+  if (tsCandidates.length >= 2) {
+    const batchInput = tsCandidates.map((p) => ({
+      patchText: normalizePatch(
+        p.patch,
+        canonicalizePathAgainstScannedFiles(p.file, scannedFiles),
+      ),
+      targetFile: canonicalizePathAgainstScannedFiles(p.file, scannedFiles),
+    }));
+    const batchResults = await validateTypeScriptPatchBatch(
+      batchInput,
+      workspacePath,
+      createTargets,
+    );
+    astOptions = { ...(astOptions ?? {}), batchResults };
+  }
 
   for (const proposal of proposals) {
     const canonicalFile = canonicalizePathAgainstScannedFiles(
@@ -41,6 +86,7 @@ export async function validateDecisionProposedPatches(params: {
       canonicalProposal,
       workspacePath,
       logger,
+      astOptions,
     );
     results.push({ proposal: canonicalProposal, validation });
   }

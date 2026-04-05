@@ -39,8 +39,17 @@ export async function resolveContextRequests(
   const uniqueRequests = dedupeContextRequests(requests);
 
   for (const req of uniqueRequests) {
-    const relativePath = normalizeWorkspaceRelativePath(req.path);
-    const absolutePath = path.resolve(workspacePath, relativePath);
+    let relativePath = normalizeWorkspaceRelativePath(req.path);
+    let absolutePath = path.resolve(workspacePath, relativePath);
+
+    // Fallback: model may request .js when the real file is .ts (ESM convention)
+    if (!allowedPaths.has(relativePath) && relativePath.endsWith(".js")) {
+      const tsVariant = relativePath.replace(/\.js$/, ".ts");
+      if (allowedPaths.has(tsVariant)) {
+        relativePath = tsVariant;
+        absolutePath = path.resolve(workspacePath, relativePath);
+      }
+    }
 
     if (!allowedPaths.has(relativePath)) {
       continue;

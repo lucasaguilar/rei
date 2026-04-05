@@ -4,7 +4,16 @@ import * as path from "path";
 export interface LogEntry {
   timestamp: string;
   turnId: string;
-  phase: "DECISION" | "KNOWLEDGE" | "PATCH_PROPOSED" | "AST_CRITIC_LOOP" | "AST_CONTEXT_EXTRACTION" | "RAG_SEARCH" | "PATCH_SYNTHESIS" | "PATCH_SYNTHESIS_FAILED" | "ERROR";
+  phase:
+    | "DECISION"
+    | "KNOWLEDGE"
+    | "PATCH_PROPOSED"
+    | "AST_CRITIC_LOOP"
+    | "AST_CONTEXT_EXTRACTION"
+    | "RAG_SEARCH"
+    | "PATCH_SYNTHESIS"
+    | "PATCH_SYNTHESIS_FAILED"
+    | "ERROR";
   data: any;
 }
 
@@ -47,7 +56,12 @@ export class AgentLogger {
     this.write("DECISION", { rawOutput, parsed });
   }
 
-  public logKnowledge(provider: string, query: string, hits: number, urlContext: string) {
+  public logKnowledge(
+    provider: string,
+    query: string,
+    hits: number,
+    urlContext: string,
+  ) {
     this.write("KNOWLEDGE", { provider, query, hits, urlContext });
   }
 
@@ -55,11 +69,27 @@ export class AgentLogger {
     this.write("PATCH_PROPOSED", { file, patchText });
   }
 
-  public logAstContext(filesScraped: number, dependenciesFound: number, signatureLength: number) {
-    this.write("AST_CONTEXT_EXTRACTION", { filesScraped, dependenciesFound, signatureLength });
+  public logAstContext(
+    filesScraped: number,
+    dependenciesFound: number,
+    signatureLength: number,
+  ) {
+    this.write("AST_CONTEXT_EXTRACTION", {
+      filesScraped,
+      dependenciesFound,
+      signatureLength,
+    });
   }
 
-  public logRagSearch(query: string, hits: Array<{ filePath: string; nodeType: string; nodeName: string; score: number }>) {
+  public logRagSearch(
+    query: string,
+    hits: Array<{
+      filePath: string;
+      nodeType: string;
+      nodeName: string;
+      score: number;
+    }>,
+  ) {
     this.write("RAG_SEARCH", { query, hitsCount: hits.length, hits });
   }
 

@@ -4,7 +4,8 @@ import type { ModelProvider, CompletionOptions } from "./model-provider.js";
 interface OpenRouterChatChoice {
   message?: {
     role?: string;
-    content?: string | null;
+    content?: string | null | Array<{ type?: string; text?: string }>;
+    reasoning?: string | null;
   };
   finish_reason?: string;
 }
@@ -81,14 +82,17 @@ export class OpenRouterProvider implements ModelProvider {
       );
     }
 
-    const content = data.choices?.[0]?.message?.content;
-    if (typeof content !== "string") {
+    const msg = data.choices?.[0]?.message;
+    const text =
+      extractTextContent(msg?.content) ??
+      extractReasoningContent(msg?.reasoning);
+    if (typeof text !== "string") {
       throw new Error(
-        `OpenRouter response missing message content (got ${typeof content})`,
+        `OpenRouter response missing message content (got ${typeof msg?.content}): ${JSON.stringify(msg ?? data.choices?.[0] ?? data).substring(0, 300)}`,
       );
     }
 
-    return content;
+    return text;
   }
 
   async *streamChat(
@@ -203,6 +207,34 @@ async function safeReadText(response: Response): Promise<string> {
   } catch {
     return "";
   }
+}
+
+/**
+ * Extract text from OpenRouter content which may be a string or an array of content parts.
+ * Some models return content as [{type:"text", text:"..."}] instead of a plain string.
+ */
+function extractTextContent(
+  content: string | null | undefined | Array<{ type?: string; text?: string }>,
+): string | undefined {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    const texts = content
+      .filter((part) => part.type === "text" && typeof part.text === "string")
+      .map((part) => part.text!);
+    if (texts.length > 0) return texts.join("");
+  }
+  return undefined;
+}
+
+/**
+ * Some reasoning models (e.g. DeepSeek-R1) return content:null with the actual
+ * output in a "reasoning" field. Fall back to that when content is empty.
+ */
+function extractReasoningContent(
+  reasoning: string | null | undefined,
+): string | undefined {
+  if (typeof reasoning === "string" && reasoning.length > 0) return reasoning;
+  return undefined;
 }
 
 function parseRequestTimeoutMs(

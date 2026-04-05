@@ -54,12 +54,18 @@ export async function synthesizePatchesFromContext(params: {
     await provider.completeChat(synthesisMessages),
   );
   if (!parsed || !Array.isArray(parsed.edits)) {
-    logger?.logSynthesisFailed("JSON parsing failed or no edits array", JSON.stringify(parsed ?? {}).substring(0, 200));
+    logger?.logSynthesisFailed(
+      "JSON parsing failed or no edits array",
+      JSON.stringify(parsed ?? {}).substring(0, 200),
+    );
     return [];
   }
 
   if (parsed.edits.length === 0) {
-    logger?.logSynthesisFailed("Model returned empty edits array", "No edits provided");
+    logger?.logSynthesisFailed(
+      "Model returned empty edits array",
+      "No edits provided",
+    );
     return [];
   }
 
@@ -68,12 +74,19 @@ export async function synthesizePatchesFromContext(params: {
     if (typeof item !== "object" || item === null) continue;
     const candidate = item as Record<string, unknown>;
     const file = typeof candidate.file === "string" ? candidate.file : "";
-    const search = typeof candidate.search === "string" ? candidate.search : "";
+    const search =
+      typeof candidate.search === "string"
+        ? unescapeLiteralNewlines(candidate.search)
+        : "";
     const replace =
-      typeof candidate.replace === "string" ? candidate.replace : "";
+      typeof candidate.replace === "string"
+        ? unescapeLiteralNewlines(candidate.replace)
+        : "";
     const create = candidate.create === true;
     const content =
-      typeof candidate.content === "string" ? candidate.content : "";
+      typeof candidate.content === "string"
+        ? unescapeLiteralNewlines(candidate.content)
+        : "";
     if (!file) continue;
     if (!create && !search) continue;
     if (create && !content) continue;
@@ -90,7 +103,10 @@ export async function synthesizePatchesFromContext(params: {
   }
 
   if (edits.length === 0) {
-    logger?.logSynthesisFailed("No valid edits extracted from model response", "Edits array was empty after filtering");
+    logger?.logSynthesisFailed(
+      "No valid edits extracted from model response",
+      "Edits array was empty after filtering",
+    );
     return [];
   }
 
@@ -203,4 +219,12 @@ function parseJsonObject(raw: string): Record<string, unknown> | null {
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Some models double-escape newlines in JSON string values, producing literal
+ * backslash-n instead of real newlines after JSON.parse. This normalizes them.
+ */
+function unescapeLiteralNewlines(value: string): string {
+  return value.replace(/\\n/g, "\n").replace(/\\t/g, "\t");
 }

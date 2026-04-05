@@ -4,6 +4,7 @@ import type { AgentLogger } from "../../core/logger.js";
 import type { ModelProvider } from "../../providers/model-provider.js";
 import type { FileMeta } from "../../workspace/workspace-scanner.js";
 import type { PatchProposalValidationResult } from "../../tools/patch-validator.js";
+import type { AstValidationOptions } from "../../tools/typescript-ast-validator.js";
 import { canonicalizePathAgainstScannedFiles } from "./decision-path.helpers.js";
 import type {
   PatchValidationEntry,
@@ -28,7 +29,9 @@ export async function runPatchCriticLoop(params: {
     proposal: AgentProposedPatch,
     workspacePath: string,
     logger?: AgentLogger,
+    astOptions?: AstValidationOptions,
   ) => Promise<PatchProposalValidationResult>;
+  astOptions?: AstValidationOptions;
 }): Promise<PatchValidationEntry[]> {
   const {
     provider,
@@ -41,6 +44,7 @@ export async function runPatchCriticLoop(params: {
     retryLimit,
     normalizePatch,
     validateProposal,
+    astOptions,
   } = params;
   const result = [...patchValidation];
 
@@ -111,6 +115,7 @@ export async function runPatchCriticLoop(params: {
             patches[0],
             workspacePath,
             logger,
+            astOptions,
           );
           if (validation.valid) {
             result[i] = { proposal: patches[0], validation };
@@ -139,6 +144,7 @@ export async function runPatchCriticLoop(params: {
             patches[0],
             workspacePath,
             logger,
+            astOptions,
           );
           if (validation.valid) {
             result[i] = { proposal: patches[0], validation };
@@ -159,6 +165,7 @@ export async function runPatchCriticLoop(params: {
           corrected,
           workspacePath,
           logger,
+          astOptions,
         );
         if (validation.valid) {
           result[i] = { proposal: corrected, validation };

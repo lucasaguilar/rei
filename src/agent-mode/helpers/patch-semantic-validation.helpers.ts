@@ -1,7 +1,10 @@
 import type { AgentProposedPatch } from "../../contracts/agent-decision.types.js";
 import type { AgentLogger } from "../../core/logger.js";
 import { supportsSemanticValidationPath } from "../../language/language-capabilities.js";
-import { validateTypeScriptPatchAst } from "../../tools/typescript-ast-validator.js";
+import {
+  validateTypeScriptPatchAst,
+  type AstValidationOptions,
+} from "../../tools/typescript-ast-validator.js";
 import {
   validatePatchProposal,
   type PatchProposalValidationResult,
@@ -11,6 +14,7 @@ export async function validateWithAstGuard(
   proposal: AgentProposedPatch,
   workspacePath: string,
   logger?: AgentLogger,
+  astOptions?: AstValidationOptions,
 ): Promise<PatchProposalValidationResult> {
   const validation = await validatePatchProposal(proposal, workspacePath);
   if (!validation.valid) {
@@ -21,11 +25,17 @@ export async function validateWithAstGuard(
     return validation;
   }
 
-  const astResult = await validateTypeScriptPatchAst(
-    proposal.patch,
-    proposal.file,
-    workspacePath,
-  );
+  // Use pre-computed batch result when available (more accurate: cross-file types resolved).
+  const batchResult = astOptions?.batchResults?.get(proposal.file);
+  const astResult =
+    batchResult ??
+    (await validateTypeScriptPatchAst(
+      proposal.patch,
+      proposal.file,
+      workspacePath,
+      astOptions,
+    ));
+
   if (!astResult.valid) {
     validation.valid = false;
     validation.issues.push({
