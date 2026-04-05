@@ -364,6 +364,34 @@
             },
             "console": "integratedTerminal",
             "skipFiles": ["<node_internals>/**"]
+        },
+         {
+            "type": "node",
+            "request": "launch",
+            "name": "REI llama-3.1-8b-instant (Groq)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev", "--", "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "groq",
+                "GROQ_MODEL": "llama-3.1-8b-instant"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+         {
+            "type": "node",
+            "request": "launch",
+            "name": "REI openrouter/free (open router)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev", "--", "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "openrouter",
+                "OPENROUTER_MODEL": "openrouter/free"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
         }
     ]
 }

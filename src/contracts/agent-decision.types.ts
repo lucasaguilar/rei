@@ -91,18 +91,17 @@ export function parseAgentDecision(raw: string): AgentDecision {
   }
 
   let proposedPatches: AgentProposedPatch[] | undefined;
-  if (Array.isArray(obj.proposedPatches)) {
-    const parsedPatches: AgentProposedPatch[] = [];
-    for (const item of obj.proposedPatches) {
-      if (typeof item !== "object" || item === null) continue;
-      const patchObj = item as Record<string, unknown>;
-      const file = typeof patchObj.file === "string" ? patchObj.file : "";
-      const description = typeof patchObj.description === "string" ? patchObj.description : "";
-      const patch = typeof patchObj.patch === "string" ? patchObj.patch : "";
-      if (!file || !patch) continue;
-      parsedPatches.push({ file, description, patch });
-    }
-    proposedPatches = parsedPatches;
+  const parsedPatches = parsePatchArray(obj.proposedPatches);
+  const recoveredFromDuplicateKeys = extractDuplicateProposedPatchArrays(raw)
+    .flatMap(parsePatchArray);
+
+  const mergedPatches = dedupePatches([
+    ...parsedPatches,
+    ...recoveredFromDuplicateKeys,
+  ]);
+
+  if (mergedPatches.length > 0) {
+    proposedPatches = mergedPatches;
   }
 
   return {
@@ -111,4 +110,134 @@ export function parseAgentDecision(raw: string): AgentDecision {
     contextRequests,
     ...(proposedPatches ? { proposedPatches } : {}),
   };
+}
+
+function parsePatchArray(value: unknown): AgentProposedPatch[] {
+  if (!Array.isArray(value)) return [];
+
+  const parsedPatches: AgentProposedPatch[] = [];
+  for (const item of value) {
+    if (typeof item !== "object" || item === null) continue;
+    const patchObj = item as Record<string, unknown>;
+    const file = typeof patchObj.file === "string" ? patchObj.file : "";
+    const description =
+      typeof patchObj.description === "string" ? patchObj.description : "";
+    const patch = typeof patchObj.patch === "string" ? patchObj.patch : "";
+    if (!file || !patch) continue;
+    parsedPatches.push({ file, description, patch });
+  }
+
+  return parsedPatches;
+}
+
+function dedupePatches(
+  patches: AgentProposedPatch[],
+): AgentProposedPatch[] {
+  const seen = new Set<string>();
+  const deduped: AgentProposedPatch[] = [];
+
+  for (const patch of patches) {
+    const key = `${patch.file}\n${patch.patch}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(patch);
+  }
+
+  return deduped;
+}
+
+function extractDuplicateProposedPatchArrays(raw: string): unknown[][] {
+  const arrays: unknown[][] = [];
+  const needle = '"proposedPatches"';
+  let cursor = 0;
+
+  while (cursor < raw.length) {
+    const keyIndex = raw.indexOf(needle, cursor);
+    if (keyIndex === -1) break;
+
+    let colonIndex = keyIndex + needle.length;
+    while (colonIndex < raw.length && /\s/.test(raw[colonIndex])) {
+      colonIndex += 1;
+    }
+    if (raw[colonIndex] !== ":") {
+      cursor = keyIndex + needle.length;
+      continue;
+    }
+
+    let valueStart = colonIndex + 1;
+    while (valueStart < raw.length && /\s/.test(raw[valueStart])) {
+      valueStart += 1;
+    }
+    if (raw[valueStart] !== "[") {
+      cursor = valueStart;
+      continue;
+    }
+
+    const extracted = extractJsonArray(raw, valueStart);
+    if (!extracted) {
+      cursor = valueStart + 1;
+      continue;
+    }
+
+    try {
+      const parsed = JSON.parse(extracted.arrayText);
+      if (Array.isArray(parsed)) {
+        arrays.push(parsed as unknown[]);
+      }
+    } catch {
+      // Ignore malformed arrays and keep scanning.
+    }
+
+    cursor = extracted.endIndex;
+  }
+
+  return arrays;
+}
+
+function extractJsonArray(
+  text: string,
+  startIndex: number,
+): { arrayText: string; endIndex: number } | null {
+  if (text[startIndex] !== "[") return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = startIndex; i < text.length; i += 1) {
+    const ch = text[i];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (ch === "[") {
+      depth += 1;
+      continue;
+    }
+
+    if (ch === "]") {
+      depth -= 1;
+      if (depth === 0) {
+        return {
+          arrayText: text.slice(startIndex, i + 1),
+          endIndex: i + 1,
+        };
+      }
+    }
+  }
+
+  return null;
 }

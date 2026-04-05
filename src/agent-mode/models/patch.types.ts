@@ -11,4 +11,8 @@ export interface SearchReplaceBlock {
   description: string;
   search: string;
   replace: string;
+  /** Create-file edit mode. */
+  create?: boolean;
+  /** Full content for create-file mode. */
+  content?: string;
 }

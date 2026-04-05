@@ -27,8 +27,9 @@ export async function handleInputTurn(
 
         if (status === "producing_response" && liveStart < 0) {
           actions.pushTranscript("");
-          actions.pushTranscript(`You: ${trimmed}`);
+          actions.pushTranscript(`\x1b[1;36mYou: ${trimmed}\x1b[0m`);
           actions.pushTranscript("");
+          actions.draw();
           liveStart = transcript.length;
           transcript.push("");
         }

@@ -4,7 +4,7 @@ import * as path from "path";
 export interface LogEntry {
   timestamp: string;
   turnId: string;
-  phase: "DECISION" | "KNOWLEDGE" | "PATCH_PROPOSED" | "AST_CRITIC_LOOP" | "AST_CONTEXT_EXTRACTION" | "RAG_SEARCH" | "ERROR";
+  phase: "DECISION" | "KNOWLEDGE" | "PATCH_PROPOSED" | "AST_CRITIC_LOOP" | "AST_CONTEXT_EXTRACTION" | "RAG_SEARCH" | "PATCH_SYNTHESIS" | "PATCH_SYNTHESIS_FAILED" | "ERROR";
   data: any;
 }
 
@@ -65,6 +65,14 @@ export class AgentLogger {
 
   public logCriticLoop(file: string, errors: string[]) {
     this.write("AST_CRITIC_LOOP", { file, errors });
+  }
+
+  public logPatchSynthesis(editCount: number, patchCount: number) {
+    this.write("PATCH_SYNTHESIS", { editCount, patchCount });
+  }
+
+  public logSynthesisFailed(reason: string, details?: string) {
+    this.write("PATCH_SYNTHESIS_FAILED", { reason, details });
   }
 
   public logError(message: string, stack?: string) {

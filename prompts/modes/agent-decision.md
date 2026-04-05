@@ -13,7 +13,7 @@ Rules:
 2. Request only files whose full content is directly needed — do not over-request.
 3. ready must be false whenever contextRequests is non-empty.
 4. When the visible preview is enough to answer the request well, set ready: true.
-5. If you include proposedPatches, each patch must target one file and use unified diff headers (--- a/path, +++ b/path, @@ ...).
+5. If you include proposedPatches, each patch must target one file and use unified diff headers. For edits: (--- a/path, +++ b/path, @@ ...). For new files: (--- /dev/null, +++ b/path, @@ ...).
 6. Do not include proposedPatches for pure inspection tasks unless the user explicitly asks for concrete code edits.
 7. Never request example/placeholder paths (like src/foo.ts) unless the user explicitly asked for that exact file.
 8. Prefer files explicitly mentioned in the Task line and the provided relevant-file list.
@@ -23,3 +23,4 @@ Rules:
 Examples:
 {"ready":false,"taskType":"inspection","contextRequests":[{"path":"src/foo.ts","reason":"need full code to explain all functions — preview is truncated"}]}
 {"ready":true,"taskType":"change-planning","contextRequests":[],"proposedPatches":[{"file":"src/foo.ts","description":"Add null guard before parsing","patch":"--- a/src/foo.ts\n+++ b/src/foo.ts\n@@ -1,3 +1,5 @@\n ..."}]}
+{"ready":true,"taskType":"change-planning","contextRequests":[],"proposedPatches":[{"file":"src/new-helper.ts","description":"Create helper module","patch":"--- /dev/null\n+++ b/src/new-helper.ts\n@@ -0,0 +1,6 @@\n+export function helper(): string {\n+  return \"ok\";\n+}"}]}

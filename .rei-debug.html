@@ -1,517 +1,817 @@
-<!DOCTYPE html>
-<html lang="en">
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>REI Debug Viewer</title>
-  <style>
-    :root {
-      --bg: #0d1117;
-      --surface: #161b22;
-      --border: #30363d;
-      --text: #c9d1d9;
-      --muted: #8b949e;
-      --accent: #58a6ff;
-      --green: #3fb950;
-      --yellow: #d29922;
-      --red: #f85149;
-      --purple: #bc8cff;
-      --teal: #39d353;
-      --orange: #f0883e;
-    }
-
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
-      font-size: 13px;
-      line-height: 1.6;
-      min-height: 100vh;
-    }
-
-    header {
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-      padding: 14px 24px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      position: sticky;
-      top: 0;
-      z-index: 100;
-    }
-
-    header h1 {
-      font-size: 15px;
-      font-weight: 700;
-      color: var(--accent);
-      letter-spacing: 0.5px;
-    }
-
-    .badge {
-      font-size: 11px;
-      padding: 2px 8px;
-      border-radius: 12px;
-      font-weight: 600;
-    }
-
-    .controls {
-      margin-left: auto;
-      display: flex;
-      gap: 8px;
-      align-items: center;
-    }
-
-    .controls input[type="file"] { display: none; }
-
-    button {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      color: var(--text);
-      padding: 5px 12px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 12px;
-      font-family: inherit;
-      transition: border-color 0.15s, background 0.15s;
-    }
-    button:hover { border-color: var(--accent); background: #1f2937; }
-
-    .filter-bar {
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-      padding: 10px 24px;
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      align-items: center;
-    }
-
-    .filter-label { color: var(--muted); font-size: 11px; margin-right: 4px; }
-
-    .chip {
-      padding: 3px 10px;
-      border-radius: 20px;
-      font-size: 11px;
-      font-weight: 600;
-      cursor: pointer;
-      border: 1px solid transparent;
-      opacity: 0.5;
-      transition: opacity 0.15s;
-    }
-    .chip.active { opacity: 1; border-color: currentColor; }
-
-    .chip-DECISION     { color: var(--accent);  background: #1c2d47; }
-    .chip-RAG_SEARCH   { color: var(--purple);  background: #1e1a2e; }
-    .chip-AST_CONTEXT_EXTRACTION { color: var(--green); background: #1a2d1e; }
-    .chip-AST_CRITIC_LOOP        { color: var(--yellow); background: #2a1f0a; }
-    .chip-KNOWLEDGE    { color: var(--orange); background: #2a1e0a; }
-    .chip-PATCH_PROPOSED { color: var(--teal); background: #0d2518; }
-    .chip-ERROR        { color: var(--red);   background: #2d1515; }
-
-    main {
-      padding: 20px 24px;
-      max-width: 1100px;
-      margin: 0 auto;
-    }
-
-    .empty {
-      text-align: center;
-      color: var(--muted);
-      padding: 80px 0;
-    }
-
-    .empty span { font-size: 36px; display: block; margin-bottom: 12px; }
-
-    .turn-group {
-      margin-bottom: 32px;
-    }
-
-    .turn-header {
-      font-size: 11px;
-      color: var(--muted);
-      border-bottom: 1px solid var(--border);
-      padding-bottom: 6px;
-      margin-bottom: 14px;
-      letter-spacing: 0.5px;
-      text-transform: uppercase;
-    }
-
-    .event-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      margin-bottom: 10px;
-      overflow: hidden;
-      transition: border-color 0.15s;
-    }
-
-    .event-card:hover { border-color: #484f58; }
-
-    .event-header {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 10px 14px;
-      cursor: pointer;
-      user-select: none;
-    }
-
-    .phase-tag {
-      font-size: 10px;
-      font-weight: 700;
-      padding: 2px 8px;
-      border-radius: 4px;
-      letter-spacing: 0.5px;
-      text-transform: uppercase;
-      white-space: nowrap;
-    }
-
-    .phase-DECISION     { color: var(--accent);  background: #1c2d47; }
-    .phase-RAG_SEARCH   { color: var(--purple);  background: #1e1a2e; }
-    .phase-AST_CONTEXT_EXTRACTION { color: var(--green); background: #1a2d1e; }
-    .phase-AST_CRITIC_LOOP        { color: var(--yellow); background: #2a1f0a; }
-    .phase-KNOWLEDGE    { color: var(--orange); background: #2a1e0a; }
-    .phase-PATCH_PROPOSED { color: var(--teal); background: #0d2518; }
-    .phase-ERROR        { color: var(--red);   background: #2d1515; }
-
-    .event-summary {
-      color: var(--text);
-      flex: 1;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .event-time {
-      color: var(--muted);
-      font-size: 11px;
-      white-space: nowrap;
-    }
-
-    .chevron {
-      color: var(--muted);
-      font-size: 10px;
-      transition: transform 0.2s;
-    }
-    .event-card.open .chevron { transform: rotate(90deg); }
-
-    .event-body {
-      display: none;
-      border-top: 1px solid var(--border);
-      padding: 14px;
-    }
-    .event-card.open .event-body { display: block; }
-
-    /* RAG Hit Table */
-    .rag-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 8px;
-    }
-    .rag-table th, .rag-table td {
-      text-align: left;
-      padding: 6px 10px;
-      border-bottom: 1px solid var(--border);
-      font-size: 12px;
-    }
-    .rag-table th { color: var(--muted); font-weight: 600; }
-    .rag-table tr:last-child td { border-bottom: none; }
-
-    .score-bar-wrap {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .score-bar {
-      height: 6px;
-      border-radius: 3px;
-      background: var(--purple);
-      flex-shrink: 0;
-    }
-
-    .query-box {
-      background: #0d1117;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 8px 12px;
-      margin-bottom: 12px;
-      color: var(--accent);
-      font-size: 12px;
-    }
-
-    pre {
-      background: #0d1117;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 12px;
-      overflow-x: auto;
-      font-size: 11px;
-      color: var(--text);
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
-
-    .stats-row {
-      display: flex;
-      gap: 14px;
-      flex-wrap: wrap;
-      margin-bottom: 12px;
-    }
-
-    .stat {
-      background: #0d1117;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 6px 12px;
-      font-size: 12px;
-    }
-    .stat span { color: var(--muted); margin-right: 4px; }
-  </style>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=3.0, user-scalable=1;">
+  <meta name="referrer" content="origin">
+  <meta name="HandheldFriendly" content="true" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>angular site:rxjs.dev at DuckDuckGo</title>
+  <link title="DuckDuckGo (Lite)" type="application/opensearchdescription+xml" rel="search" href="//duckduckgo.com/opensearch_lite_v2.xml">
+  <link href="//duckduckgo.com/favicon.ico" rel="shortcut icon" />
+  <link rel="icon" href="//duckduckgo.com/favicon.ico" type="image/x-icon" />
+  <link id="icon60" rel="apple-touch-icon" href="//duckduckgo.com/assets/icons/meta/DDG-iOS-icon_60x60.png?v=2"/>
+  <link id="icon76" rel="apple-touch-icon" sizes="76x76" href="//duckduckgo.com/assets/icons/meta/DDG-iOS-icon_76x76.png?v=2"/>
+  <link id="icon120" rel="apple-touch-icon" sizes="120x120" href="//duckduckgo.com/assets/icons/meta/DDG-iOS-icon_120x120.png?v=2"/>
+  <link id="icon152" rel="apple-touch-icon" sizes="152x152" href="//duckduckgo.com/assets/icons/meta/DDG-iOS-icon_152x152.png?v=2"/>
+  <link rel="image_src" href="//duckduckgo.com/assets/icons/meta/DDG-icon_256x256.png">
+  <link rel="stylesheet" media="handheld, all" href="//duckduckgo.com/dist/lr.48ddfe4eadf6a534e93f.css" type="text/css"/>
 </head>
+
 <body>
-
-<header>
-  <h1>⬡ REI Debug Viewer</h1>
-  <span class="badge" style="background:#1c2d47;color:#58a6ff">agent-flow.jsonl</span>
-  <div class="controls">
-    <button id="load-btn" onclick="document.getElementById('file-input').click()">📂 Load JSONL</button>
-    <input type="file" id="file-input" accept=".jsonl,.json" />
-    <button onclick="refresh()">↻ Refresh</button>
-    <button onclick="clearAll()">✕ Clear</button>
+  <p class='extra'>&nbsp;</p>
+  <div class="header">
+    DuckDuckGo
   </div>
-</header>
+  <p class='extra'>&nbsp;</p>
 
-<div class="filter-bar" id="filter-bar">
-  <span class="filter-label">Filter:</span>
-  <!-- chips injected dynamically -->
-</div>
+  <form action="/lite/" method="post">
+      <input class='query' type="text" size="40" name="q" value="angular site:rxjs.dev">
+      <input class='submit' type="submit" value="Search">
+      
+      
+      
+      
 
-<main id="main">
-  <div class="empty" id="drop-zone">
-    <span>⬡</span>
-    <p>Drag &amp; drop or load your log file</p>
-    <p style="margin-top:8px;font-size:11px;color:#484f58">Expected path: <code style="color:#58a6ff">.rei/logs/agent-flow.jsonl</code></p>
-  </div>
-</main>
+      <div class="filters">
+        <select class="submit" name="kl">
+          
+            <option value="" >All Regions</option>
+          
+            <option value="ar-es" >Argentina</option>
+          
+            <option value="au-en" >Australia</option>
+          
+            <option value="at-de" >Austria</option>
+          
+            <option value="be-fr" >Belgium (fr)</option>
+          
+            <option value="be-nl" >Belgium (nl)</option>
+          
+            <option value="br-pt" >Brazil</option>
+          
+            <option value="bg-bg" >Bulgaria</option>
+          
+            <option value="ca-en" >Canada (en)</option>
+          
+            <option value="ca-fr" >Canada (fr)</option>
+          
+            <option value="ct-ca" >Catalonia</option>
+          
+            <option value="cl-es" >Chile</option>
+          
+            <option value="cn-zh" >China</option>
+          
+            <option value="co-es" >Colombia</option>
+          
+            <option value="hr-hr" >Croatia</option>
+          
+            <option value="cz-cs" >Czech Republic</option>
+          
+            <option value="dk-da" >Denmark</option>
+          
+            <option value="ee-et" >Estonia</option>
+          
+            <option value="fi-fi" >Finland</option>
+          
+            <option value="fr-fr" >France</option>
+          
+            <option value="de-de" >Germany</option>
+          
+            <option value="gr-el" >Greece</option>
+          
+            <option value="hk-tzh" >Hong Kong</option>
+          
+            <option value="hu-hu" >Hungary</option>
+          
+            <option value="is-is" >Iceland</option>
+          
+            <option value="in-en" >India (en)</option>
+          
+            <option value="id-en" >Indonesia (en)</option>
+          
+            <option value="ie-en" >Ireland</option>
+          
+            <option value="il-en" >Israel (en)</option>
+          
+            <option value="it-it" >Italy</option>
+          
+            <option value="jp-jp" >Japan</option>
+          
+            <option value="kr-kr" >Korea</option>
+          
+            <option value="lv-lv" >Latvia</option>
+          
+            <option value="lt-lt" >Lithuania</option>
+          
+            <option value="my-en" >Malaysia (en)</option>
+          
+            <option value="mx-es" >Mexico</option>
+          
+            <option value="nl-nl" >Netherlands</option>
+          
+            <option value="nz-en" >New Zealand</option>
+          
+            <option value="no-no" >Norway</option>
+          
+            <option value="pk-en" >Pakistan (en)</option>
+          
+            <option value="pe-es" >Peru</option>
+          
+            <option value="ph-en" >Philippines (en)</option>
+          
+            <option value="pl-pl" >Poland</option>
+          
+            <option value="pt-pt" >Portugal</option>
+          
+            <option value="ro-ro" >Romania</option>
+          
+            <option value="ru-ru" >Russia</option>
+          
+            <option value="xa-ar" >Saudi Arabia</option>
+          
+            <option value="sg-en" >Singapore</option>
+          
+            <option value="sk-sk" >Slovakia</option>
+          
+            <option value="sl-sl" >Slovenia</option>
+          
+            <option value="za-en" >South Africa</option>
+          
+            <option value="es-ca" >Spain (ca)</option>
+          
+            <option value="es-es" >Spain (es)</option>
+          
+            <option value="se-sv" >Sweden</option>
+          
+            <option value="ch-de" >Switzerland (de)</option>
+          
+            <option value="ch-fr" >Switzerland (fr)</option>
+          
+            <option value="tw-tzh" >Taiwan</option>
+          
+            <option value="th-en" >Thailand (en)</option>
+          
+            <option value="tr-tr" >Turkey</option>
+          
+            <option value="us-en" >US (English)</option>
+          
+            <option value="us-es" >US (Spanish)</option>
+          
+            <option value="ua-uk" >Ukraine</option>
+          
+            <option value="uk-en" >United Kingdom</option>
+          
+            <option value="vn-en" >Vietnam (en)</option>
+          
+        </select>
 
-<script>
-  const ALL_PHASES = [
-    'DECISION', 'RAG_SEARCH', 'AST_CONTEXT_EXTRACTION',
-    'AST_CRITIC_LOOP', 'KNOWLEDGE', 'PATCH_PROPOSED', 'ERROR'
-  ];
+        <select class="submit" name="df">
+          
+            <option value="" selected>Any Time</option>
+          
+            <option value="d" >Past Day</option>
+          
+            <option value="w" >Past Week</option>
+          
+            <option value="m" >Past Month</option>
+          
+            <option value="y" >Past Year</option>
+          
+        </select>
+      </div>
+  </form>
 
-  let entries = [];
-  let activeFilters = new Set(ALL_PHASES);
+  
+    <p class="extra">&nbsp;</p>
+    <table border="0">
+      <tr>
+        <td>
+          
+        </td>
+        <td>
+          
+            <!-- Next Page Button Sub-template -->
+<form class="next_form" action="/lite/" method="post">
+    <input type="submit" class='navbutton' value="Next Page &gt;">
+    <input type="hidden" name="q" value="angular site:rxjs.dev">
+    <input type="hidden" name="s" value="10">
+    <input type="hidden" name="nextParams" value="">
+    <input type="hidden" name="v" value="l">
+    <input type="hidden" name="o" value="json">
+    <input type="hidden" name="dc" value="13">
+    <input type="hidden" name="api" value="d.js">
+    <input type="hidden" name="vqd" value="4-88671523668323916388823138408376417827">
+    &nbsp;&nbsp;&nbsp;&nbsp;
+    
+    
+    
+      <input name="kl" value="wt-wt" type="hidden">
+    
+    
+    
+    
+</form>
+          
+        </td>
+      </tr>
+    </table>
+  
 
-  // ─── File Loading ──────────────────────────────────────────────────────────
-  document.getElementById('file-input').addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      parseAndRender(ev.target.result);
-    };
-    reader.readAsText(file);
-  });
+  
 
-  // Drag-and-drop support
-  document.body.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
-  document.body.addEventListener('drop', (e) => {
-    e.preventDefault();
-    const file = e.dataTransfer.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => parseAndRender(ev.target.result);
-    reader.readAsText(file);
-  });
+  <p class='extra'>&nbsp;</p>
 
-  function parseAndRender(text) {
-    entries = text.trim().split('\n')
-      .filter(Boolean)
-      .map(line => { try { return JSON.parse(line); } catch { return null; } })
-      .filter(Boolean);
-    buildFilterBar();
-    render();
-  }
+  <table border="0">
+    
+  </table>
 
-  function refresh() {
-    // Re-render with current data
-    render();
-  }
+  <table border="0">
+    
+      
+      <!-- Web results are present -->
+      
+        
+          
 
-  function clearAll() {
-    entries = [];
-    document.getElementById('filter-bar').innerHTML = '<span class="filter-label">Filter:</span>';
-    document.getElementById('main').innerHTML = `<div class="empty"><span>🔍</span><p>Load a <code>agent-flow.jsonl</code> file.</p></div>`;
-    document.getElementById('file-input').value = '';
-  }
+            <tr class="result-sponsored">
+              
+                <!-- Sponsored result with counter -->
+                <td valign="top">
+                  
+                    1.&nbsp;
+                  
+                </td>
+                <td>
+                  <a rel="nofollow" href="https://duckduckgo.com/y.js?ad_domain=ebay.com&amp;ad_provider=bingv7aa&amp;ad_type=txad&amp;click_metadata=Vt8wLgthZ2KFjXUvIBKhRpxOQAV6lbPNkyCm5CnHFZsSVjXXHxPYILwMZqr31DFoCSMPrnSEtRbWRqjvBCXwcln%2DjJonoHwf1IhGXffqXa3ameSRrb8vwWnDGt3ob1Xut6d9NV1Vyho414Pm_qQrsTilCypekng3l%2DA0d2r%2D1Cs.xxbE79K%2DUa5aI0a3_ghb4Q&amp;rut=06cdd0ca0e4b61af0e86d95f48d74e1bfdc31e4b74d9f41af75ba7c71ffb09cd&amp;u3=https%3A%2F%2Fwww.bing.com%2Faclick%3Fld%3De8fitb2b6m6%2DiTqhqcs1P4CTVUCUzJGrORGyyU724rwVZa8ivijN4wEhlSaxQe%2DnUQeDG55fQdmBn1bCNR159htBsp64p92elldb5lyTZm4jhxJkcQD8kTi4HUXT2jYGCxfZhgPU70JVGegRY7lrmROAwmYtR25ql5xYIpfGHxFYZghbcW1w%2D32FjKJ4_kcfUuorRgVwgYTLQLf0XpdPZJVwARGBo%26u%3DaHR0cHMlM2ElMmYlMmZ3d3cuZWJheS5jb20lMmZzY2glMmZpLmh0bWwlM2Zfbmt3JTNkbmV0JTI1MjBjb3JlJTI1MjBhbmQlMjUyMGFuZ3VsYXIlMjZub3JvdmVyJTNkMSUyNm1rZXZ0JTNkMSUyNm1rcmlkJTNkMjE1MjctMTc1MDcxLTkxMzQwMC0zJTI2bWtjaWQlM2QyJTI2bWtzY2lkJTNkMTAyJTI2a2V5d29yZCUzZG5ldCUyNTIwY29yZSUyNTIwYW5kJTI1MjBhbmd1bGFyJTI2Y3JscCUzZF8lMjZNVF9JRCUzZCUyNmdlb19pZCUzZCUyNnJsc2F0YXJnZXQlM2Rrd2QtNzY3NjAxMzAzNzI3MjMlM2Fsb2MtOCUyNmFkcG9zJTNkJTI2ZGV2aWNlJTNkYyUyNm1rdHlwZSUzZCUyNmxvYyUzZDE0MTk2OCUyNnBvaSUzZCUyNmFiY0lkJTNkJTI2Y21wZ24lM2Q0ODY3Njk1MTMlMjZzaXRlbG5rJTNkJTI2YWRncm91cGlkJTNkMTIyODE1NTY1MTk0ODMzOSUyNm5ldHdvcmslM2RzJTI2bWF0Y2h0eXBlJTNkcCUyNm1zY2xraWQlM2Q1MTNiNDQ3MjQ1OGExNzkyZTNhZDJkYmQ2ZWI3Y2RlZQ%26rlid%3D513b4472458a1792e3ad2dbd6eb7cdee&amp;vqd=4-231315681384723993293650408508144069659&amp;iurl=%7B1%7DIG%3D2FC498E9601D4C0AB1F7CBAEFB1A819A%26CID%3D2D5232AF423E67E43DB8259F4332669E%26ID%3DDevEx%2C5038.1" class='result-link'>Find Net Core And Angular On eBay - eBay Official Site</a>
+                  (Sponsored link - <a
+                    href="https://duckduckgo.com/duckduckgo-help-pages/company/ads-by-microsoft-on-duckduckgo-private-search/"
+                    rel="nofollow" class="result-link">more info</a>)
+                </td>
+                
+            </tr>
 
-  // ─── Filter Bar ────────────────────────────────────────────────────────────
-  function buildFilterBar() {
-    const bar = document.getElementById('filter-bar');
-    const present = new Set(entries.map(e => e.phase));
-    bar.innerHTML = '<span class="filter-label">Filter:</span>';
+            
+              <tr class="result-sponsored">
+                <td>&nbsp;&nbsp;&nbsp;</td>
+                <td class='result-snippet'>
+                  We&#x27;ve got your back with the eBay Money Back Guarantee. Vast selection and free shipping on millions of items.
+                </td>
+              </tr>
+            
 
-    for (const phase of ALL_PHASES) {
-      if (!present.has(phase)) continue;
-      const chip = document.createElement('span');
-      chip.className = `chip chip-${phase} active`;
-      chip.textContent = phase.replace(/_/g, ' ');
-      chip.dataset.phase = phase;
-      chip.addEventListener('click', () => {
-        if (activeFilters.has(phase)) {
-          activeFilters.delete(phase);
-          chip.classList.remove('active');
-        } else {
-          activeFilters.add(phase);
-          chip.classList.add('active');
-        }
-        render();
-      });
-      bar.appendChild(chip);
-    }
-  }
+            
+              <tr class="result-sponsored">
+                <td>&nbsp;&nbsp;&nbsp;</td>
+                <td>
+                  <span class='link-text'>ebay.com</span>
+                  
+                </td>
+              </tr>
+            
 
-  // ─── Main Render ───────────────────────────────────────────────────────────
-  function render() {
-    const main = document.getElementById('main');
-    const filtered = entries.filter(e => activeFilters.has(e.phase));
-    if (filtered.length === 0) {
-      main.innerHTML = `<div class="empty"><span>🔍</span><p>No events match the current filter.</p></div>`;
-      return;
-    }
+            <tr>
+              <td>&nbsp;</td>
+              <td>&nbsp;</td>
+            </tr>
+          
 
-    // Group by turnId
-    const turns = {};
-    for (const entry of filtered) {
-      if (!turns[entry.turnId]) turns[entry.turnId] = [];
-      turns[entry.turnId].push(entry);
-    }
+          
+      
+        
+          
 
-    main.innerHTML = '';
-    for (const [turnId, events] of Object.entries(turns)) {
-      const group = document.createElement('div');
-      group.className = 'turn-group';
-      const firstTs = events[0].timestamp;
-      group.innerHTML = `<div class="turn-header">Turn ${turnId} — ${new Date(firstTs).toLocaleString()} (${events.length} events)</div>`;
-      for (const ev of events) {
-        group.appendChild(buildCard(ev));
-      }
-      main.appendChild(group);
-    }
-  }
+            <tr class="result-sponsored">
+              
+                <!-- Sponsored result with counter -->
+                <td valign="top">
+                  
+                    2.&nbsp;
+                  
+                </td>
+                <td>
+                  <a rel="nofollow" href="https://duckduckgo.com/y.js?ad_domain=codecademy.com&amp;ad_provider=bingv7aa&amp;ad_type=txad&amp;click_metadata=KJHWgH0ozr%2DPUVNd8ydC_V9nteBF6awozi7ztnivFKX4UCGgsd03gEQqU%2DJLKrtQrEtjLNoCypxcX%2D54bjRf7iopRIpzv_wyTNrb8HpaPqQ8YiXsWSnsI8mW%2DB_5TZGIhRStbzSN5OuaYxPvyUMFKwHO_qrgtnU4j8WWzO5pNtE.lcT6rYCHuv3ffJK2QV7hDA&amp;rut=69c4e79ff0cc68118d407690fe7b78ee6f545a788c82e29509362b338368bd9a&amp;u3=https%3A%2F%2Fwww.bing.com%2Faclick%3Fld%3De865ESIaADw%2DToXxj2HblxEzVUCUw8DNQ27acodIVvvAYPuQJO6fKjpnpDTbzhx3MvI55dX%2D45GLUX3SF_f1W%2DojW6UpfB5JzbiOlDvMvl1SnZU6ld4V0rdaFHZC2AQUeTun5PAULJsgqaJuG9ZGz7CZx7WqYb_lDOa1OoVebvJyjH4_dugWOEu9sySod6tCBqmMHPm0WAf6xrMKgAaQjx7ZwIEIk%26u%3DaHR0cHMlM2ElMmYlMmZ3d3cuY29kZWNhZGVteS5jb20lMmZsZWFybiUyZmxlYXJuLWFuZ3VsYXJqcyUzZmdfbmV0d29yayUzZHMlMjZnX3Byb2R1Y3RjaGFubmVsJTNkJTI2Z19hZGlkJTNkJTI2Z19sb2NpbnRlcmVzdCUzZCUyNmdfa2V5d29yZCUzZHR1dG9yaWFsJTI1MjBhbmd1bGFyJTI1MjBqcyUyNmdfYWNjdGlkJTNkMjQzLTAzOS03MDExJTI2Z19hZHR5cGUlM2QlMjZnX2tleXdvcmRpZCUzZGt3ZC03OTUwOTAyMzk0MTYyMyUzYWxvYy04JTI2Z19pZmNyZWF0aXZlJTNkJTI2Z19jYW1wYWlnbiUzZGFjY291bnQlMjZnX2xvY3BoeXNpY2FsJTNkMTQxOTY4JTI2Z19hZGdyb3VwaWQlM2QxMjcyMTM1NzYxMDAzNjU5JTI2Z19wcm9kdWN0aWQlM2QlMjZnX3NvdXJjZSUzZCU3YnNvdXJjZWlkJTdkJTI2Z19tZXJjaGFudGlkJTNkJTI2Z19wbGFjZW1lbnQlM2QlMjZnX3BhcnRpdGlvbiUzZCUyNmdfY2FtcGFpZ25pZCUzZDM3MDM3OTY0MyUyNmdfaWZwcm9kdWN0JTNkJTI2dXRtX2lkJTNkdF9rd2QtNzk1MDkwMjM5NDE2MjMlM2Fsb2MtOCUzYWFnXzEyNzIxMzU3NjEwMDM2NTklM2FjcF8zNzAzNzk2NDMlM2FuX3MlM2FkX2MlMjZtc2Nsa2lkJTNkOGE4YzVjMmYwMTk1MWE2MTE2NmMzNWUwMmFhODNjOTUlMjZ1dG1fc291cmNlJTNkYmluZyUyNnV0bV9tZWRpdW0lM2RjcGMlMjZ1dG1fY2FtcGFpZ24lM2RST1clMjUyMC0lMjUyMEJyb2FkJTI2dXRtX3Rlcm0lM2R0dXRvcmlhbCUyNTIwYW5ndWxhciUyNTIwanMlMjZ1dG1fY29udGVudCUzZGFuZ3VsYXIlMjUyMGpzJTI1MjAxLng%26rlid%3D8a8c5c2f01951a61166c35e02aa83c95&amp;vqd=4-171254010680113142634926921965744268285&amp;iurl=%7B1%7DIG%3D2FC498E9601D4C0AB1F7CBAEFB1A819A%26CID%3D2D5232AF423E67E43DB8259F4332669E%26ID%3DDevEx%2C5042.1" class='result-link'>Online Angular JS 1.X Courses - Learn by Doing</a>
+                  (Sponsored link - <a
+                    href="https://duckduckgo.com/duckduckgo-help-pages/company/ads-by-microsoft-on-duckduckgo-private-search/"
+                    rel="nofollow" class="result-link">more info</a>)
+                </td>
+                
+            </tr>
 
-  // ─── Card Builder ──────────────────────────────────────────────────────────
-  function buildCard(entry) {
-    const card = document.createElement('div');
-    card.className = 'event-card';
+            
+              <tr class="result-sponsored">
+                <td>&nbsp;&nbsp;&nbsp;</td>
+                <td class='result-snippet'>
+                  Take your skills to a new level and join millions that have learned <b>Angular</b> JS 1.X. Learn key takeaway skills of <b>Angular</b> JS 1.X and earn a certificate of completion.
+                </td>
+              </tr>
+            
 
-    const header = document.createElement('div');
-    header.className = 'event-header';
-    header.innerHTML = `
-      <span class="phase-tag phase-${entry.phase}">${entry.phase.replace(/_/g, ' ')}</span>
-      <span class="event-summary">${getSummary(entry)}</span>
-      <span class="event-time">${new Date(entry.timestamp).toLocaleTimeString()}</span>
-      <span class="chevron">▶</span>
-    `;
-    header.addEventListener('click', () => card.classList.toggle('open'));
+            
+              <tr class="result-sponsored">
+                <td>&nbsp;&nbsp;&nbsp;</td>
+                <td>
+                  <span class='link-text'>codecademy.com</span>
+                  
+                </td>
+              </tr>
+            
 
-    const body = document.createElement('div');
-    body.className = 'event-body';
-    body.innerHTML = buildBody(entry);
+            <tr>
+              <td>&nbsp;</td>
+              <td>&nbsp;</td>
+            </tr>
+          
 
-    card.appendChild(header);
-    card.appendChild(body);
-    return card;
-  }
+          
+      
+        
+            <tr>
+              
+                <td valign="top">
+                  
+                    3.&nbsp;
+                  
+                </td>
+                <td>
+                  <a rel="nofollow" href="https://rxjs.dev/" class='result-link'>RxJS</a>
+                </td>
+                
+            </tr>
 
-  function getSummary(entry) {
-    const d = entry.data;
-    switch (entry.phase) {
-      case 'RAG_SEARCH':
-        return `Query: "${d.query}" → ${d.hitsCount} hits`;
-      case 'AST_CONTEXT_EXTRACTION':
-        return `${d.filesScraped} files scraped, ${d.dependenciesFound} deps found, ${d.signatureLength} chars`;
-      case 'AST_CRITIC_LOOP':
-        return `${d.file} — ${d.errors.length} error(s)`;
-      case 'DECISION':
-        return `Agent decision logged`;
-      case 'KNOWLEDGE':
-        return `${d.provider}: "${d.query}" → ${d.hits} hits`;
-      case 'PATCH_PROPOSED':
-        return `Patch for: ${d.file}`;
-      case 'ERROR':
-        return `Error: ${d.message}`;
-      default:
-        return JSON.stringify(d).slice(0, 80);
-    }
-  }
+            
+              
+                <!-- Only show abstract separately if there's a click URL (not EOF) -->
+                <tr>
+                  <td>&nbsp;&nbsp;&nbsp;</td>
+                  <td class='result-snippet'>
+                    RxJS is a library for reactive programming using Observables, to make it easier to compose asynchronous or callback-based code. This project is a rewrite of Reactive-Extensions/RxJS with better performance, better modularity, better debuggable call stacks, while staying mostly backwards compatible, with some breaking changes that reduce the API surface
+                  </td>
+                </tr>
+              
+            
 
-  function buildBody(entry) {
-    const d = entry.data;
-    if (entry.phase === 'RAG_SEARCH') {
-      const rows = (d.hits || []).map(h => {
-        const pct = Math.round(h.score * 100);
-        const barWidth = Math.max(4, pct);
-        return `<tr>
-          <td><span style="color:#bc8cff">[${h.nodeType}]</span> ${escHtml(h.nodeName)}</td>
-          <td style="color:#8b949e;font-size:11px">${escHtml(h.filePath)}</td>
-          <td>
-            <div class="score-bar-wrap">
-              <div class="score-bar" style="width:${barWidth}px"></div>
-              <span style="color:#bc8cff;font-weight:700">${pct}%</span>
-            </div>
-          </td>
-        </tr>`;
-      }).join('');
-      return `
-        <div class="query-box">🔎 ${escHtml(d.query)}</div>
-        <table class="rag-table">
-          <thead><tr><th>Node</th><th>File</th><th>Score</th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>`;
-    }
+            
+              <tr>
+                <td>&nbsp;&nbsp;&nbsp;</td>
+                <td>
+                  <span class='link-text'>rxjs.dev</span>
+                  
+                </td>
+              </tr>
+            
 
-    if (entry.phase === 'AST_CONTEXT_EXTRACTION') {
-      return `
-        <div class="stats-row">
-          <div class="stat"><span>Files scraped:</span>${d.filesScraped}</div>
-          <div class="stat"><span>Dependencies:</span>${d.dependenciesFound}</div>
-          <div class="stat"><span>Signature chars:</span>${d.signatureLength}</div>
-        </div>`;
-    }
+            <tr>
+              <td>&nbsp;</td>
+              <td>&nbsp;</td>
+            </tr>
 
-    if (entry.phase === 'AST_CRITIC_LOOP') {
-      const errors = (d.errors || []).map(e => `<li style="color:#f85149;margin-top:4px">${escHtml(e)}</li>`).join('');
-      return `<div style="margin-bottom:8px;color:#8b949e">File: <span style="color:#c9d1d9">${escHtml(d.file)}</span></div>
-              <ul style="padding-left:18px">${errors || '<li style="color:#3fb950">No errors</li>'}</ul>`;
-    }
+        
+      
+        
+            <tr>
+              
+                <td valign="top">
+                  
+                    4.&nbsp;
+                  
+                </td>
+                <td>
+                  <a rel="nofollow" href="https://rxjs.dev/guide/operators" class='result-link'>RxJS - RxJS Operators</a>
+                </td>
+                
+            </tr>
 
-    if (entry.phase === 'PATCH_PROPOSED') {
-      return `<div style="margin-bottom:8px;color:#8b949e">File: <span style="color:#39d353">${escHtml(d.file)}</span></div>
-              <pre>${escHtml(d.patchText || '')}</pre>`;
-    }
+            
+              
+                <!-- Only show abstract separately if there's a click URL (not EOF) -->
+                <tr>
+                  <td>&nbsp;&nbsp;&nbsp;</td>
+                  <td class='result-snippet'>
+                    RxJS is mostly useful for its operators, even though the Observable is the foundation. Operators are the essential pieces that allow complex asynchronous code to be easily composed in a declarative manner. What are operators? link Operators are functions. There are two kinds of operators: Pipeable Operators are the kind that can be piped to Observables using the syntax observableInstance.pipe ...
+                  </td>
+                </tr>
+              
+            
 
-    if (entry.phase === 'ERROR') {
-      return `<div style="color:#f85149;margin-bottom:8px">${escHtml(d.message)}</div>
-              ${d.stack ? `<pre style="color:#f85149">${escHtml(d.stack)}</pre>` : ''}`;
-    }
+            
+              <tr>
+                <td>&nbsp;&nbsp;&nbsp;</td>
+                <td>
+                  <span class='link-text'>rxjs.dev/guide/operators</span>
+                  
+                </td>
+              </tr>
+            
 
-    // Generic fallback
-    return `<pre>${escHtml(JSON.stringify(d, null, 2))}</pre>`;
-  }
+            <tr>
+              <td>&nbsp;</td>
+              <td>&nbsp;</td>
+            </tr>
 
-  function escHtml(str) {
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
-</script>
+        
+      
+        
+            <tr>
+              
+                <td valign="top">
+                  
+                    5.&nbsp;
+                  
+                </td>
+                <td>
+                  <a rel="nofollow" href="https://rxjs.dev/api/index/function/firstValueFrom" class='result-link'>RxJS - firstValueFrom</a>
+                </td>
+                
+            </tr>
+
+            
+              
+                <!-- Only show abstract separately if there's a click URL (not EOF) -->
+                <tr>
+                  <td>&nbsp;&nbsp;&nbsp;</td>
+                  <td class='result-snippet'>
+                    Converts an observable to a promise by subscribing to the observable, and returning a promise that will resolve as soon as the first value arrives from the observable. The subscription will then be closed.
+                  </td>
+                </tr>
+              
+            
+
+            
+              <tr>
+                <td>&nbsp;&nbsp;&nbsp;</td>
+                <td>
+                  <span class='link-text'>rxjs.dev/api/index/function/firstValueFrom</span>
+                  
+                </td>
+              </tr>
+            
+
+            <tr>
+              <td>&nbsp;</td>
+              <td>&nbsp;</td>
+            </tr>
+
+        
+      
+        
+            <tr>
+              
+                <td valign="top">
+                  
+                    6.&nbsp;
+                  
+                </td>
+                <td>
+                  <a rel="nofollow" href="https://rxjs.dev/api/operators/scan" class='result-link'>RxJS - scan</a>
+                </td>
+                
+            </tr>
+
+            
+              
+                <!-- Only show abstract separately if there's a click URL (not EOF) -->
+                <tr>
+                  <td>&nbsp;&nbsp;&nbsp;</td>
+                  <td class='result-snippet'>
+                    Useful for encapsulating and managing state. Applies an accumulator (or &quot;reducer function&quot;) to each value from the source after an initial state is established -- either via a seed value (second argument), or from the first value from the source.
+                  </td>
+                </tr>
+              
+            
+
+            
+              <tr>
+                <td>&nbsp;&nbsp;&nbsp;</td>
+                <td>
+                  <span class='link-text'>rxjs.dev/api/operators/scan</span>
+                  
+                </td>
+              </tr>
+            
+
+            <tr>
+              <td>&nbsp;</td>
+              <td>&nbsp;</td>
+            </tr>
+
+        
+      
+        
+            <tr>
+              
+                <td valign="top">
+                  
+                    7.&nbsp;
+                  
+                </td>
+                <td>
+                  <a rel="nofollow" href="https://rxjs.dev/api/operators/finalize" class='result-link'>RxJS - finalize</a>
+                </td>
+                
+            </tr>
+
+            
+              
+                <!-- Only show abstract separately if there's a click URL (not EOF) -->
+                <tr>
+                  <td>&nbsp;&nbsp;&nbsp;</td>
+                  <td class='result-snippet'>
+                    import { interval, finalize, tap, noop, timer } from &#x27;rxjs&#x27;; const source = interval (100).pipe ( finalize ( () =&gt; console.log (&#x27; [finalize] Called&#x27;)), tap ( { next ...
+                  </td>
+                </tr>
+              
+            
+
+            
+              <tr>
+                <td>&nbsp;&nbsp;&nbsp;</td>
+                <td>
+                  <span class='link-text'>rxjs.dev/api/operators/finalize</span>
+                  
+                </td>
+              </tr>
+            
+
+            <tr>
+              <td>&nbsp;</td>
+              <td>&nbsp;</td>
+            </tr>
+
+        
+      
+        
+            <tr>
+              
+                <td valign="top">
+                  
+                    8.&nbsp;
+                  
+                </td>
+                <td>
+                  <a rel="nofollow" href="https://rxjs.dev/guide/subject" class='result-link'>RxJS - Subject</a>
+                </td>
+                
+            </tr>
+
+            
+              
+                <!-- Only show abstract separately if there's a click URL (not EOF) -->
+                <tr>
+                  <td>&nbsp;&nbsp;&nbsp;</td>
+                  <td class='result-snippet'>
+                    What is a Subject? An RxJS Subject is a special type of Observable that allows values to be multicasted to many Observers. While plain Observables are unicast (each subscribed Observer owns an independent execution of the Observable), Subjects are multicast. A Subject is like an Observable, but can multicast to many Observers. Subjects are like EventEmitters: they maintain a registry of many ...
+                  </td>
+                </tr>
+              
+            
+
+            
+              <tr>
+                <td>&nbsp;&nbsp;&nbsp;</td>
+                <td>
+                  <span class='link-text'>rxjs.dev/guide/subject</span>
+                  
+                </td>
+              </tr>
+            
+
+            <tr>
+              <td>&nbsp;</td>
+              <td>&nbsp;</td>
+            </tr>
+
+        
+      
+        
+            <tr>
+              
+                <td valign="top">
+                  
+                    9.&nbsp;
+                  
+                </td>
+                <td>
+                  <a rel="nofollow" href="https://rxjs.dev/api/index/function/pipe" class='result-link'>RxJS - pipe</a>
+                </td>
+                
+            </tr>
+
+            
+              
+                <!-- Only show abstract separately if there's a click URL (not EOF) -->
+                <tr>
+                  <td>&nbsp;&nbsp;&nbsp;</td>
+                  <td class='result-snippet'>
+                    pipe() can be called on one or more functions, each of which can take one argument (&quot;UnaryFunction&quot;) and uses it to return a value. It returns a function that takes one argument, passes it to the first UnaryFunction, and then passes the result to the next one, passes that result to the next one, and so on.
+                  </td>
+                </tr>
+              
+            
+
+            
+              <tr>
+                <td>&nbsp;&nbsp;&nbsp;</td>
+                <td>
+                  <span class='link-text'>rxjs.dev/api/index/function/pipe</span>
+                  
+                </td>
+              </tr>
+            
+
+            <tr>
+              <td>&nbsp;</td>
+              <td>&nbsp;</td>
+            </tr>
+
+        
+      
+        
+            <tr>
+              
+                <td valign="top">
+                  
+                    10.&nbsp;
+                  
+                </td>
+                <td>
+                  <a rel="nofollow" href="https://rxjs.dev/api/operators/tap" class='result-link'>RxJS - tap</a>
+                </td>
+                
+            </tr>
+
+            
+              
+                <!-- Only show abstract separately if there's a click URL (not EOF) -->
+                <tr>
+                  <td>&nbsp;&nbsp;&nbsp;</td>
+                  <td class='result-snippet'>
+                    Returns MonoTypeOperatorFunction&lt;T&gt; Description link Used when you want to affect outside state with a notification without altering the notification Tap is designed to allow the developer a designated place to perform side effects. While you could perform side-effects inside of a map or a mergeMap, that would make their mapping functions impure, which isn&#x27;t always a big deal, but will make it ...
+                  </td>
+                </tr>
+              
+            
+
+            
+              <tr>
+                <td>&nbsp;&nbsp;&nbsp;</td>
+                <td>
+                  <span class='link-text'>rxjs.dev/api/operators/tap</span>
+                  
+                </td>
+              </tr>
+            
+
+            <tr>
+              <td>&nbsp;</td>
+              <td>&nbsp;</td>
+            </tr>
+
+        
+      
+        
+            <tr>
+              
+                <td valign="top">
+                  
+                    11.&nbsp;
+                  
+                </td>
+                <td>
+                  <a rel="nofollow" href="https://rxjs.dev/api/index/function/interval" class='result-link'>RxJS - interval</a>
+                </td>
+                
+            </tr>
+
+            
+              
+                <!-- Only show abstract separately if there's a click URL (not EOF) -->
+                <tr>
+                  <td>&nbsp;&nbsp;&nbsp;</td>
+                  <td class='result-snippet'>
+                    Returns Observable &lt;number&gt;: An Observable that emits a sequential number each time interval. Description link Emits incremental numbers periodically in time. interval returns an Observable that emits an infinite sequence of ascending integers, with a constant interval of time of your choosing between those emissions. The first emission is not sent immediately, but only after the first period ...
+                  </td>
+                </tr>
+              
+            
+
+            
+              <tr>
+                <td>&nbsp;&nbsp;&nbsp;</td>
+                <td>
+                  <span class='link-text'>rxjs.dev/api/index/function/interval</span>
+                  
+                </td>
+              </tr>
+            
+
+            <tr>
+              <td>&nbsp;</td>
+              <td>&nbsp;</td>
+            </tr>
+
+        
+      
+        
+            <tr>
+              
+                <td valign="top">
+                  
+                    12.&nbsp;
+                  
+                </td>
+                <td>
+                  <a rel="nofollow" href="https://rxjs.dev/api/operators/switchMap" class='result-link'>RxJS - switchMap</a>
+                </td>
+                
+            </tr>
+
+            
+              
+                <!-- Only show abstract separately if there's a click URL (not EOF) -->
+                <tr>
+                  <td>&nbsp;&nbsp;&nbsp;</td>
+                  <td class='result-snippet'>
+                    Projects each source value to an Observable which is merged in the output Observable, emitting values only from the most recently projected Observable.
+                  </td>
+                </tr>
+              
+            
+
+            
+              <tr>
+                <td>&nbsp;&nbsp;&nbsp;</td>
+                <td>
+                  <span class='link-text'>rxjs.dev/api/operators/switchMap</span>
+                  
+                </td>
+              </tr>
+            
+
+            <tr>
+              <td>&nbsp;</td>
+              <td>&nbsp;</td>
+            </tr>
+
+        
+      
+    
+
+    
+      
+      <tr>
+        <td colspan=2>
+          
+          
+            <!-- Next Page Button Sub-template -->
+<form class="next_form" action="/lite/" method="post">
+    <input type="submit" class='navbutton' value="Next Page &gt;">
+    <input type="hidden" name="q" value="angular site:rxjs.dev">
+    <input type="hidden" name="s" value="10">
+    <input type="hidden" name="nextParams" value="">
+    <input type="hidden" name="v" value="l">
+    <input type="hidden" name="o" value="json">
+    <input type="hidden" name="dc" value="13">
+    <input type="hidden" name="api" value="d.js">
+    <input type="hidden" name="vqd" value="4-88671523668323916388823138408376417827">
+    &nbsp;&nbsp;&nbsp;&nbsp;
+    
+    
+    
+      <input name="kl" value="wt-wt" type="hidden">
+    
+    
+    
+    
+</form>
+          
+          
+        </td>
+      </tr>
+    
+  </table>
+
+  <p class='extra'>&nbsp;</p>
+
+  <form action="/lite/" method="post">
+      <input class='query' type="text" size="40" name="q" value="angular site:rxjs.dev" >
+      <input class='submit' type="submit" value="Search">
+      
+      
+      
+      
+      
+        <input name="kl" value="wt-wt" type="hidden">
+      
+  </form>
+
+  <p class='extra'>&nbsp;</p>
+
+  
+    <img src="//duckduckgo.com/t/sl_l"/>
+  
+  <div id='end-spacer'>&nbsp;</div>
 
 </body>
 </html>

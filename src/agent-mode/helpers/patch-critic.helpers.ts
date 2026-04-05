@@ -63,11 +63,14 @@ export async function runPatchCriticLoop(params: {
             .map((issue) => `- ${issue.code}: ${issue.message}`)
             .join("\n"),
           "",
-          "Instead of a raw diff, return a search/replace edit as JSON:",
+          "Instead of a raw diff, return an edit as JSON:",
           '{"file":"...","description":"...","search":"exact lines to find in the file","replace":"replacement lines"}',
+          "or for file creation:",
+          '{"file":"src/new-file.ts","description":"...","create":true,"content":"full file content"}',
           "",
           "Rules:",
-          '- "search" must be an exact substring of the file content.',
+          '- For existing files, "search" must be an exact substring of the file content.',
+          '- For new files, use create=true and provide full "content".',
           "- Include 2-3 context lines to uniquely identify the location.",
           "- Do not add prose. First char must be {.",
         ].join("\n"),
@@ -118,6 +121,34 @@ export async function runPatchCriticLoop(params: {
         }
       }
 
+      if (parsed.create === true && typeof parsed.content === "string") {
+        const edits: SearchReplaceBlock[] = [
+          {
+            file,
+            description,
+            search: "",
+            replace: "",
+            create: true,
+            content: parsed.content,
+          },
+        ];
+
+        const patches = await buildPatchesFromEdits(edits, workspacePath);
+        if (patches.length > 0) {
+          const validation = await validateProposal(
+            patches[0],
+            workspacePath,
+            logger,
+          );
+          if (validation.valid) {
+            result[i] = { proposal: patches[0], validation };
+            break;
+          }
+
+          item.validation = validation;
+        }
+      }
+
       if (typeof parsed.patch === "string") {
         const corrected: AgentProposedPatch = {
           file,
@@ -144,7 +175,8 @@ export async function runPatchCriticLoop(params: {
             role: "user",
             content: [
               "That edit could not be applied.",
-              'Make sure the "search" field is an exact copy of lines from the file.',
+              'For existing files, make sure the "search" field is an exact copy of lines from the file.',
+              'For new files, use {"create":true,"content":"..."}.',
               "Return the corrected JSON object.",
             ].join("\n"),
           },

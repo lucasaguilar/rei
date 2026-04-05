@@ -187,6 +187,7 @@ export async function validatePatchProposal(
 ): Promise<PatchProposalValidationResult> {
   const semantic = validatePatchSemantics(proposal.patch);
   const issues: PatchValidationIssue[] = [...semantic.issues];
+  const extractedInfo = extractFileFromPatch(proposal.patch);
 
   if (semantic.file && semantic.file !== proposal.file) {
     issues.push({
@@ -196,7 +197,10 @@ export async function validatePatchProposal(
   }
 
   const fileForSecurity = semantic.file ?? proposal.file;
-  const security = validateFileTarget(fileForSecurity, workspacePath, policy);
+  const isCreatePatch = extractedInfo?.oldFile.trim() === "/dev/null";
+  const security = validateFileTarget(fileForSecurity, workspacePath, policy, {
+    allowCreate: isCreatePatch,
+  });
   if (!security.ok) {
     issues.push({
       code: "SECURITY_POLICY",

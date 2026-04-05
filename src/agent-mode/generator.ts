@@ -146,6 +146,7 @@ export async function prepareAgentContext(params: {
       provider,
       messagesForModel: answerMessages,
       workspacePath,
+      logger,
     });
     if (synthesized.length > 0) {
       let synthesizedValidation = await validateDecisionProposedPatches({

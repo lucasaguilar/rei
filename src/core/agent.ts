@@ -315,10 +315,9 @@ export class Agent {
       return;
     }
 
-    this.pendingProposedPatches = [
-      ...(this.pendingProposedPatches ?? []),
-      ...patches,
-    ];
+    // Keep pending queue scoped to the latest change-planning outcome.
+    // This avoids mixing patches from unrelated user requests across turns.
+    this.pendingProposedPatches = [...patches];
   }
 
   private async generateNonAgentAssistantResponse(
