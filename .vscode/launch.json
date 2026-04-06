@@ -382,13 +382,13 @@
         {
             "type": "node",
             "request": "launch",
-            "name": "REI gemini-3-flash-preview (Gemini)",
+            "name": "REI gemini-3.1-flash-lite-preview (Gemini)",
             "runtimeExecutable": "npm",
             "runtimeArgs": ["run", "dev", "--", "chat"],
             "envFile": "${workspaceFolder}/.env",
             "env": {
                 "MODEL_PROVIDER": "gemini",
-                "GEMINI_MODEL": "gemini-3-flash-preview"
+                "GEMINI_MODEL": "gemini-3.1-flash-lite-preview"
             },
             "console": "integratedTerminal",
             "skipFiles": ["<node_internals>/**"]

@@ -12,6 +12,9 @@ export interface LogEntry {
     | "AST_CONTEXT_EXTRACTION"
     | "RAG_SEARCH"
     | "PATCH_SYNTHESIS"
+    | "PATCH_SYNTHESIS_COVERAGE"
+    | "SANDBOX_VERIFY"
+    | "SANDBOX_VERIFY_FAILED"
     | "PATCH_SYNTHESIS_FAILED"
     | "ERROR";
   data: any;
@@ -99,6 +102,40 @@ export class AgentLogger {
 
   public logPatchSynthesis(editCount: number, patchCount: number) {
     this.write("PATCH_SYNTHESIS", { editCount, patchCount });
+  }
+
+  public logPatchSynthesisCoverage(data: {
+    rawEditCount: number;
+    acceptedEditCount: number;
+    patchCount: number;
+    droppedEdits: Array<{
+      file: string;
+      description: string;
+      reason: string;
+      detail?: string;
+    }>;
+  }) {
+    this.write("PATCH_SYNTHESIS_COVERAGE", data);
+  }
+
+  public logSandboxVerify(data: {
+    command: string;
+    patchCount: number;
+    verified: boolean;
+    exitCode: number;
+    stdoutPreview?: string;
+    stderrPreview?: string;
+  }) {
+    this.write("SANDBOX_VERIFY", data);
+  }
+
+  public logSandboxVerifyFailed(data: {
+    command: string;
+    patchCount: number;
+    reason: string;
+    details?: string;
+  }) {
+    this.write("SANDBOX_VERIFY_FAILED", data);
   }
 
   public logSynthesisFailed(reason: string, details?: string) {

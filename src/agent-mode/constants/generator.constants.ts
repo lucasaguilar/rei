@@ -1,5 +1,6 @@
 export const DECISION_RETRIES = 2;
 export const PATCH_CRITIC_RETRIES = 2;
+export const SANDBOX_REPAIR_RETRIES = 1;
 export const RETRYABLE_PATCH_CODES = new Set<string>([
   "GIT_APPLY_CHECK_FAILED",
   "INVALID_PATCH_HEADERS",

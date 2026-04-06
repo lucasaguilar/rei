@@ -109,16 +109,16 @@ export async function runPatchCriticLoop(params: {
           },
         ];
 
-        const patches = await buildPatchesFromEdits(edits, workspacePath);
-        if (patches.length > 0) {
+        const synthesis = await buildPatchesFromEdits(edits, workspacePath);
+        if (synthesis.patches.length > 0) {
           const validation = await validateProposal(
-            patches[0],
+            synthesis.patches[0],
             workspacePath,
             logger,
             astOptions,
           );
           if (validation.valid) {
-            result[i] = { proposal: patches[0], validation };
+            result[i] = { proposal: synthesis.patches[0], validation };
             break;
           }
 
@@ -138,16 +138,16 @@ export async function runPatchCriticLoop(params: {
           },
         ];
 
-        const patches = await buildPatchesFromEdits(edits, workspacePath);
-        if (patches.length > 0) {
+        const synthesis = await buildPatchesFromEdits(edits, workspacePath);
+        if (synthesis.patches.length > 0) {
           const validation = await validateProposal(
-            patches[0],
+            synthesis.patches[0],
             workspacePath,
             logger,
             astOptions,
           );
           if (validation.valid) {
-            result[i] = { proposal: patches[0], validation };
+            result[i] = { proposal: synthesis.patches[0], validation };
             break;
           }
 

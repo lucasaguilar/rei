@@ -6,20 +6,38 @@ import type { AgentProposedPatch } from "../../contracts/agent-decision.types.js
 import type { ModelProvider } from "../../providers/model-provider.js";
 import { generateUnifiedDiff } from "../../tools/patch-generator.js";
 import { sanitizeAgentJsonText } from "./response-json.helpers.js";
-import type { SearchReplaceBlock } from "../models/patch.types.js";
+import type {
+  PatchSynthesisCoverage,
+  SearchReplaceBlock,
+} from "../models/patch.types.js";
 import type { AgentLogger } from "../../core/logger.js";
+
+export interface PatchSynthesisResult {
+  patches: AgentProposedPatch[];
+  coverage: PatchSynthesisCoverage;
+}
 
 export async function synthesizePatchesFromContext(params: {
   provider: ModelProvider;
   messagesForModel: ChatSession["messages"];
   workspacePath: string;
   logger?: AgentLogger;
-}): Promise<AgentProposedPatch[]> {
+}): Promise<PatchSynthesisResult> {
   const { provider, messagesForModel, workspacePath, logger } = params;
   const lastUserMessage = [...messagesForModel]
     .reverse()
     .find((message) => message.role === "user");
-  if (!lastUserMessage) return [];
+  if (!lastUserMessage) {
+    return {
+      patches: [],
+      coverage: {
+        rawEditCount: 0,
+        acceptedEditCount: 0,
+        patchCount: 0,
+        droppedEdits: [],
+      },
+    };
+  }
 
   const contextMessages = messagesForModel.filter(
     (message) => message.role === "user" || message.role === "assistant",
@@ -58,7 +76,15 @@ export async function synthesizePatchesFromContext(params: {
       "JSON parsing failed or no edits array",
       JSON.stringify(parsed ?? {}).substring(0, 200),
     );
-    return [];
+    return {
+      patches: [],
+      coverage: {
+        rawEditCount: 0,
+        acceptedEditCount: 0,
+        patchCount: 0,
+        droppedEdits: [],
+      },
+    };
   }
 
   if (parsed.edits.length === 0) {
@@ -66,7 +92,15 @@ export async function synthesizePatchesFromContext(params: {
       "Model returned empty edits array",
       "No edits provided",
     );
-    return [];
+    return {
+      patches: [],
+      coverage: {
+        rawEditCount: 0,
+        acceptedEditCount: 0,
+        patchCount: 0,
+        droppedEdits: [],
+      },
+    };
   }
 
   const edits: SearchReplaceBlock[] = [];
@@ -107,20 +141,34 @@ export async function synthesizePatchesFromContext(params: {
       "No valid edits extracted from model response",
       "Edits array was empty after filtering",
     );
-    return [];
+    return {
+      patches: [],
+      coverage: {
+        rawEditCount: parsed.edits.length,
+        acceptedEditCount: 0,
+        patchCount: 0,
+        droppedEdits: [],
+      },
+    };
   }
 
-  const patches = await buildPatchesFromEdits(edits, workspacePath);
-  if (patches.length > 0) {
-    logger?.logPatchSynthesis(edits.length, patches.length);
+  const result = await buildPatchesFromEdits(
+    edits,
+    workspacePath,
+    parsed.edits.length,
+  );
+  if (result.patches.length > 0) {
+    logger?.logPatchSynthesis(edits.length, result.patches.length);
   }
-  return patches;
+  logger?.logPatchSynthesisCoverage(result.coverage);
+  return result;
 }
 
 export async function buildPatchesFromEdits(
   edits: SearchReplaceBlock[],
   workspacePath: string,
-): Promise<AgentProposedPatch[]> {
+  rawEditCount = edits.length,
+): Promise<PatchSynthesisResult> {
   const editsByFile = new Map<string, SearchReplaceBlock[]>();
   for (const edit of edits) {
     const existing = editsByFile.get(edit.file) ?? [];
@@ -129,6 +177,7 @@ export async function buildPatchesFromEdits(
   }
 
   const patches: AgentProposedPatch[] = [];
+  const droppedEdits: PatchSynthesisCoverage["droppedEdits"] = [];
 
   for (const [file, fileEdits] of editsByFile) {
     const absPath = path.join(workspacePath, file);
@@ -145,6 +194,16 @@ export async function buildPatchesFromEdits(
     const appliedDescriptions: string[] = [];
 
     for (const edit of fileEdits) {
+      if (fileExists && edit.create === true) {
+        droppedEdits.push({
+          file,
+          description: edit.description,
+          reason: "CREATE_TARGET_EXISTS",
+          detail: "Create edit targeted a file that already exists.",
+        });
+        continue;
+      }
+
       if (!fileExists && edit.create === true) {
         after = (edit.content ?? "").replace(/\r\n/g, "\n");
         appliedDescriptions.push(edit.description || "Create file");
@@ -156,6 +215,12 @@ export async function buildPatchesFromEdits(
       const normalizedSearch = edit.search.replace(/\r\n/g, "\n");
       const firstOccurrence = normalizedAfter.indexOf(normalizedSearch);
       if (firstOccurrence === -1) {
+        droppedEdits.push({
+          file,
+          description: edit.description,
+          reason: "SEARCH_NOT_FOUND",
+          detail: "Search block was not found in the target file.",
+        });
         continue;
       }
 
@@ -164,6 +229,12 @@ export async function buildPatchesFromEdits(
         firstOccurrence + 1,
       );
       if (secondOccurrence !== -1) {
+        droppedEdits.push({
+          file,
+          description: edit.description,
+          reason: "SEARCH_AMBIGUOUS",
+          detail: "Search block matched more than once in the target file.",
+        });
         continue;
       }
 
@@ -175,10 +246,28 @@ export async function buildPatchesFromEdits(
       appliedDescriptions.push(edit.description);
     }
 
-    if (after === before) continue;
+    if (after === before) {
+      if (fileEdits.length > 0 && appliedDescriptions.length === 0) {
+        droppedEdits.push({
+          file,
+          description: "No applied edits",
+          reason: "EMPTY_PATCH_RESULT",
+          detail: "No edit in this file could be converted into a patch.",
+        });
+      }
+      continue;
+    }
 
     let diff = generateUnifiedDiff(file, before, after);
-    if (!diff) continue;
+    if (!diff) {
+      droppedEdits.push({
+        file,
+        description: appliedDescriptions.join("; ") || "Synthesized edit",
+        reason: "EMPTY_PATCH_RESULT",
+        detail: "Unified diff generation produced an empty patch.",
+      });
+      continue;
+    }
 
     const isCreatePatch = before.length === 0;
     if (isCreatePatch) {
@@ -192,7 +281,15 @@ export async function buildPatchesFromEdits(
     });
   }
 
-  return patches;
+  return {
+    patches,
+    coverage: {
+      rawEditCount,
+      acceptedEditCount: edits.length,
+      patchCount: patches.length,
+      droppedEdits,
+    },
+  };
 }
 
 export function parseSearchReplacePayload(

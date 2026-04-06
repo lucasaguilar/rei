@@ -14,6 +14,7 @@ import {
   DECISION_RETRIES,
   PATCH_CRITIC_RETRIES,
   RETRYABLE_PATCH_CODES,
+  SANDBOX_REPAIR_RETRIES,
 } from "./constants/generator.constants.js";
 import { extractProvidedContextPaths } from "./helpers/decision-path.helpers.js";
 import { runDecisionPhase } from "./helpers/decision-phase.helpers.js";
@@ -21,6 +22,7 @@ import { appendContextToLastUserMessage } from "./helpers/context-message.helper
 import { validateWithAstGuard } from "./helpers/patch-semantic-validation.helpers.js";
 import { synthesizePatchesFromContext } from "./helpers/patch-repair.helpers.js";
 import { runPatchCriticLoop } from "./helpers/patch-critic.helpers.js";
+import { verifyPatchBatchInSandbox } from "./helpers/sandbox-verification.helpers.js";
 import {
   appendPatchSection,
   normalizePatch,
@@ -150,6 +152,8 @@ export async function prepareAgentContext(params: {
   }
 
   // --- Phase 2.5: Patch Validation ---
+  let synthesisCoverage = undefined;
+  let sandboxVerification = undefined;
   let patchValidation = await validateDecisionProposedPatches({
     decision,
     workspacePath,
@@ -194,16 +198,19 @@ export async function prepareAgentContext(params: {
       workspacePath,
       logger,
     });
-    if (synthesized.length > 0) {
+    synthesisCoverage = synthesized.coverage;
+    if (synthesized.patches.length > 0) {
       let synthesizedValidation = await validateDecisionProposedPatches({
-        decision: { ...decision, proposedPatches: synthesized },
+        decision: { ...decision, proposedPatches: synthesized.patches },
         workspacePath,
         scannedFiles,
         logger,
         validateProposal: validateWithAstGuard,
       });
 
-      const synthesizedAstOptions = buildAstOptionsFromProposals(synthesized);
+      const synthesizedAstOptions = buildAstOptionsFromProposals(
+        synthesized.patches,
+      );
 
       // Run critic loop on synthesized patches that failed validation
       if (synthesizedValidation.some((item) => !item.validation.valid)) {
@@ -231,7 +238,131 @@ export async function prepareAgentContext(params: {
     }
   }
 
-  return { answerMessages, patchValidation, decision };
+  // --- Phase 2.6: Sandbox verification on validated patch batch ---
+  if (decision.taskType === "change-planning") {
+    const validProposals = patchValidation
+      .filter((item) => item.validation.valid)
+      .map((item) => item.proposal);
+    if (validProposals.length > 0) {
+      try {
+        sandboxVerification = await verifyPatchBatchInSandbox({
+          workspacePath,
+          proposals: validProposals,
+        });
+        logger.logSandboxVerify({
+          command: sandboxVerification.command,
+          patchCount: sandboxVerification.patchCount,
+          verified: sandboxVerification.verified,
+          exitCode: sandboxVerification.exitCode,
+          stdoutPreview: sandboxVerification.stdout.substring(0, 400),
+          stderrPreview: sandboxVerification.stderr.substring(0, 400),
+        });
+
+        // One-pass repair loop: if batch fails in sandbox, ask model for
+        // corrective patches using compile errors from sandbox verification.
+        if (!sandboxVerification.verified) {
+          for (
+            let attempt = 0;
+            attempt < SANDBOX_REPAIR_RETRIES;
+            attempt += 1
+          ) {
+            const repairedPatches = await requestSandboxRepairPatches({
+              provider,
+              answerMessages,
+              currentValidPatches: validProposals,
+              verificationStderr: sandboxVerification.stderr,
+            });
+
+            if (repairedPatches.length === 0) {
+              logger.logSandboxVerifyFailed({
+                command: sandboxVerification.command,
+                patchCount: validProposals.length,
+                reason: "Sandbox repair produced no proposedPatches",
+                details: `attempt=${attempt + 1}`,
+              });
+              break;
+            }
+
+            let repairedValidation = await validateDecisionProposedPatches({
+              decision: { ...decision, proposedPatches: repairedPatches },
+              workspacePath,
+              scannedFiles,
+              logger,
+              validateProposal: validateWithAstGuard,
+            });
+
+            const repairedAstOptions =
+              buildAstOptionsFromProposals(repairedPatches);
+
+            if (repairedValidation.some((item) => !item.validation.valid)) {
+              repairedValidation = await runPatchCriticLoop({
+                provider,
+                messagesForModel: answerMessages,
+                workspacePath,
+                scannedFiles,
+                patchValidation: repairedValidation,
+                logger,
+                retryableCodes: RETRYABLE_PATCH_CODES,
+                retryLimit: PATCH_CRITIC_RETRIES,
+                normalizePatch,
+                validateProposal: validateWithAstGuard,
+                astOptions: repairedAstOptions,
+              });
+            }
+
+            const repairedValidProposals = repairedValidation
+              .filter((item) => item.validation.valid)
+              .map((item) => item.proposal);
+
+            if (repairedValidProposals.length === 0) {
+              logger.logSandboxVerifyFailed({
+                command: sandboxVerification.command,
+                patchCount: repairedPatches.length,
+                reason: "Sandbox repair patches failed validation",
+                details: `attempt=${attempt + 1}`,
+              });
+              break;
+            }
+
+            const repairedSandbox = await verifyPatchBatchInSandbox({
+              workspacePath,
+              proposals: repairedValidProposals,
+            });
+
+            logger.logSandboxVerify({
+              command: repairedSandbox.command,
+              patchCount: repairedSandbox.patchCount,
+              verified: repairedSandbox.verified,
+              exitCode: repairedSandbox.exitCode,
+              stdoutPreview: repairedSandbox.stdout.substring(0, 400),
+              stderrPreview: repairedSandbox.stderr.substring(0, 400),
+            });
+
+            if (repairedSandbox.verified) {
+              patchValidation = repairedValidation;
+              sandboxVerification = repairedSandbox;
+              break;
+            }
+          }
+        }
+      } catch (error) {
+        logger.logSandboxVerifyFailed({
+          command: "npx tsc --noEmit",
+          patchCount: validProposals.length,
+          reason: "Sandbox verification crashed",
+          details: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
+  return {
+    answerMessages,
+    patchValidation,
+    decision,
+    synthesisCoverage,
+    sandboxVerification,
+  };
 }
 
 export function buildAgentFinalResponse(
@@ -242,6 +373,8 @@ export function buildAgentFinalResponse(
     answer,
     prelude.patchValidation,
     prelude.decision.taskType,
+    prelude.synthesisCoverage,
+    prelude.sandboxVerification,
   );
   return {
     response: withPatchSection,
@@ -282,4 +415,52 @@ function buildAstOptionsFromProposals(
     }
   }
   return createTargets.size > 0 ? { createTargets } : undefined;
+}
+
+async function requestSandboxRepairPatches(params: {
+  provider: ModelProvider;
+  answerMessages: ChatSession["messages"];
+  currentValidPatches: AgentProposedPatch[];
+  verificationStderr: string;
+}): Promise<AgentProposedPatch[]> {
+  const { provider, answerMessages, currentValidPatches, verificationStderr } =
+    params;
+
+  const patchPreview = currentValidPatches
+    .map(
+      (p) =>
+        `File: ${p.file}\n\n${p.patch.substring(0, 1800)}${p.patch.length > 1800 ? "\n... (truncated)" : ""}`,
+    )
+    .join("\n\n");
+
+  const stderrPreview = verificationStderr.split("\n").slice(0, 80).join("\n");
+
+  const repairMessages: ChatSession["messages"] = [
+    ...answerMessages.slice(-6),
+    {
+      role: "user",
+      content: [
+        "The proposed patch batch failed sandbox verification (npx tsc --noEmit).",
+        "Return corrected patches as AgentDecision JSON only.",
+        "Use this exact shape:",
+        '{"ready":true,"taskType":"change-planning","contextRequests":[],"proposedPatches":[{"file":"src/file.ts","description":"...","patch":"--- a/...\\n+++ b/...\\n@@ ..."}]}',
+        "Do not include prose. Do not include markdown fences.",
+        "Keep changes minimal and only for files needed to fix the errors.",
+        "",
+        "Current valid patches:",
+        patchPreview,
+        "",
+        "Sandbox verification stderr:",
+        stderrPreview,
+      ].join("\n"),
+    },
+  ];
+
+  try {
+    const raw = await provider.completeChat(repairMessages);
+    const repaired = parseAgentDecision(raw);
+    return repaired.proposedPatches ?? [];
+  } catch {
+    return [];
+  }
 }

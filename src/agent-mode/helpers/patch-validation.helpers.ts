@@ -11,7 +11,11 @@ import {
 } from "../../tools/typescript-ast-validator.js";
 import { supportsSemanticValidationPath } from "../../language/language-capabilities.js";
 import { extractFileFromPatch } from "../../tools/patch-generator.js";
-import type { PatchValidationEntry } from "../models/patch.types.js";
+import type {
+  PatchSynthesisCoverage,
+  PatchValidationEntry,
+} from "../models/patch.types.js";
+import type { SandboxVerificationResult } from "./sandbox-verification.helpers.js";
 import { canonicalizePathAgainstScannedFiles } from "./decision-path.helpers.js";
 
 export async function validateDecisionProposedPatches(params: {
@@ -98,6 +102,8 @@ export function appendPatchSection(
   answer: string,
   validation: PatchValidationEntry[],
   taskType: AgentDecision["taskType"],
+  synthesisCoverage?: PatchSynthesisCoverage,
+  sandboxVerification?: SandboxVerificationResult,
 ): string {
   if (validation.length === 0 && taskType !== "change-planning") {
     return answer;
@@ -106,6 +112,38 @@ export function appendPatchSection(
   const valid = validation.filter((item) => item.validation.valid);
   const invalid = validation.filter((item) => !item.validation.valid);
   const sections: string[] = [answer, "", "## Patch Proposals", ""];
+
+  if (synthesisCoverage) {
+    sections.push(
+      `Synthesis coverage: ${synthesisCoverage.rawEditCount} raw edits, ${synthesisCoverage.acceptedEditCount} usable edits, ${synthesisCoverage.patchCount} generated patches, ${synthesisCoverage.droppedEdits.length} dropped edits.`,
+    );
+    if (synthesisCoverage.droppedEdits.length > 0) {
+      sections.push("");
+      sections.push("Dropped edits before validation:");
+      for (const item of synthesisCoverage.droppedEdits) {
+        sections.push(`- ${item.file}: ${item.reason}`);
+      }
+    }
+    sections.push("");
+  }
+
+  if (sandboxVerification) {
+    sections.push(
+      `Sandbox verification: ${sandboxVerification.verified ? "PASSED" : "FAILED"} (${sandboxVerification.command}, exit ${sandboxVerification.exitCode}, patches ${sandboxVerification.patchCount}).`,
+    );
+    if (sandboxVerification.failedPatchFiles.length > 0) {
+      sections.push(
+        `Patch apply failures in sandbox: ${sandboxVerification.failedPatchFiles.join(", ")}`,
+      );
+    }
+    if (!sandboxVerification.verified && sandboxVerification.stderr) {
+      sections.push("Verification stderr (preview):");
+      sections.push(
+        sandboxVerification.stderr.split("\n").slice(0, 20).join("\n"),
+      );
+    }
+    sections.push("");
+  }
 
   if (valid.length > 0) {
     sections.push(`Validated patches: ${valid.length}`);
