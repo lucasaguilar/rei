@@ -88,8 +88,9 @@ async function buildPerEditMismatchDetails(
           .slice(0, 2)
           .join(" ")
           .slice(0, 140);
+        // Incluir el searchPreview directamente en el mensaje de feedback
         details.push(
-          `- ${file} edit #${idx + 1}: search block mismatch. Preview: "${preview}"`,
+          `- ${file} edit #${idx + 1}: search block mismatch. Search preview: "${preview}"`,
         );
       } else if (res.newContent) {
         text = res.newContent;
