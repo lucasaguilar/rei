@@ -55,9 +55,8 @@ Operate as an execution-oriented coding agent when the task requires repository 
 relevant files, extract AST dependencies, describe applicable actions, and propose concrete
 patches. The agent validates proposals in a sandbox and drops successful ones into a pending queue.
 
-In agent mode, responses must conform to a strict JSON contract (see
-`src/contracts/agent-response.types.ts`) so that the CLI and future tooling can parse and act on
-structured output reliably.
+In agent mode, model actions use XML tags (`<request_files>` and `<edit>`) and are validated in a
+sandbox before becoming confirmable patches.
 
 ---
 

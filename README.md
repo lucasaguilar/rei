@@ -398,7 +398,7 @@ Important properties of the final phase:
 
 In other words:
 
-- the internal JSON exists only to negotiate context
+- legacy internal JSON is no longer part of the active agent pipeline
 - the visible answer comes from the final free-text provider call
 
 ## How REI decides it needs more context

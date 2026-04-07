@@ -125,7 +125,7 @@ The pipeline calls `extractFileRequests()` in `src/agent-mode/response-handler.t
 ```
 The pipeline calls `extractSREdits()` in `src/agent-mode/response-handler.ts`, applies them in a sandbox, and runs `npx tsc --noEmit` for verification.
 
-Neither `src/contracts/agent-response.types.ts` nor `src/contracts/agent-decision.types.ts` describe the current agent loop. Both are legacy artefacts retained in the repository but not used by the XML-based pipeline.
+`src/contracts/agent-decision.types.ts` does not describe the current agent loop. It is a legacy artefact not used by the XML-based pipeline.
 
 ## Skills In The Current Runtime
 
