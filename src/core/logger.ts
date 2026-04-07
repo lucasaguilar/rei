@@ -6,6 +6,7 @@ export interface LogEntry {
   turnId: string;
   correlationId?: string;
   phase:
+    | "USER_PROMPT"
     | "DECISION"
     | "KNOWLEDGE"
     | "PATCH_PROPOSED"
@@ -66,6 +67,13 @@ export class AgentLogger {
     } catch (e) {
       // Best effort logging, don't crash the agent if fs fails
     }
+  }
+
+  public logUserPrompt(data: {
+    mode: string;
+    prompt: string;
+  }) {
+    this.write("USER_PROMPT", data);
   }
 
   public logDecision(rawOutput: string, parsed: any) {

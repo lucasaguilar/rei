@@ -122,6 +122,10 @@
       .phase.INFO {
         border-color: #a0b9c0;
       }
+      .phase.USER_PROMPT {
+        border-color: var(--accent-2);
+        color: var(--accent);
+      }
       .phase.ERROR,
       .phase.SR_VALIDATION_FAILED {
         border-color: var(--bad);
@@ -217,6 +221,15 @@
         for (const e of list) {
           const turnId = e.turnId || "";
           if (!turnId || byTurn.has(turnId)) continue;
+
+          if (
+            e.phase === "USER_PROMPT" &&
+            e.data &&
+            typeof e.data.prompt === "string"
+          ) {
+            byTurn.set(turnId, e.data.prompt);
+            continue;
+          }
 
           if (
             e.phase === "CONTEXT_SEARCH" &&

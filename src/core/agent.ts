@@ -243,6 +243,10 @@ export class Agent {
   ): Promise<void> {
     onStatus?.("building_context");
     this.ensureSystemMessage(session);
+    this.logger.logUserPrompt({
+      mode: session.mode,
+      prompt: userInput,
+    });
 
     const context = await buildTurnContext({
       workspacePath: this.workspacePath,
