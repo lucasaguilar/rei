@@ -1,9 +1,5 @@
 import type { SessionMode } from "../../chat/types.js";
 import {
-  hasRagIndex,
-  startIndexingWorker,
-} from "../../context/rag/rag-indexer.js";
-import {
   formatTypeScriptCompileResult,
   runTypeScriptCompileCheck,
 } from "../../tools/typescript-compile-check.js";
@@ -16,7 +12,6 @@ import {
   listSessions,
   loadSessionById,
 } from "../../chat/session-store.js";
-
 
 export async function handleInputCommand(
   trimmed: string,
@@ -73,7 +68,9 @@ export async function handleInputCommand(
       if (item.issues.length > 0) {
         actions.pushTranscript(`Issues: ${item.issues.join(" | ")}`);
       }
-      actions.pushTranscript(`--- Search Block ---\n${item.proposal.search}\n--- Replace Block ---\n${item.proposal.replace}`);
+      actions.pushTranscript(
+        `--- Search Block ---\n${item.proposal.search}\n--- Replace Block ---\n${item.proposal.replace}`,
+      );
     }
 
     if (!assessment.workspaceQualityOk && assessment.workspaceQualityStderr) {
@@ -96,7 +93,11 @@ export async function handleInputCommand(
     return true;
   }
 
-  if (trimmed === "/confirm" || trimmed === "/confirm --dry-run" || trimmed === "/confirm --force") {
+  if (
+    trimmed === "/confirm" ||
+    trimmed === "/confirm --dry-run" ||
+    trimmed === "/confirm --force"
+  ) {
     const dryRun = trimmed.includes("--dry-run");
     const force = trimmed.includes("--force");
     const skipTscCheck = dryRun || force;
@@ -138,7 +139,6 @@ export async function handleInputCommand(
             `  validation: ${item.validationErrors.join(" | ")}`,
           );
         }
-
       }
 
       if (!dryRun && !skipTscCheck && result.success) {
@@ -237,23 +237,11 @@ export async function handleInputCommand(
   }
 
   if (trimmed === "/index") {
-    const { workspacePath, actions: act } = ctx;
-    const already = hasRagIndex(workspacePath);
-    act.pushTranscript(
-      already
-        ? "[RAG] Re-indexing workspace in background..."
-        : "[RAG] Starting first-time index in background...",
+    const map = agent.refreshRepositorySkeletonMap();
+    const lines = map.split("\n").length;
+    actions.pushTranscript(
+      `[REPO MAP] Regenerated successfully (${lines} lines).`,
     );
-    startIndexingWorker(workspacePath, {
-      onProgress: (indexed, total) => {
-        act.pushTranscript(`[RAG] Indexing... ${indexed}/${total} files`);
-        act.draw();
-      },
-      onDone: (message) => {
-        act.pushTranscript(`[RAG] ${message}`);
-        act.draw();
-      },
-    });
     return true;
   }
 

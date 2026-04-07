@@ -1,8 +1,12 @@
 import type { SessionMode } from "../chat/types.js";
 import { loadPrompt } from "./loader.js";
 
-export function buildSystemMessage(mode: SessionMode): string {
+export function buildSystemMessage(
+  mode: SessionMode,
+  repositorySkeletonMap?: string,
+): string {
   const sections: string[] = [
+    ...(repositorySkeletonMap ? [repositorySkeletonMap, ""] : []),
     loadPrompt("shared/base"),
     "",
     `Active mode: ${mode}`,

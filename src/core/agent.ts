@@ -5,6 +5,7 @@ import { buildTurnContext } from "../context/context-builder.js";
 import { buildMessagesForModel } from "../chat/message-builder.js";
 import { compactSession, needsCompaction } from "../chat/compactor.js";
 import { type ChatSession } from "../chat/types.js";
+import { generateRepoMap } from "../tools/repo-map-generator.js";
 import {
   scanWorkspace,
   type FileMeta,
@@ -35,6 +36,7 @@ export class Agent {
   };
   private pendingProposedPatches: AgentSREdit[] = [];
   private knowledgeOrchestrator: KnowledgeOrchestrator;
+  private repoMapCache?: string;
   public logger: AgentLogger;
   public readonly provider: ModelProvider;
   private readonly workspacePath: string;
@@ -55,6 +57,11 @@ export class Agent {
 
   hasPendingPatches(): boolean {
     return this.pendingProposedPatches.length > 0;
+  }
+
+  refreshRepositorySkeletonMap(): string {
+    this.repoMapCache = generateRepoMap(this.workspacePath);
+    return this.repoMapCache;
   }
 
   getPendingPatches(): AgentSREdit[] {
@@ -226,8 +233,16 @@ export class Agent {
     return this.generateAgentAssistantResponse(messagesForModel);
   }
 
-  private ensureSystemMessage(session: ChatSession): void {
-    const systemContent = buildSystemMessage(session.mode);
+  private async ensureSystemMessage(session: ChatSession): Promise<void> {
+    const repositorySkeletonMap =
+      session.mode === "agent"
+        ? (this.repoMapCache ??
+          (this.repoMapCache = generateRepoMap(this.workspacePath)))
+        : undefined;
+    const systemContent = buildSystemMessage(
+      session.mode,
+      repositorySkeletonMap,
+    );
 
     if (session.messages.length > 0 && session.messages[0].role === "system") {
       session.messages[0] = { role: "system", content: systemContent };
@@ -242,7 +257,7 @@ export class Agent {
     onStatus?: StreamTurnOptions["onStatus"],
   ): Promise<void> {
     onStatus?.("building_context");
-    this.ensureSystemMessage(session);
+    await this.ensureSystemMessage(session);
     this.logger.logUserPrompt({
       mode: session.mode,
       prompt: userInput,

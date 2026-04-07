@@ -31,7 +31,8 @@ export const HELP_TEXT = `Commands:
   /confirm        - apply queued patches
   /confirm --dry-run - validate/apply-check queued patches only
   /confirm --force   - apply queued patches skipping TS validation
-  /discard        - clear queued patches without applying`;
+  /discard        - clear queued patches without applying
+  /index          - regenerate repository skeleton map`;
 
 export const MODE_PROMPTS: Record<SessionMode, string> = {
   ask: "ask > ",
@@ -74,7 +75,7 @@ export const COMMANDS: Array<{
     description: "apply patches skipping TS validation",
   },
   { command: "/discard", description: "clear queued patches" },
-  { command: "/index", description: "index workspace for semantic RAG search" },
+  { command: "/index", description: "regenerate repository skeleton map" },
   { command: "/session", description: "show session info" },
   { command: "/session list", description: "list archived sessions" },
   {
