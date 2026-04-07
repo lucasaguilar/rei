@@ -40,6 +40,61 @@ export async function handleInputCommand(
     return true;
   }
 
+  if (trimmed === "/runplan") {
+    // Busca el último mensaje de plan en la sesión
+    const lastPlanMsg = [...session.messages]
+      .reverse()
+      .find(
+        (m) =>
+          m.role === "assistant" &&
+          m.content &&
+          m.content.toLowerCase().includes("plan"),
+      );
+    if (!lastPlanMsg) {
+      actions.pushTranscript("[RUNPLAN] No plan found in session.");
+      return true;
+    }
+
+    // Extrae archivos mencionados en el plan (heurística simple: busca líneas con .ts, .js, .json, etc.)
+    const fileRegex =
+      /([\w\-/]+\.(ts|js|json|md|tsx|jsx|yml|yaml|css|scss|html|cjs|mjs))/gi;
+    const files = Array.from(
+      new Set(lastPlanMsg.content.match(fileRegex) || []),
+    );
+    if (files.length === 0) {
+      actions.pushTranscript(
+        "[RUNPLAN] No files detected in plan. Please ensure the plan lists file names.",
+      );
+      return true;
+    }
+
+    // Cambia a modo agent
+    session.mode = "agent";
+    actions.pushTranscript(
+      `[RUNPLAN] Switching to agent mode and executing plan on files: ${files.join(", ")}`,
+    );
+
+    // Inyecta contexto: agrega un mensaje de usuario con el plan y los archivos
+    const planPrompt = `Ejecutá el siguiente plan sobre estos archivos:\n\nPLAN:\n${lastPlanMsg.content}\n\nARCHIVOS:\n${files.join(", ")}`;
+    session.messages.push({ role: "user", content: planPrompt });
+
+    // Ejecuta el agent automáticamente
+    state.busy = true;
+    actions.draw();
+    try {
+      const response = await agent.runTurn(session, planPrompt);
+      actions.pushTranscript(response);
+    } catch (err) {
+      actions.pushTranscript(
+        `[RUNPLAN] Error: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      state.busy = false;
+      actions.draw();
+    }
+    return true;
+  }
+
   if (trimmed === "/help") {
     actions.pushTranscript(HELP_TEXT);
     return true;

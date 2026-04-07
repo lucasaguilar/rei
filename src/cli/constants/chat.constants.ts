@@ -27,6 +27,7 @@ export const HELP_TEXT = `Commands:
   /mode ask       - switch to ask mode
   /mode planning  - switch to planning mode
   /mode agent     - switch to agent mode
+  /runplan        - execute last planning-mode plan
   /index          - regenerate repository skeleton map`;
 
 export const MODE_PROMPTS: Record<SessionMode, string> = {
@@ -59,6 +60,7 @@ export const COMMANDS: Array<{
   { command: "/mode ask", description: "switch to ask mode" },
   { command: "/mode planning", description: "switch to planning mode" },
   { command: "/mode agent", description: "switch to agent mode" },
+  { command: "/runplan", description: "execute last planning-mode plan" },
   { command: "/index", description: "regenerate repository skeleton map" },
   { command: "/session", description: "show session info" },
   { command: "/session list", description: "list archived sessions" },
