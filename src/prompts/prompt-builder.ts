@@ -12,21 +12,11 @@ export function buildSystemMessage(mode: SessionMode): string {
   ];
 
   if (mode === "agent") {
-    sections.push(loadPrompt("modes/agent-answer"));
+    sections.push(loadPrompt("modes/agent"));
   } else {
     sections.push(loadPrompt(`modes/${mode}`), "");
     sections.push(loadPrompt(`formats/${mode}-format`));
   }
 
   return sections.join("\n");
-}
-
-export function buildAgentDecisionSystemMessage(): string {
-  return [
-    loadPrompt("shared/base"),
-    "",
-    "Active mode: agent (context evaluation)",
-    "",
-    loadPrompt("modes/agent-decision"),
-  ].join("\n");
 }

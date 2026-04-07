@@ -30,6 +30,7 @@ export const HELP_TEXT = `Commands:
   /pending        - show currently queued validated patches
   /confirm        - apply queued patches
   /confirm --dry-run - validate/apply-check queued patches only
+  /confirm --force   - apply queued patches skipping TS validation
   /discard        - clear queued patches without applying`;
 
 export const MODE_PROMPTS: Record<SessionMode, string> = {
@@ -67,6 +68,10 @@ export const COMMANDS: Array<{
   {
     command: "/confirm --dry-run",
     description: "validate queued patches only",
+  },
+  {
+    command: "/confirm --force",
+    description: "apply patches skipping TS validation",
   },
   { command: "/discard", description: "clear queued patches" },
   { command: "/index", description: "index workspace for semantic RAG search" },

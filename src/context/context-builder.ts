@@ -86,10 +86,7 @@ export async function buildTurnContext(params: {
   const heuristicSelected = selectRelevantFiles(files, userInput, mode);
 
   const mergedPaths: Array<{ path: string; score: number }> = [
-    // RAG results first (guaranteed semantic relevance)
-    ...Array.from(ragFilePaths).map((p) => ({ path: p, score: 1 })),
-    // Heuristic results that weren't already included from RAG
-    ...heuristicSelected.filter((f) => !ragFilePaths.has(f.path)),
+    ...heuristicSelected,
   ];
 
   const isExplicit = isExplicitContentRequest(userInput);

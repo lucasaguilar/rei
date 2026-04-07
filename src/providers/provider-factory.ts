@@ -4,8 +4,15 @@ import { MockProvider } from "./mock-provider.js";
 import { OllamaProvider } from "./ollama-provider.js";
 import { GroqProvider } from "./groq-provider.js";
 import { OpenRouterProvider } from "./openrouter-provider.js";
+import { HuggingFaceProvider } from "./huggingface-provider.js";
 
-export type ProviderName = "mock" | "ollama" | "groq" | "gemini" | "openrouter";
+export type ProviderName =
+  | "mock"
+  | "ollama"
+  | "groq"
+  | "gemini"
+  | "openrouter"
+  | "huggingface";
 
 export function createModelProvider(): ModelProvider {
   const providerName = (process.env.MODEL_PROVIDER ?? "mock").toLowerCase();
@@ -21,9 +28,11 @@ export function createModelProvider(): ModelProvider {
       return new GeminiProvider();
     case "openrouter":
       return new OpenRouterProvider();
+    case "huggingface":
+      return new HuggingFaceProvider();
     default:
       throw new Error(
-        `Unknown MODEL_PROVIDER: ${process.env.MODEL_PROVIDER}. Expected one of: mock, ollama, groq, gemini, openrouter`
+        `Unknown MODEL_PROVIDER: ${process.env.MODEL_PROVIDER}. Expected one of: mock, ollama, groq, gemini, openrouter, huggingface`,
       );
   }
 }

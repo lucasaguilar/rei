@@ -7,10 +7,16 @@ import {
   formatTypeScriptCompileResult,
   runTypeScriptCompileCheck,
 } from "../../tools/typescript-compile-check.js";
-import { formatPatchForTerminal } from "../../tools/patch-generator.js";
+import type { AgentSREdit } from "../../contracts/agent-interaction.types.js";
 import { HELP_TEXT } from "../constants/chat.constants.js";
 import type { InputHandlerContext } from "../models/input-handler.types.js";
-import { saveSession } from "../../chat/session-store.js";
+import {
+  saveSession,
+  archiveCurrentSession,
+  listSessions,
+  loadSessionById,
+} from "../../chat/session-store.js";
+
 
 export async function handleInputCommand(
   trimmed: string,
@@ -29,6 +35,13 @@ export async function handleInputCommand(
     session.messages = [];
     ctx.transcript.length = 0;
     actions.pushTranscript("History cleared.");
+    saveSession(
+      ctx.workspacePath,
+      session.messages,
+      session.mode,
+      session.summary,
+      session.createdAt,
+    );
     return true;
   }
 
@@ -60,7 +73,7 @@ export async function handleInputCommand(
       if (item.issues.length > 0) {
         actions.pushTranscript(`Issues: ${item.issues.join(" | ")}`);
       }
-      actions.pushTranscript(formatPatchForTerminal(item.proposal.patch));
+      actions.pushTranscript(`--- Search Block ---\n${item.proposal.search}\n--- Replace Block ---\n${item.proposal.replace}`);
     }
 
     if (!assessment.workspaceQualityOk && assessment.workspaceQualityStderr) {
@@ -83,8 +96,10 @@ export async function handleInputCommand(
     return true;
   }
 
-  if (trimmed === "/confirm" || trimmed === "/confirm --dry-run") {
+  if (trimmed === "/confirm" || trimmed === "/confirm --dry-run" || trimmed === "/confirm --force") {
     const dryRun = trimmed.includes("--dry-run");
+    const force = trimmed.includes("--force");
+    const skipTscCheck = dryRun || force;
     const pending = agent.getPendingPatches();
     if (pending.length === 0) {
       actions.pushTranscript("No pending patches to apply.");
@@ -123,12 +138,10 @@ export async function handleInputCommand(
             `  validation: ${item.validationErrors.join(" | ")}`,
           );
         }
-        if (item.stderr) {
-          actions.pushTranscript(`  stderr: ${item.stderr.trim()}`);
-        }
+
       }
 
-      if (!dryRun && result.success) {
+      if (!dryRun && !skipTscCheck && result.success) {
         state.activeStatus = "producing_response";
         actions.draw();
         try {
@@ -241,6 +254,64 @@ export async function handleInputCommand(
         act.draw();
       },
     });
+    return true;
+  }
+
+  if (trimmed === "/session" || trimmed === "/session info") {
+    const nonSystem = session.messages.filter((m) => m.role !== "system");
+    const turns = Math.floor(nonSystem.length / 2);
+    actions.pushTranscript(`Mode: ${session.mode}`);
+    actions.pushTranscript(`Turns: ${turns}`);
+    actions.pushTranscript(`Created: ${session.createdAt ?? "unknown"}`);
+    return true;
+  }
+
+  if (trimmed === "/session new") {
+    const archived = archiveCurrentSession(ctx.workspacePath);
+    session.messages = [];
+    ctx.transcript.length = 0;
+    saveSession(ctx.workspacePath, [], session.mode, undefined, undefined);
+    actions.pushTranscript(
+      archived
+        ? `[SESSION] Archived as ${archived}. Starting fresh.`
+        : "[SESSION] Started fresh session.",
+    );
+    return true;
+  }
+
+  if (trimmed === "/session list") {
+    const sessions = listSessions(ctx.workspacePath);
+    if (sessions.length === 0) {
+      actions.pushTranscript("[SESSION] No archived sessions.");
+    } else {
+      for (const s of sessions) {
+        actions.pushTranscript(
+          `  ${s.id}  [${s.mode}]  ${new Date(s.updatedAt).toLocaleString()}  (${s.turns} turns)${s.summary ? "  " + s.summary : ""}`,
+        );
+      }
+    }
+    return true;
+  }
+
+  const sessionLoadMatch = trimmed.match(/^\/session\s+load\s+(\S+)$/);
+  if (sessionLoadMatch) {
+    const id = sessionLoadMatch[1];
+    const loaded = loadSessionById(ctx.workspacePath, id);
+    if (!loaded) {
+      actions.pushTranscript(`[SESSION] Session "${id}" not found.`);
+    } else {
+      session.messages = loaded.messages;
+      session.mode = loaded.mode;
+      session.summary = loaded.summary;
+      session.createdAt = loaded.createdAt;
+      ctx.transcript.length = 0;
+      const turns = Math.floor(
+        loaded.messages.filter((m) => m.role !== "system").length / 2,
+      );
+      actions.pushTranscript(
+        `[SESSION] Loaded "${id}" (${turns} turns, mode: ${loaded.mode}).`,
+      );
+    }
     return true;
   }
 

@@ -420,6 +420,65 @@
             },
             "console": "integratedTerminal",
             "skipFiles": ["<node_internals>/**"]
-        }
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "REI Qwen/Qwen2.5-72B-Instruct (HuggingFace)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev", "--", "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "huggingface",
+                "HF_MODEL": "Qwen/Qwen2.5-72B-Instruct"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "REI meta-llama/Llama-3.1-8B-Instruct (HuggingFace)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev", "--", "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "huggingface",
+                "HF_MODEL": "meta-llama/Llama-3.1-8B-Instruct"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+          {
+            "type": "node",
+            "request": "launch",
+            "name": "REI google/gemma-4-31B-it:novita (HuggingFace)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev", "--", "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "huggingface",
+                "HF_MODEL": "google/gemma-4-31B-it:novita"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+            {
+            "type": "node",
+            "request": "launch",
+            "name": "REI Qwen/Qwen2.5-Coder-32B-Instruct (HuggingFace)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev", "--", "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "huggingface",
+                "HF_MODEL": "Qwen/Qwen2.5-Coder-32B-Instruct"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        
+
+        
     ]
 }

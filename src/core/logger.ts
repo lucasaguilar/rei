@@ -16,6 +16,9 @@ export interface LogEntry {
     | "SANDBOX_VERIFY"
     | "SANDBOX_VERIFY_FAILED"
     | "PATCH_SYNTHESIS_FAILED"
+    | "PATCH_OUTCOME"
+    | "PATCH_QUALITY"
+    | "INFO"
     | "ERROR";
   data: any;
 }
@@ -140,6 +143,30 @@ export class AgentLogger {
 
   public logSynthesisFailed(reason: string, details?: string) {
     this.write("PATCH_SYNTHESIS_FAILED", { reason, details });
+  }
+
+  public logPatchOutcome(data: {
+    validCount: number;
+    rejectedCount: number;
+    sandboxVerified: boolean;
+    confirmableCount: number;
+  }) {
+    this.write("PATCH_OUTCOME", data);
+  }
+
+  public logPatchQuality(data: {
+    ideaDetected: boolean;
+    patchGenerated: boolean;
+    patchApplicable: boolean;
+    patchCompilable: boolean;
+    generatedPatchCount: number;
+    appliedPatchCount: number;
+  }) {
+    this.write("PATCH_QUALITY", data);
+  }
+
+  public logInfo(message: string, context?: any) {
+    this.write("INFO", { message, context });
   }
 
   public logError(message: string, stack?: string) {
