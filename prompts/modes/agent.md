@@ -29,5 +29,7 @@ new lines of code
 3. To INSERT text: the `<search>` block should be the lines right before/after the insertion, and `<replace>` should be those same lines plus your new code.
 4. To DELETE text: the `<replace>` block should just be the context lines.
 5. NEVER output unified diffs (--- +++). ONLY use S&R blocks.
+6. If your refactor changes a public method or function contract (rename, sync/async change, parameter change, or return-shape change), you MUST request or account for consumer files before finalizing edits.
+7. If those consumer files are not already visible, emit `<request_files>` for them before returning final `<edit>` blocks.
 
 If you emit `<edit>` blocks, the system will apply them in a temporary sandbox workspace, run the verification command (default: `npx tsc --noEmit --pretty false`), and either ask for your confirmation (if successful) or return errors to you for an auto-fix iteration.

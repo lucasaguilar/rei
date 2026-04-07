@@ -69,10 +69,7 @@ export class AgentLogger {
     }
   }
 
-  public logUserPrompt(data: {
-    mode: string;
-    prompt: string;
-  }) {
+  public logUserPrompt(data: { mode: string; prompt: string }) {
     this.write("USER_PROMPT", data);
   }
 

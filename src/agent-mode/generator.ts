@@ -13,6 +13,7 @@ import {
   formatVirtualBatchResult,
 } from "../tools/typescript-compile-check.js";
 import { applyFileEdits } from "../tools/search-replace.js";
+import { findSymbolCallers, rankCallerFiles } from "../context/caller-graph.js";
 import * as fs from "fs/promises";
 import * as path from "path";
 
@@ -26,6 +27,7 @@ export interface AgentModeOutcome {
 
 const MAX_TURNS = 7;
 const SEARCH_MISMATCH_HINT = "Could not find exact match for search block in";
+const MAX_AUTO_INJECTED_CALLER_FILES = 5;
 
 /**
  * Builds a system message injecting the contents of requested files.
@@ -54,6 +56,87 @@ function isSearchMismatchOnly(applyErrors: string[]): boolean {
     applyErrors.length > 0 &&
     applyErrors.every((error) => error.includes(SEARCH_MISMATCH_HINT))
   );
+}
+
+function extractPublicContractSignatures(block: string): Map<string, string> {
+  const signatures = new Map<string, string>();
+  const lines = block.split("\n");
+
+  for (const line of lines) {
+    const normalized = line.trim();
+    if (!normalized) continue;
+
+    const publicMethod = normalized.match(
+      /^public\s+(?:static\s+)?(?:async\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*\([^)]*\)/,
+    );
+    if (publicMethod) {
+      signatures.set(publicMethod[1], normalized.replace(/\s+/g, " "));
+      continue;
+    }
+
+    const exportedFunction = normalized.match(
+      /^export\s+(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\([^)]*\)/,
+    );
+    if (exportedFunction) {
+      signatures.set(exportedFunction[1], normalized.replace(/\s+/g, " "));
+    }
+  }
+
+  return signatures;
+}
+
+function detectContractChangeSymbols(edits: AgentSREdit[]): string[] {
+  const changedSymbols = new Set<string>();
+
+  for (const edit of edits) {
+    const before = extractPublicContractSignatures(edit.search);
+    const after = extractPublicContractSignatures(edit.replace);
+
+    for (const [symbol, beforeSig] of before) {
+      const afterSig = after.get(symbol);
+      if (!afterSig || afterSig !== beforeSig) {
+        changedSymbols.add(symbol);
+      }
+    }
+
+    for (const symbol of after.keys()) {
+      if (!before.has(symbol)) {
+        changedSymbols.add(symbol);
+      }
+    }
+  }
+
+  return [...changedSymbols];
+}
+
+function findAdditionalCallerFiles(params: {
+  workspacePath: string;
+  scannedFiles: FileMeta[];
+  edits: AgentSREdit[];
+  alreadyInjectedFiles: Set<string>;
+}): { callerFiles: string[]; changedSymbols: string[] } {
+  const { workspacePath, scannedFiles, edits, alreadyInjectedFiles } = params;
+  const changedSymbols = detectContractChangeSymbols(edits);
+  if (changedSymbols.length === 0) {
+    return { callerFiles: [], changedSymbols };
+  }
+
+  const editedFiles = new Set(edits.map((edit) => edit.file));
+  const refs = findSymbolCallers({
+    workspacePath,
+    symbolNames: changedSymbols,
+    scannedFiles,
+    maxResults: 40,
+  });
+
+  const callerFiles = rankCallerFiles(refs)
+    .filter(
+      (filePath) =>
+        !editedFiles.has(filePath) && !alreadyInjectedFiles.has(filePath),
+    )
+    .slice(0, MAX_AUTO_INJECTED_CALLER_FILES);
+
+  return { callerFiles, changedSymbols };
 }
 
 async function buildPerEditMismatchDetails(
@@ -137,7 +220,8 @@ export async function generateAgentModeResponse(params: {
   scannedFiles: FileMeta[];
   logger: AgentLogger;
 }): Promise<AgentModeOutcome> {
-  const { provider, messagesForModel, workspacePath, logger } = params;
+  const { provider, messagesForModel, workspacePath, scannedFiles, logger } =
+    params;
 
   let currentMessages = [...messagesForModel];
   let loopCount = 0;
@@ -147,6 +231,7 @@ export async function generateAgentModeResponse(params: {
   let lastEdits: AgentSREdit[] = [];
   let lastValidationError = "";
   let consecutiveSearchMismatchFailures = 0;
+  const autoInjectedCallerFiles = new Set<string>();
 
   while (loopCount < MAX_TURNS) {
     loopCount++;
@@ -188,6 +273,37 @@ export async function generateAgentModeResponse(params: {
         `Agent proposed ${edits.length} edits. Running sandbox validation...`,
         { previews },
       );
+
+      const { callerFiles, changedSymbols } = findAdditionalCallerFiles({
+        workspacePath,
+        scannedFiles,
+        edits,
+        alreadyInjectedFiles: autoInjectedCallerFiles,
+      });
+
+      if (callerFiles.length > 0) {
+        callerFiles.forEach((file) => autoInjectedCallerFiles.add(file));
+        logger.logInfo(
+          `Auto-injecting caller context for contract changes: ${callerFiles.join(", ")}`,
+          { changedSymbols },
+        );
+        const contextMessage = await buildFileContextMessage(
+          workspacePath,
+          callerFiles,
+        );
+
+        currentMessages.push({ role: "assistant", content: rawResponse });
+        currentMessages.push({
+          role: "user",
+          content:
+            `Your proposed edits change public method or function contracts (${changedSymbols.join(", ")}). ` +
+            `You must update known consumers before finalizing the patch.\n\n` +
+            `Here are caller files that reference those symbols:\n${contextMessage}\n\n` +
+            `Please reply with a complete set of corrected <edit> tags covering both the declaration changes and all affected consumers.`,
+        });
+        continue;
+      }
+
       const valResult = await applyVirtualBatch(workspacePath, edits);
 
       if (!valResult.success) {
@@ -220,7 +336,7 @@ export async function generateAgentModeResponse(params: {
             message: d.message,
           })),
         });
-        
+
         // Agregar resumen estructurado al log de información
         logger.logInfo("Validation failed summary", {
           errorKind,
