@@ -286,13 +286,12 @@ export function formatVirtualBatchResult(result: VirtualBatchResult): string {
   }
 
   if (result.success) {
-    return `✅ All patches applied and validated successfully with sandbox command: ${result.verifyCommand}`;
+    return `✅ All patches applied and validated successfully with sandbox command: \`${result.verifyCommand}\``;
   }
 
   lines.push(
     `❌ Validation failed with ${result.diagnostics.length} compilation error(s).`,
   );
-  lines.push(`Command: ${result.verifyCommand}`);
   for (const d of result.diagnostics) {
     lines.push(
       `  [${d.filePath}:${d.line}:${d.column}] TS${d.code}: ${d.message}`,
@@ -311,5 +310,6 @@ export function formatVirtualBatchResult(result: VirtualBatchResult): string {
     lines.push(stdoutPreview.split("\n").slice(0, 20).join("\n"));
   }
 
+  lines.push(`\nRun: \`${result.verifyCommand}\``);
   return lines.join("\n");
 }

@@ -34,7 +34,6 @@ export class Agent {
     files: FileMeta[];
     timestamp: number;
   };
-  private pendingProposedPatches: AgentSREdit[] = [];
   private knowledgeOrchestrator: KnowledgeOrchestrator;
   private repoMapCache?: string;
   public logger: AgentLogger;
@@ -55,63 +54,12 @@ export class Agent {
     return this.provider.complete(prompt);
   }
 
-  hasPendingPatches(): boolean {
-    return this.pendingProposedPatches.length > 0;
-  }
-
-  refreshRepositorySkeletonMap(): string {
-    this.repoMapCache = generateRepoMap(this.workspacePath);
-    return this.repoMapCache;
-  }
-
-  getPendingPatches(): AgentSREdit[] {
-    return [...this.pendingProposedPatches];
-  }
-
-  clearPendingPatches(): number {
-    const count = this.pendingProposedPatches.length;
-    this.pendingProposedPatches = [];
-    return count;
-  }
-
-  async applyPendingPatches(options?: {
-    dryRun?: boolean;
-  }): Promise<BatchPatchApplyResult> {
-    if (this.pendingProposedPatches.length === 0) {
-      return {
-        success: false,
-        results: [],
-      };
-    }
-
-    const result = await applySREditBatchFS(
-      this.pendingProposedPatches,
-      this.workspacePath,
-    );
-
-    if (
-      !options?.dryRun &&
-      result.success &&
-      result.results.every((r) => r.applied)
-    ) {
-      this.pendingProposedPatches = [];
-    }
-
-    return result;
-  }
-
   async assessPendingPatchesSafety(): Promise<PendingPatchAssessment> {
-    // Legacy sandbox logic removed in favor of virtual TS morph check.
-    // Kept the return type to satisfy the compiler temporarily.
+    // No hay más pending patches; solo retorna vacío para compatibilidad.
     return {
       workspaceQualityOk: true,
       workspaceQualityStderr: "",
-      items: this.pendingProposedPatches.map((p) => ({
-        proposal: p,
-        applicable: true,
-        safe: true,
-        issues: [],
-      })),
+      items: [],
     };
   }
 
@@ -160,30 +108,41 @@ export class Agent {
         logger: this.logger,
       });
 
-      if (outcome.failed) {
-        // Enqueue partial patches so user can /confirm --force or /discard
-        this.appendPendingProposedPatches(outcome.failedProposedPatches ?? []);
-        const msg = this.buildStuckMessage(
-          outcome.lastValidationError,
-          outcome.failedProposedPatches ?? [],
+      // Si hay parches válidos, aplicarlos directamente
+      if (
+        outcome.validProposedPatches &&
+        outcome.validProposedPatches.length > 0
+      ) {
+        const result = await applySREditBatchFS(
+          outcome.validProposedPatches,
+          this.workspacePath,
         );
-        session.messages.push({ role: "assistant", content: msg });
+        const msg = result.success
+          ? `\n\n---\n[32m[1m${result.results.length} patch(es) applied directly.\u001b[0m` +
+            result.results
+              .map(
+                (r) =>
+                  `\n- ${r.file}: ${r.applied ? "applied" : r.skipped ? "skipped" : "failed"}`,
+              )
+              .join("")
+          : `\n\n---\n[31m[1mSome patches failed to apply.\u001b[0m` +
+            result.results
+              .map(
+                (r) =>
+                  `\n- ${r.file}: ${r.applied ? "applied" : r.skipped ? "skipped" : "failed"}`,
+              )
+              .join("");
+        const fullResponse = outcome.response + msg;
+        session.messages.push({ role: "assistant", content: outcome.response });
         options?.onStatus?.("producing_response");
-        yield msg;
+        yield fullResponse;
         return;
       }
 
-      this.appendPendingProposedPatches(outcome.validProposedPatches ?? []);
-
-      const hasPatches = (outcome.validProposedPatches ?? []).length > 0;
-      const suffix = hasPatches
-        ? `\n\n---\n✅ **${outcome.validProposedPatches!.length} patch(es) ready.** Use \`/confirm\` to apply or \`/discard\` to reject.`
-        : "";
-
-      const fullResponse = outcome.response + suffix;
+      // Si no hay parches válidos, solo responde
       session.messages.push({ role: "assistant", content: outcome.response });
       options?.onStatus?.("producing_response");
-      yield fullResponse;
+      yield outcome.response;
       return;
     }
 
@@ -304,16 +263,6 @@ export class Agent {
     });
   }
 
-  private appendPendingProposedPatches(patches: AgentSREdit[]): void {
-    if (patches.length === 0) {
-      return;
-    }
-
-    // Keep pending queue scoped to the latest change-planning outcome.
-    // This avoids mixing patches from unrelated user requests across turns.
-    this.pendingProposedPatches = [...patches];
-  }
-
   private async generateNonAgentAssistantResponse(
     mode: ChatSession["mode"],
     messagesForModel: ChatSession["messages"],
@@ -354,7 +303,39 @@ export class Agent {
       logger: this.logger,
     });
 
-    this.appendPendingProposedPatches(outcome.validProposedPatches ?? []);
+    // Aplica los parches válidos directamente
+    if (
+      outcome.validProposedPatches &&
+      outcome.validProposedPatches.length > 0
+    ) {
+      const result = await applySREditBatchFS(
+        outcome.validProposedPatches,
+        this.workspacePath,
+      );
+      if (result.success) {
+        return (
+          outcome.response +
+          `\n\n---\n[32m[1m${result.results.length} patch(es) applied directly.[0m` +
+          result.results
+            .map(
+              (r) =>
+                `\n- ${r.file}: ${r.applied ? "applied" : r.skipped ? "skipped" : "failed"}`,
+            )
+            .join("")
+        );
+      } else {
+        return (
+          outcome.response +
+          `\n\n---\n[31m[1mSome patches failed to apply.[0m` +
+          result.results
+            .map(
+              (r) =>
+                `\n- ${r.file}: ${r.applied ? "applied" : r.skipped ? "skipped" : "failed"}`,
+            )
+            .join("")
+        );
+      }
+    }
     return outcome.response;
   }
 

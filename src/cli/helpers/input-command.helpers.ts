@@ -45,139 +45,6 @@ export async function handleInputCommand(
     return true;
   }
 
-  if (trimmed === "/pending") {
-    const pending = agent.getPendingPatches();
-    if (pending.length === 0) {
-      actions.pushTranscript("No pending patches.");
-      return true;
-    }
-
-    const assessment = await agent.assessPendingPatchesSafety();
-    actions.pushTranscript(`Pending patches: ${pending.length}`);
-    actions.pushTranscript(
-      `Workspace quality: ${assessment.workspaceQualityOk ? "ok" : "failed"}`,
-    );
-
-    for (const item of assessment.items) {
-      actions.pushTranscript(`File: ${item.proposal.file}`);
-      actions.pushTranscript(
-        `Reason: ${item.proposal.description || "(no description)"}`,
-      );
-      actions.pushTranscript(`Applicable: ${item.applicable ? "yes" : "no"}`);
-      actions.pushTranscript(`Safe: ${item.safe ? "yes" : "no"}`);
-      if (item.issues.length > 0) {
-        actions.pushTranscript(`Issues: ${item.issues.join(" | ")}`);
-      }
-      actions.pushTranscript(
-        `--- Search Block ---\n${item.proposal.search}\n--- Replace Block ---\n${item.proposal.replace}`,
-      );
-    }
-
-    if (!assessment.workspaceQualityOk && assessment.workspaceQualityStderr) {
-      actions.pushTranscript(
-        `Workspace check stderr: ${assessment.workspaceQualityStderr.trim()}`,
-      );
-    }
-
-    actions.pushTranscript("Use /confirm to apply, or /discard to clear them.");
-    return true;
-  }
-
-  if (trimmed === "/discard") {
-    const discarded = agent.clearPendingPatches();
-    actions.pushTranscript(
-      discarded > 0
-        ? `Discarded ${discarded} pending patch(es).`
-        : "No pending patches.",
-    );
-    return true;
-  }
-
-  if (
-    trimmed === "/confirm" ||
-    trimmed === "/confirm --dry-run" ||
-    trimmed === "/confirm --force"
-  ) {
-    const dryRun = trimmed.includes("--dry-run");
-    const force = trimmed.includes("--force");
-    const skipTscCheck = dryRun || force;
-    const pending = agent.getPendingPatches();
-    if (pending.length === 0) {
-      actions.pushTranscript("No pending patches to apply.");
-      return true;
-    }
-
-    state.busy = true;
-    state.activeStatus = "producing_response";
-    actions.startSpinner();
-    actions.draw();
-
-    try {
-      const result = await agent.applyPendingPatches({ dryRun });
-      if (result.results.length === 0) {
-        actions.pushTranscript("No pending patches to apply.");
-        return true;
-      }
-
-      actions.pushTranscript(
-        dryRun
-          ? "Patch dry-run completed."
-          : result.success
-            ? "Patches applied."
-            : "Patch apply completed with errors.",
-      );
-
-      for (const item of result.results) {
-        const status = item.applied
-          ? "applied"
-          : item.skipped
-            ? "skipped"
-            : "failed";
-        actions.pushTranscript(`- ${item.file}: ${status}`);
-        if (item.validationErrors.length > 0) {
-          actions.pushTranscript(
-            `  validation: ${item.validationErrors.join(" | ")}`,
-          );
-        }
-      }
-
-      if (!dryRun && !skipTscCheck && result.success) {
-        state.activeStatus = "producing_response";
-        actions.draw();
-        try {
-          const compileResult = await runTypeScriptCompileCheck(
-            ctx.workspacePath,
-          );
-          for (const line of formatTypeScriptCompileResult(compileResult)) {
-            actions.pushTranscript(line);
-          }
-        } catch (compileErr: unknown) {
-          actions.pushTranscript(
-            `[tsc] check skipped: ${compileErr instanceof Error ? compileErr.message : String(compileErr)}`,
-          );
-        }
-      }
-    } catch (err: unknown) {
-      actions.pushTranscript(
-        `Error: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    } finally {
-      state.busy = false;
-      state.activeStatus = undefined;
-      actions.stopSpinner();
-
-      saveSession(
-        ctx.workspacePath,
-        session.messages,
-        session.mode,
-        session.summary,
-        session.createdAt,
-      );
-    }
-
-    return true;
-  }
-
   const modeMatch = trimmed.match(/^\/mode\s+(\S+)$/);
   if (modeMatch) {
     const requested = modeMatch[1];
@@ -237,7 +104,9 @@ export async function handleInputCommand(
   }
 
   if (trimmed === "/index") {
-    const map = agent.refreshRepositorySkeletonMap();
+    const { generateRepoMap } =
+      await import("../../tools/repo-map-generator.js");
+    const map = generateRepoMap(ctx.workspacePath);
     const lines = map.split("\n").length;
     actions.pushTranscript(
       `[REPO MAP] Regenerated successfully (${lines} lines).`,
