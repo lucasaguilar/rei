@@ -31,7 +31,7 @@ REI operates as an **execution-capable** agent with strict verification gates. T
 
 - REI can read, analyze, and map the semantic relationships of repository files using an AST dependency graph.
 - REI can explain, plan, and propose concrete code changes.
-- REI **validates patches in memory** via a semantic Critic Loop before presenting them.
+- REI validates proposed edits in a temporary sandbox workspace and runs project verification (for TypeScript, `npx tsc --noEmit --pretty false`) before presenting them.
 - Patches are safely queued and are **only applied** to the filesystem after explicit user confirmation (`/confirm`).
 
 This constraint is intentional. The goal is to provide autonomous code generation that strictly adheres to the existing architecture while putting the highest authority (file modification) squarely in the developer's hands.
@@ -53,7 +53,7 @@ proposed changes. Do not simulate execution or modify files.
 ### agent
 Operate as an execution-oriented coding agent when the task requires repository work. Identify
 relevant files, extract AST dependencies, describe applicable actions, and propose concrete
-patches. The agent internally validates patches via the Critic Loop and drops them into a pending queue.
+patches. The agent validates proposals in a sandbox and drops successful ones into a pending queue.
 
 In agent mode, responses must conform to a strict JSON contract (see
 `src/contracts/agent-response.types.ts`) so that the CLI and future tooling can parse and act on

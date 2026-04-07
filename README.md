@@ -1,7 +1,7 @@
 # rei
 
 **REI** is a next-generation, compiler-aware AI Coding Agent built directly for the terminal.
-Engineered for privacy, precision, and local-first execution, REI goes far beyond text completion: it builds a **local semantic vector index** of your codebase using AST-level chunking, performs **RAG-powered context retrieval** before every turn, auto-discovers caller files for cascade changes, and runs an **AST Critic Loop** that compiles and self-corrects patches in memory before you ever see them.
+Engineered for privacy, precision, and local-first execution, REI goes far beyond text completion: it builds a repository-aware context using heuristic file selection and caller discovery before every turn, auto-discovers caller files for cascade changes, and validates proposed edits in a temporary sandbox with real project verification before you ever see them.
 
 ## 🌟 Why REI? (Unique Value Proposition)
 
@@ -9,14 +9,13 @@ While commercial giants like Cursor and GitHub Copilot dominate the cloud IDE sp
 
 - **100% Local & Privacy-First**: No more sending sensitive proprietary code to commercial APIs if you don't want to. REI runs locally using `Ollama` (DeepSeek, Llama 3, Qwen) or any proxy. Your codebase never leaves your firewall.
 - **Editor Agnostic**: It lives in the terminal. No need to migrate from WebStorm, Android Studio, Vim, or Emacs. REI operates directly on your filesystem.
-- **Local Semantic RAG Index**: REI builds a vector index of your entire codebase using `@xenova/transformers` (ONNX, runs 100% offline). Every function, class, and interface is embedded as a mathematical vector stored in `.rei/rag-index.json`. On each turn, REI finds the most semantically relevant code nodes — not just keyword matches.
-- **AST-Level Chunking**: The RAG index is not built from raw text blocks. It uses `ts-morph` to segment the codebase by actual AST nodes (functions, classes, interfaces). Each vector corresponds to a real, named code unit with exact line numbers.
+- **Heuristic Repository Context**: REI ranks files from your workspace using keyword/path scoring, explicit path hints (like `@src/file.ts`), and caller discovery so relevant files are loaded without requiring embeddings.
 - **Caller Graph Discovery**: When you ask REI to change a function, it automatically scans the workspace for every file that references that symbol and pre-loads them into context — so cascade change proposals cover all affected files without you listing them.
-- **The AST Critic Loop (Auto-Healing)**: REI validates LLM-generated patches with the TypeScript compiler in memory. If the model produces broken code, REI feeds the compiler error back to the LLM and forces a correction before showing you anything.
-- **Post-Apply Compile Check**: After `/confirm`, REI runs a full `tsc` check across the project (via `ts-morph`) and reports any type errors passively — no shell invocation needed.
+- **Sandbox Validation Loop (Auto-Healing)**: REI validates LLM-generated edits in a temporary sandbox copy of the workspace and runs TypeScript verification (`npx tsc --noEmit --pretty false`). If the model produces broken code, REI feeds the compiler error back to the LLM and forces a correction before showing you anything.
+- **Post-Apply Compile Check**: After `/confirm`, REI can run project compile checks and report type errors.
 - **Persistent Sessions**: Conversations are automatically saved to `.rei/sessions/current.json` and resumed on next launch. Older sessions can be archived and reloaded by ID.
 - **Conversation Compaction**: When a session grows beyond 20 messages, older turns are summarized using a configurable cheaper model, keeping context manageable without losing key decisions.
-- **Absolute Transparency**: REI logs its entire internal thought process to `.rei/logs/agent-flow.jsonl` — every RAG query, AST extraction, patch proposal, and compiler error, structured as JSON Lines.
+- **Absolute Transparency**: REI logs its internal flow to `.rei/logs/agent-flow.jsonl` — context search, AST extraction, patch proposal, sandbox verification, and compiler errors, structured as JSON Lines.
 
 ## 🎯 Target Audience
 
@@ -26,11 +25,11 @@ While commercial giants like Cursor and GitHub Copilot dominate the cloud IDE sp
 
 ## 🌍 Supported Languages & Polyglot Architecture
 
-REI is designed with an elegant degradation architecture. This means it can operate on **any codebase today**, while providing "God Mode" powers to its primary ecosystem:
+REI is designed with a graceful degradation architecture. It can operate on **any codebase today**, while providing stronger guarantees for its primary TypeScript/JavaScript workflow:
 
-- **👑 Tier 1: TypeScript & JavaScript (God Mode)**: Full AST Semantic Extraction and Critic Loop Auto-Healing natively using `ts-morph`. The LLM receives strict structural blueprints, and REI compiles the LLM's patches in memory strictly checking for semantic errors before showing you the code.
-- **🛠 Tier 2: Python, Go, Java, Rust, PHP, etc. (Standard Mode)**: REI natively indexes all files in your workspace, searching for keywords and context. It behaves exactly like standard Copilot CLI agents, proposing patches based on pure text/prompt understanding.
-- **🚀 The v2.0 Roadmap (Universal AST)**: REI's architecture is strictly modular. The next step to making REI the ultimate polyglot expert involves integrating `Tree-Sitter` for universal AST skeleton extraction, and orchestrating native Language Servers (e.g., `mypy`, `go build`, `cargo check`) to execute semantic Critic Loops across all major programming languages!
+- **👑 Tier 1: TypeScript & JavaScript (God Mode)**: Sandbox-first validation with real TypeScript verification (`npx tsc --noEmit --pretty false`), plus repository-aware context (heuristic selection and caller discovery) for safer multi-file edits.
+- **🛠 Tier 2: Python, Go, Java, Rust, PHP, etc. (Standard Mode)**: Heuristic repository context and prompt-driven edit proposals, without TypeScript-specific compile guarantees.
+- **🚀 The v2.0 Roadmap (Universal AST)**: The architecture is modular, enabling future integration of `Tree-Sitter` and language-native validators (for example `mypy`, `go build`, `cargo check`) to provide language-specific verification loops across ecosystems.
 
 ## Install
 
@@ -86,9 +85,9 @@ npm run dev -- --workspace /workspaces/another-repo
 | `/mode agent` | Switch to agent mode |
 | `/pending` | Show currently queued validated patches |
 | `/confirm` | Apply all queued patches to the filesystem |
-| `/confirm --dry-run` | Validate patches with `git apply --check` without writing |
+| `/confirm --dry-run` | Validate queued edits without writing |
 | `/discard` | Clear queued patches without applying |
-| `/index` | Index (or re-index) the workspace for semantic RAG search |
+| `/index` | Build or refresh the semantic index file (legacy/optional; runtime context currently uses heuristics) |
 | `/compact` | Manually compact conversation memory into a summary |
 | `/session` | Show current session info (created date, mode, turn count) |
 | `/session list` | List all archived sessions for this workspace |
@@ -218,11 +217,10 @@ On every user turn, REI rebuilds and injects a rich context bundle into the last
 ### Turn context pipeline
 
 1. **Workspace scan** — file tree is scanned and cached for 30 seconds.
-2. **Semantic RAG search** — the user input is embedded and the top-5 most relevant AST nodes are retrieved from the local vector index. Exact source code is extracted by line number.
-3. **Heuristic file selector** — keyword and path scoring fills any gaps left by RAG (de-duplicated, RAG results take priority).
-4. **Caller graph discovery** — when the prompt implies a change, REI extracts symbol names and scans the workspace for every file that references them.
-5. **External knowledge** — if the prompt triggers a known framework keyword, official docs are fetched and summarized.
-6. **Enriched user message** — assembled in priority order: RAG code snippets → external doc summaries → caller file previews → heuristic file previews.
+2. **Heuristic file selector** — keyword and path scoring selects relevant files (with explicit `@path` hints boosted when present).
+3. **Caller graph discovery** — when the prompt implies a change, REI extracts symbol names and scans the workspace for every file that references them.
+4. **External knowledge** — if the prompt triggers a known framework keyword, official docs are fetched and summarized.
+5. **Enriched user message** — assembled with caller file previews, heuristic file previews, and external doc summaries.
 
 If you include `@path/to/file` in your message, that path is matched during the heuristic step and the file is prioritised. Using `@` for a specific file is always the most reliable way to guarantee it ends up in context.
 
@@ -246,33 +244,11 @@ When a preview is cut, REI appends:
 
 That marker is important for the agent decision step.
 
-## Local Semantic RAG Index
+## Semantic Indexing Status
 
-REI ships a built-in local vector database stored at `.rei/rag-index.json`. It runs entirely offline using `@xenova/transformers` (`Xenova/all-MiniLM-L6-v2`, ~22 MB, ONNX, cached after first download).
+Embedding-based semantic search is currently disabled in runtime context building. REI uses heuristic file selection + caller discovery as the default source of repository context.
 
-### Building the index
-
-Run `/index` in any chat session to trigger (or re-trigger) indexing. REI walks the workspace using `ts-morph`, extracts every function, class, interface, and variable declaration as an individual chunk, and generates a 384-dimensional embedding vector for each. Non-TypeScript files are indexed as raw text.
-
-Indexing runs asynchronously in-process without blocking the chat. Any previous indexing run is aborted before a new one starts. The index is written atomically to disk (`.tmp` rename) when complete.
-
-### Query-time flow
-
-On every turn, before any LLM call, REI:
-
-1. Embeds the user message with the same ONNX model.
-2. Runs cosine-similarity search against all stored vectors (top-5 by default).
-3. Maps each result back to exact line numbers in the source file and extracts the verbatim code.
-4. Injects the code snippets directly into the user message — not just metadata, but the actual source.
-
-### Storage
-
-```
-.rei/
-  rag-index.json   — all vectors + metadata (add to .gitignore)
-```
-
-The index automatically detects stale entries when files change. Use `/index` to force a full rebuild.
+If `.rei/rag-index.json` exists from older versions, it is not used while semantic search is disabled.
 
 ## Session persistence
 
@@ -345,39 +321,18 @@ The retrieved HTML pages are cleaned, evaluated, and synthesized using a backgro
 
 ## Agent mode: current flow
 
-Agent mode no longer uses a user-visible JSON response contract.
-Instead, it runs in four phases:
+Agent mode uses an iterative Search/Replace loop with explicit XML actions.
 
-### Phase 1: internal context decision
+### Phase 1: model response parsing
 
-REI sends a small internal prompt whose only job is to decide:
+For each loop turn, REI parses the model output for:
 
-- is the currently visible context enough?
-- is this an inspection task or a change-planning task?
-- which additional files are needed, if any?
+- `<request_files>path1, path2</request_files>` to request additional file context
+- `<edit file="...">` blocks with `<search>` and `<replace>` to propose changes
 
-The model must return a small internal JSON object:
+### Phase 2: deterministic file injection
 
-```json
-{
-  "ready": false,
-  "taskType": "inspection",
-  "contextRequests": [
-    {
-      "path": "src/agent-mode/semantic-validation.ts",
-      "reason": "need full code to explain all functions"
-    }
-  ]
-}
-```
-
-This object is parsed by `parseAgentDecision()` and is never shown to the user.
-
-If parsing fails, REI sanitizes the response, retries with a repair prompt, and eventually falls back to a safe default that skips context expansion.
-
-### Phase 2: deterministic context resolution
-
-If the decision requests more files, REI resolves them without asking the model to guess paths.
+If the model requests files via `<request_files>`, REI resolves them without asking the model to guess paths.
 
 Guardrails applied before any file is injected:
 
@@ -387,79 +342,47 @@ Guardrails applied before any file is injected:
 - duplicate requests are ignored
 - file reads are capped
 
-Resolved content is appended to the last user message as additional context.
+Resolved content is appended to the conversation and the loop continues.
 
-### Phase 2.5: git applicability and validation
-For `change-planning` tasks, REI validates model-proposed patches before they are shown as actionable:
+### Phase 2.5: sandbox verification and repair
+For change tasks, REI validates model-proposed edits in a temporary sandbox before they are shown as actionable:
 
-- normalize and canonicalize paths/headers
-- validate semantics + security
-- `git apply --check` test in memory
+- apply Search/Replace edits in sandbox
+- run `npx tsc --noEmit --pretty false` (or configured verifier)
+- parse diagnostics and feed them back to the model in retry loops
 
-### Phase 2.6: AST Compiler Guard (The Critic Loop)
-If the patch targets TypeScript files (`.ts`, `.tsx`) and passes Git validation, REI invokes an **in-memory TypeScript Compiler (`ts-morph`)**:
-1. It copies the file to a `.tmp` location and applies the patch locally.
-2. It evaluates `getPreEmitDiagnostics()` on the patched file.
-3. If TypeScript throws an error (e.g. `TS2339: Property 'patatita' does not exist`), the patch is marked as `AST_VALIDATION_FAILED`.
-4. **Critic Loop**: REI secretly opens a background chat with the LLM, feeds it the compiler error, and demands a corrected patch via search & replace logic. It retries up to 2 times. If the LLM cannot fix the semantic error, the patch is permanently rejected, saving the user from a broken workspace.
-
-Only patches that pass all validation stages (including AST) are queued for `/pending` and `/confirm`.
+Only edits that pass sandbox verification are queued for `/pending` and `/confirm`.
 
 ---
 
 ## Patch workflow
 
-When REI is in agent mode and the model proposes file changes, the changes go through a multi-stage pipeline before they can be applied.
+When REI is in agent mode and the model proposes file changes, edits go through a sandbox-first validation flow.
 
-### 1. Patch generation
+### 1. Edit generation
 
-`src/tools/patch-generator.ts` produces unified diff output from before/after string pairs:
+The model produces Search/Replace blocks (`<edit file="...">` with `<search>` and `<replace>`).
 
-- `generateUnifiedDiff(filePath, before, after)` — returns a unified diff string (RFC 3881 format).
-- `formatPatchForTerminal(diff)` — colorizes the diff for terminal display (green additions, red deletions, yellow hunk headers, cyan file headers).
-- `extractFileFromPatch(patch)` — reads the target file path and hunk count from the diff headers.
+### 2. Sandbox validation
 
-### 2. Patch validation
+`src/tools/typescript-compile-check.ts` applies the proposed edits to a temporary sandbox copy and runs project verification (`npx tsc --noEmit --pretty false` by default).
 
-`src/tools/patch-validator.ts` runs a three-stage check before the patch is queued:
+If validation fails, diagnostics are fed back to the model for repair retries.
 
-**Semantic validation** (`validatePatchSemantics`):
-- Patch is non-empty.
-- Exactly one `---` / `+++` header pair (multi-file patches are rejected).
-- At least one hunk (`@@` header).
-- No merge conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`).
+### 3. Pending queue
 
-**Security validation** (`validateFileTarget`, from `file-security.ts`):
-- Target file is inside the workspace.
-- Target is inside an allowed directory (`src/`, `prompts/`, `docs/`).
-- Target is not a denied file (`package.json`, `tsconfig.json`, `.env`, lock files, etc.).
-- No symlink traversal.
-
-**Git applicability check** (`validatePatchWithGit`):
-- Runs `git apply --check` on the patch without writing to disk.
-- Confirms the patch applies cleanly to the current working tree.
-
-Only patches that pass all three stages are enqueued.
-
-### 3. Patch queue
-
-Validated patches are stored in memory on the `Agent` instance as `AgentProposedPatch[]`. The queue survives across turns until explicitly confirmed or discarded.
+Sandbox-verified edits are stored in memory on the `Agent` instance until explicit confirmation.
 
 ```
-/pending        — inspect queue (shows colorized diff)
-/confirm        — apply all queued patches to disk
-/confirm --dry-run — re-run git apply --check without writing
-/discard        — drop all pending patches
+/pending        — inspect queued edits
+/confirm        — apply queued edits to disk
+/confirm --dry-run — validate queued edits without writing
+/discard        — drop all pending edits
 ```
 
-### 4. Patch application
+### 4. Edit application
 
-`src/tools/patch-applier.ts` applies the queue through `git apply`:
-
-- `applyPatchToFS(patchText, workspacePath, { dryRun })` — writes the patch to a temp file and runs `git apply` (or `git apply --check` for dry-run). Cleans up the temp file regardless of outcome.
-- `applyPatchBatch(proposals, workspacePath, options)` — iterates the queue, re-validates each patch, and calls `applyPatchToFS` per entry. Returns a `BatchPatchApplyResult` with per-file status.
-
-After a successful real apply (`dryRun: false`, all entries applied), the queue is automatically cleared.
+`src/tools/patch-applier.ts` applies Search/Replace edits to the filesystem. After a successful real apply (`dryRun: false`, all entries applied), the queue is automatically cleared.
 
 ### Phase 3: final free-text answer
 
@@ -521,16 +444,11 @@ For `ask` and `planning`, `buildSystemMessage(mode)` composes:
 
 ### Agent mode
 
-Agent mode uses two prompts depending on the phase:
-
-- decision phase: shared base prompt + `agent-decision`
-- answer phase: shared base prompt + shared response rules + `agent-answer`
-
-This split is what lets REI keep the orchestration contract internal while still returning normal markdown to the user.
+Agent mode uses `buildSystemMessage("agent")`, which loads shared base instructions, shared response rules, and `prompts/modes/agent.md`.
 
 ## Debug output
 
-Each turn prints a brief context summary, and agent mode also prints internal decision logs.
+Each turn prints a brief context summary.
 
 Example:
 
@@ -540,16 +458,16 @@ Example:
   - src/core/agent.ts (score: 6)
   - src/prompts/prompt-builder.ts (score: 4)
   - README.md (score: 2)
-[REI debug] Agent decision: taskType=inspection, ready=false, contextRequests=[src/foo.ts]
-[REI debug] Agent context resolved 1 file(s), injecting into answer phase
+[REI debug] Agent requested files: src/foo.ts
+[REI debug] Agent proposed 2 edits. Running sandbox validation...
 ```
 
 ## Current limitations
 
 - patch proposals are only applied manually through `/confirm` (explicit approval gate)
-- model-proposed diffs may still be rejected if validation or `git apply --check` fails
+- model-proposed edits may still be rejected if sandbox validation fails
 - no built-in command-execution toolchain inside REI runtime yet (focus is context + patch workflow)
-- RAG index must be rebuilt manually after large refactors (`/index`)
+- if semantic indexing is re-enabled, rebuild the index after large refactors (`/index`)
 - external knowledge providers cover a limited set of frameworks
 
 ## Next steps
@@ -557,18 +475,18 @@ Example:
 Near-term priorities:
 
 1. `/review` command — structured code review output (critical / warning / suggestion) per file or directory
-2. make `@` mentions first-class context pins (pre-loaded before RAG, not part of heuristic scoring)
-3. incremental RAG index updates (watch mode, re-embed only changed files)
+2. make `@` mentions first-class context pins (always pre-loaded before heuristic scoring)
+3. optional semantic indexing refresh flow (if re-enabled)
 4. add richer patch diagnostics/fix suggestions when validation fails
 
 ## Diagnostic Traceability (Logging)
 
 REI records every turn's internal operations to a zero-dependency append-only JSON Lines file located at `.rei/logs/agent-flow.jsonl`. 
-Because Agent Mode has internal hidden loops (Phase 1 Decision, Phase 2.6 Critic Loop), this log is vital for transparency. It records:
-- The exact raw output from the LLM before JSON parsing.
+Because Agent Mode has internal hidden loops (context request + sandbox repair), this log is vital for transparency. It records:
+- The exact raw output from the LLM before action parsing.
 - The external URLs scraped by the Knowledge Orchestrator.
-- The exact raw strings of patches.
-- The TypeScript Compiler errors caught during the AST Guard phase.
+- The exact raw strings of proposed Search/Replace edits.
+- The TypeScript compiler errors caught during sandbox verification.
 
 ## Testing
 
@@ -592,14 +510,11 @@ npm run check
 ```mermaid
 flowchart TD
   A[User enters message] --> B[Build system prompt for current mode]
-  B --> B1{RAG index exists?}
-  B1 -->|Yes| B2[Semantic RAG search top-5 nodes]
-  B1 -->|No| C
-  B2 --> C[Heuristic file selector fills gaps]
+  B --> C[Heuristic file selector]
   C --> CG[Caller graph discovery]
   CG --> C2{Keywords match official docs?}
   C2 -->|Yes| C3[Fetch, rank, and summarize internet docs]
-  C3 --> D[Enrich user message: RAG snippets + docs + file previews]
+  C3 --> D[Enrich user message: docs + caller + file previews]
   C2 -->|No| D
 
   D --> SC{needsCompaction?}
@@ -608,12 +523,12 @@ flowchart TD
   SC -->|No| E
 
   E -->|No| F[Call provider and return normal text]
-  E -->|Yes| G[Phase 1: internal AgentDecision JSON]
-  G --> H{Need more context?}
+  E -->|Yes| G[Phase 1: parse model actions]
+  G --> H{Model requested files?}
   H -->|Yes| I[Phase 2: resolve requested files safely]
-  I --> J[Append extra context to last user message]
+  I --> J[Inject requested file context and continue]
   H -->|No| J
-  J --> K[Phase 2.5: validate and recover patch proposals]
+  J --> K[Phase 2.5: validate and recover Search/Replace edits]
   K --> L[Phase 3: final free-text markdown answer]
   L --> M[Render formatted output in terminal]
   F --> M
@@ -638,25 +553,22 @@ flowchart TD
 
   B -->|chat| H[run-chat.ts]
   H --> HS[Load session<br/>from disk]
-  HS --> AI{RAG index<br/>exists?}
-  AI -->|No| AI2[Auto-index<br/>workspace]
-  AI2 --> I{Session mode}
-  AI -->|Yes| I
+  HS --> I{Session mode}
 
   I -->|ask/planning| J[buildSystemMessage]
-  J --> K[buildTurnContext<br/>RAG + heuristic + caller graph]
+  J --> K[buildTurnContext<br/>heuristic + caller graph]
   K --> L[provider chat/stream]
   L --> LS[Save session<br/>to disk]
   LS --> M[Rendered answer]
 
-  I -->|agent| N[buildTurnContext<br/>RAG + heuristic + caller graph]
-  N --> O[prepareAgentContext]
-  O --> P[Phase 1 decision]
-  P --> Q[Phase 2 context resolution]
-  Q --> R[Phase 2.5 patch validation]
-  R --> S[Final provider call]
+  I -->|agent| N[buildTurnContext<br/>heuristic + caller graph]
+  N --> O[generateAgentModeResponse]
+  O --> P[Parse model actions<br/>request_files or edit]
+  P --> Q[Resolve requested files safely]
+  Q --> R[Phase 2.5 sandbox validation + repair loop]
+  R --> S[Final model response]
   S --> SLS[Save session<br/>to disk]
-  SLS --> T{Valid patches?}
+  SLS --> T{Valid edits?}
   T -->|Yes| U[Answer + patch section]
   T -->|No| U
 

@@ -1,24 +1,21 @@
 Output format requirements (AGENT mode):
-- Return exactly one JSON object that conforms to the injected AgentResponse contract.
-- Return JSON only (no markdown fences, no prose before/after, no bullet lists).
-- The first character of the response must be `{` and the last character must be `}`.
-- The response must not contain triple backticks anywhere.
-- Use valid JSON syntax with double-quoted keys/strings.
-- Include all fields from the contract; no top-level key is optional.
-- For array fields that do not apply, return an empty array instead of omitting the field.
-- Keep paths workspace-relative in all file/target fields.
-- In actions.type, use only inspect, modify, or validate.
-- In analysis-first tasks, prefer inspect actions.
-- Use modify only when the user explicitly asks for repository changes or concrete change proposals.
-- Use validate only when a concrete validation step is justified.
-- In proposedChanges, describe the intended change clearly and technically.
-- proposedChanges may be an empty array when the task is analysis-only.
-- In proposedChanges.description, include the logical insertion point when applicable (for example, before bootstrap or after initialization).
-- In proposedChanges.description, include relevant constraints and assumptions from the visible context.
-- risks may be an empty array when no concrete risks are visible in the provided context.
-- If needsMoreContext is false, contextRequests must be an empty array.
-- If needsMoreContext is true, contextRequests must contain one or more entries.
-- Never omit description inside actions, proposedChanges, or risks.
-- Do not generate full code patches or diffs in this phase.
-- Avoid exact code generation unless the snippet is trivial and required to explain intent.
-- If you want to suggest a next step, put it in finalMessage or an existing description field. Do not add fields such as nextStep, notes, rationale, or metadata.
+- Do NOT return JSON. Do not use a JSON object as your response.
+- Respond in plain markdown prose unless you are emitting XML action tags.
+- To request file contents, emit exactly: <request_files>src/path/file1.ts, src/path/file2.ts</request_files>
+- To propose code edits, emit one <edit> block per file or non-contiguous change:
+
+  <edit file="src/relative/path/to/file.ts">
+  <search>
+  exact verbatim lines from the file to replace (include 1-2 lines of context)
+  </search>
+  <replace>
+  new lines of code
+  </replace>
+  </edit>
+
+- Never mix <request_files> and <edit> blocks in the same response.
+- If you need more context, emit only <request_files> and nothing else.
+- If you are ready to propose edits, emit <edit> blocks followed by a brief plain-text explanation.
+- Use workspace-relative paths in all file= attributes and <request_files> lists.
+- The <search> block must be verbatim text from the file. Do not paraphrase or reconstruct it.
+- Do not output unified diffs (--- / +++ lines). Only use <edit> S&R blocks.

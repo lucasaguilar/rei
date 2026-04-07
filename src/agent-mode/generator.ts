@@ -3,7 +3,11 @@ import type { ModelProvider } from "../providers/model-provider.js";
 import type { FileMeta } from "../workspace/workspace-scanner.js";
 import type { AgentLogger } from "../core/logger.js";
 import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
-import { extractFileRequests, extractSREdits } from "./response-handler.js";
+import {
+  extractFileRequests,
+  extractSREdits,
+  formatSREditsForLog,
+} from "./response-handler.js";
 import {
   applyVirtualBatch,
   formatVirtualBatchResult,
@@ -172,12 +176,58 @@ export async function generateAgentModeResponse(params: {
     const edits = extractSREdits(rawResponse);
     if (edits.length > 0) {
       lastEdits = edits;
+      const previews = formatSREditsForLog(edits);
+      logger.logSREditsParsed({
+        turnLoop: loopCount,
+        count: edits.length,
+        files: [...new Set(edits.map((edit) => edit.file))],
+        previews,
+      });
       logger.logInfo(
-        `Agent proposed ${edits.length} edits. Running virtual validation...`,
+        `Agent proposed ${edits.length} edits. Running sandbox validation...`,
+        { previews },
       );
       const valResult = await applyVirtualBatch(workspacePath, edits);
 
       if (!valResult.success) {
+        const files = [...new Set(edits.map((edit) => edit.file))];
+        const errorKind =
+          valResult.applyErrors.length > 0 && valResult.diagnostics.length > 0
+            ? "mixed"
+            : valResult.applyErrors.length > 0
+              ? "apply"
+              : "compile";
+        logger.logSRValidationFailed({
+          turnLoop: loopCount,
+          errorKind,
+          editCount: edits.length,
+          files,
+          applyErrors: [
+            ...valResult.applyErrors,
+            ...(valResult.verifyStderr
+              ? [
+                  `verifyCommand=${valResult.verifyCommand}`,
+                  ...valResult.verifyStderr.split("\n").slice(0, 5),
+                ]
+              : []),
+          ],
+          diagnostics: valResult.diagnostics.map((d) => ({
+            filePath: d.filePath,
+            line: d.line,
+            column: d.column,
+            code: d.code,
+            message: d.message,
+          })),
+        });
+        
+        // Agregar resumen estructurado al log de información
+        logger.logInfo("Validation failed summary", {
+          errorKind,
+          filesAffected: files,
+          diagnosticsCount: valResult.diagnostics.length,
+          applyErrorCount: valResult.applyErrors.length,
+        });
+
         let feedback = formatVirtualBatchResult(valResult);
         const mismatchOnly = isSearchMismatchOnly(valResult.applyErrors);
         consecutiveSearchMismatchFailures = mismatchOnly
@@ -262,6 +312,10 @@ export async function generateAgentModeResponse(params: {
     }
 
     // 4. Simple text response — no edits, no file requests
+    logger.logNoEditsReason("model_returned_text_only", {
+      loopCount,
+      rawResponsePreview: rawResponse.substring(0, 200) + "...",
+    });
     return finalizeOutcome(
       logger,
       {

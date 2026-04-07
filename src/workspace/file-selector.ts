@@ -7,6 +7,38 @@ export type RankedFile = FileMeta & {
 };
 
 const TOP_FILES_LIMIT = 6;
+const SPANISH_STOPWORDS = new Set([
+  "que",
+  "como",
+  "donde",
+  "cuando",
+  "para",
+  "una",
+  "del",
+  "los",
+  "las",
+  "por",
+  "con",
+  "sin",
+  "sobre",
+  "desde",
+  "hasta",
+  "este",
+  "esta",
+  "tambien",
+  "todo",
+  "todos",
+  "archivo",
+  "funcion",
+  "clase",
+  "retorno",
+  "cambio",
+  "cambia",
+  "modifica",
+  "agrega",
+  "elimina",
+  "actualiza",
+]);
 
 export function selectRelevantFiles(
   files: FileMeta[],
@@ -14,10 +46,11 @@ export function selectRelevantFiles(
   mode: SessionMode,
 ): RankedFile[] {
   const keywords = extractKeywords(userInput);
+  const explicitPathHints = extractExplicitPathHints(userInput);
 
   const ranked: RankedFile[] = files.map((file) => ({
     ...file,
-    score: scoreFile(file, keywords, mode),
+    score: scoreFile(file, keywords, explicitPathHints, mode),
   }));
 
   const selected = ranked
@@ -70,12 +103,20 @@ function extractKeywords(input: string): string[] {
   return input
     .toLowerCase()
     .split(/\W+/)
-    .filter((w) => w.length > 2);
+    .filter((w) => w.length > 2)
+    .filter((w) => !SPANISH_STOPWORDS.has(w));
+}
+
+function extractExplicitPathHints(input: string): string[] {
+  const matches =
+    input.match(/[A-Za-z0-9_.-]+\/[A-Za-z0-9_./-]+\.[A-Za-z0-9]+/g) ?? [];
+  return matches.map((m) => m.toLowerCase());
 }
 
 function scoreFile(
   file: FileMeta,
   keywords: string[],
+  explicitPathHints: string[],
   mode: SessionMode,
 ): number {
   let score = 0;
@@ -86,6 +127,17 @@ function scoreFile(
   for (const keyword of keywords) {
     if (nameLower.includes(keyword)) score += 3;
     if (pathLower.includes(keyword)) score += 1;
+  }
+
+  for (const hintedPath of explicitPathHints) {
+    if (pathLower === hintedPath) {
+      score += 30;
+    } else if (
+      pathLower.endsWith(hintedPath) ||
+      hintedPath.includes(pathLower)
+    ) {
+      score += 12;
+    }
   }
 
   // Mode-based boosts: agent mode prefers source files, planning mode prefers docs

@@ -23,6 +23,7 @@ import {
   buildRepoSummary,
   isExplicitContentRequest,
 } from "./helpers/context-builder.helpers.js";
+import { ENABLE_SEMANTIC_RAG_SEARCH } from "./constants/context-builder.constants.js";
 
 export type RagNodeSnippet = {
   filePath: string;
@@ -71,7 +72,7 @@ export async function buildTurnContext(params: {
   let ragResults: RagSearchResult[] | undefined;
   const ragFilePaths = new Set<string>();
 
-  if (hasRagIndex(workspacePath)) {
+  if (ENABLE_SEMANTIC_RAG_SEARCH && hasRagIndex(workspacePath)) {
     try {
       ragResults = await searchRag(workspacePath, userInput, 5);
       for (const r of ragResults) {
@@ -82,12 +83,34 @@ export async function buildTurnContext(params: {
     }
   }
 
-  // Merge RAG hits with the heuristic selector, RAG-ranked files take priority
+  // Merge RAG hits with the heuristic selector.
   const heuristicSelected = selectRelevantFiles(files, userInput, mode);
+  const mergedMap = new Map<string, number>();
 
-  const mergedPaths: Array<{ path: string; score: number }> = [
-    ...heuristicSelected,
-  ];
+  for (let i = 0; i < heuristicSelected.length; i += 1) {
+    const file = heuristicSelected[i];
+    mergedMap.set(file.path, file.score + Math.max(0, 8 - i));
+  }
+
+  if (ragResults && ragResults.length > 0) {
+    for (let i = 0; i < ragResults.length; i += 1) {
+      const hit = ragResults[i];
+      const ragRankBoost = Math.max(0, 14 - i * 2);
+      const ragScoreBoost = Math.max(0, Math.round(hit.score * 20));
+      const current = mergedMap.get(hit.metadata.filePath) ?? 0;
+      mergedMap.set(
+        hit.metadata.filePath,
+        current + ragRankBoost + ragScoreBoost,
+      );
+    }
+  }
+
+  const mergedPaths: Array<{ path: string; score: number }> = Array.from(
+    mergedMap.entries(),
+  )
+    .map(([p, s]) => ({ path: p, score: s }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8);
 
   const isExplicit = isExplicitContentRequest(userInput);
   const previewMaxChars =

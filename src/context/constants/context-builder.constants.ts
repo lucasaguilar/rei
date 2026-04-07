@@ -18,3 +18,4 @@ export const CHANGE_INTENT_PATTERN =
 export const MAX_CALLER_SEARCH_RESULTS = 15;
 export const MAX_CALLER_CONTEXT_FILES = 5;
 export const MAX_RAG_NODE_SNIPPET_CHARS = 3000;
+export const ENABLE_SEMANTIC_RAG_SEARCH = false;

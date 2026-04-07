@@ -9,7 +9,10 @@ import {
   scanWorkspace,
   type FileMeta,
 } from "../workspace/workspace-scanner.js";
-import { applySREditBatchFS, type BatchPatchApplyResult } from "../tools/patch-applier.js";
+import {
+  applySREditBatchFS,
+  type BatchPatchApplyResult,
+} from "../tools/patch-applier.js";
 import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
 import { KnowledgeOrchestrator } from "../knowledge/orchestrator.js";
 import { AgentLogger } from "./logger.js";
@@ -35,12 +38,15 @@ export class Agent {
   public logger: AgentLogger;
   public readonly provider: ModelProvider;
   private readonly workspacePath: string;
+  private correlationId: string;
 
   constructor(provider: ModelProvider, workspacePath: string = process.cwd()) {
     this.provider = provider;
     this.workspacePath = workspacePath;
     this.knowledgeOrchestrator = new KnowledgeOrchestrator(this.provider);
     this.logger = new AgentLogger(workspacePath);
+    this.correlationId =
+      Date.now().toString(36) + Math.random().toString(36).substring(2, 7);
   }
 
   async run(prompt: string): Promise<string> {
@@ -73,7 +79,7 @@ export class Agent {
 
     const result = await applySREditBatchFS(
       this.pendingProposedPatches,
-      this.workspacePath
+      this.workspacePath,
     );
 
     if (
@@ -93,17 +99,18 @@ export class Agent {
     return {
       workspaceQualityOk: true,
       workspaceQualityStderr: "",
-      items: this.pendingProposedPatches.map(p => ({
+      items: this.pendingProposedPatches.map((p) => ({
         proposal: p,
         applicable: true,
         safe: true,
-        issues: []
-      }))
+        issues: [],
+      })),
     };
   }
 
   async runTurn(session: ChatSession, userInput: string): Promise<string> {
     this.logger.startTurn();
+    this.logger.setCorrelationId(this.correlationId);
     await this.prepareSessionForTurn(session, userInput);
     await this.compactSessionIfNeeded(session);
 
@@ -127,6 +134,7 @@ export class Agent {
     options?: StreamTurnOptions,
   ): AsyncIterable<string> {
     this.logger.startTurn();
+    this.logger.setCorrelationId(this.correlationId);
     await this.prepareSessionForTurn(session, userInput, options?.onStatus);
     await this.compactSessionIfNeeded(session, options?.onStatus);
 
@@ -148,7 +156,10 @@ export class Agent {
       if (outcome.failed) {
         // Enqueue partial patches so user can /confirm --force or /discard
         this.appendPendingProposedPatches(outcome.failedProposedPatches ?? []);
-        const msg = this.buildStuckMessage(outcome.lastValidationError, outcome.failedProposedPatches ?? []);
+        const msg = this.buildStuckMessage(
+          outcome.lastValidationError,
+          outcome.failedProposedPatches ?? [],
+        );
         session.messages.push({ role: "assistant", content: msg });
         options?.onStatus?.("producing_response");
         yield msg;
@@ -168,7 +179,6 @@ export class Agent {
       yield fullResponse;
       return;
     }
-
 
     if (this.provider.streamChat) {
       let fullResponse = "";
@@ -244,7 +254,7 @@ export class Agent {
     });
 
     if (context.ragResults && context.ragResults.length > 0) {
-      this.logger.logRagSearch(
+      this.logger.logContextSearch(
         userInput,
         context.ragResults.map((r) => ({
           filePath: r.metadata.filePath,
@@ -329,7 +339,10 @@ export class Agent {
     return outcome.response;
   }
 
-  private buildStuckMessage(lastError: string | undefined, patches: AgentSREdit[]): string {
+  private buildStuckMessage(
+    lastError: string | undefined,
+    patches: AgentSREdit[],
+  ): string {
     const patchCount = patches.length;
     const errorSection = lastError
       ? `\n**Last validation error:**\n\`\`\`\n${lastError}\n\`\`\``

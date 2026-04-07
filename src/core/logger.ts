@@ -4,13 +4,14 @@ import * as path from "path";
 export interface LogEntry {
   timestamp: string;
   turnId: string;
+  correlationId?: string;
   phase:
     | "DECISION"
     | "KNOWLEDGE"
     | "PATCH_PROPOSED"
     | "AST_CRITIC_LOOP"
     | "AST_CONTEXT_EXTRACTION"
-    | "RAG_SEARCH"
+    | "CONTEXT_SEARCH"
     | "PATCH_SYNTHESIS"
     | "PATCH_SYNTHESIS_COVERAGE"
     | "SANDBOX_VERIFY"
@@ -18,6 +19,8 @@ export interface LogEntry {
     | "PATCH_SYNTHESIS_FAILED"
     | "PATCH_OUTCOME"
     | "PATCH_QUALITY"
+    | "SR_EDITS_PARSED"
+    | "SR_VALIDATION_FAILED"
     | "INFO"
     | "ERROR";
   data: any;
@@ -26,6 +29,7 @@ export interface LogEntry {
 export class AgentLogger {
   private logFilePath: string;
   private turnId: string;
+  private correlationId?: string;
 
   constructor(workspacePath: string) {
     const logDir = path.join(workspacePath, ".rei", "logs");
@@ -42,6 +46,11 @@ export class AgentLogger {
 
   public startTurn() {
     this.turnId = this.generateTurnId();
+    this.correlationId = undefined;
+  }
+
+  public setCorrelationId(id: string) {
+    this.correlationId = id;
   }
 
   private write(phase: LogEntry["phase"], data: any) {
@@ -49,6 +58,7 @@ export class AgentLogger {
       const entry: LogEntry = {
         timestamp: new Date().toISOString(),
         turnId: this.turnId,
+        correlationId: this.correlationId,
         phase,
         data,
       };
@@ -87,7 +97,7 @@ export class AgentLogger {
     });
   }
 
-  public logRagSearch(
+  public logContextSearch(
     query: string,
     hits: Array<{
       filePath: string;
@@ -96,7 +106,7 @@ export class AgentLogger {
       score: number;
     }>,
   ) {
-    this.write("RAG_SEARCH", { query, hitsCount: hits.length, hits });
+    this.write("CONTEXT_SEARCH", { query, hitsCount: hits.length, hits });
   }
 
   public logCriticLoop(file: string, errors: string[]) {
@@ -165,8 +175,44 @@ export class AgentLogger {
     this.write("PATCH_QUALITY", data);
   }
 
+  public logSREditsParsed(data: {
+    turnLoop: number;
+    count: number;
+    files: string[];
+    previews: Array<{
+      file: string;
+      searchLines: number;
+      replaceLines: number;
+      searchPreview: string;
+      replacePreview: string;
+    }>;
+  }) {
+    this.write("SR_EDITS_PARSED", data);
+  }
+
+  public logSRValidationFailed(data: {
+    turnLoop: number;
+    errorKind: "apply" | "compile" | "mixed";
+    editCount: number;
+    files: string[];
+    applyErrors: string[];
+    diagnostics: Array<{
+      filePath: string;
+      line: number;
+      column: number;
+      code: number;
+      message: string;
+    }>;
+  }) {
+    this.write("SR_VALIDATION_FAILED", data);
+  }
+
   public logInfo(message: string, context?: any) {
     this.write("INFO", { message, context });
+  }
+
+  public logNoEditsReason(reason: string, context?: any) {
+    this.logInfo("No edits produced", { reason, context });
   }
 
   public logError(message: string, stack?: string) {

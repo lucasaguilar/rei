@@ -30,4 +30,4 @@ new lines of code
 4. To DELETE text: the `<replace>` block should just be the context lines.
 5. NEVER output unified diffs (--- +++). ONLY use S&R blocks.
 
-If you emit `<edit>` blocks, the system will apply them, compile the TypeScript workspace in-memory, and either ask for your confirmation (if successful) or return compilation errors to you for an auto-fix iteration.
+If you emit `<edit>` blocks, the system will apply them in a temporary sandbox workspace, run the verification command (default: `npx tsc --noEmit --pretty false`), and either ask for your confirmation (if successful) or return errors to you for an auto-fix iteration.

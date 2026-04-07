@@ -106,26 +106,26 @@ loadPrompt(section: string): string
 
 ---
 
-## Agent Decision Contract
+## Agent Action Contract
 
-REI no longer uses the older user-visible agent response contract as its primary agent-mode output.
+REI agent mode uses an XML-based action protocol, not JSON. The model communicates intent via two XML tags:
 
-Instead, the current runtime uses an internal decision contract in
-src/contracts/agent-decision.types.ts during the first agent phase. The model returns:
+**Requesting files:**
+```
+<request_files>src/path/to/file1.ts, src/path/to/file2.ts</request_files>
+```
+The pipeline calls `extractFileRequests()` in `src/agent-mode/response-handler.ts` and injects resolved file contents into the next model message.
 
-- `ready`
-- `taskType`
-- `contextRequests`
-- `proposedPatches` (optional)
+**Proposing edits:**
+```xml
+<edit file="src/path/to/file.ts">
+<search>exact lines to replace</search>
+<replace>new lines</replace>
+</edit>
+```
+The pipeline calls `extractSREdits()` in `src/agent-mode/response-handler.ts`, applies them in a sandbox, and runs `npx tsc --noEmit` for verification.
 
-That object is parsed internally and never shown directly to the user. The visible response in agent mode is produced later as normal markdown after context resolution and patch validation.
-
-This is the key architectural split:
-
-- internal JSON for orchestration
-- free-text markdown for the user-facing answer
-
-The older file src/contracts/agent-response.types.ts still exists in the repository, but it does not describe the current primary agent loop documented here.
+Neither `src/contracts/agent-response.types.ts` nor `src/contracts/agent-decision.types.ts` describe the current agent loop. Both are legacy artefacts retained in the repository but not used by the XML-based pipeline.
 
 ## Skills In The Current Runtime
 
@@ -165,12 +165,12 @@ flowchart TD
   PA --> O
 
   I -->|agent| U["⚙️ AGENT MODE<br/>buildTurnContext"]
-  U --> V["Phase 1:<br/>AgentDecisionSystemMessage"]
-  V --> VA["shared/base +<br/>modes/agent-decision"]
-  VA --> Y["⚙️ Decision JSON<br/>taskType, contextRequests,<br/>proposedPatches?"]
-  Y --> Z["Phase 2 & 2.5:<br/>Context resolution<br/>+ AST Semantics Extraction<br/>+ Git & Syntax validation<br/>+ AST Critic Loop (TS/JS)"]
-  Z --> AA["Phase 3:<br/>buildSystemMessage agent"]
-  AA --> AAA["shared/base +<br/>response-rules +<br/>modes/agent-answer"]
+  U --> V["Phase 1:<br/>Parse model actions"]
+  V --> VA["request_files tags<br/>or edit blocks"]
+  VA --> Y["Phase 2:<br/>Context resolution for requested files"]
+  Y --> Z["Phase 2.5:<br/>Search/Replace extraction<br/>+ Sandbox verification (tsc)<br/>+ Repair retries"]
+  Z --> AA["Phase 3:<br/>final agent response"]
+  AA --> AAA["shared/base +<br/>response-rules +<br/>modes/agent"]
   AAA --> AE["🤖 provider<br/>stream/complete"]
   AE --> AF["✨ Rendered agent<br/>answer + patches"]
 

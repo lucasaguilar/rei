@@ -1,8 +1,12 @@
+import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { Project, ts } from "ts-morph";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
 import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
 import { applyFileEdits } from "./search-replace.js";
+
+const execAsync = promisify(exec);
 
 export interface TypeScriptCompileDiagnostic {
   filePath: string;
@@ -24,67 +28,136 @@ export interface VirtualBatchResult {
   applyErrors: string[];
   fileCount: number;
   virtualFiles: Map<string, string>;
+  verifyCommand: string;
+  verifyStdout: string;
+  verifyStderr: string;
 }
 
-export function extractUniqueDiagnostics(workspacePath: string, project: Project): TypeScriptCompileDiagnostic[] {
-  const allDiagnostics = project.getPreEmitDiagnostics();
+const DEFAULT_VERIFY_COMMAND = "npx tsc --noEmit --pretty false";
+
+function shouldCopyToSandbox(relativePath: string): boolean {
+  const normalized = relativePath.replace(/\\/g, "/");
+  if (!normalized) return true;
+
+  const root = normalized.split("/")[0];
+  if (root === ".git" || root === "node_modules") {
+    return false;
+  }
+
+  return true;
+}
+
+async function createSandboxWorkspace(workspacePath: string): Promise<string> {
+  const sandboxRoot = await fs.promises.mkdtemp(
+    path.join(os.tmpdir(), "rei-sandbox-"),
+  );
+
+  await fs.promises.cp(workspacePath, sandboxRoot, {
+    recursive: true,
+    force: true,
+    filter: (src) => {
+      const rel = path.relative(workspacePath, src);
+      return shouldCopyToSandbox(rel);
+    },
+  });
+
+  const sourceNodeModules = path.join(workspacePath, "node_modules");
+  const sandboxNodeModules = path.join(sandboxRoot, "node_modules");
+  if (fs.existsSync(sourceNodeModules) && !fs.existsSync(sandboxNodeModules)) {
+    await fs.promises.symlink(sourceNodeModules, sandboxNodeModules, "dir");
+  }
+
+  return sandboxRoot;
+}
+
+async function runVerifyCommand(
+  cwd: string,
+  command: string,
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  try {
+    const { stdout, stderr } = await execAsync(command, {
+      cwd,
+      maxBuffer: 1024 * 1024 * 6,
+      env: {
+        ...process.env,
+        FORCE_COLOR: "0",
+      },
+    });
+    return { exitCode: 0, stdout, stderr };
+  } catch (error) {
+    const err = error as {
+      code?: number;
+      stdout?: string;
+      stderr?: string;
+      message?: string;
+    };
+    return {
+      exitCode: typeof err.code === "number" ? err.code : 1,
+      stdout: err.stdout ?? "",
+      stderr: err.stderr ?? err.message ?? "",
+    };
+  }
+}
+
+function parseTscDiagnostics(
+  workspacePath: string,
+  output: string,
+): TypeScriptCompileDiagnostic[] {
   const diagnostics: TypeScriptCompileDiagnostic[] = [];
+  const lines = output.split("\n");
 
-  for (const d of allDiagnostics) {
-    const sourceFile = d.getSourceFile();
-    const start = d.getStart();
+  for (const line of lines) {
+    const match = line.match(/^(.*)\((\d+),(\d+)\): error TS(\d+): (.*)$/);
+    if (!match) continue;
 
-    if (!sourceFile || start == null) continue;
+    const rawPath = match[1].trim();
+    const lineNum = Number(match[2]);
+    const colNum = Number(match[3]);
+    const code = Number(match[4]);
+    const message = match[5].trim();
 
-    const { line, column } = sourceFile.getLineAndColumnAtPos(start);
-    const absPath = sourceFile.getFilePath();
+    const absPath = path.isAbsolute(rawPath)
+      ? rawPath
+      : path.join(workspacePath, rawPath);
     const relPath = path.relative(workspacePath, absPath).replace(/\\/g, "/");
-
-    if (relPath.startsWith("node_modules") || relPath.startsWith(".."))
-      continue;
 
     diagnostics.push({
       filePath: relPath,
-      line,
-      column,
-      message: ts.flattenDiagnosticMessageText(
-        d.compilerObject.messageText,
-        "\n",
-      ),
-      code: d.getCode(),
+      line: Number.isFinite(lineNum) ? lineNum : 0,
+      column: Number.isFinite(colNum) ? colNum : 0,
+      code: Number.isFinite(code) ? code : 0,
+      message,
     });
   }
 
   const seen = new Set<string>();
-  const unique = diagnostics.filter((d) => {
-    const key = `${d.filePath}:${d.line}:${d.code}`;
+  return diagnostics.filter((d) => {
+    const key = `${d.filePath}:${d.line}:${d.code}:${d.message}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
-
-  return unique;
 }
 
 export async function runTypeScriptCompileCheck(
   workspacePath: string,
 ): Promise<TypeScriptCompileCheckResult> {
-  const tsconfigPath = path.join(workspacePath, "tsconfig.json");
-  if (!fs.existsSync(tsconfigPath)) {
+  if (!fs.existsSync(path.join(workspacePath, "tsconfig.json"))) {
     return { success: true, diagnostics: [], fileCount: 0 };
   }
 
-  const project = new Project({
-    tsConfigFilePath: tsconfigPath,
-    skipAddingFilesFromTsConfig: false,
-  });
-
-  const unique = extractUniqueDiagnostics(workspacePath, project);
+  const command =
+    process.env.REI_SANDBOX_VERIFY_COMMAND ?? DEFAULT_VERIFY_COMMAND;
+  const verify = await runVerifyCommand(workspacePath, command);
+  const diagnostics = parseTscDiagnostics(
+    workspacePath,
+    `${verify.stdout}\n${verify.stderr}`,
+  );
 
   return {
-    success: unique.length === 0,
-    diagnostics: unique.slice(0, 30),
-    fileCount: project.getSourceFiles().length,
+    success: verify.exitCode === 0,
+    diagnostics: diagnostics.slice(0, 30),
+    fileCount: 0,
   };
 }
 
@@ -121,11 +194,12 @@ export function formatTypeScriptCompileResult(
  */
 export async function applyVirtualBatch(
   workspacePath: string,
-  edits: AgentSREdit[]
+  edits: AgentSREdit[],
 ): Promise<VirtualBatchResult> {
-  const tsconfigPath = path.join(workspacePath, "tsconfig.json");
   const virtualFiles = new Map<string, string>();
   const applyErrors: string[] = [];
+  const command =
+    process.env.REI_SANDBOX_VERIFY_COMMAND ?? DEFAULT_VERIFY_COMMAND;
 
   // Group edits by file
   const editsByFile = new Map<string, AgentSREdit[]>();
@@ -134,96 +208,75 @@ export async function applyVirtualBatch(
     editsByFile.get(edit.file)!.push(edit);
   }
 
-  if (!fs.existsSync(tsconfigPath)) {
-    // If it's not a TS project, we just do textual S&R checks without compilation validation
-    for (const [file, fileEdits] of editsByFile.entries()) {
-      const absPath = path.join(workspacePath, file);
-      try {
-        const text = await fs.promises.readFile(absPath, "utf-8");
-        const res = applyFileEdits(text, fileEdits);
-        if (!res.success) {
-          applyErrors.push(res.error!);
-        } else {
-          virtualFiles.set(file, res.newContent!);
-        }
-      } catch (err) {
-        applyErrors.push(`Failed to read source file ${file}: ${err}`);
-      }
-    }
-    
+  if (!fs.existsSync(path.join(workspacePath, "tsconfig.json"))) {
     return {
       success: applyErrors.length === 0,
       diagnostics: [],
       applyErrors,
       fileCount: 0,
-      virtualFiles
+      virtualFiles,
+      verifyCommand: command,
+      verifyStdout: "",
+      verifyStderr: "",
     };
   }
 
-  // TS Project validation
-  const project = new Project({
-    tsConfigFilePath: tsconfigPath,
-    skipAddingFilesFromTsConfig: false,
-  });
+  const sandboxPath = await createSandboxWorkspace(workspacePath);
 
-  // 1. Gather baseline diagnostics (pre-existing errors)
-  const baselineDiagnostics = extractUniqueDiagnostics(workspacePath, project);
-  const baselineKeys = new Set(
-    baselineDiagnostics.map(d => `${d.filePath}:${d.code}:${d.message}`)
-  );
+  try {
+    for (const [file, fileEdits] of editsByFile.entries()) {
+      const sandboxFile = path.join(sandboxPath, file);
 
-  // 2. Apply mutations in-memory
-  for (const [file, fileEdits] of editsByFile.entries()) {
-    const absPath = path.join(workspacePath, file);
-    const sourceFile = project.getSourceFile(absPath);
-    
-    if (!sourceFile) {
-      // It might be a new file being created, or an untracked file
-      applyErrors.push(`File ${file} not found in TS project context.`);
-      continue;
+      try {
+        const text = await fs.promises.readFile(sandboxFile, "utf-8");
+        const res = applyFileEdits(text, fileEdits);
+        if (!res.success) {
+          applyErrors.push(res.error!);
+          continue;
+        }
+
+        await fs.promises.writeFile(sandboxFile, res.newContent!, "utf-8");
+        virtualFiles.set(file, res.newContent!);
+      } catch (err) {
+        applyErrors.push(`Failed to read source file ${file}: ${err}`);
+      }
     }
 
-    const text = sourceFile.getFullText();
-    const res = applyFileEdits(text, fileEdits);
-    if (!res.success) {
-      applyErrors.push(res.error!);
-    } else {
-      sourceFile.replaceWithText(res.newContent!);
-      virtualFiles.set(file, res.newContent!);
+    if (applyErrors.length > 0) {
+      return {
+        success: false,
+        diagnostics: [],
+        applyErrors,
+        fileCount: 0,
+        virtualFiles,
+        verifyCommand: command,
+        verifyStdout: "",
+        verifyStderr: "",
+      };
     }
-  }
 
-  // If text application failed, no point compiling
-  if (applyErrors.length > 0) {
+    const verify = await runVerifyCommand(sandboxPath, command);
+    const output = `${verify.stdout}\n${verify.stderr}`;
+    const diagnostics = parseTscDiagnostics(workspacePath, output).slice(0, 30);
+
     return {
-      success: false,
-      diagnostics: [],
-      applyErrors,
-      fileCount: project.getSourceFiles().length,
-      virtualFiles
+      success: verify.exitCode === 0,
+      diagnostics,
+      applyErrors: [],
+      fileCount: 0,
+      virtualFiles,
+      verifyCommand: command,
+      verifyStdout: verify.stdout,
+      verifyStderr: verify.stderr,
     };
+  } finally {
+    await fs.promises.rm(sandboxPath, { recursive: true, force: true });
   }
-
-  // 3. Evaluate TS diagnostics on the mutated virtual project
-  const currentDiagnostics = extractUniqueDiagnostics(workspacePath, project);
-
-  // 4. Filter strictly for *new* diagnostics that didn't exist in the baseline
-  const newDiagnostics = currentDiagnostics.filter(
-    d => !baselineKeys.has(`${d.filePath}:${d.code}:${d.message}`)
-  );
-
-  return {
-    success: newDiagnostics.length === 0,
-    diagnostics: newDiagnostics.slice(0, 30),
-    applyErrors: [],
-    fileCount: project.getSourceFiles().length,
-    virtualFiles
-  };
 }
 
 export function formatVirtualBatchResult(result: VirtualBatchResult): string {
   const lines: string[] = [];
-  
+
   if (result.applyErrors.length > 0) {
     lines.push("❌ Failed to apply patches:");
     for (const err of result.applyErrors) {
@@ -233,12 +286,30 @@ export function formatVirtualBatchResult(result: VirtualBatchResult): string {
   }
 
   if (result.success) {
-    return `✅ All patches applied and validated successfully (${result.fileCount} files checked).`;
+    return `✅ All patches applied and validated successfully with sandbox command: ${result.verifyCommand}`;
   }
 
-  lines.push(`❌ Validation failed with ${result.diagnostics.length} compilation error(s):`);
+  lines.push(
+    `❌ Validation failed with ${result.diagnostics.length} compilation error(s).`,
+  );
+  lines.push(`Command: ${result.verifyCommand}`);
   for (const d of result.diagnostics) {
-    lines.push(`  [${d.filePath}:${d.line}:${d.column}] TS${d.code}: ${d.message}`);
+    lines.push(
+      `  [${d.filePath}:${d.line}:${d.column}] TS${d.code}: ${d.message}`,
+    );
   }
+
+  const stderrPreview = result.verifyStderr.trim();
+  if (stderrPreview) {
+    lines.push("\nCompiler stderr preview:");
+    lines.push(stderrPreview.split("\n").slice(0, 20).join("\n"));
+  }
+
+  const stdoutPreview = result.verifyStdout.trim();
+  if (stdoutPreview) {
+    lines.push("\nCompiler stdout preview:");
+    lines.push(stdoutPreview.split("\n").slice(0, 20).join("\n"));
+  }
+
   return lines.join("\n");
 }

@@ -67,11 +67,11 @@ Output: {ok: true} or {ok: false, error: FileSecurityError}
 - Integration examples in `file-security.integration.ts`
 
 ### Phase 2 (Next)
-- `patch-generator.ts` — Generate diffs for validated files
-- `patch-validator.ts` — Semantic validation with git
+- Search/Replace edit extraction and normalization in agent mode
+- Sandbox verification (`npx tsc --noEmit --pretty false`) before queueing
 
 ### Phase 3
-- `patch-applier.ts` — Apply patches via `git apply`
+- `patch-applier.ts` — Apply validated Search/Replace edits
 - CLI confirmation gate with security summary
 
 ## Usage Examples
