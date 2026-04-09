@@ -1,198 +1,87 @@
 import * as fs from "fs/promises";
-import * as os from "os";
 import * as path from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
-import type { PatchProposal } from "./patch-validator.js";
-import { validatePatchProposal } from "./patch-validator.js";
+import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
+import { applyFileEdits } from "./search-replace.js";
 
 const execFileAsync = promisify(execFile);
-
-export interface PatchApplyOptions {
-  dryRun?: boolean;
-  reverse?: boolean;
-}
-
-export interface PatchApplyResult {
-  applied: boolean;
-  stdout: string;
-  stderr: string;
-}
 
 export interface BatchPatchApplyItemResult {
   file: string;
   applied: boolean;
   skipped: boolean;
   validationErrors: string[];
-  stdout: string;
-  stderr: string;
 }
 
 export interface BatchPatchApplyResult {
   success: boolean;
-  dryRun: boolean;
   results: BatchPatchApplyItemResult[];
 }
 
-export async function runWorkspaceTypecheck(workspacePath: string): Promise<{ ok: boolean; stdout: string; stderr: string }> {
-  try {
-    const cleanEnv = { ...process.env };
-    delete cleanEnv.NODE_OPTIONS;
-    delete cleanEnv.VSCODE_INSPECTOR_OPTIONS;
-
-    const { stdout, stderr } = await execFileAsync("npm", ["run", "check"], {
-      cwd: workspacePath,
-      env: cleanEnv,
-    });
-    return { ok: true, stdout, stderr };
-  } catch (error) {
-    const err = error as {
-      stdout?: string;
-      stderr?: string;
-      message?: string;
-    };
-    return {
-      ok: false,
-      stdout: err.stdout ?? "",
-      stderr: err.stderr ?? err.message ?? "npm run check failed",
-    };
-  }
-}
-
 /**
- * Apply a unified diff patch through git apply.
- * Uses --check in dryRun mode for safe preflight.
+ * Validates and applies a batch of Search & Replace edits directly to the physical file system.
  */
-export async function applyPatchToFS(
-  patchText: string,
+export async function applySREditBatchFS(
+  edits: AgentSREdit[],
   workspacePath: string,
-  options: PatchApplyOptions = {}
-): Promise<PatchApplyResult> {
-  const dryRun = options.dryRun ?? true;
-  const reverse = options.reverse ?? false;
-  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "rei-patch-apply-"));
-  const patchPath = path.join(tmpDir, "apply.patch");
-
-  try {
-    await fs.writeFile(patchPath, patchText, "utf-8");
-
-    const args = ["-C", workspacePath, "apply"];
-    if (dryRun) args.push("--check");
-    if (reverse) args.push("-R");
-    args.push("--whitespace=nowarn", patchPath);
-
-    const { stdout, stderr } = await execFileAsync("git", args);
-    return { applied: true, stdout, stderr };
-  } catch (error) {
-    const err = error as {
-      stdout?: string;
-      stderr?: string;
-      message?: string;
-    };
-
-    return {
-      applied: false,
-      stdout: err.stdout ?? "",
-      stderr: err.stderr ?? err.message ?? "git apply failed",
-    };
-  } finally {
-    await fs.rm(tmpDir, { recursive: true, force: true });
-  }
-}
-
-/**
- * Validate + apply multiple patch proposals in sequence.
- * By default this runs in dry-run mode.
- */
-export async function applyPatchBatch(
-  proposals: PatchProposal[],
-  workspacePath: string,
-  options: PatchApplyOptions = {}
 ): Promise<BatchPatchApplyResult> {
-  const dryRun = options.dryRun ?? true;
   const results: BatchPatchApplyItemResult[] = [];
-
-  // Safety gate: before real apply, ensure workspace currently type-checks.
-  if (!dryRun) {
-    const quality = await runWorkspaceTypecheck(workspacePath);
-    if (!quality.ok) {
-      for (const proposal of proposals) {
-        results.push({
-          file: proposal.file,
-          applied: false,
-          skipped: true,
-          validationErrors: ["Quality gate failed: npm run check"],
-          stdout: quality.stdout,
-          stderr: quality.stderr,
-        });
-      }
-
-      return {
-        success: false,
-        dryRun,
-        results,
-      };
-    }
+  
+  // Group edits by file
+  const editsByFile = new Map<string, AgentSREdit[]>();
+  for (const edit of edits) {
+    if (!editsByFile.has(edit.file)) editsByFile.set(edit.file, []);
+    editsByFile.get(edit.file)!.push(edit);
   }
 
-  for (const proposal of proposals) {
-    const validation = await validatePatchProposal(proposal, workspacePath);
+  let allSuccess = true;
 
-    if (!validation.valid) {
-      results.push({
-        file: proposal.file,
-        applied: false,
-        skipped: true,
-        validationErrors: validation.issues.map((issue) => issue.message),
-        stdout: validation.git.stdout,
-        stderr: validation.git.stderr,
-      });
-      continue;
-    }
-
-    const applied = await applyPatchToFS(proposal.patch, workspacePath, { dryRun });
-    if (applied.applied && !dryRun) {
-      const quality = await runWorkspaceTypecheck(workspacePath);
-      if (!quality.ok) {
-        const reverted = await applyPatchToFS(proposal.patch, workspacePath, {
-          dryRun: false,
-          reverse: true,
-        });
-
+  for (const [file, fileEdits] of editsByFile.entries()) {
+    const absPath = path.join(workspacePath, file);
+    try {
+      const text = await fs.readFile(absPath, "utf-8");
+      const res = applyFileEdits(text, fileEdits);
+      
+      if (!res.success) {
         results.push({
-          file: proposal.file,
+          file,
           applied: false,
           skipped: false,
-          validationErrors: [
-            "Post-apply quality gate failed: npm run check (patch reverted)",
-          ],
-          stdout: [applied.stdout, quality.stdout, reverted.stdout].filter(Boolean).join("\n"),
-          stderr: [applied.stderr, quality.stderr, reverted.stderr].filter(Boolean).join("\n"),
+          validationErrors: [res.error!]
         });
+        allSuccess = false;
         continue;
       }
+      
+      await fs.writeFile(absPath, res.newContent!, "utf-8");
+      
+      results.push({
+        file,
+        applied: true,
+        skipped: false,
+        validationErrors: []
+      });
+      
+    } catch (err) {
+      allSuccess = false;
+      results.push({
+        file,
+        applied: false,
+        skipped: false,
+        validationErrors: [`Failed to read/write file: ${err}`]
+      });
     }
-
-    results.push({
-      file: proposal.file,
-      applied: applied.applied,
-      skipped: false,
-      validationErrors: [],
-      stdout: applied.stdout,
-      stderr: applied.stderr,
-    });
   }
 
   return {
-    success: results.every((item) => item.applied || item.skipped),
-    dryRun,
+    success: allSuccess,
     results,
   };
 }
 
 /**
- * Create a commit for already applied patch changes.
- * This function only handles commit orchestration, not patch application.
+ * Creates a commit for already applied changes.
  */
 export async function commitAppliedPatches(
   workspacePath: string,

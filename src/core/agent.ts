@@ -1,25 +1,20 @@
 import type { ModelProvider } from "../providers/model-provider.js";
-import {
-  generateAgentModeResponse,
-  prepareAgentContext,
-  buildAgentFinalResponse,
-} from "../agent-mode/generator.js";
+import { generateAgentModeResponse } from "../agent-mode/generator.js";
 import { buildSystemMessage } from "../prompts/prompt-builder.js";
 import { buildTurnContext } from "../context/context-builder.js";
 import { buildMessagesForModel } from "../chat/message-builder.js";
 import { compactSession, needsCompaction } from "../chat/compactor.js";
 import { type ChatSession } from "../chat/types.js";
+import { generateRepoMap } from "../tools/repo-map-generator.js";
 import {
   scanWorkspace,
   type FileMeta,
 } from "../workspace/workspace-scanner.js";
 import {
-  applyPatchBatch,
-  runWorkspaceTypecheck,
+  applySREditBatchFS,
   type BatchPatchApplyResult,
 } from "../tools/patch-applier.js";
-import { validatePatchProposal } from "../tools/patch-validator.js";
-import type { AgentProposedPatch } from "../contracts/agent-decision.types.js";
+import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
 import { KnowledgeOrchestrator } from "../knowledge/orchestrator.js";
 import { AgentLogger } from "./logger.js";
 import { SCAN_CACHE_TTL_MS } from "./constants/agent.constants.js";
@@ -39,100 +34,38 @@ export class Agent {
     files: FileMeta[];
     timestamp: number;
   };
-  private pendingProposedPatches: AgentProposedPatch[] = [];
   private knowledgeOrchestrator: KnowledgeOrchestrator;
+  private repoMapCache?: string;
   public logger: AgentLogger;
   public readonly provider: ModelProvider;
   private readonly workspacePath: string;
+  private correlationId: string;
 
   constructor(provider: ModelProvider, workspacePath: string = process.cwd()) {
     this.provider = provider;
     this.workspacePath = workspacePath;
     this.knowledgeOrchestrator = new KnowledgeOrchestrator(this.provider);
     this.logger = new AgentLogger(workspacePath);
+    this.correlationId =
+      Date.now().toString(36) + Math.random().toString(36).substring(2, 7);
   }
 
   async run(prompt: string): Promise<string> {
     return this.provider.complete(prompt);
   }
 
-  hasPendingPatches(): boolean {
-    return this.pendingProposedPatches.length > 0;
-  }
-
-  getPendingPatches(): AgentProposedPatch[] {
-    return [...this.pendingProposedPatches];
-  }
-
-  clearPendingPatches(): number {
-    const count = this.pendingProposedPatches.length;
-    this.pendingProposedPatches = [];
-    return count;
-  }
-
-  async applyPendingPatches(options?: {
-    dryRun?: boolean;
-  }): Promise<BatchPatchApplyResult> {
-    if (this.pendingProposedPatches.length === 0) {
-      return {
-        success: false,
-        dryRun: options?.dryRun ?? true,
-        results: [],
-      };
-    }
-
-    const result = await applyPatchBatch(
-      this.pendingProposedPatches,
-      this.workspacePath,
-      {
-        dryRun: options?.dryRun ?? true,
-      },
-    );
-
-    if (
-      !options?.dryRun &&
-      result.success &&
-      result.results.every((r) => r.applied)
-    ) {
-      this.pendingProposedPatches = [];
-    }
-
-    return result;
-  }
-
   async assessPendingPatchesSafety(): Promise<PendingPatchAssessment> {
-    const quality = await runWorkspaceTypecheck(this.workspacePath);
-    const items: PendingPatchAssessmentItem[] = [];
-
-    for (const proposal of this.pendingProposedPatches) {
-      const validation = await validatePatchProposal(
-        proposal,
-        this.workspacePath,
-      );
-      const applicable = validation.valid;
-      const safe = applicable && quality.ok;
-      const issues = validation.issues.map((issue) => issue.message);
-      if (!quality.ok) {
-        issues.push("Workspace quality gate failed: npm run check");
-      }
-
-      items.push({
-        proposal,
-        applicable,
-        safe,
-        issues,
-      });
-    }
-
+    // No hay más pending patches; solo retorna vacío para compatibilidad.
     return {
-      workspaceQualityOk: quality.ok,
-      workspaceQualityStderr: quality.stderr,
-      items,
+      workspaceQualityOk: true,
+      workspaceQualityStderr: "",
+      items: [],
     };
   }
 
   async runTurn(session: ChatSession, userInput: string): Promise<string> {
     this.logger.startTurn();
+    this.logger.setCorrelationId(this.correlationId);
     await this.prepareSessionForTurn(session, userInput);
     await this.compactSessionIfNeeded(session);
 
@@ -156,6 +89,7 @@ export class Agent {
     options?: StreamTurnOptions,
   ): AsyncIterable<string> {
     this.logger.startTurn();
+    this.logger.setCorrelationId(this.correlationId);
     await this.prepareSessionForTurn(session, userInput, options?.onStatus);
     await this.compactSessionIfNeeded(session, options?.onStatus);
 
@@ -166,7 +100,7 @@ export class Agent {
     options?.onStatus?.("calling_model");
 
     if (session.mode === "agent") {
-      const prelude = await prepareAgentContext({
+      const outcome = await generateAgentModeResponse({
         provider: this.provider,
         messagesForModel,
         workspacePath: this.workspacePath,
@@ -174,34 +108,41 @@ export class Agent {
         logger: this.logger,
       });
 
-      options?.onStatus?.("producing_response");
-
-      let answer: string;
-      if (this.provider.streamChat) {
-        answer = "";
-        for await (const token of this.provider.streamChat(
-          prelude.answerMessages,
-        )) {
-          answer += token;
-          yield token;
-        }
-      } else {
-        answer = await this.provider.completeChat(prelude.answerMessages);
-        // In the non-streaming branch, yield the full answer so callers receive
-        // the main assistant output before any additional patch section.
-        yield answer;
+      // Si hay parches válidos, aplicarlos directamente
+      if (
+        outcome.validProposedPatches &&
+        outcome.validProposedPatches.length > 0
+      ) {
+        const result = await applySREditBatchFS(
+          outcome.validProposedPatches,
+          this.workspacePath,
+        );
+        const msg = result.success
+          ? `\n\n---\n[32m[1m${result.results.length} patch(es) applied directly.\u001b[0m` +
+            result.results
+              .map(
+                (r) =>
+                  `\n- ${r.file}: ${r.applied ? "applied" : r.skipped ? "skipped" : "failed"}`,
+              )
+              .join("")
+          : `\n\n---\n[31m[1mSome patches failed to apply.\u001b[0m` +
+            result.results
+              .map(
+                (r) =>
+                  `\n- ${r.file}: ${r.applied ? "applied" : r.skipped ? "skipped" : "failed"}`,
+              )
+              .join("");
+        const fullResponse = outcome.response + msg;
+        session.messages.push({ role: "assistant", content: outcome.response });
+        options?.onStatus?.("producing_response");
+        yield fullResponse;
+        return;
       }
 
-      const outcome = buildAgentFinalResponse(answer, prelude);
-      this.appendPendingProposedPatches(outcome.validProposedPatches ?? []);
-
-      // Yield patch section as extra chunk if present
-      const patchSection = outcome.response.slice(answer.length);
-      if (patchSection) {
-        yield patchSection;
-      }
-
+      // Si no hay parches válidos, solo responde
       session.messages.push({ role: "assistant", content: outcome.response });
+      options?.onStatus?.("producing_response");
+      yield outcome.response;
       return;
     }
 
@@ -251,8 +192,16 @@ export class Agent {
     return this.generateAgentAssistantResponse(messagesForModel);
   }
 
-  private ensureSystemMessage(session: ChatSession): void {
-    const systemContent = buildSystemMessage(session.mode);
+  private async ensureSystemMessage(session: ChatSession): Promise<void> {
+    const repositorySkeletonMap =
+      session.mode === "agent"
+        ? (this.repoMapCache ??
+          (this.repoMapCache = generateRepoMap(this.workspacePath)))
+        : undefined;
+    const systemContent = buildSystemMessage(
+      session.mode,
+      repositorySkeletonMap,
+    );
 
     if (session.messages.length > 0 && session.messages[0].role === "system") {
       session.messages[0] = { role: "system", content: systemContent };
@@ -267,7 +216,11 @@ export class Agent {
     onStatus?: StreamTurnOptions["onStatus"],
   ): Promise<void> {
     onStatus?.("building_context");
-    this.ensureSystemMessage(session);
+    await this.ensureSystemMessage(session);
+    this.logger.logUserPrompt({
+      mode: session.mode,
+      prompt: userInput,
+    });
 
     const context = await buildTurnContext({
       workspacePath: this.workspacePath,
@@ -279,7 +232,7 @@ export class Agent {
     });
 
     if (context.ragResults && context.ragResults.length > 0) {
-      this.logger.logRagSearch(
+      this.logger.logContextSearch(
         userInput,
         context.ragResults.map((r) => ({
           filePath: r.metadata.filePath,
@@ -308,17 +261,6 @@ export class Agent {
       provider: this.provider,
       modelOverride: process.env.COMPACTOR_MODEL,
     });
-  }
-
-  private appendPendingProposedPatches(patches: AgentProposedPatch[]): void {
-    if (patches.length === 0) {
-      return;
-    }
-
-    this.pendingProposedPatches = [
-      ...(this.pendingProposedPatches ?? []),
-      ...patches,
-    ];
   }
 
   private async generateNonAgentAssistantResponse(
@@ -361,7 +303,62 @@ export class Agent {
       logger: this.logger,
     });
 
-    this.appendPendingProposedPatches(outcome.validProposedPatches ?? []);
+    // Aplica los parches válidos directamente
+    if (
+      outcome.validProposedPatches &&
+      outcome.validProposedPatches.length > 0
+    ) {
+      const result = await applySREditBatchFS(
+        outcome.validProposedPatches,
+        this.workspacePath,
+      );
+      if (result.success) {
+        return (
+          outcome.response +
+          `\n\n---\n[32m[1m${result.results.length} patch(es) applied directly.[0m` +
+          result.results
+            .map(
+              (r) =>
+                `\n- ${r.file}: ${r.applied ? "applied" : r.skipped ? "skipped" : "failed"}`,
+            )
+            .join("")
+        );
+      } else {
+        return (
+          outcome.response +
+          `\n\n---\n[31m[1mSome patches failed to apply.[0m` +
+          result.results
+            .map(
+              (r) =>
+                `\n- ${r.file}: ${r.applied ? "applied" : r.skipped ? "skipped" : "failed"}`,
+            )
+            .join("")
+        );
+      }
+    }
     return outcome.response;
+  }
+
+  private buildStuckMessage(
+    lastError: string | undefined,
+    patches: AgentSREdit[],
+  ): string {
+    const patchCount = patches.length;
+    const errorSection = lastError
+      ? `\n**Last validation error:**\n\`\`\`\n${lastError}\n\`\`\``
+      : "";
+
+    return [
+      `⚠️ The agent couldn't fully validate the proposed changes after multiple attempts.`,
+      errorSection,
+      ``,
+      patchCount > 0
+        ? `The **${patchCount} proposed patch(es)** have been queued anyway. Choose your next action:`
+        : `No patches were produced. Choose your next action:`,
+      ``,
+      `  • \`/confirm --force\`  — apply the patches without TS validation (dangerous, use with care)`,
+      `  • \`/discard\`          — reject all patches and start over`,
+      `  • **Type a hint**     — describe the fix and the agent will retry with your guidance`,
+    ].join("\n");
   }
 }

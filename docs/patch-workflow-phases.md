@@ -35,35 +35,29 @@ Security policy summary:
 
 ---
 
-## Phase 2: Patch Generation
+## Phase 2: Edit Generation (Search & Replace)
 
-Implemented in src/tools/patch-generator.ts:
+Implemented in src/agent-mode/response-handler.ts:
 
-- generateUnifiedDiff(filePath, before, after)
-- formatPatchForTerminal(diffText)
-- extractFileFromPatch(diffText)
+- extractSREdits(response)
+- extractFileRequests(response)
+- buildAgentRepairPrompt(...)
 
-This phase is used both for direct diff handling and for synthesized edits that REI converts into a unified diff before validation.
+The agent emits `<edit file="...">` blocks with `<search>` / `<replace>` pairs.
 
 ---
 
-## Phase 3: Patch Validation
+## Phase 3: Sandbox Validation
 
-Implemented in src/tools/patch-validator.ts:
-
-- validatePatchSemantics(patchText)
-- validatePatchWithGit(patchText, workspacePath)
-- detectMergeConflicts(patchText)
-- validatePatchProposal(proposal, workspacePath, policy?)
+Implemented in src/tools/typescript-compile-check.ts and src/agent-mode/generator.ts.
 
 Validation stages:
 
-1. Diff structure validation checks hunks, line counts, and conflict markers.
-2. Security validation checks the target file against workspace policy.
-3. Git applicability runs `git apply --check` without writing to disk.
-4. AST Compilation Guard (TS/JS ONLY) runs `ts-morph` pre-emit diagnostics on the proposed patch to catch logic and type errors before queuing.
+1. Apply all proposed Search/Replace edits to a temporary sandbox workspace.
+2. Run project verification command (`npx tsc --noEmit --pretty false` by default).
+3. Parse diagnostics and feed failures back into the repair loop.
 
-Only patches that pass all stages can enter the pending queue.
+Only edits that pass sandbox verification are queued.
 
 ---
 
@@ -71,43 +65,30 @@ Only patches that pass all stages can enter the pending queue.
 
 Implemented in src/tools/patch-applier.ts:
 
-- applyPatchToFS(patchText, workspacePath, options?)
-- applyPatchBatch(proposals, workspacePath, options?)
-- commitAppliedPatches(workspacePath, message, filePaths?)
+- applySREditBatchFS(edits, workspacePath, options?)
 
 Active CLI behavior:
 
-1. /confirm --dry-run re-validates and runs git apply --check only.
-2. /confirm applies validated patches with git apply.
-3. If every patch applies successfully in a real run, the queue is cleared.
+1. /confirm --dry-run validates Search/Replace applicability without writing.
+2. /confirm applies queued Search/Replace edits to the filesystem.
+3. If every edit applies successfully in a real run, the queue is cleared.
 
 Important:
 
-- commitAppliedPatches exists as a helper, but it is not part of the default interactive CLI flow.
+- Application is edit-based (Search/Replace), not unified-diff based.
 
 ---
 
 ## Phase 5: AgentDecision Extension
 
-Implemented in src/contracts/agent-decision.types.ts and src/agent-mode/generator.ts.
-
-The decision contract supports:
-
-- ready
-- taskType
-- contextRequests
-- proposedPatches
+Implemented in src/agent-mode/generator.ts.
 
 Current generator behavior:
 
-- validates proposedPatches returned by the decision phase
-- normalizes headers, paths, and escaped newlines before validation
-- retries some invalid patches through a critic loop
-- can synthesize search/replace edits from visible context and convert them into diffs
-- returns valid proposed patches to the Agent queue
-- appends a patch section to the final answer when relevant
-
-This means patch generation is no longer just a passive model output; REI actively repairs and validates patch proposals before surfacing them as actionable.
+- extracts search/replace edits from model output
+- handles `<request_files>` cycles when more context is needed
+- retries invalid edits through a repair loop using sandbox diagnostics
+- returns sandbox-verified edits to the Agent queue
 
 ---
 
@@ -117,17 +98,12 @@ Implemented in src/cli/run-chat.ts.
 
 Available commands:
 
-- /pending - display queued patches with ANSI-colored diffs
-- /confirm - apply queued patches
-- /confirm --dry-run - validate queued patches without writing
+- /pending - display queued edits
+- /confirm - apply queued edits
+- /confirm --dry-run - validate queued edits without writing
 - /discard - clear queued patches
 
-Display behavior from formatPatchForTerminal:
-
-- Green additions
-- Red deletions
-- Cyan file headers
-- Yellow hunk headers
+Display behavior shows file targets and edit blocks for queued Search/Replace operations.
 
 ---
 
@@ -135,21 +111,19 @@ Display behavior from formatPatchForTerminal:
 
 ```text
 User message
-  -> Agent decision (may include proposedPatches)
+  -> Agent generates search/replace edits or requests files
   -> Context resolution for approved file requests
-  -> Patch normalization / validation / recovery
-  -> Queue valid patches on Agent
+  -> Sandbox validation / repair loop
+  -> Queue valid edits on Agent
   -> /pending to inspect
   -> /confirm or /confirm --dry-run
 ```
 
-For change-planning tasks, Phase 2.5 in the runtime effectively sits between context resolution and the final answer:
+For change tasks, runtime validation sits between context resolution and the final answer:
 
-- patch normalization
-- diff structure and security validation
-- git apply --check
-- AST compilation guard and Critic Loop (TS/JS ONLY)
-- retry / synthesis when possible
+- search/replace applicability
+- sandbox project verification
+- compile diagnostics feedback loop
 
 ---
 
@@ -159,7 +133,7 @@ For change-planning tasks, Phase 2.5 in the runtime effectively sits between con
 |------|-----------|
 | Path traversal escapes | Target validation keeps paths inside the workspace |
 | Symlink breakouts | Real-path containment checks reject escapes |
-| Corrupted diffs | Validation runs git apply --check before queue/apply |
+| Corrupted edit payloads | Search/Replace validation rejects malformed or non-matching edits |
 | Unsafe targets | Denylists and directory policy block sensitive files |
 | Accidental writes | The CLI requires explicit /confirm |
 | Hidden auto-commit behavior | Commits are not automatic in the CLI flow |
@@ -194,34 +168,31 @@ The runtime steps below map to the implemented phases above.
 │ Agent Mode: 4-Phase + Patch Workflow                        │
 └──────────────────────────────────────────────────────────────┘
 
-Step 1 - Agent Decision
-  Output: AgentDecision { ready, taskType, contextRequests, proposedPatches? }
-
-  ↓ if contextRequests exist
-
-Step 2 - Context Resolution
-  Resolve only scanned workspace files
+Step 1 - File Resolution
+  Model emits <request_files>path1, path2</request_files> XML tags
+  System resolves only scanned workspace files
   Reject denied files, sensitive extensions, and symlink escapes
 
-  ↓ if proposedPatches exist
+  ↓ files injected into next model message
 
-Step 3 - Patch Normalization / Generation
-  Normalize headers, canonical paths, escaped newlines
-  Generate unified diffs for synthesized edits
+Step 2 - Edit Generation
+  Model emits <edit file="..."><search>...</search><replace>...</replace></edit> blocks
+  Normalize Search/Replace payloads and paths
+  Prepare batch edits for sandbox validation
 
   ↓
 
-Step 4 - Patch Validation / Recovery
-  validatePatchSemantics() + validatePatchWithGit()
-  validateWithAstGuard() via ts-morph (TS/JS only)
-  Retry repairable structural and compiler failures through the Critic Loop
-  Queue valid proposals on Agent.pendingProposedPatches
+Step 4 - Sandbox Validation / Recovery
+  Apply Search/Replace edits in temporary sandbox
+  Run project verification (tsc by default)
+  Retry repairable apply/compile failures through repair loop
+  Queue valid edits on Agent.pendingProposedPatches
 
   ↓ after /confirm
 
-Step 5 - Patch Application
-  applyPatchToFS(dryRun=true) for /confirm --dry-run
-  applyPatchToFS(dryRun=false) for /confirm
+Step 5 - Edit Application
+  applySREditBatchFS(dryRun=true) for /confirm --dry-run
+  applySREditBatchFS(dryRun=false) for /confirm
 
   ↓ in CLI loop
 
@@ -260,12 +231,12 @@ flowchart TD
   L --> M[Rendered answer]
 
   I -->|agent| N[buildTurnContext()]
-  N --> O[prepareAgentContext()]
-  O --> P[Phase 1 decision]
+  N --> O[generateAgentModeResponse()]
+  O --> P[Parse model actions: request_files or edit]
   P --> Q[Phase 2 context resolution]
-  Q --> R[Phase 2.5 patch validation and recovery]
-  R --> S[Final provider call]
-  S --> T[Queue valid patches if any]
+  Q --> R[Phase 2.5 sandbox validation and recovery]
+  R --> S[Final model response]
+  S --> T[Queue valid edits if any]
   T --> U[Rendered answer plus patch section]
 
   V[weather/SKILL.md] -. skill file exists in repo .-> W[No runtime activation yet]

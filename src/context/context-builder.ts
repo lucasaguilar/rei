@@ -23,6 +23,8 @@ import {
   buildRepoSummary,
   isExplicitContentRequest,
 } from "./helpers/context-builder.helpers.js";
+import { extractExplicitPathHints } from "../workspace/file-selector.js";
+import { ENABLE_SEMANTIC_RAG_SEARCH } from "./constants/context-builder.constants.js";
 
 export type RagNodeSnippet = {
   filePath: string;
@@ -71,7 +73,7 @@ export async function buildTurnContext(params: {
   let ragResults: RagSearchResult[] | undefined;
   const ragFilePaths = new Set<string>();
 
-  if (hasRagIndex(workspacePath)) {
+  if (ENABLE_SEMANTIC_RAG_SEARCH && hasRagIndex(workspacePath)) {
     try {
       ragResults = await searchRag(workspacePath, userInput, 5);
       for (const r of ragResults) {
@@ -82,35 +84,70 @@ export async function buildTurnContext(params: {
     }
   }
 
-  // Merge RAG hits with the heuristic selector, RAG-ranked files take priority
+  // Merge RAG hits with the heuristic selector.
   const heuristicSelected = selectRelevantFiles(files, userInput, mode);
+  const mergedMap = new Map<string, number>();
 
-  const mergedPaths: Array<{ path: string; score: number }> = [
-    // RAG results first (guaranteed semantic relevance)
-    ...Array.from(ragFilePaths).map((p) => ({ path: p, score: 1 })),
-    // Heuristic results that weren't already included from RAG
-    ...heuristicSelected.filter((f) => !ragFilePaths.has(f.path)),
-  ];
+  for (let i = 0; i < heuristicSelected.length; i += 1) {
+    const file = heuristicSelected[i];
+    mergedMap.set(file.path, file.score + Math.max(0, 8 - i));
+  }
+
+  if (ragResults && ragResults.length > 0) {
+    for (let i = 0; i < ragResults.length; i += 1) {
+      const hit = ragResults[i];
+      const ragRankBoost = Math.max(0, 14 - i * 2);
+      const ragScoreBoost = Math.max(0, Math.round(hit.score * 20));
+      const current = mergedMap.get(hit.metadata.filePath) ?? 0;
+      mergedMap.set(
+        hit.metadata.filePath,
+        current + ragRankBoost + ragScoreBoost,
+      );
+    }
+  }
+
+  const mergedPaths: Array<{ path: string; score: number }> = Array.from(
+    mergedMap.entries(),
+  )
+    .map(([p, s]) => ({ path: p, score: s }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8);
 
   const isExplicit = isExplicitContentRequest(userInput);
-  const previewMaxChars =
-    mode === "agent"
-      ? isExplicit
-        ? PREVIEW_MAX_CHARS_FULL
-        : PREVIEW_MAX_CHARS_AGENT
-      : isExplicit
-        ? PREVIEW_MAX_CHARS_AGENT
-        : PREVIEW_MAX_CHARS_DEFAULT;
+  // Detectar archivos mencionados explícitamente en el input
+  const explicitPathHints = extractExplicitPathHints(userInput).map((p) =>
+    p.toLowerCase(),
+  );
 
   const relevantFiles = await Promise.all(
-    mergedPaths.map(async (f) => ({
-      path: f.path,
-      score: f.score,
-      preview: await readFilePreview(
+    mergedPaths.map(async (f) => {
+      // Si el archivo fue mencionado explícitamente, siempre incluirlo completo
+      const isExplicitMention = explicitPathHints.some((hint) => {
+        const filePathLower = f.path.toLowerCase();
+        return (
+          filePathLower === hint ||
+          filePathLower.endsWith(hint) ||
+          hint.endsWith(filePathLower)
+        );
+      });
+      const preview = await readFilePreview(
         path.join(workspacePath, f.path),
-        previewMaxChars,
-      ),
-    })),
+        isExplicitMention
+          ? PREVIEW_MAX_CHARS_FULL
+          : mode === "agent"
+            ? isExplicit
+              ? PREVIEW_MAX_CHARS_FULL
+              : PREVIEW_MAX_CHARS_AGENT
+            : isExplicit
+              ? PREVIEW_MAX_CHARS_AGENT
+              : PREVIEW_MAX_CHARS_DEFAULT,
+      );
+      return {
+        path: f.path,
+        score: f.score,
+        preview,
+      };
+    }),
   );
 
   const callerFiles = await buildCallerFilesContext({

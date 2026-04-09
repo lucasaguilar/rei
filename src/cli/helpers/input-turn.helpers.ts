@@ -1,6 +1,7 @@
 import type { TurnStatus } from "../../core/models/agent.types.js";
 import { renderMarkdown } from "../markdown-renderer.js";
 import type { InputHandlerContext } from "../models/input-handler.types.js";
+import { saveSession } from "../../chat/session-store.js";
 
 export async function handleInputTurn(
   trimmed: string,
@@ -27,8 +28,9 @@ export async function handleInputTurn(
 
         if (status === "producing_response" && liveStart < 0) {
           actions.pushTranscript("");
-          actions.pushTranscript(`You: ${trimmed}`);
+          actions.pushTranscript(`\x1b[1;36mYou: ${trimmed}\x1b[0m`);
           actions.pushTranscript("");
+          actions.draw();
           liveStart = transcript.length;
           transcript.push("");
         }
@@ -60,6 +62,15 @@ export async function handleInputTurn(
     state.busy = false;
     state.activeStatus = undefined;
     actions.stopSpinner();
+    
+    saveSession(
+      ctx.workspacePath,
+      session.messages,
+      session.mode,
+      session.summary,
+      session.createdAt,
+    );
+    
     actions.draw();
   }
 }

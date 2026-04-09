@@ -11,13 +11,13 @@ import * as path from "path";
 export interface FileModifyPolicy {
   /** Directories where modifications are allowed (relative, with trailing /) */
   allowedDirs: string[];
-  
+
   /** Exact file paths that cannot be modified (workspace-relative) */
   deniedFiles: string[];
-  
+
   /** Regex patterns for files that require extra validation before modification */
   requiresValidation: RegExp[];
-  
+
   /** If true, error on any symlinks discovered (prevents breakout attempts) */
   containSymlinks: boolean;
 }
@@ -68,7 +68,14 @@ export interface FileSecurityError {
   path: string;
 }
 
-export type ValidationResult = { ok: true } | { ok: false; error: FileSecurityError };
+export type ValidationResult =
+  | { ok: true }
+  | { ok: false; error: FileSecurityError };
+
+export interface ValidateFileTargetOptions {
+  /** Allow targets that do not exist yet (for create-file patches). */
+  allowCreate?: boolean;
+}
 
 /**
  * Validate that a file path is safe to modify.
@@ -87,7 +94,8 @@ export type ValidationResult = { ok: true } | { ok: false; error: FileSecurityEr
 export function validateFileTarget(
   filePath: string,
   workspacePath: string,
-  policy: FileModifyPolicy = DEFAULT_FILE_MODIFY_POLICY
+  policy: FileModifyPolicy = DEFAULT_FILE_MODIFY_POLICY,
+  options: ValidateFileTargetOptions = {},
 ): ValidationResult {
   // Normalize paths
   const normalized = normalizePath(filePath);
@@ -107,7 +115,9 @@ export function validateFileTarget(
   }
 
   // Check 2: In allowed directory
-  const inAllowed = policy.allowedDirs.some((dir) => normalized.startsWith(dir));
+  const inAllowed = policy.allowedDirs.some((dir) =>
+    normalized.startsWith(dir),
+  );
   if (!inAllowed) {
     return {
       ok: false,
@@ -144,9 +154,29 @@ export function validateFileTarget(
 
   // Check 4 & 5: Symlinks and readability
   if (policy.containSymlinks) {
-    const symlinkCheck = checkSymlinksInPath(absPath, absWorkspace);
+    const symlinkCheck = checkSymlinksInPath(absPath, absWorkspace, {
+      allowMissingLeaf: options.allowCreate === true,
+    });
     if (symlinkCheck.ok === false) {
       return symlinkCheck;
+    }
+  }
+
+  // Create-file mode: allow missing leaf if parent directory is accessible.
+  if (options.allowCreate === true && !fs.existsSync(absPath)) {
+    const parentDir = path.dirname(absPath);
+    try {
+      fs.accessSync(parentDir, fs.constants.R_OK | fs.constants.W_OK);
+      return { ok: true };
+    } catch {
+      return {
+        ok: false,
+        error: {
+          code: "NOT_READABLE",
+          message: `Parent directory for "${filePath}" is not readable/writable`,
+          path: filePath,
+        },
+      };
     }
   }
 
@@ -173,7 +203,10 @@ export function validateFileTarget(
  * @param absPath absolute path to check
  * @param absWorkspace absolute path to workspace root
  */
-export function isWithinWorkspace(absPath: string, absWorkspace: string): boolean {
+export function isWithinWorkspace(
+  absPath: string,
+  absWorkspace: string,
+): boolean {
   const resolved = path.resolve(absPath);
   const resolvedWorkspace = path.resolve(absWorkspace);
   const relative = path.relative(resolvedWorkspace, resolved);
@@ -204,7 +237,8 @@ export function isWithinWorkspace(absPath: string, absWorkspace: string): boolea
  */
 function checkSymlinksInPath(
   absPath: string,
-  absWorkspace: string
+  absWorkspace: string,
+  options: { allowMissingLeaf?: boolean } = {},
 ): ValidationResult {
   let current = path.resolve(absPath);
   const workspace = path.resolve(absWorkspace);
@@ -226,6 +260,10 @@ function checkSymlinksInPath(
       // If we can't stat (missing parent), that's ok for ancestor check
       // but fail if it's the target file itself
       if (current === absPath) {
+        if (options.allowMissingLeaf === true) {
+          current = path.dirname(current);
+          continue;
+        }
         return {
           ok: false,
           error: {
@@ -247,10 +285,7 @@ function checkSymlinksInPath(
  * Normalize a file path to use forward slashes and no trailing slash (except root).
  */
 function normalizePath(filePath: string): string {
-  return path
-    .normalize(filePath)
-    .replace(/\\/g, "/")
-    .replace(/\/$/, "");
+  return path.normalize(filePath).replace(/\\/g, "/").replace(/\/$/, "");
 }
 
 /**

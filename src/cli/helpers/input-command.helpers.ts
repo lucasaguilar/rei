@@ -1,16 +1,17 @@
 import type { SessionMode } from "../../chat/types.js";
 import {
-  hasRagIndex,
-  startIndexingWorker,
-} from "../../context/rag/rag-indexer.js";
-import {
   formatTypeScriptCompileResult,
   runTypeScriptCompileCheck,
 } from "../../tools/typescript-compile-check.js";
-import { formatPatchForTerminal } from "../../tools/patch-generator.js";
+import type { AgentSREdit } from "../../contracts/agent-interaction.types.js";
 import { HELP_TEXT } from "../constants/chat.constants.js";
 import type { InputHandlerContext } from "../models/input-handler.types.js";
-import { saveSession } from "../../chat/session-store.js";
+import {
+  saveSession,
+  archiveCurrentSession,
+  listSessions,
+  loadSessionById,
+} from "../../chat/session-store.js";
 
 export async function handleInputCommand(
   trimmed: string,
@@ -29,139 +30,73 @@ export async function handleInputCommand(
     session.messages = [];
     ctx.transcript.length = 0;
     actions.pushTranscript("History cleared.");
+    saveSession(
+      ctx.workspacePath,
+      session.messages,
+      session.mode,
+      session.summary,
+      session.createdAt,
+    );
+    return true;
+  }
+
+  if (trimmed === "/runplan") {
+    // Busca el último mensaje de plan en la sesión
+    const lastPlanMsg = [...session.messages]
+      .reverse()
+      .find(
+        (m) =>
+          m.role === "assistant" &&
+          m.content &&
+          m.content.toLowerCase().includes("plan"),
+      );
+    if (!lastPlanMsg) {
+      actions.pushTranscript("[RUNPLAN] No plan found in session.");
+      return true;
+    }
+
+    // Extrae archivos mencionados en el plan (heurística simple: busca líneas con .ts, .js, .json, etc.)
+    const fileRegex =
+      /([\w\-/]+\.(ts|js|json|md|tsx|jsx|yml|yaml|css|scss|html|cjs|mjs))/gi;
+    const files = Array.from(
+      new Set(lastPlanMsg.content.match(fileRegex) || []),
+    );
+    if (files.length === 0) {
+      actions.pushTranscript(
+        "[RUNPLAN] No files detected in plan. Please ensure the plan lists file names.",
+      );
+      return true;
+    }
+
+    // Cambia a modo agent
+    session.mode = "agent";
+    actions.pushTranscript(
+      `[RUNPLAN] Switching to agent mode and executing plan on files: ${files.join(", ")}`,
+    );
+
+    // Inyecta contexto: agrega un mensaje de usuario con el plan y los archivos
+    const planPrompt = `Ejecutá el siguiente plan sobre estos archivos:\n\nPLAN:\n${lastPlanMsg.content}\n\nARCHIVOS:\n${files.join(", ")}`;
+    session.messages.push({ role: "user", content: planPrompt });
+
+    // Ejecuta el agent automáticamente
+    state.busy = true;
+    actions.draw();
+    try {
+      const response = await agent.runTurn(session, planPrompt);
+      actions.pushTranscript(response);
+    } catch (err) {
+      actions.pushTranscript(
+        `[RUNPLAN] Error: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      state.busy = false;
+      actions.draw();
+    }
     return true;
   }
 
   if (trimmed === "/help") {
     actions.pushTranscript(HELP_TEXT);
-    return true;
-  }
-
-  if (trimmed === "/pending") {
-    const pending = agent.getPendingPatches();
-    if (pending.length === 0) {
-      actions.pushTranscript("No pending patches.");
-      return true;
-    }
-
-    const assessment = await agent.assessPendingPatchesSafety();
-    actions.pushTranscript(`Pending patches: ${pending.length}`);
-    actions.pushTranscript(
-      `Workspace quality: ${assessment.workspaceQualityOk ? "ok" : "failed"}`,
-    );
-
-    for (const item of assessment.items) {
-      actions.pushTranscript(`File: ${item.proposal.file}`);
-      actions.pushTranscript(
-        `Reason: ${item.proposal.description || "(no description)"}`,
-      );
-      actions.pushTranscript(`Applicable: ${item.applicable ? "yes" : "no"}`);
-      actions.pushTranscript(`Safe: ${item.safe ? "yes" : "no"}`);
-      if (item.issues.length > 0) {
-        actions.pushTranscript(`Issues: ${item.issues.join(" | ")}`);
-      }
-      actions.pushTranscript(formatPatchForTerminal(item.proposal.patch));
-    }
-
-    if (!assessment.workspaceQualityOk && assessment.workspaceQualityStderr) {
-      actions.pushTranscript(
-        `Workspace check stderr: ${assessment.workspaceQualityStderr.trim()}`,
-      );
-    }
-
-    actions.pushTranscript("Use /confirm to apply, or /discard to clear them.");
-    return true;
-  }
-
-  if (trimmed === "/discard") {
-    const discarded = agent.clearPendingPatches();
-    actions.pushTranscript(
-      discarded > 0
-        ? `Discarded ${discarded} pending patch(es).`
-        : "No pending patches.",
-    );
-    return true;
-  }
-
-  if (trimmed === "/confirm" || trimmed === "/confirm --dry-run") {
-    const dryRun = trimmed.includes("--dry-run");
-    const pending = agent.getPendingPatches();
-    if (pending.length === 0) {
-      actions.pushTranscript("No pending patches to apply.");
-      return true;
-    }
-
-    state.busy = true;
-    state.activeStatus = "producing_response";
-    actions.startSpinner();
-    actions.draw();
-
-    try {
-      const result = await agent.applyPendingPatches({ dryRun });
-      if (result.results.length === 0) {
-        actions.pushTranscript("No pending patches to apply.");
-        return true;
-      }
-
-      actions.pushTranscript(
-        dryRun
-          ? "Patch dry-run completed."
-          : result.success
-            ? "Patches applied."
-            : "Patch apply completed with errors.",
-      );
-
-      for (const item of result.results) {
-        const status = item.applied
-          ? "applied"
-          : item.skipped
-            ? "skipped"
-            : "failed";
-        actions.pushTranscript(`- ${item.file}: ${status}`);
-        if (item.validationErrors.length > 0) {
-          actions.pushTranscript(
-            `  validation: ${item.validationErrors.join(" | ")}`,
-          );
-        }
-        if (item.stderr) {
-          actions.pushTranscript(`  stderr: ${item.stderr.trim()}`);
-        }
-      }
-
-      if (!dryRun && result.success) {
-        state.activeStatus = "producing_response";
-        actions.draw();
-        try {
-          const compileResult = await runTypeScriptCompileCheck(
-            ctx.workspacePath,
-          );
-          for (const line of formatTypeScriptCompileResult(compileResult)) {
-            actions.pushTranscript(line);
-          }
-        } catch (compileErr: unknown) {
-          actions.pushTranscript(
-            `[tsc] check skipped: ${compileErr instanceof Error ? compileErr.message : String(compileErr)}`,
-          );
-        }
-      }
-    } catch (err: unknown) {
-      actions.pushTranscript(
-        `Error: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    } finally {
-      state.busy = false;
-      state.activeStatus = undefined;
-      actions.stopSpinner();
-
-      saveSession(
-        ctx.workspacePath,
-        session.messages,
-        session.mode,
-        session.summary,
-        session.createdAt,
-      );
-    }
-
     return true;
   }
 
@@ -224,23 +159,71 @@ export async function handleInputCommand(
   }
 
   if (trimmed === "/index") {
-    const { workspacePath, actions: act } = ctx;
-    const already = hasRagIndex(workspacePath);
-    act.pushTranscript(
-      already
-        ? "[RAG] Re-indexing workspace in background..."
-        : "[RAG] Starting first-time index in background...",
+    const { generateRepoMap } =
+      await import("../../tools/repo-map-generator.js");
+    const map = generateRepoMap(ctx.workspacePath);
+    const lines = map.split("\n").length;
+    actions.pushTranscript(
+      `[REPO MAP] Regenerated successfully (${lines} lines).`,
     );
-    startIndexingWorker(workspacePath, {
-      onProgress: (indexed, total) => {
-        act.pushTranscript(`[RAG] Indexing... ${indexed}/${total} files`);
-        act.draw();
-      },
-      onDone: (message) => {
-        act.pushTranscript(`[RAG] ${message}`);
-        act.draw();
-      },
-    });
+    return true;
+  }
+
+  if (trimmed === "/session" || trimmed === "/session info") {
+    const nonSystem = session.messages.filter((m) => m.role !== "system");
+    const turns = Math.floor(nonSystem.length / 2);
+    actions.pushTranscript(`Mode: ${session.mode}`);
+    actions.pushTranscript(`Turns: ${turns}`);
+    actions.pushTranscript(`Created: ${session.createdAt ?? "unknown"}`);
+    return true;
+  }
+
+  if (trimmed === "/session new") {
+    const archived = archiveCurrentSession(ctx.workspacePath);
+    session.messages = [];
+    ctx.transcript.length = 0;
+    saveSession(ctx.workspacePath, [], session.mode, undefined, undefined);
+    actions.pushTranscript(
+      archived
+        ? `[SESSION] Archived as ${archived}. Starting fresh.`
+        : "[SESSION] Started fresh session.",
+    );
+    return true;
+  }
+
+  if (trimmed === "/session list") {
+    const sessions = listSessions(ctx.workspacePath);
+    if (sessions.length === 0) {
+      actions.pushTranscript("[SESSION] No archived sessions.");
+    } else {
+      for (const s of sessions) {
+        actions.pushTranscript(
+          `  ${s.id}  [${s.mode}]  ${new Date(s.updatedAt).toLocaleString()}  (${s.turns} turns)${s.summary ? "  " + s.summary : ""}`,
+        );
+      }
+    }
+    return true;
+  }
+
+  const sessionLoadMatch = trimmed.match(/^\/session\s+load\s+(\S+)$/);
+  if (sessionLoadMatch) {
+    const id = sessionLoadMatch[1];
+    const loaded = loadSessionById(ctx.workspacePath, id);
+    if (!loaded) {
+      actions.pushTranscript(`[SESSION] Session "${id}" not found.`);
+    } else {
+      session.messages = loaded.messages;
+      session.mode = loaded.mode;
+      session.summary = loaded.summary;
+      session.createdAt = loaded.createdAt;
+      ctx.transcript.length = 0;
+      const turns = Math.floor(
+        loaded.messages.filter((m) => m.role !== "system").length / 2,
+      );
+      actions.pushTranscript(
+        `[SESSION] Loaded "${id}" (${turns} turns, mode: ${loaded.mode}).`,
+      );
+    }
     return true;
   }
 

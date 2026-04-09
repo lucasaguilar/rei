@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>REI Log Viewer</title>
+    <style>
+      :root {
+        --bg: #f3efe5;
+        --panel: #fffaf0;
+        --ink: #1b1b1b;
+        --muted: #6f665b;
+        --accent: #004e64;
+        --accent-2: #00a5cf;
+        --bad: #8f1d14;
+        --ok: #2a6f2b;
+        --line: #ddd2c4;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 20% 0%, #fff2d8 0%, transparent 35%),
+          radial-gradient(circle at 80% 100%, #d6f3ff 0%, transparent 40%),
+          var(--bg);
+      }
+      header {
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--line);
+        background: linear-gradient(90deg, #fffaf0 0%, #f5f2ea 100%);
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 20px;
+        letter-spacing: 0.2px;
+      }
+      .controls {
+        display: grid;
+        grid-template-columns: 1fr 1fr auto auto auto;
+        gap: 8px;
+      }
+      input,
+      select,
+      button {
+        padding: 8px 10px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: white;
+        color: var(--ink);
+      }
+      button {
+        cursor: pointer;
+        border-color: var(--accent);
+        background: var(--accent);
+        color: white;
+      }
+      button.secondary {
+        background: white;
+        color: var(--accent);
+      }
+      main {
+        padding: 16px 20px 24px;
+        max-width: 1400px;
+        margin: 0 auto;
+      }
+      .meta {
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        margin-bottom: 12px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .stats {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 10px;
+      }
+      .pill {
+        padding: 4px 8px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--panel);
+        font-size: 12px;
+      }
+      .rows {
+        display: grid;
+        gap: 8px;
+      }
+      .row {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        border-radius: 10px;
+        padding: 10px;
+      }
+      .top {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 6px;
+        font-size: 12px;
+      }
+      .turn {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: var(--accent);
+      }
+      .phase {
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: #fff;
+      }
+      .phase.INFO {
+        border-color: #a0b9c0;
+      }
+      .phase.USER_PROMPT {
+        border-color: var(--accent-2);
+        color: var(--accent);
+      }
+      .phase.ERROR,
+      .phase.SR_VALIDATION_FAILED {
+        border-color: var(--bad);
+        color: var(--bad);
+      }
+      .phase.PATCH_OUTCOME,
+      .phase.PATCH_QUALITY {
+        border-color: var(--ok);
+        color: var(--ok);
+      }
+      pre {
+        margin: 0;
+        font-size: 12px;
+        line-height: 1.4;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      @media (max-width: 900px) {
+        .controls {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>REI Agent Flow Viewer</h1>
+      <div class="controls">
+        <input id="turnFilter" placeholder="Filter by turnId" />
+        <input id="textFilter" placeholder="Search text in entry" />
+        <select id="phaseFilter">
+          <option value="">All phases</option>
+        </select>
+        <button id="refreshBtn">Refresh</button>
+        <button id="autoBtn" class="secondary">Auto: ON</button>
+      </div>
+    </header>
+    <main>
+      <div class="meta">
+        <span id="path"></span>
+        <span id="updated"></span>
+      </div>
+      <div class="stats" id="stats"></div>
+      <div class="rows" id="rows"></div>
+    </main>
+
+    <script>
+      const pathEl = document.getElementById("path");
+      const updatedEl = document.getElementById("updated");
+      const statsEl = document.getElementById("stats");
+      const rowsEl = document.getElementById("rows");
+      const turnFilterEl = document.getElementById("turnFilter");
+      const textFilterEl = document.getElementById("textFilter");
+      const phaseFilterEl = document.getElementById("phaseFilter");
+      const refreshBtn = document.getElementById("refreshBtn");
+      const autoBtn = document.getElementById("autoBtn");
+
+      let entries = [];
+      let autoOn = true;
+      let timer = null;
+
+      function fmt(ts) {
+        try {
+          return new Date(ts).toLocaleString();
+        } catch {
+          return ts;
+        }
+      }
+
+      function countByPhase(list) {
+        const map = new Map();
+        for (const e of list) {
+          map.set(e.phase, (map.get(e.phase) || 0) + 1);
+        }
+        return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
+      }
+
+      function refreshPhaseOptions(list) {
+        const selected = phaseFilterEl.value;
+        const phases = [
+          ...new Set(list.map((e) => e.phase).filter(Boolean)),
+        ].sort();
+        phaseFilterEl.innerHTML =
+          '<option value="">All phases</option>' +
+          phases.map((p) => `<option value="${p}">${p}</option>`).join("");
+        phaseFilterEl.value = phases.includes(selected) ? selected : "";
+      }
+
+      function extractInitialQueryByTurn(list) {
+        const byTurn = new Map();
+
+        for (const e of list) {
+          const turnId = e.turnId || "";
+          if (!turnId || byTurn.has(turnId)) continue;
+
+          if (
+            e.phase === "USER_PROMPT" &&
+            e.data &&
+            typeof e.data.prompt === "string"
+          ) {
+            byTurn.set(turnId, e.data.prompt);
+            continue;
+          }
+
+          if (
+            e.phase === "CONTEXT_SEARCH" &&
+            e.data &&
+            typeof e.data.query === "string"
+          ) {
+            byTurn.set(turnId, e.data.query);
+            continue;
+          }
+
+          if (
+            e.phase === "INFO" &&
+            e.data &&
+            e.data.context &&
+            typeof e.data.context.rawResponse === "string" &&
+            /<request_files>|<edit\s+file=/i.test(e.data.context.rawResponse)
+          ) {
+            byTurn.set(turnId, e.data.context.rawResponse);
+          }
+        }
+
+        return byTurn;
+      }
+
+      function render() {
+        const turnFilter = turnFilterEl.value.trim().toLowerCase();
+        const textFilter = textFilterEl.value.trim().toLowerCase();
+        const phaseFilter = phaseFilterEl.value;
+        const initialByTurn = extractInitialQueryByTurn(entries);
+
+        const filtered = entries.filter((e) => {
+          if (
+            turnFilter &&
+            !(e.turnId || "").toLowerCase().includes(turnFilter)
+          )
+            return false;
+          if (phaseFilter && e.phase !== phaseFilter) return false;
+          if (textFilter) {
+            const blob = JSON.stringify(e).toLowerCase();
+            if (!blob.includes(textFilter)) return false;
+          }
+          return true;
+        });
+
+        const phaseStats = countByPhase(filtered);
+        statsEl.innerHTML =
+          `<span class="pill">entries: ${filtered.length}</span>` +
+          phaseStats
+            .slice(0, 10)
+            .map(
+              ([phase, count]) =>
+                `<span class="pill">${phase}: ${count}</span>`,
+            )
+            .join("");
+
+        rowsEl.innerHTML = filtered
+          .slice(-400)
+          .reverse()
+          .map((e) => {
+            const pretty = JSON.stringify(e.data, null, 2);
+            const initial = initialByTurn.get(e.turnId || "");
+            const initialHtml = initial
+              ? `<pre style="margin-bottom:8px; border:1px solid var(--line); border-radius:8px; padding:8px; background:#fff">initial query:\n${initial
+                  .slice(0, 500)
+                  .replace(
+                    /</g,
+                    "&lt;",
+                  )}${initial.length > 500 ? "..." : ""}</pre>`
+              : "";
+            return `
+              <article class="row">
+                <div class="top">
+                  <span class="turn">${e.turnId || "-"}</span>
+                  <span class="phase ${e.phase || ""}">${e.phase || "-"}</span>
+                  <span>${fmt(e.timestamp)}</span>
+                </div>
+                ${initialHtml}
+                <pre>${pretty.replace(/</g, "&lt;")}</pre>
+              </article>
+            `;
+          })
+          .join("");
+      }
+
+      async function load() {
+        const res = await fetch("/api/log", { cache: "no-store" });
+        const payload = await res.json();
+
+        if (!res.ok) {
+          rowsEl.innerHTML = `<article class="row"><pre>${JSON.stringify(payload, null, 2)}</pre></article>`;
+          return;
+        }
+
+        pathEl.textContent = payload.logPath;
+        updatedEl.textContent = `updated: ${fmt(payload.updatedAt)}`;
+
+        entries = payload.content
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line) => {
+            try {
+              return JSON.parse(line);
+            } catch {
+              return {
+                timestamp: "",
+                turnId: "",
+                phase: "INVALID_JSONL",
+                data: { rawLine: line },
+              };
+            }
+          });
+
+        refreshPhaseOptions(entries);
+        render();
+      }
+
+      function startAuto() {
+        stopAuto();
+        timer = setInterval(() => {
+          load().catch(console.error);
+        }, 2000);
+      }
+
+      function stopAuto() {
+        if (timer) {
+          clearInterval(timer);
+          timer = null;
+        }
+      }
+
+      refreshBtn.addEventListener("click", () => load().catch(console.error));
+      turnFilterEl.addEventListener("input", render);
+      textFilterEl.addEventListener("input", render);
+      phaseFilterEl.addEventListener("change", render);
+      autoBtn.addEventListener("click", () => {
+        autoOn = !autoOn;
+        autoBtn.textContent = `Auto: ${autoOn ? "ON" : "OFF"}`;
+        if (autoOn) startAuto();
+        else stopAuto();
+      });
+
+      load().catch(console.error);
+      startAuto();
+    </script>
+  </body>
+</html>

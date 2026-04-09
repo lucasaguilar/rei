@@ -47,6 +47,10 @@ const IGNORED_EXTENSIONS = new Set([
 
 const MAX_FILES = 200;
 
+function shouldIgnoreDirectory(dirName: string): boolean {
+  return dirName.startsWith(".") || IGNORED_DIRS.has(dirName);
+}
+
 export function scanWorkspace(workspacePath: string): FileMeta[] {
   const results: FileMeta[] = [];
   collectFiles(workspacePath, workspacePath, results);
@@ -56,7 +60,7 @@ export function scanWorkspace(workspacePath: string): FileMeta[] {
 function collectFiles(
   workspacePath: string,
   currentPath: string,
-  results: FileMeta[]
+  results: FileMeta[],
 ): void {
   if (results.length >= MAX_FILES) return;
 
@@ -71,7 +75,7 @@ function collectFiles(
     if (results.length >= MAX_FILES) break;
 
     if (entry.isDirectory()) {
-      if (IGNORED_DIRS.has(entry.name)) continue;
+      if (shouldIgnoreDirectory(entry.name)) continue;
       collectFiles(workspacePath, path.join(currentPath, entry.name), results);
     } else if (entry.isFile()) {
       const ext = path.extname(entry.name).toLowerCase();

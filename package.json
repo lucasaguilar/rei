@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx src/main.ts",
     "check": "tsc --noEmit",
+    "log:viewer": "node tools/log-viewer/server.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },

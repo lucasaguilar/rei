@@ -88,7 +88,7 @@ export function buildTurnUserMessage(params: {
   if (context.relevantFiles.length > 0) {
     lines.push(``);
     lines.push(
-      `The following files are ALREADY included in this message. Do NOT request them via contextRequests:`,
+      `The following files are ALREADY included in this message. Do NOT request them via <request_files> tags:`,
     );
     for (const file of context.relevantFiles) {
       lines.push(`  - ${file.path}`);

@@ -181,13 +181,34 @@ export function findSymbolCallers(params: {
  * number of matched symbols (most referenced files first).
  */
 export function rankCallerFiles(refs: CallerReference[]): string[] {
-  const countByFile = new Map<string, number>();
+  const scoreByFile = new Map<string, number>();
   for (const ref of refs) {
-    countByFile.set(ref.filePath, (countByFile.get(ref.filePath) ?? 0) + 1);
+    const current = scoreByFile.get(ref.filePath) ?? 0;
+    scoreByFile.set(ref.filePath, current + scoreCallerReference(ref));
   }
-  return [...countByFile.entries()]
+  return [...scoreByFile.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([filePath]) => filePath);
+}
+
+function scoreCallerReference(ref: CallerReference): number {
+  let score = 1;
+  const snippet = ref.snippet;
+
+  if (
+    snippet.includes(`.${ref.symbolName}`) ||
+    snippet.includes(`${ref.symbolName}(`)
+  ) {
+    score += 3;
+  }
+  if (/\bimport\b/.test(snippet)) {
+    score += 2;
+  }
+  if (/\bnew\b/.test(snippet)) {
+    score += 2;
+  }
+
+  return score;
 }
 
 function escapeRegex(str: string): string {

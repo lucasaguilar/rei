@@ -27,10 +27,8 @@ export const HELP_TEXT = `Commands:
   /mode ask       - switch to ask mode
   /mode planning  - switch to planning mode
   /mode agent     - switch to agent mode
-  /pending        - show currently queued validated patches
-  /confirm        - apply queued patches
-  /confirm --dry-run - validate/apply-check queued patches only
-  /discard        - clear queued patches without applying`;
+  /runplan        - execute last planning-mode plan
+  /index          - regenerate repository skeleton map`;
 
 export const MODE_PROMPTS: Record<SessionMode, string> = {
   ask: "ask > ",
@@ -62,14 +60,8 @@ export const COMMANDS: Array<{
   { command: "/mode ask", description: "switch to ask mode" },
   { command: "/mode planning", description: "switch to planning mode" },
   { command: "/mode agent", description: "switch to agent mode" },
-  { command: "/pending", description: "show queued patches" },
-  { command: "/confirm", description: "apply queued patches" },
-  {
-    command: "/confirm --dry-run",
-    description: "validate queued patches only",
-  },
-  { command: "/discard", description: "clear queued patches" },
-  { command: "/index", description: "index workspace for semantic RAG search" },
+  { command: "/runplan", description: "execute last planning-mode plan" },
+  { command: "/index", description: "regenerate repository skeleton map" },
   { command: "/session", description: "show session info" },
   { command: "/session list", description: "list archived sessions" },
   {

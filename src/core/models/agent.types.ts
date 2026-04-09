@@ -1,4 +1,4 @@
-import type { AgentProposedPatch } from "../../contracts/agent-decision.types.js";
+import type { AgentSREdit } from "../../contracts/agent-interaction.types.js";
 
 export type TurnStatus =
   | "building_context"
@@ -12,7 +12,7 @@ export type StreamTurnOptions = {
 };
 
 export interface PendingPatchAssessmentItem {
-  proposal: AgentProposedPatch;
+  proposal: AgentSREdit;
   applicable: boolean;
   safe: boolean;
   issues: string[];

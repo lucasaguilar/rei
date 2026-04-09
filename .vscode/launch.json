@@ -364,6 +364,142 @@
             },
             "console": "integratedTerminal",
             "skipFiles": ["<node_internals>/**"]
-        }
+        },
+         {
+            "type": "node",
+            "request": "launch",
+            "name": "REI llama-3.1-8b-instant (Groq)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev", "--", "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "groq",
+                "GROQ_MODEL": "llama-3.1-8b-instant"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "REI gemini-3.1-flash-lite-preview (Gemini)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev", "--", "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "gemini",
+                "GEMINI_MODEL": "gemini-3.1-flash-lite-preview"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+         {
+            "type": "node",
+            "request": "launch",
+            "name": "REI openrouter/free (open router)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev", "--", "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "openrouter",
+                "OPENROUTER_MODEL": "openrouter/free"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+          {
+            "type": "node",
+            "request": "launch",
+            "name": "REI liquid/lfm-2.5-1.2b-instruct:free (open router)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev", "--", "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "openrouter",
+                "OPENROUTER_MODEL": "liquid/lfm-2.5-1.2b-instruct:free"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "REI Qwen/Qwen2.5-72B-Instruct (HuggingFace)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev", "--", "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "huggingface",
+                "HF_MODEL": "Qwen/Qwen2.5-72B-Instruct"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "REI meta-llama/Llama-3.1-8B-Instruct (HuggingFace)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev", "--", "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "huggingface",
+                "HF_MODEL": "meta-llama/Llama-3.1-8B-Instruct"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+          {
+            "type": "node",
+            "request": "launch",
+            "name": "REI google/gemma-4-31B-it:novita (HuggingFace)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev", "--", "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "huggingface",
+                "HF_MODEL": "google/gemma-4-31B-it:novita"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+            {
+            "type": "node",
+            "request": "launch",
+            "name": "REI Qwen/Qwen2.5-Coder-32B-Instruct (HuggingFace)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev", "--", "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "huggingface",
+                "HF_MODEL": "Qwen/Qwen2.5-Coder-32B-Instruct"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+         {
+            "type": "node",
+            "request": "launch",
+            "name": "TEST REI Qwen/Qwen2.5-Coder-32B-Instruct (HuggingFace)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run",
+                "dev",
+                "--",
+                "--workspace",
+                "/Users/lucasaguilar/www/lab/app-for-news",
+                "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "huggingface",
+                "HF_MODEL": "Qwen/Qwen2.5-Coder-32B-Instruct"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+
+
+        
+
+        
     ]
 }
