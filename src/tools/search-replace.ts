@@ -14,11 +14,15 @@ export function applySearchReplace(originalContent: string, edit: AgentSREdit): 
   const searchNormalized = edit.search.replace(/\r\n/g, "\n");
   const contentNormalized = originalContent.replace(/\r\n/g, "\n");
   
-  const index = contentNormalized.indexOf(searchNormalized);
+  // Defensive backslash handling to prevent accumulation
+  const searchCleaned = searchNormalized.replace(/\\\\/g, "\\");
+  const replaceCleaned = edit.replace.replace(/\r\n/g, "\n").replace(/\\\\/g, "\\");
+  
+  const index = contentNormalized.indexOf(searchCleaned);
   
   if (index === -1) {
     // Attempt fallback: try trimming per-line whitespace differences
-    const linesSearch = searchNormalized.split("\n").map(l => l.trim());
+    const linesSearch = searchCleaned.split("\n").map(l => l.trim());
     const linesContent = contentNormalized.split("\n");
     
     // We do a naive fallback strictly for reporting purposes right now.
@@ -30,7 +34,7 @@ export function applySearchReplace(originalContent: string, edit: AgentSREdit): 
   }
   
   // Enforce uniqueness constraints (optional, but good for safety)
-  const lastIndex = contentNormalized.lastIndexOf(searchNormalized);
+  const lastIndex = contentNormalized.lastIndexOf(searchCleaned);
   if (index !== lastIndex) {
     return {
       success: false,
@@ -38,8 +42,7 @@ export function applySearchReplace(originalContent: string, edit: AgentSREdit): 
     };
   }
   
-  const replaceNormalized = edit.replace.replace(/\r\n/g, "\n");
-  const newContent = contentNormalized.slice(0, index) + replaceNormalized + contentNormalized.slice(index + searchNormalized.length);
+  const newContent = contentNormalized.slice(0, index) + replaceCleaned + contentNormalized.slice(index + searchCleaned.length);
   
   return {
     success: true,

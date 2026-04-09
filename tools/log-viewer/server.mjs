@@ -5,9 +5,12 @@ import path from "node:path";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.REI_LOG_VIEWER_PORT || 4173);
+
 const ROOT = process.cwd();
 const HTML_PATH = path.join(ROOT, "tools/log-viewer/index.html");
-const LOG_PATH = path.join(ROOT, ".rei/logs/agent-flow.jsonl");
+const LOG_PATH = process.env.REI_LOG_PATH
+  ? path.resolve(process.env.REI_LOG_PATH)
+  : path.join(ROOT, ".rei/logs/agent-flow.jsonl");
 
 function sendJson(res, status, data) {
   res.writeHead(status, {
@@ -61,5 +64,5 @@ const server = createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`REI Log Viewer running at http://${HOST}:${PORT}`);
-  console.log(`Reading log from ${path.relative(ROOT, LOG_PATH)}`);
+  console.log(`Reading log from ${LOG_PATH}`);
 });

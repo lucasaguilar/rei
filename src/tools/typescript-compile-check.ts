@@ -3,8 +3,10 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
+
 import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
 import { applyFileEdits } from "./search-replace.js";
+import { detectProjectType } from "../workspace/project-type.js";
 
 const execAsync = promisify(exec);
 
@@ -146,8 +148,10 @@ export async function runTypeScriptCompileCheck(
     return { success: true, diagnostics: [], fileCount: 0 };
   }
 
+  // Detect project type and select verify command
+  const detected = detectProjectType(workspacePath);
   const command =
-    process.env.REI_SANDBOX_VERIFY_COMMAND ?? DEFAULT_VERIFY_COMMAND;
+    process.env.REI_SANDBOX_VERIFY_COMMAND ?? detected.verifyCommand;
   const verify = await runVerifyCommand(workspacePath, command);
   const diagnostics = parseTscDiagnostics(
     workspacePath,
@@ -198,8 +202,11 @@ export async function applyVirtualBatch(
 ): Promise<VirtualBatchResult> {
   const virtualFiles = new Map<string, string>();
   const applyErrors: string[] = [];
+
+  // Detect project type and select verify command
+  const detected = detectProjectType(workspacePath);
   const command =
-    process.env.REI_SANDBOX_VERIFY_COMMAND ?? DEFAULT_VERIFY_COMMAND;
+    process.env.REI_SANDBOX_VERIFY_COMMAND ?? detected.verifyCommand;
 
   // Group edits by file
   const editsByFile = new Map<string, AgentSREdit[]>();

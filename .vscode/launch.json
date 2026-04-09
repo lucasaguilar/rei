@@ -477,6 +477,27 @@
             "console": "integratedTerminal",
             "skipFiles": ["<node_internals>/**"]
         },
+         {
+            "type": "node",
+            "request": "launch",
+            "name": "TEST REI Qwen/Qwen2.5-Coder-32B-Instruct (HuggingFace)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run",
+                "dev",
+                "--",
+                "--workspace",
+                "/Users/lucasaguilar/www/lab/app-for-news",
+                "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "huggingface",
+                "HF_MODEL": "Qwen/Qwen2.5-Coder-32B-Instruct"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+
+
         
 
         

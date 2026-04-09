@@ -107,7 +107,7 @@ function extractKeywords(input: string): string[] {
     .filter((w) => !SPANISH_STOPWORDS.has(w));
 }
 
-function extractExplicitPathHints(input: string): string[] {
+export function extractExplicitPathHints(input: string): string[] {
   const matches =
     input.match(/[A-Za-z0-9_.-]+\/[A-Za-z0-9_./-]+\.[A-Za-z0-9]+/g) ?? [];
   return matches.map((m) => m.toLowerCase());

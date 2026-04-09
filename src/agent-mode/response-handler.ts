@@ -9,6 +9,9 @@ function normalizeBlockContent(raw: string): string {
   content = content.replace(/^\s*```[a-zA-Z0-9_-]*\s*/, "");
   content = content.replace(/\s*```\s*$/, "");
 
+  // Ensure consistent backslash handling to prevent accumulation
+  content = content.replace(/\\\\/g, "\\"); // Normalize double backslashes
+  
   return content.replace(/^\n/, "").replace(/\n$/, "");
 }
 
