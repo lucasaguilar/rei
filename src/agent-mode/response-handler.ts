@@ -11,7 +11,7 @@ function normalizeBlockContent(raw: string): string {
 
   // Ensure consistent backslash handling to prevent accumulation
   content = content.replace(/\\\\/g, "\\"); // Normalize double backslashes
-  
+
   return content.replace(/^\n/, "").replace(/\n$/, "");
 }
 

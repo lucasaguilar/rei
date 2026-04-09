@@ -1,5 +1,5 @@
 import type { SessionMode } from "../chat/types.js";
-import { loadPrompt } from "./loader.js";
+import { loadLocalRules, loadPrompt } from "./loader.js";
 
 export function buildSystemMessage(
   mode: SessionMode,
@@ -12,6 +12,9 @@ export function buildSystemMessage(
     `Active mode: ${mode}`,
     "",
     loadPrompt("shared/response-rules"),
+    "",
+    // Inyectamos las reglas locales aquí para que tengan alta prioridad
+    loadLocalRules(),
     "",
   ];
 

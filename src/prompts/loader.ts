@@ -32,8 +32,8 @@ export function loadPrompt(section: string): string {
   } catch {
     throw new Error(
       `[REI] Could not load prompt section "${section}". ` +
-      `Expected file at: ${filePath}. ` +
-      `Check that the prompts/ directory exists and contains the correct markdown files.`
+        `Expected file at: ${filePath}. ` +
+        `Check that the prompts/ directory exists and contains the correct markdown files.`,
     );
   }
   cache.set(section, content);
@@ -46,4 +46,18 @@ export function loadPrompt(section: string): string {
  */
 export function clearPromptCache(): void {
   cache.clear();
+}
+
+// NOTE ONWARD: The following function is not related to prompt loading but is a convenient place to put it since it's used by prompt-building logic and we want to keep all prompt-related code in this directory.
+export function loadLocalRules(): string {
+  const rulesPath = path.join(PROMPTS_ROOT, ".rei-rules.md");
+  if (fs.existsSync(rulesPath)) {
+    try {
+      const content = fs.readFileSync(rulesPath, "utf-8");
+      return `\n\n### MANDATORY CODING RULES (Follow strictly):\n${content}`;
+    } catch (e) {
+      return "";
+    }
+  }
+  return "";
 }
