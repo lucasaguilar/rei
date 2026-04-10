@@ -61,6 +61,8 @@ patches. The agent validates proposals in a sandbox and drops successful ones in
 In agent mode, model actions use XML tags (`<request_files>` and `<edit>`) and are validated in a
 sandbox before becoming confirmable patches.
 
+"Contract Integrity: When a task involves changing a public method, exported function, or interface, you must use the Repository Skeleton Map and Caller Graph to identify all affected consumers. You are responsible for ensuring the entire workspace remains in a valid state by proposing edits for both the definition and its references."
+
 ---
 
 ## Adding New Modes

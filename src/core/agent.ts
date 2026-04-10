@@ -1,5 +1,5 @@
 import type { ModelProvider } from "../providers/model-provider.js";
-import { generateAgentModeResponse } from "../agent-mode/generator.js";
+import { executeAgentTurn } from "../agent-mode/generator.js";
 import { buildSystemMessage } from "../prompts/prompt-builder.js";
 import { buildTurnContext } from "../context/context-builder.js";
 import { buildMessagesForModel } from "../chat/message-builder.js";
@@ -100,7 +100,7 @@ export class Agent {
     options?.onStatus?.("calling_model");
 
     if (session.mode === "agent") {
-      const outcome = await generateAgentModeResponse({
+      const outcome = await executeAgentTurn({
         provider: this.provider,
         messagesForModel,
         workspacePath: this.workspacePath,
@@ -295,7 +295,7 @@ export class Agent {
   private async generateAgentAssistantResponse(
     messagesForModel: ChatSession["messages"],
   ): Promise<string> {
-    const outcome = await generateAgentModeResponse({
+    const outcome = await executeAgentTurn({
       provider: this.provider,
       messagesForModel,
       workspacePath: this.workspacePath,

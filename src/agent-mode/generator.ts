@@ -213,7 +213,7 @@ function finalizeOutcome(
   return outcome;
 }
 
-export async function generateAgentModeResponse(params: {
+export async function executeAgentTurn(params: {
   provider: ModelProvider;
   messagesForModel: ChatSession["messages"];
   workspacePath: string;

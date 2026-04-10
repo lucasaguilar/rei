@@ -5,9 +5,9 @@ import type { ChatMessage, SessionMode } from "./types.js";
 // Each user message already re-injects workspace context (files, RAG, AST),
 // so trimming old turns only loses conversational back-and-forth, not code grounding.
 const MAX_NON_SYSTEM_MESSAGES: Record<SessionMode, number> = {
-  ask: 14,       // ~7 full exchanges
-  planning: 10,  // ~5 full exchanges
-  agent: 10,     // ~5 full exchanges — was 5, too short for multi-step tasks
+  ask: 20, // ~40 full exchanges
+  planning: 12, // ~24 full exchanges
+  agent: 16, // ~32 full exchanges
 };
 
 /**
@@ -27,7 +27,7 @@ const MAX_NON_SYSTEM_MESSAGES: Record<SessionMode, number> = {
  */
 export function buildMessagesForModel(
   messages: ChatMessage[],
-  mode: SessionMode = "ask"
+  mode: SessionMode = "ask",
 ): ChatMessage[] {
   const systemMessage =
     messages.length > 0 && messages[0].role === "system"
