@@ -125,23 +125,23 @@ export class InputHandler {
     }
 
     // Procesar el turno del usuario
-    const rawResponse = await agent.runTurn(session, trimmed);
-    session.messages.push({ role: "assistant", content: rawResponse });
+    //const rawResponse = await agent.runTurn(session, trimmed);
+    //session.messages.push({ role: "assistant", content: rawResponse });
 
     // Extraer ediciones de código
-    const edits = extractSREdits(rawResponse);
+    //const edits = extractSREdits(rawResponse);
 
-    if (edits.length > 0) {
-      // Formatear las diferencias de código
-      edits.forEach((edit) => {
-        const formattedDiff = formatCodeDiff(edit.search, edit.replace);
-        actions.pushTranscript(`\n\n--- File: ${edit.file} ---\n\n${formattedDiff}`);
-      });
+    //if (edits.length > 0) {
+    // Formatear las diferencias de código
+    //edits.forEach((edit) => {
+    //const formattedDiff = formatCodeDiff(edit.search, edit.replace);
+    //actions.pushTranscript(`\n\n--- File: ${edit.file} ---\n\n${formattedDiff}`);
+    // });
 
-      // Actualizar el estado y dibujar la pantalla
-      actions.draw();
-      return;
-    }
+    // Actualizar el estado y dibujar la pantalla
+    //actions.draw();
+    // return;
+    // }
 
     await handleInputTurn(trimmed, ctx);
   }
