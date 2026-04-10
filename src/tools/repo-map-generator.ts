@@ -38,7 +38,13 @@ function getEntryPointFiles(workspacePath: string): Set<string> {
 const REPO_MAP_HEADER = "### REPOSITORY SKELETON MAP";
 
 export function generateRepoMap(workspacePath: string): string {
-  const files = listRelevantFiles(workspacePath);
+  // NOTE 1. Filtro de carpetas prohibidas
+  const IGNORE_DIRS = ["node_modules", "dist", ".rei", ".git", "bin"];
+
+  const files = listRelevantFiles(workspacePath).filter(
+    (file) => !IGNORE_DIRS.some((dir) => file.split(path.sep).includes(dir)),
+  );
+
   const entryPointFiles = getEntryPointFiles(workspacePath);
   const tsFiles = files.filter((f) => /\.(ts|js|tsx|jsx)$/.test(f));
   const htmlFiles = files.filter((f) => f.endsWith(".html"));
@@ -72,11 +78,26 @@ export function generateRepoMap(workspacePath: string): string {
   for (const file of htmlFiles) {
     const relPath = path.relative(workspacePath, file).replace(/\\/g, "/");
     const content = fs.readFileSync(file, "utf8");
-    const tags = Array.from(content.matchAll(/<([a-zA-Z0-9\-]+)/g)).map(
-      (m) => m[1],
-    );
+    const tags = Array.from(content.matchAll(/<([a-zA-Z0-9\-]+)/g))
+      .map((m) => m[1]) // Filtramos etiquetas genéricas para resaltar componentes (tags con guion o especiales)
+      .filter(
+        (tag) =>
+          tag.includes("-") ||
+          ![
+            "div",
+            "span",
+            "p",
+            "b",
+            "i",
+            "tr",
+            "td",
+            "table",
+            "form",
+            "input",
+          ].includes(tag.toLowerCase()),
+      );
     sections.push(
-      `// FILE: ${relPath}\nHTML tags: ${[...new Set(tags)].join(", ")}`,
+      `// FILE: ${relPath}\nRelevant Tags: ${[...new Set(tags)].join(", ")}`,
     );
   }
 
@@ -219,6 +240,7 @@ function renderClass(cls: import("ts-morph").ClassDeclaration): string {
     : "";
   const jsDoc = cls.getJsDocs()[0]?.getComment() || "";
   const jsDocLine = jsDoc ? `// ${jsDoc}\n` : "";
+
   const props = cls
     .getProperties()
     .filter((prop) => (prop.getScope() ?? "public") === "public")
@@ -226,9 +248,11 @@ function renderClass(cls: import("ts-morph").ClassDeclaration): string {
       const readonly = prop.isReadonly() ? "readonly " : "";
       const staticModifier = prop.isStatic() ? "static " : "";
       const optional = prop.hasQuestionToken() ? "?" : "";
-      const typeText = prop.getTypeNode()?.getText() ?? "any";
+      //const typeText = prop.getTypeNode()?.getText() ?? "any";
+      const typeText = cleanTypeText(prop.getTypeNode()?.getText() ?? "any"); // <--- Limpieza aquí
       return `public ${staticModifier}${readonly}${prop.getName()}${optional}: ${typeText};`;
     });
+
   const methods = cls
     .getMethods()
     .filter((method) => (method.getScope() ?? "public") === "public")
@@ -274,9 +298,15 @@ function renderFunction(fn: import("ts-morph").FunctionDeclaration): string {
   return `${exportComment}${jsDocLine}export ${asyncPrefix}function ${name}(${parameters}): ${returnType};`;
 }
 
+function cleanTypeText(text: string): string {
+  // Elimina patrones tipo import("/Users/.../file").Nombre por solo el Nombre
+  return text.replace(/import\(".*?"\)\./g, "");
+}
+
 function renderPropertySignature(prop: PropertySignature): string {
   const optional = prop.hasQuestionToken() ? "?" : "";
-  const typeText = prop.getTypeNode()?.getText() ?? "any";
+  //const typeText = prop.getTypeNode()?.getText() ?? "any";
+  const typeText = cleanTypeText(prop.getTypeNode()?.getText() ?? "any"); // <--- Limpieza aquí
   return `${prop.getName()}${optional}: ${typeText};`;
 }
 

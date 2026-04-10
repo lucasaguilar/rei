@@ -54,7 +54,7 @@ export class AgentLogger {
     this.correlationId = id;
   }
 
-  private write(phase: LogEntry["phase"], data: any) {
+  private persistLogEntry(phase: LogEntry["phase"], data: any) {
     try {
       const entry: LogEntry = {
         timestamp: new Date().toISOString(),
@@ -70,11 +70,11 @@ export class AgentLogger {
   }
 
   public logUserPrompt(data: { mode: string; prompt: string }) {
-    this.write("USER_PROMPT", data);
+    this.persistLogEntry("USER_PROMPT", data);
   }
 
   public logDecision(rawOutput: string, parsed: any) {
-    this.write("DECISION", { rawOutput, parsed });
+    this.persistLogEntry("DECISION", { rawOutput, parsed });
   }
 
   public logKnowledge(
@@ -83,11 +83,11 @@ export class AgentLogger {
     hits: number,
     urlContext: string,
   ) {
-    this.write("KNOWLEDGE", { provider, query, hits, urlContext });
+    this.persistLogEntry("KNOWLEDGE", { provider, query, hits, urlContext });
   }
 
   public logPatchProposal(file: string, patchText: string) {
-    this.write("PATCH_PROPOSED", { file, patchText });
+    this.persistLogEntry("PATCH_PROPOSED", { file, patchText });
   }
 
   public logAstContext(
@@ -95,7 +95,7 @@ export class AgentLogger {
     dependenciesFound: number,
     signatureLength: number,
   ) {
-    this.write("AST_CONTEXT_EXTRACTION", {
+    this.persistLogEntry("AST_CONTEXT_EXTRACTION", {
       filesScraped,
       dependenciesFound,
       signatureLength,
@@ -111,15 +111,15 @@ export class AgentLogger {
       score: number;
     }>,
   ) {
-    this.write("CONTEXT_SEARCH", { query, hitsCount: hits.length, hits });
+    this.persistLogEntry("CONTEXT_SEARCH", { query, hitsCount: hits.length, hits });
   }
 
   public logCriticLoop(file: string, errors: string[]) {
-    this.write("AST_CRITIC_LOOP", { file, errors });
+    this.persistLogEntry("AST_CRITIC_LOOP", { file, errors });
   }
 
   public logPatchSynthesis(editCount: number, patchCount: number) {
-    this.write("PATCH_SYNTHESIS", { editCount, patchCount });
+    this.persistLogEntry("PATCH_SYNTHESIS", { editCount, patchCount });
   }
 
   public logPatchSynthesisCoverage(data: {
@@ -133,7 +133,7 @@ export class AgentLogger {
       detail?: string;
     }>;
   }) {
-    this.write("PATCH_SYNTHESIS_COVERAGE", data);
+    this.persistLogEntry("PATCH_SYNTHESIS_COVERAGE", data);
   }
 
   public logSandboxVerify(data: {
@@ -144,7 +144,7 @@ export class AgentLogger {
     stdoutPreview?: string;
     stderrPreview?: string;
   }) {
-    this.write("SANDBOX_VERIFY", data);
+    this.persistLogEntry("SANDBOX_VERIFY", data);
   }
 
   public logSandboxVerifyFailed(data: {
@@ -153,11 +153,11 @@ export class AgentLogger {
     reason: string;
     details?: string;
   }) {
-    this.write("SANDBOX_VERIFY_FAILED", data);
+    this.persistLogEntry("SANDBOX_VERIFY_FAILED", data);
   }
 
   public logSynthesisFailed(reason: string, details?: string) {
-    this.write("PATCH_SYNTHESIS_FAILED", { reason, details });
+    this.persistLogEntry("PATCH_SYNTHESIS_FAILED", { reason, details });
   }
 
   public logPatchOutcome(data: {
@@ -166,7 +166,7 @@ export class AgentLogger {
     sandboxVerified: boolean;
     confirmableCount: number;
   }) {
-    this.write("PATCH_OUTCOME", data);
+    this.persistLogEntry("PATCH_OUTCOME", data);
   }
 
   public logPatchQuality(data: {
@@ -177,7 +177,7 @@ export class AgentLogger {
     generatedPatchCount: number;
     appliedPatchCount: number;
   }) {
-    this.write("PATCH_QUALITY", data);
+    this.persistLogEntry("PATCH_QUALITY", data);
   }
 
   public logSREditsParsed(data: {
@@ -192,7 +192,7 @@ export class AgentLogger {
       replacePreview: string;
     }>;
   }) {
-    this.write("SR_EDITS_PARSED", data);
+    this.persistLogEntry("SR_EDITS_PARSED", data);
   }
 
   public logSRValidationFailed(data: {
@@ -209,11 +209,11 @@ export class AgentLogger {
       message: string;
     }>;
   }) {
-    this.write("SR_VALIDATION_FAILED", data);
+    this.persistLogEntry("SR_VALIDATION_FAILED", data);
   }
 
   public logInfo(message: string, context?: any) {
-    this.write("INFO", { message, context });
+    this.persistLogEntry("INFO", { message, context });
   }
 
   public logNoEditsReason(reason: string, context?: any) {
@@ -221,6 +221,6 @@ export class AgentLogger {
   }
 
   public logError(message: string, stack?: string) {
-    this.write("ERROR", { message, stack });
+    this.persistLogEntry("ERROR", { message, stack });
   }
 }
