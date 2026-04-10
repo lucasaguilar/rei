@@ -13,6 +13,17 @@ Output format requirements (AGENT mode):
   </replace>
   </edit>
 
+- To create a new file, emit one <create> block per file:
+
+  <create file="src/relative/path/to/newfile.ts">
+  full file contents
+  </create>
+
+- Only use <create> blocks for files that do not exist yet.
+- Do not use <edit> for new files; always use <create>.
+- You may emit <create> and <edit> blocks in the same response if needed.
+- The system will ignore <create> blocks for files that already exist.
+
 - Never mix <request_files> and <edit> blocks in the same response.
 - If you need more context, emit only <request_files> and nothing else.
 - If you are ready to propose edits, emit <edit> blocks followed by a brief plain-text explanation.

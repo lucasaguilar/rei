@@ -71,8 +71,20 @@ function collectFiles(
     return;
   }
 
+  const EXCLUDED_FILES = [
+    ".rei-debug.html",
+    path.join("tools", "log-viewer", "index.html"),
+    path.join("log-viewer", "index.html"),
+  ];
+
   for (const entry of entries) {
     if (results.length >= MAX_FILES) break;
+
+    const relPath = path.relative(
+      workspacePath,
+      path.join(currentPath, entry.name),
+    );
+    if (EXCLUDED_FILES.includes(relPath)) continue;
 
     if (entry.isDirectory()) {
       if (shouldIgnoreDirectory(entry.name)) continue;
@@ -81,7 +93,7 @@ function collectFiles(
       const ext = path.extname(entry.name).toLowerCase();
       if (IGNORED_EXTENSIONS.has(ext)) continue;
       results.push({
-        path: path.relative(workspacePath, path.join(currentPath, entry.name)),
+        path: relPath,
         name: entry.name,
         extension: ext,
       });

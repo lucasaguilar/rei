@@ -1,4 +1,5 @@
 import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
+import { formatCodeDiff } from "../cli/markdown-renderer.js";
 
 function normalizeBlockContent(raw: string): string {
   let content = raw.replace(/\r\n/g, "\n");
@@ -26,8 +27,6 @@ function compactPreview(raw: string, maxChars = 160): string {
     ? `${oneLine.slice(0, Math.max(0, maxChars - 3))}...`
     : oneLine;
 }
-
-import { formatCodeDiff } from '../cli/markdown-renderer.js';
 
 export function formatSREditsForLog(edits: AgentSREdit[]): Array<{
   file: string;
@@ -92,4 +91,31 @@ export function extractSREdits(response: string): AgentSREdit[] {
     }
   }
   return edits;
+}
+
+/**
+ * Extracts <create file="...">...</create> blocks for file creation.
+ */
+export function extractCreateFileRequests(
+  response: string,
+): Array<{ file: string; content: string }> {
+  const creates: Array<{ file: string; content: string }> = [];
+  const createRegex = /<create\s+file="([^"]+)">([\s\S]*?)<\/create>/gi;
+  const matches = [...response.matchAll(createRegex)];
+  for (const match of matches) {
+    const file = match[1].trim();
+    const content = normalizeBlockContent(match[2]);
+    creates.push({ file, content });
+  }
+  return creates;
+}
+
+/**
+ * Extracts <execute_command> tags from the agent response.
+ */
+export function extractCommandRequests(response: string): string[] {
+  const matches = [
+    ...response.matchAll(/<execute_command>([\s\S]*?)<\/execute_command>/gi),
+  ];
+  return matches.map((match) => match[1].trim());
 }

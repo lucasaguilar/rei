@@ -2,6 +2,8 @@ import type { TurnStatus } from "../../core/models/agent.types.js";
 import { renderMarkdown } from "../markdown-renderer.js";
 import type { InputHandlerContext } from "../models/input-handler.types.js";
 import { saveSession } from "../../chat/session-store.js";
+import { extractSREdits } from "../../agent-mode/response-handler.js";
+import { formatCodeDiff } from "../markdown-renderer.js";
 
 export async function handleInputTurn(
   trimmed: string,
@@ -43,15 +45,34 @@ export async function handleInputTurn(
       }
     }
 
+    // Procesar el buffer final: extraer edits y formatear
+    const edits = extractSREdits(buffer);
+    let finalContent = buffer;
+
+    if (edits.length > 0) {
+      // Limpiar el buffer de los tags XML para el renderizado markdown
+      finalContent = buffer.replace(/<edit[\s\S]*?<\/edit>/gi, "").trim();
+    }
+
     if (liveStart >= 0) {
-      const rendered = renderMarkdown(buffer);
+      const rendered = renderMarkdown(finalContent);
       const lines = rendered.split("\n");
       transcript.splice(liveStart, transcript.length - liveStart, ...lines);
     } else {
       actions.pushTranscript("");
       actions.pushTranscript(`You: ${trimmed}`);
       actions.pushTranscript("");
-      actions.pushTranscript(renderMarkdown(buffer));
+      actions.pushTranscript(renderMarkdown(finalContent));
+    }
+
+    // Si hubo edits, los añadimos formateados al final
+    if (edits.length > 0) {
+      actions.pushTranscript("\n### Cambios propuestos:");
+      for (const edit of edits) {
+        actions.pushTranscript(
+          `\n**Archivo:** ${edit.file}\n${formatCodeDiff(edit.search, edit.replace)}`,
+        );
+      }
     }
     actions.pushTranscript("");
   } catch (err: unknown) {
@@ -62,7 +83,7 @@ export async function handleInputTurn(
     state.busy = false;
     state.activeStatus = undefined;
     actions.stopSpinner();
-    
+
     saveSession(
       ctx.workspacePath,
       session.messages,
@@ -70,7 +91,7 @@ export async function handleInputTurn(
       session.summary,
       session.createdAt,
     );
-    
+
     actions.draw();
   }
 }
