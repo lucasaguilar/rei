@@ -27,7 +27,7 @@ export async function applySREditBatchFS(
   workspacePath: string,
 ): Promise<BatchPatchApplyResult> {
   const results: BatchPatchApplyItemResult[] = [];
-  
+
   // Group edits by file
   const editsByFile = new Map<string, AgentSREdit[]>();
   for (const edit of edits) {
@@ -42,34 +42,33 @@ export async function applySREditBatchFS(
     try {
       const text = await fs.readFile(absPath, "utf-8");
       const res = applyFileEdits(text, fileEdits);
-      
+
       if (!res.success) {
         results.push({
           file,
           applied: false,
           skipped: false,
-          validationErrors: [res.error!]
+          validationErrors: [res.error!],
         });
         allSuccess = false;
         continue;
       }
-      
+
       await fs.writeFile(absPath, res.newContent!, "utf-8");
-      
+
       results.push({
         file,
         applied: true,
         skipped: false,
-        validationErrors: []
+        validationErrors: [],
       });
-      
     } catch (err) {
       allSuccess = false;
       results.push({
         file,
         applied: false,
         skipped: false,
-        validationErrors: [`Failed to read/write file: ${err}`]
+        validationErrors: [`Failed to read/write file: ${err}`],
       });
     }
   }
@@ -86,7 +85,7 @@ export async function applySREditBatchFS(
 export async function commitAppliedPatches(
   workspacePath: string,
   message: string,
-  filePaths?: string[]
+  filePaths?: string[],
 ): Promise<{ committed: boolean; stdout: string; stderr: string }> {
   try {
     const addArgs = ["-C", workspacePath, "add"];
@@ -119,4 +118,55 @@ export async function commitAppliedPatches(
       stderr: err.stderr ?? err.message ?? "git commit failed",
     };
   }
+}
+
+/**
+ * Applies a batch of file creations. Does not overwrite existing files.
+ */
+export async function applyCreateFileBatchFS(
+  creates: Array<{ file: string; content: string }>,
+  workspacePath: string,
+): Promise<BatchPatchApplyResult> {
+  const results: BatchPatchApplyItemResult[] = [];
+  let allSuccess = true;
+  for (const { file, content } of creates) {
+    const absPath = path.join(workspacePath, file);
+    try {
+      // Check if file exists
+      await fs
+        .access(absPath)
+        .then(() => {
+          // File exists
+          results.push({
+            file,
+            applied: false,
+            skipped: false,
+            validationErrors: ["File already exists, not overwritten."],
+          });
+          allSuccess = false;
+        })
+        .catch(async () => {
+          // File does not exist, create it
+          await fs.mkdir(path.dirname(absPath), { recursive: true });
+          await fs.writeFile(absPath, content, "utf-8");
+          results.push({
+            file,
+            applied: true,
+            skipped: false,
+            validationErrors: [],
+          });
+        });
+    } catch (err) {
+      allSuccess = false;
+      results.push({
+        file,
+        applied: false,
+        skipped: false,
+        validationErrors: [
+          `Failed to create file: ${err instanceof Error ? err.message : String(err)}`,
+        ],
+      });
+    }
+  }
+  return { success: allSuccess, results };
 }

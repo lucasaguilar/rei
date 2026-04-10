@@ -464,9 +464,7 @@ Example:
 
 ## Current limitations
 
-- patch proposals are only applied manually through `/confirm` (explicit approval gate)
 - model-proposed edits may still be rejected if sandbox validation fails
-- no built-in command-execution toolchain inside REI runtime yet (focus is context + patch workflow)
 - if semantic indexing is re-enabled, rebuild the index after large refactors (`/index`)
 - external knowledge providers cover a limited set of frameworks
 

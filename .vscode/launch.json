@@ -242,13 +242,13 @@
         {
             "type": "node",
             "request": "launch",
-            "name": "REI qwen/qwen2.5-vl-72b-instruct:free (OpenRouter)",
+            "name": "REI qwen/qwen-2.5-coder-32b-instruct (OpenRouter)",
             "runtimeExecutable": "npm",
             "runtimeArgs": ["run", "dev", "--", "chat"],
             "envFile": "${workspaceFolder}/.env",
             "env": {
                 "MODEL_PROVIDER": "openrouter",
-                "OPENROUTER_MODEL": "qwen/qwen2.5-vl-72b-instruct:free"
+                "OPENROUTER_MODEL": "qwen/qwen-2.5-coder-32b-instruct"
             },
             "console": "integratedTerminal",
             "skipFiles": ["<node_internals>/**"]
@@ -326,13 +326,13 @@
         {
             "type": "node",
             "request": "launch",
-            "name": "REI google/gemma-3-27b-it:free (OpenRouter)",
+            "name": "REI google/gemma-4-31b-it (OpenRouter)",
             "runtimeExecutable": "npm",
             "runtimeArgs": ["run", "dev", "--", "chat"],
             "envFile": "${workspaceFolder}/.env",
             "env": {
                 "MODEL_PROVIDER": "openrouter",
-                "OPENROUTER_MODEL": "google/gemma-3-27b-it:free"
+                "OPENROUTER_MODEL": "google/gemma-4-31b-it"
             },
             "console": "integratedTerminal",
             "skipFiles": ["<node_internals>/**"]

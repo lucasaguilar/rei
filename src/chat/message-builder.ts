@@ -1,3 +1,7 @@
+import {
+  compressSkeletonMap,
+  lightweightCompress,
+} from "./helpers/chat.helpers.js";
 import type { ChatMessage, SessionMode } from "./types.js";
 
 // NOTE: Position 0 in session.messages is always the system message and is
@@ -33,6 +37,10 @@ export function buildMessagesForModel(
     messages.length > 0 && messages[0].role === "system"
       ? messages[0]
       : undefined;
+
+  if (systemMessage) {
+    systemMessage.content = compressSkeletonMap(systemMessage.content);
+  }
 
   // Non-system messages start at index 1 when a system message is present,
   // otherwise the entire array is non-system messages.

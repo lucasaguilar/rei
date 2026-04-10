@@ -6,6 +6,7 @@ import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
 import {
   extractFileRequests,
   extractSREdits,
+  extractCreateFileRequests,
   formatSREditsForLog,
 } from "./response-handler.js";
 import {
@@ -16,6 +17,7 @@ import { applyFileEdits } from "../tools/search-replace.js";
 import { findSymbolCallers, rankCallerFiles } from "../context/caller-graph.js";
 import * as fs from "fs/promises";
 import * as path from "path";
+import { applyCreateFileBatchFS } from "../tools/patch-applier.js";
 
 export interface AgentModeOutcome {
   response: string;
@@ -240,6 +242,35 @@ export async function executeAgentTurn(params: {
     const rawResponse = await provider.completeChat(currentMessages);
     lastRawResponse = rawResponse;
     logger.logInfo("Raw LLM Response", { rawResponse });
+
+    // 1a. Handle <create> blocks (file creation requests)
+    const createFileRequests = extractCreateFileRequests(rawResponse);
+    if (createFileRequests.length > 0) {
+      const createResults = await applyCreateFileBatchFS(
+        createFileRequests,
+        workspacePath,
+      );
+      logger.logInfo("File creation results", { createResults });
+
+      // Si hubo errores de creación, alimentar feedback al modelo y continuar el loop
+      const failedCreates = createResults.results.filter((r) => !r.applied);
+      if (failedCreates.length > 0) {
+        const feedback =
+          "Some <create> blocks failed:\n" +
+          failedCreates
+            .map((r) => `- ${r.file}: ${r.validationErrors.join("; ")}`)
+            .join("\n");
+        logger.logInfo("File creation feedback", { feedback });
+        currentMessages.push({ role: "assistant", content: rawResponse });
+        currentMessages.push({
+          role: "user",
+          content:
+            feedback +
+            "\nPlease fix these issues and reply with corrected <create> blocks or continue with the next step.",
+        });
+        continue;
+      }
+    }
 
     // 2. Did the model request more files?
     const fileRequests = extractFileRequests(rawResponse);

@@ -23,7 +23,8 @@ export interface LogEntry {
     | "SR_EDITS_PARSED"
     | "SR_VALIDATION_FAILED"
     | "INFO"
-    | "ERROR";
+    | "ERROR"
+    | "COMMAND_EXECUTED";
   data: any;
 }
 
@@ -222,5 +223,9 @@ export class AgentLogger {
 
   public logError(message: string, stack?: string) {
     this.persistLogEntry("ERROR", { message, stack });
+  }
+
+  public logCommandExecution(command: string, result: any) {
+    this.persistLogEntry("COMMAND_EXECUTED", { command, ...result });
   }
 }

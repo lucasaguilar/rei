@@ -14,6 +14,8 @@ import {
   applySREditBatchFS,
   type BatchPatchApplyResult,
 } from "../tools/patch-applier.js";
+import { executeCommand } from "../tools/command-executor.js";
+import { extractCommandRequests } from "../agent-mode/response-handler.js";
 import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
 import { KnowledgeOrchestrator } from "../knowledge/orchestrator.js";
 import { AgentLogger } from "./logger.js";
@@ -139,7 +141,24 @@ export class Agent {
         return;
       }
 
-      // Si no hay parches válidos, solo responde
+      // Interceptación de comandos antes de finalizar el turno
+      const commands = extractCommandRequests(outcome.response);
+      if (commands.length > 0) {
+        let commandFeedback = "\n\n--- Command Execution Results ---\n";
+        for (const cmd of commands) {
+          this.logger.logInfo(`Executing command: ${cmd}`);
+          const result = await executeCommand(cmd, this.workspacePath);
+          this.logger.logCommandExecution(cmd, result);
+          commandFeedback += `\nCommand: ${cmd}\nExit Code: ${result.exitCode}\nStdout: ${result.stdout || "none"}\nStderr: ${result.stderr || "none"}\n`;
+        }
+        session.messages.push({ role: "assistant", content: outcome.response });
+        session.messages.push({ role: "user", content: `System Feedback: ${commandFeedback}` });
+        options?.onStatus?.("producing_response");
+        yield outcome.response + commandFeedback;
+        return;
+      }
+
+      // Si no hay parches ni comandos, solo responde
       session.messages.push({ role: "assistant", content: outcome.response });
       options?.onStatus?.("producing_response");
       yield outcome.response;
@@ -335,6 +354,17 @@ export class Agent {
             .join("")
         );
       }
+    }
+    const commands = extractCommandRequests(outcome.response);
+    if (commands.length > 0) {
+      let commandFeedback = "\n\n--- Command Execution Results ---\n";
+      for (const cmd of commands) {
+        this.logger.logInfo(`Executing command: ${cmd}`);
+        const result = await executeCommand(cmd, this.workspacePath);
+        this.logger.logCommandExecution(cmd, result);
+        commandFeedback += `\nCommand: ${cmd}\nExit Code: ${result.exitCode}\nStdout: ${result.stdout || "none"}\nStderr: ${result.stderr || "none"}\n`;
+      }
+      return outcome.response + commandFeedback;
     }
     return outcome.response;
   }
