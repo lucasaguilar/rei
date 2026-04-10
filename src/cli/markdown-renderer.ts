@@ -1,3 +1,4 @@
+import { diffLines } from 'diff';
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
 
@@ -10,6 +11,27 @@ const yellowBold = (s: string): string => `\x1b[1;33m${s}\x1b[0m`;
 const blueBold = (s: string): string => `\x1b[1;34m${s}\x1b[0m`;
 const italic = (s: string): string => `\x1b[3m${s}\x1b[0m`;
 const underline = (s: string): string => `\x1b[4;34m${s}\x1b[0m`;
+
+/**
+ * Formats a code difference between search and replace blocks.
+ * Uses ANSI color codes to highlight additions (green) and deletions (red).
+ */
+export function formatCodeDiff(search: string, replace: string): string {
+  const diff = diffLines(search, replace);
+  let formattedDiff = '';
+
+  diff.forEach((part) => {
+    if (part.added) {
+      formattedDiff += `\x1b[32m+ ${part.value}\x1b[0m`; // Verde para añadido
+    } else if (part.removed) {
+      formattedDiff += `\x1b[31m- ${part.value}\x1b[0m`; // Rojo para eliminado
+    } else {
+      formattedDiff += `  ${part.value}`; // Blanco para sin cambios
+    }
+  });
+
+  return formattedDiff.trim();
+}
 
 /**
  * Styles heading text that arrives with its "#" prefix already included

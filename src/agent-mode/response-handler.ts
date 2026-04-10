@@ -27,12 +27,15 @@ function compactPreview(raw: string, maxChars = 160): string {
     : oneLine;
 }
 
+import { formatCodeDiff } from '../cli/markdown-renderer.js';
+
 export function formatSREditsForLog(edits: AgentSREdit[]): Array<{
   file: string;
   searchLines: number;
   replaceLines: number;
   searchPreview: string;
   replacePreview: string;
+  diffPreview: string;
 }> {
   return edits.map((edit) => ({
     file: edit.file,
@@ -40,6 +43,7 @@ export function formatSREditsForLog(edits: AgentSREdit[]): Array<{
     replaceLines: edit.replace.split("\n").length,
     searchPreview: compactPreview(edit.search),
     replacePreview: compactPreview(edit.replace),
+    diffPreview: formatCodeDiff(edit.search, edit.replace),
   }));
 }
 

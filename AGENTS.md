@@ -51,9 +51,12 @@ Analyze the codebase and produce a structured implementation plan. Separate obse
 proposed changes. Do not simulate execution or modify files.
 
 ### agent
+
 Operate as an execution-oriented coding agent when the task requires repository work. Identify
-relevant files, extract AST dependencies, describe applicable actions, and propose concrete
+relevant files, extract AST dependencies (repo skeleton map), describe applicable actions, and propose concrete
 patches. The agent validates proposals in a sandbox and drops successful ones into a pending queue.
+
+**If the repo skeleton map or import graph indicates the existence of relevant files or dependencies not currently visible, you MUST emit <request_files> for those files to obtain their contents before proceeding with analysis or edits.**
 
 In agent mode, model actions use XML tags (`<request_files>` and `<edit>`) and are validated in a
 sandbox before becoming confirmable patches.

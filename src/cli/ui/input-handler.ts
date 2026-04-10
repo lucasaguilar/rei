@@ -3,21 +3,26 @@ import type { InputHandlerContext } from "../models/input-handler.types.js";
 import { clamp } from "../helpers/terminal.helpers.js";
 import { handleInputCommand } from "../helpers/input-command.helpers.js";
 import { handleInputTurn } from "../helpers/input-turn.helpers.js";
+import { extractSREdits } from "../../agent-mode/response-handler.js";
+import { formatCodeDiff } from "../markdown-renderer.js";
 
 export class InputHandler {
   public static async submitInput(ctx: InputHandlerContext): Promise<void> {
     const { state, actions } = ctx;
 
+    // NOTE: Check if the input handler is currently busy processing another input
     if (state.busy) return;
 
     const activePalette = actions.getActivePalette();
     const submittedInput = state.inputBuffer;
     const trimmed = state.inputBuffer.trim();
 
+    // NOTE: Handle selection from the mention palette (file/directory suggestions)
     if (InputHandler.handleMentionPaletteSelection(ctx, activePalette)) {
       return;
     }
 
+    // NOTE: Handle selection from the command palette (/help, /mode, etc.)
     if (await InputHandler.handleCommandPaletteSelection(ctx, activePalette)) {
       return;
     }
@@ -103,7 +108,7 @@ export class InputHandler {
     submittedInput: string,
     trimmed: string,
   ): Promise<void> {
-    const { state, actions } = ctx;
+    const { state, actions, session, agent, workspacePath } = ctx;
 
     actions.resetInput();
     actions.draw();
@@ -116,6 +121,25 @@ export class InputHandler {
     const wasCommand = await handleInputCommand(trimmed, ctx);
     actions.draw();
     if (!state.running || wasCommand) {
+      return;
+    }
+
+    // Procesar el turno del usuario
+    const rawResponse = await agent.runTurn(session, trimmed);
+    session.messages.push({ role: "assistant", content: rawResponse });
+
+    // Extraer ediciones de código
+    const edits = extractSREdits(rawResponse);
+
+    if (edits.length > 0) {
+      // Formatear las diferencias de código
+      edits.forEach((edit) => {
+        const formattedDiff = formatCodeDiff(edit.search, edit.replace);
+        actions.pushTranscript(`\n\n--- File: ${edit.file} ---\n\n${formattedDiff}`);
+      });
+
+      // Actualizar el estado y dibujar la pantalla
+      actions.draw();
       return;
     }
 
