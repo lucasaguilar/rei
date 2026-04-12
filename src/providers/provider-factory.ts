@@ -14,8 +14,12 @@ export type ProviderName =
   | "openrouter"
   | "huggingface";
 
-export function createModelProvider(): ModelProvider {
-  const providerName = (process.env.MODEL_PROVIDER ?? "mock").toLowerCase();
+export function createModelProvider(providerNameArg?: string): ModelProvider {
+  const providerName = (
+    providerNameArg ??
+    process.env.MODEL_PROVIDER ??
+    "mock"
+  ).toLowerCase();
 
   switch (providerName) {
     case "mock":
@@ -27,12 +31,13 @@ export function createModelProvider(): ModelProvider {
     case "gemini":
       return new GeminiProvider();
     case "openrouter":
+      console.log("Creating OpenRouterProvider with");
       return new OpenRouterProvider();
     case "huggingface":
       return new HuggingFaceProvider();
     default:
       throw new Error(
-        `Unknown MODEL_PROVIDER: ${process.env.MODEL_PROVIDER}. Expected one of: mock, ollama, groq, gemini, openrouter, huggingface`,
+        `Unknown MODEL_PROVIDER: ${providerNameArg ?? process.env.MODEL_PROVIDER}. Expected one of: mock, ollama, groq, gemini, openrouter, huggingface`,
       );
   }
 }
