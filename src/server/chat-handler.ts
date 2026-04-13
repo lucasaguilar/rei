@@ -1,5 +1,6 @@
 import { Agent } from "../core/agent.js";
 import { SessionMode, type ChatSession } from "../chat/types.js";
+import { isWorkspaceAllowed } from "../server/workspace-config.js";
 
 export class ChatHandler {
   private agent: Agent;
@@ -17,6 +18,11 @@ export class ChatHandler {
       : "";
 
     if (!prompt) throw new Error("No prompt provided.");
+
+    // Validar workspace antes de continuar
+    if (!isWorkspaceAllowed(this.workspacePath)) {
+      throw new Error("Workspace not allowed");
+    }
 
     // 1. Recuperar la sesión actual del workspace para mantener el flow de REI
     const { loadCurrentSession } = await import("../chat/session-store.js");

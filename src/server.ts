@@ -3,9 +3,16 @@ import { createModelProvider } from "./providers/provider-factory.js";
 import { Agent } from "./core/agent.js";
 import { ChatHandler } from "./server/chat-handler.js";
 import { REI_LOGO } from "./cli/rei-logo.js";
+import { isWorkspaceAllowed, getDefaultWorkspace } from "./server/workspace-config.js";
 
 const PORT = process.env.REI_SERVER_PORT || 3000;
-const WORKSPACE_PATH = process.cwd();
+const WORKSPACE_PATH = process.env.REI_WORKSPACE_PATH || getDefaultWorkspace();
+
+// Validar que el workspace sea uno permitido
+if (!isWorkspaceAllowed(WORKSPACE_PATH)) {
+  console.error(`❌ Workspace not allowed: ${WORKSPACE_PATH}`);
+  process.exit(1);
+}
 
 async function startServer() {
   // 1. Instanciamos el Agente UNA SOLA VEZ al inicio del servidor

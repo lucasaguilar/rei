@@ -509,6 +509,20 @@
             },
             "console": "integratedTerminal",
             "skipFiles": ["<node_internals>/**"]
+        }, // Qwen/Qwen2.5-Coder-32B-Instruct
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "SERVER REI qwen/qwen3-coder-30b-a3b-instruct (OpenRouter)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "server"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "openrouter",
+                "OPENROUTER_MODEL": "qwen/qwen3-coder-30b-a3b-instruct"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
         },
         
                
