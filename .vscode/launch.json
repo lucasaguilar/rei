@@ -496,6 +496,22 @@
             "console": "integratedTerminal",
             "skipFiles": ["<node_internals>/**"]
         },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "SERVER REI google/gemma-4-31b-it (OpenRouter)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "server"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "openrouter",
+                "OPENROUTER_MODEL": "google/gemma-4-31b-it"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        
+               
 
 
         
