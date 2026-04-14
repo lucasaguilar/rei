@@ -12,7 +12,7 @@ While commercial giants like Cursor and GitHub Copilot dominate the cloud IDE sp
 - **Heuristic Repository Context**: REI ranks files from your workspace using keyword/path scoring, explicit path hints (like `@src/file.ts`), and caller discovery so relevant files are loaded without requiring embeddings.
 - **Caller Graph Discovery**: When you ask REI to change a function, it automatically scans the workspace for every file that references that symbol and pre-loads them into context — so cascade change proposals cover all affected files without you listing them.
 - **Sandbox Validation Loop (Auto-Healing)**: REI validates LLM-generated edits in a temporary sandbox copy of the workspace and runs TypeScript verification (`npx tsc --noEmit --pretty false`). If the model produces broken code, REI feeds the compiler error back to the LLM and forces a correction before showing you anything.
-- **Post-Apply Compile Check**: After `/confirm`, REI can run project compile checks and report type errors.
+- **Post-Apply Compile Check**: REI can run project compile checks and report type errors.
 - **Persistent Sessions**: Conversations are automatically saved to `.rei/sessions/current.json` and resumed on next launch. Older sessions can be archived and reloaded by ID.
 - **Conversation Compaction**: When a session grows beyond 20 messages, older turns are summarized using a configurable cheaper model, keeping context manageable without losing key decisions.
 - **Absolute Transparency**: REI logs its internal flow to `.rei/logs/agent-flow.jsonl` — context search, AST extraction, patch proposal, sandbox verification, and compiler errors, structured as JSON Lines.
@@ -83,10 +83,6 @@ npm run dev -- --workspace /workspaces/another-repo
 | `/mode ask` | Switch to ask mode |
 | `/mode planning` | Switch to planning mode |
 | `/mode agent` | Switch to agent mode |
-| `/pending` | Show currently queued validated patches |
-| `/confirm` | Apply all queued patches to the filesystem |
-| `/confirm --dry-run` | Validate queued edits without writing |
-| `/discard` | Clear queued patches without applying |
 | `/index` | Build or refresh the semantic index file (legacy/optional; runtime context currently uses heuristics) |
 | `/compact` | Manually compact conversation memory into a summary |
 | `/session` | Show current session info (created date, mode, turn count) |
@@ -351,8 +347,6 @@ For change tasks, REI validates model-proposed edits in a temporary sandbox befo
 - run `npx tsc --noEmit --pretty false` (or configured verifier)
 - parse diagnostics and feed them back to the model in retry loops
 
-Only edits that pass sandbox verification are queued for `/pending` and `/confirm`.
-
 ---
 
 ## Patch workflow
@@ -368,17 +362,6 @@ The model produces Search/Replace blocks (`<edit file="...">` with `<search>` an
 `src/tools/typescript-compile-check.ts` applies the proposed edits to a temporary sandbox copy and runs project verification (`npx tsc --noEmit --pretty false` by default).
 
 If validation fails, diagnostics are fed back to the model for repair retries.
-
-### 3. Pending queue
-
-Sandbox-verified edits are stored in memory on the `Agent` instance until explicit confirmation.
-
-```
-/pending        — inspect queued edits
-/confirm        — apply queued edits to disk
-/confirm --dry-run — validate queued edits without writing
-/discard        — drop all pending edits
-```
 
 ### 4. Edit application
 

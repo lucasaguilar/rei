@@ -32,10 +32,6 @@ REI operates as an **execution-capable** agent with strict verification gates. T
 - REI can read, analyze, and map the semantic relationships of repository files using an AST dependency graph.
 - REI can explain, plan, and propose concrete code changes.
 - REI validates proposed edits in a temporary sandbox workspace and runs project verification (for TypeScript, `npx tsc --noEmit --pretty false`) before presenting them.
-- Patches are safely queued and are **only applied** to the filesystem after explicit user confirmation (`/confirm`).
-
-This constraint is intentional. The goal is to provide autonomous code generation that strictly adheres to the existing architecture while putting the highest authority (file modification) squarely in the developer's hands.
-
 ---
 
 ## Modes
@@ -54,12 +50,12 @@ proposed changes. Do not simulate execution or modify files.
 
 Operate as an execution-oriented coding agent when the task requires repository work. Identify
 relevant files, extract AST dependencies (repo skeleton map), describe applicable actions, and propose concrete
-patches. The agent validates proposals in a sandbox and drops successful ones into a pending queue.
+patches. The agent validates proposals in a sandbox and applies all successful edits directly to the filesystem—there is no pending queue or manual confirmation step.
 
 **If the repo skeleton map or import graph indicates the existence of relevant files or dependencies not currently visible, you MUST emit <request_files> for those files to obtain their contents before proceeding with analysis or edits.**
 
 In agent mode, model actions use XML tags (`<request_files>` and `<edit>`) and are validated in a
-sandbox before becoming confirmable patches.
+sandbox before being applied directly to the workspace.
 
 "Contract Integrity: When a task involves changing a public method, exported function, or interface, you must use the Repository Skeleton Map and Caller Graph to identify all affected consumers. You are responsible for ensuring the entire workspace remains in a valid state by proposing edits for both the definition and its references."
 
