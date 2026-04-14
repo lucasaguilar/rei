@@ -1,17 +1,5 @@
-import type { SessionMode } from "../../chat/types.js";
-import {
-  formatTypeScriptCompileResult,
-  runTypeScriptCompileCheck,
-} from "../../tools/typescript-compile-check.js";
-import type { AgentSREdit } from "../../contracts/agent-interaction.types.js";
-import { HELP_TEXT } from "../constants/chat.constants.js";
+import { processMenuCommand } from "../../chat/menu-command-processor.js";
 import type { InputHandlerContext } from "../models/input-handler.types.js";
-import {
-  saveSession,
-  archiveCurrentSession,
-  listSessions,
-  loadSessionById,
-} from "../../chat/session-store.js";
 
 export async function handleInputCommand(
   trimmed: string,
@@ -26,203 +14,37 @@ export async function handleInputCommand(
     return true;
   }
 
-  if (trimmed === "/clear") {
-    session.messages = [];
-    ctx.transcript.length = 0;
-    actions.pushTranscript("History cleared.");
-    saveSession(
-      ctx.workspacePath,
-      session.messages,
-      session.mode,
-      session.summary,
-      session.createdAt,
-    );
-    return true;
-  }
+  // Delegate to the centralized command processor
+  const result = await processMenuCommand(
+    trimmed,
+    session,
+    ctx.workspacePath,
+    agent.provider
+  );
 
-  if (trimmed === "/runplan") {
-    // Busca el último mensaje de plan en la sesión
-    const lastPlanMsg = [...session.messages]
-      .reverse()
-      .find(
-        (m) =>
-          m.role === "assistant" &&
-          m.content &&
-          m.content.toLowerCase().includes("plan"),
-      );
-    if (!lastPlanMsg) {
-      actions.pushTranscript("[RUNPLAN] No plan found in session.");
-      return true;
+  if (result.success) {
+    actions.pushTranscript(result.response);
+    
+    if (result.newSession) {
+      Object.assign(session, result.newSession);
     }
 
-    // Extrae archivos mencionados en el plan (heurística simple: busca líneas con .ts, .js, .json, etc.)
-    const fileRegex =
-      /([\w\-/]+\.(ts|js|json|md|tsx|jsx|yml|yaml|css|scss|html|cjs|mjs))/gi;
-    const files = Array.from(
-      new Set(lastPlanMsg.content.match(fileRegex) || []),
-    );
-    if (files.length === 0) {
-      actions.pushTranscript(
-        "[RUNPLAN] No files detected in plan. Please ensure the plan lists file names.",
-      );
-      return true;
-    }
-
-    // Cambia a modo agent
-    session.mode = "agent";
-    actions.pushTranscript(
-      `[RUNPLAN] Switching to agent mode and executing plan on files: ${files.join(", ")}`,
-    );
-
-    // Inyecta contexto: agrega un mensaje de usuario con el plan y los archivos
-    const planPrompt = `Ejecutá el siguiente plan sobre estos archivos:\n\nPLAN:\n${lastPlanMsg.content}\n\nARCHIVOS:\n${files.join(", ")}`;
-    session.messages.push({ role: "user", content: planPrompt });
-
-    // Ejecuta el agent automáticamente
-    state.busy = true;
-    actions.draw();
-    try {
-      const response = await agent.runTurn(session, planPrompt);
-      actions.pushTranscript(response);
-    } catch (err) {
-      actions.pushTranscript(
-        `[RUNPLAN] Error: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    } finally {
-      state.busy = false;
+    // Handle automatic execution (e.g., /runplan)
+    if (result.autoExecute) {
+      const { prompt } = result.autoExecute;
+      session.messages.push({ role: "user", content: prompt });
+      
+      state.busy = true;
       actions.draw();
-    }
-    return true;
-  }
-
-  if (trimmed === "/help") {
-    actions.pushTranscript(HELP_TEXT);
-    return true;
-  }
-
-  const modeMatch = trimmed.match(/^\/mode\s+(\S+)$/);
-  if (modeMatch) {
-    const requested = modeMatch[1];
-    if (
-      requested === "ask" ||
-      requested === "planning" ||
-      requested === "agent"
-    ) {
-      const previousMode = session.mode;
-      session.mode = requested as SessionMode;
-      if (previousMode === "agent" && session.mode !== "agent") {
-        const systemMessages = session.messages.filter(
-          (m) => m.role === "system",
-        );
-        session.messages = systemMessages;
+      try {
+        const response = await agent.runTurn(session, prompt);
+        actions.pushTranscript(response);
+      } catch (err) {
+        actions.pushTranscript(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        state.busy = false;
+        actions.draw();
       }
-      actions.pushTranscript(`[REI] Mode switched to: ${session.mode}`);
-    } else {
-      actions.pushTranscript(
-        `Unknown mode: ${requested}. Available modes: ask, planning, agent`,
-      );
-    }
-    return true;
-  }
-
-  if (trimmed === "/compact") {
-    state.busy = true;
-    state.activeStatus = "compacting_memory";
-    actions.startSpinner();
-    actions.draw();
-
-    try {
-      const { compactSession } = await import("../../chat/compactor.js");
-      session.messages = await compactSession({
-        messages: session.messages,
-        provider: ctx.agent.provider,
-        modelOverride: process.env.COMPACTOR_MODEL,
-      });
-      saveSession(
-        ctx.workspacePath,
-        session.messages,
-        session.mode,
-        session.summary,
-        session.createdAt,
-      );
-      actions.pushTranscript("[SESSION] Conversation compacted.");
-    } catch (err: unknown) {
-      actions.pushTranscript(
-        `Error: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    } finally {
-      state.busy = false;
-      state.activeStatus = undefined;
-      actions.stopSpinner();
-    }
-    return true;
-  }
-
-  if (trimmed === "/index") {
-    const { generateRepoMap } =
-      await import("../../tools/repo-map-generator.js");
-    const map = generateRepoMap(ctx.workspacePath);
-    const lines = map.split("\n").length;
-    actions.pushTranscript(
-      `[REPO MAP] Regenerated successfully (${lines} lines).`,
-    );
-    return true;
-  }
-
-  if (trimmed === "/session" || trimmed === "/session info") {
-    const nonSystem = session.messages.filter((m) => m.role !== "system");
-    const turns = Math.floor(nonSystem.length / 2);
-    actions.pushTranscript(`Mode: ${session.mode}`);
-    actions.pushTranscript(`Turns: ${turns}`);
-    actions.pushTranscript(`Created: ${session.createdAt ?? "unknown"}`);
-    return true;
-  }
-
-  if (trimmed === "/session new") {
-    const archived = archiveCurrentSession(ctx.workspacePath);
-    session.messages = [];
-    ctx.transcript.length = 0;
-    saveSession(ctx.workspacePath, [], session.mode, undefined, undefined);
-    actions.pushTranscript(
-      archived
-        ? `[SESSION] Archived as ${archived}. Starting fresh.`
-        : "[SESSION] Started fresh session.",
-    );
-    return true;
-  }
-
-  if (trimmed === "/session list") {
-    const sessions = listSessions(ctx.workspacePath);
-    if (sessions.length === 0) {
-      actions.pushTranscript("[SESSION] No archived sessions.");
-    } else {
-      for (const s of sessions) {
-        actions.pushTranscript(
-          `  ${s.id}  [${s.mode}]  ${new Date(s.updatedAt).toLocaleString()}  (${s.turns} turns)${s.summary ? "  " + s.summary : ""}`,
-        );
-      }
-    }
-    return true;
-  }
-
-  const sessionLoadMatch = trimmed.match(/^\/session\s+load\s+(\S+)$/);
-  if (sessionLoadMatch) {
-    const id = sessionLoadMatch[1];
-    const loaded = loadSessionById(ctx.workspacePath, id);
-    if (!loaded) {
-      actions.pushTranscript(`[SESSION] Session "${id}" not found.`);
-    } else {
-      session.messages = loaded.messages;
-      session.mode = loaded.mode;
-      session.summary = loaded.summary;
-      session.createdAt = loaded.createdAt;
-      ctx.transcript.length = 0;
-      const turns = Math.floor(
-        loaded.messages.filter((m) => m.role !== "system").length / 2,
-      );
-      actions.pushTranscript(
-        `[SESSION] Loaded "${id}" (${turns} turns, mode: ${loaded.mode}).`,
-      );
     }
     return true;
   }

@@ -5,6 +5,7 @@ import type { FileMeta } from "../workspace/workspace-scanner.js";
 import { loadCurrentSession, saveSession } from "../chat/session-store.js";
 import { runChat } from "../cli/run-chat.js";
 import { buildMentionEntries } from "../cli/helpers/chat.helpers.js";
+import { processMenuCommand } from "../chat/menu-command-processor.js";
 
 export class ChatHandler {
   constructor(
@@ -38,11 +39,38 @@ export class ChatHandler {
           summary: existing.summary,
         }
       : { messages: [], mode: "agent" };
-    //const mentionEntries = buildMentionEntries(this.workspacePath);
 
-    //await InputHandler.submitInput(inputContext);
+    // Interceptar comandos de menú (ej: /index, /compact, /clear)
+    if (promptTrimmed.startsWith("/")) {
+      const cmdResult = await processMenuCommand(
+        promptTrimmed,
+        session,
+        this.workspacePath,
+        this.agent.provider
+      );
 
-    //const { state, actions, session, agent, workspacePath } = ctx;
+      if (cmdResult.success) {
+        // Si el comando actualiza la sesión (ej: /mode o /clear), aplicamos los cambios
+        if (cmdResult.newSession) {
+          Object.assign(session, cmdResult.newSession);
+        }
+
+        // Guardamos la sesión actualizada y devolvemos la respuesta del comando
+        session.messages.push({ role: "user", content: promptTrimmed });
+        session.messages.push({ role: "assistant", content: cmdResult.response });
+        saveSession(
+          this.workspacePath,
+          session.messages,
+          session.mode,
+          session.summary,
+          session.createdAt,
+        );
+
+        onChunk(cmdResult.response);
+        return cmdResult.response;
+      }
+      // Si el comando no fue reconocido o falló, continuamos al flujo del agente
+    }
 
     // Delegamos la construcción del contexto y el mensaje de sistema al Agent.
     // El Agent internamente utiliza buildTurnContext y buildSystemMessage (prompt-builder.ts)
