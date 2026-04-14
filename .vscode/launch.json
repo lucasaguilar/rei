@@ -340,20 +340,6 @@
         {
             "type": "node",
             "request": "launch",
-            "name": "REI qwen/qwen3.6-plus-preview:free (OpenRouter 32B)",
-            "runtimeExecutable": "npm",
-            "runtimeArgs": ["run", "dev", "--", "chat"],
-            "envFile": "${workspaceFolder}/.env",
-            "env": {
-                "MODEL_PROVIDER": "openrouter",
-                "OPENROUTER_MODEL": "qwen/qwen3.6-plus-preview:free"
-            },
-            "console": "integratedTerminal",
-            "skipFiles": ["<node_internals>/**"]
-        },
-        {
-            "type": "node",
-            "request": "launch",
             "name": "REI google/gemini-2.0-flash-lite-preview-02-05:free (OpenRouter 9B)",
             "runtimeExecutable": "npm",
             "runtimeArgs": ["run", "dev", "--", "chat"],
@@ -506,6 +492,20 @@
             "env": {
                 "MODEL_PROVIDER": "openrouter",
                 "OPENROUTER_MODEL": "google/gemma-4-31b-it"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        }, // Qwen/Qwen2.5-Coder-32B-Instruct
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "SERVER REI qwen/qwen3-coder-30b-a3b-instruct (OpenRouter)",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "server"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "openrouter",
+                "OPENROUTER_MODEL": "qwen/qwen3-coder-30b-a3b-instruct"
             },
             "console": "integratedTerminal",
             "skipFiles": ["<node_internals>/**"]

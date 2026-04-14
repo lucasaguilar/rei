@@ -3,12 +3,43 @@ import { createModelProvider } from "./providers/provider-factory.js";
 import { Agent } from "./core/agent.js";
 import { ChatHandler } from "./server/chat-handler.js";
 import { REI_LOGO } from "./cli/rei-logo.js";
+import {
+  isWorkspaceAllowed,
+  getDefaultWorkspace,
+} from "./server/workspace-config.js";
+// Imports fundamentales para el REI Flow
+import { scanWorkspace } from "./workspace/workspace-scanner.js";
+import { generateRepoMap } from "./tools/repo-map-generator.js";
+import { startIndexingWorker } from "./context/rag/rag-indexer.js";
 
 const PORT = process.env.REI_SERVER_PORT || 3000;
-const WORKSPACE_PATH = process.cwd();
+const WORKSPACE_PATH = process.env.REI_WORKSPACE_PATH || getDefaultWorkspace();
+
+// Validar que el workspace sea uno permitido
+if (!isWorkspaceAllowed(WORKSPACE_PATH)) {
+  console.error(`❌ Workspace not allowed: ${WORKSPACE_PATH}`);
+  process.exit(1);
+}
 
 async function startServer() {
-  // 1. Instanciamos el Agente UNA SOLA VEZ al inicio del servidor
+  console.log(REI_LOGO);
+  console.log("🔍 Initializing workspace context (matching CLI flow)...");
+
+  // 1. Preparar el contexto igual que en runChat
+  //const scannedFiles = scanWorkspace(WORKSPACE_PATH);
+  const repoMap = generateRepoMap(WORKSPACE_PATH);
+  console.log(`📁 Repo map generated with ${repoMap.length} entries.`);
+
+  // Iniciar RAG en background
+  /*
+  startIndexingWorker(WORKSPACE_PATH, {
+    onProgress: (indexed, total) =>
+      console.log(`📦 RAG indexing: ${indexed}/${total} nodes`),
+    onDone: (msg) => console.log(`✅ RAG complete: ${msg}`),
+  });
+  */
+
+  // 2. Instanciar Agente y Handler con el contexto inicial
   const provider = createModelProvider();
   const agent = new Agent(provider, WORKSPACE_PATH);
   const chatHandler = new ChatHandler(agent, WORKSPACE_PATH);
@@ -30,12 +61,12 @@ async function startServer() {
       req.on("end", async () => {
         try {
           const jsonBody = JSON.parse(body);
-          
+
           // Configurar respuesta como Stream (SSE) compatible con OpenAI/Continue
           res.writeHead(200, {
             "Content-Type": "text/event-stream",
             "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
+            Connection: "keep-alive",
           });
 
           const requestedModel = jsonBody.model || "rei-agent";
@@ -48,11 +79,13 @@ async function startServer() {
               object: "chat.completion.chunk",
               created: now,
               model: requestedModel,
-              choices: [{
-                index: 0,
-                delta: { content },
-                finish_reason: null,
-              }],
+              choices: [
+                {
+                  index: 0,
+                  delta: { content },
+                  finish_reason: null,
+                },
+              ],
             };
             res.write(`data: ${JSON.stringify(payload)}\n\n`);
           };

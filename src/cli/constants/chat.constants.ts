@@ -11,24 +11,21 @@ Commands:
   /mode ask
   /mode planning
   /mode agent
-  /pending
-  /confirm
-  /confirm --dry-run
-  /discard
   /exit
 
 Ready.`;
 };
 
-export const HELP_TEXT = `Commands:
-  /exit           - end the session
-  /clear          - clear conversation history
-  /help           - show this help
-  /mode ask       - switch to ask mode
-  /mode planning  - switch to planning mode
-  /mode agent     - switch to agent mode
-  /runplan        - execute last planning-mode plan
-  /index          - regenerate repository skeleton map`;
+export function getHelpText(): string {
+  return (
+    "Commands:\n" +
+    COMMANDS.map(
+      (cmd) =>
+        `  ${cmd.command.padEnd(16)}- ${cmd.description}` +
+        (cmd.requiresArgs ? " <args>" : ""),
+    ).join("\n")
+  );
+}
 
 export const MODE_PROMPTS: Record<SessionMode, string> = {
   ask: "ask > ",

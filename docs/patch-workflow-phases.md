@@ -2,7 +2,7 @@
 
 ## Vision
 
-REI allows agent mode to propose concrete patches, validate them safely, queue them for review, and apply them only after an explicit CLI confirmation step.
+REI allows agent mode to propose concrete patches, validate them safely, and apply them directly to the filesystem after sandbox validation—no manual confirmation or patch queue.
 
 ## Status
 
@@ -13,8 +13,7 @@ The active runtime flow is:
 1. Agent mode evaluates whether the visible context is enough and may emit proposed patches.
 2. Additional files are resolved safely from the scanned workspace only.
 3. Proposed patches are normalized, validated, and optionally repaired.
-4. Valid patches are queued on the Agent instance.
-5. The CLI exposes review and confirmation commands.
+4. Valid patches are applied immediately after sandbox validation.
 
 ---
 
@@ -65,13 +64,13 @@ Only edits that pass sandbox verification are queued.
 
 Implemented in src/tools/patch-applier.ts:
 
-- applySREditBatchFS(edits, workspacePath, options?)
+- applySREditBatchFS(edits, workspacePath)
 
-Active CLI behavior:
+Current behavior:
 
-1. /confirm --dry-run validates Search/Replace applicability without writing.
-2. /confirm applies queued Search/Replace edits to the filesystem.
-3. If every edit applies successfully in a real run, the queue is cleared.
+- All valid Search/Replace edits are applied directly to the filesystem as soon as they are generated and validated by the agent (no manual confirmation step).
+- The result of each patch (success or failure) is reported in the assistant's response.
+- There is no patch queue or /confirm command; edits are not staged for review—they are executed immediately after sandbox validation.
 
 Important:
 
@@ -92,18 +91,10 @@ Current generator behavior:
 
 ---
 
-## Phase 6: CLI Confirmation Gate
 
-Implemented in src/cli/run-chat.ts.
+## Phase 6: (Legacy) CLI Confirmation Gate
 
-Available commands:
-
-- /pending - display queued edits
-- /confirm - apply queued edits
-- /confirm --dry-run - validate queued edits without writing
-- /discard - clear queued patches
-
-Display behavior shows file targets and edit blocks for queued Search/Replace operations.
+The explicit confirmation gate and patch queue have been removed. All validated edits are now applied immediately. The commands /confirm, /pending, and /discard no longer exist.
 
 ---
 
@@ -114,9 +105,7 @@ User message
   -> Agent generates search/replace edits or requests files
   -> Context resolution for approved file requests
   -> Sandbox validation / repair loop
-  -> Queue valid edits on Agent
-  -> /pending to inspect
-  -> /confirm or /confirm --dry-run
+  -> Apply valid edits immediately
 ```
 
 For change tasks, runtime validation sits between context resolution and the final answer:
@@ -135,7 +124,7 @@ For change tasks, runtime validation sits between context resolution and the fin
 | Symlink breakouts | Real-path containment checks reject escapes |
 | Corrupted edit payloads | Search/Replace validation rejects malformed or non-matching edits |
 | Unsafe targets | Denylists and directory policy block sensitive files |
-| Accidental writes | The CLI requires explicit /confirm |
+| Accidental writes | All validated edits are applied immediately (no manual confirmation) |
 | Hidden auto-commit behavior | Commits are not automatic in the CLI flow |
 
 ---
@@ -151,10 +140,6 @@ Inside the REI session:
 ```text
 /mode agent
 implement feature X in src/foo.ts
-/pending
-/confirm --dry-run
-/confirm
-/discard
 ```
 
 ---
@@ -188,19 +173,15 @@ Step 4 - Sandbox Validation / Recovery
   Retry repairable apply/compile failures through repair loop
   Queue valid edits on Agent.pendingProposedPatches
 
-  ↓ after /confirm
+  ↓ after sandbox validation
 
 Step 5 - Edit Application
-  applySREditBatchFS(dryRun=true) for /confirm --dry-run
-  applySREditBatchFS(dryRun=false) for /confirm
+  applySREditBatchFS(...) for direct patch application
 
   ↓ in CLI loop
 
 Step 6 - Confirmation Gate
-  /pending
-  /confirm
-  /confirm --dry-run
-  /discard
+
 ```
 
 ---
