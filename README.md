@@ -1,6 +1,6 @@
 # rei
 
-**REI** is a next-generation, compiler-aware AI Coding Agent built directly for the terminal.
+**REI** is a next-generation, compiler-aware AI Coding Agent available as a powerful CLI tool and a high-performance server for IDE integration.
 Engineered for privacy, precision, and local-first execution, REI goes far beyond text completion: it builds a repository-aware context using heuristic file selection and caller discovery before every turn, auto-discovers caller files for cascade changes, and validates proposed edits in a temporary sandbox with real project verification before you ever see them.
 
 ## 🌟 Why REI? (Unique Value Proposition)
@@ -8,7 +8,7 @@ Engineered for privacy, precision, and local-first execution, REI goes far beyon
 While commercial giants like Cursor and GitHub Copilot dominate the cloud IDE space, REI takes a radically different "Sniper" approach tailored for the terminal:
 
 - **100% Local & Privacy-First**: No more sending sensitive proprietary code to commercial APIs if you don't want to. REI runs locally using `Ollama` (DeepSeek, Llama 3, Qwen) or any proxy. Your codebase never leaves your firewall.
-- **Editor Agnostic**: It lives in the terminal. No need to migrate from WebStorm, Android Studio, Vim, or Emacs. REI operates directly on your filesystem.
+- **Editor Agnostic & Integratable**: While it provides a native terminal experience, REI also acts as a backend server. You can integrate it into VS Code via **Continue.dev**, allowing you to use REI's repository-aware intelligence directly within your favorite IDE.
 - **Heuristic Repository Context**: REI ranks files from your workspace using keyword/path scoring, explicit path hints (like `@src/file.ts`), and caller discovery so relevant files are loaded without requiring embeddings.
 - **Caller Graph Discovery**: When you ask REI to change a function, it automatically scans the workspace for every file that references that symbol and pre-loads them into context — so cascade change proposals cover all affected files without you listing them.
 - **Sandbox Validation Loop (Auto-Healing)**: REI validates LLM-generated edits in a temporary sandbox copy of the workspace and runs TypeScript verification (`npx tsc --noEmit --pretty false`). If the model produces broken code, REI feeds the compiler error back to the LLM and forces a correction before showing you anything.
@@ -16,6 +16,20 @@ While commercial giants like Cursor and GitHub Copilot dominate the cloud IDE sp
 - **Persistent Sessions**: Conversations are automatically saved to `.rei/sessions/current.json` and resumed on next launch. Older sessions can be archived and reloaded by ID.
 - **Conversation Compaction**: When a session grows beyond 20 messages, older turns are summarized using a configurable cheaper model, keeping context manageable without losing key decisions.
 - **Absolute Transparency**: REI logs its internal flow to `.rei/logs/agent-flow.jsonl` — context search, AST extraction, patch proposal, sandbox verification, and compiler errors, structured as JSON Lines.
+
+## 🔌 IDE Integration (Continue.dev)
+
+REI can be used as a custom LLM provider for the [Continue](https://www.continue.dev/) extension in VS Code or JetBrains:
+
+1. **Start the REI Server**: 
+   ```bash
+   npm run server
+   ```
+2. **Configure Continue**: Add a new model in your `config.json` pointing to the REI endpoint:
+   - **API Base**: `http://localhost:3000/chat/completions`
+   - **Model**: (Your configured model, e.g., `openrouter/nvidia/nemotron-3-super-120b-a12b:free`)
+
+This allows you to use REI's `/mode` commands and repository context directly from the Continue chat sidebar.
 
 ## 🎯 Target Audience
 
