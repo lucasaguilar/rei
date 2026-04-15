@@ -153,6 +153,11 @@ function renderSourceFile(
 ): string {
   const fileLines: string[] = [];
 
+  const importsLine = renderImports(sourceFile);
+  if (importsLine) {
+    fileLines.push(importsLine);
+  }
+
   for (const iface of sourceFile.getInterfaces()) {
     fileLines.push(renderInterface(iface));
   }
@@ -322,4 +327,18 @@ function renderMethodSignature(params: {
   const asyncPrefix = params.isAsync ? "async " : "";
   const staticPrefix = params.isStatic ? "static " : "";
   return `${scope}${staticPrefix}${asyncPrefix}${params.name}(${params.parameters.join(", ")}): ${params.returnType};`;
+}
+
+function renderImports(sourceFile: SourceFile): string {
+  const importDeclarations = sourceFile.getImportDeclarations();
+  if (importDeclarations.length === 0) return "";
+
+  const importPaths = importDeclarations.map((imp) => {
+    const moduleSpecifier = imp.getModuleSpecifierValue();
+    // Opcional: podrías filtrar solo imports locales (que empiecen con .)
+    // si quieres que el agente se enfoque solo en el grafo del proyecto.
+    return moduleSpecifier;
+  });
+
+  return `// Imports: ${[...new Set(importPaths)].join(", ")}`;
 }
