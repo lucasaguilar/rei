@@ -19,7 +19,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { applyCreateFileBatchFS } from "../tools/patch-applier.js";
 
-export interface AgentModeOutcome {
+export interface ExecutionResult {
   response: string;
   validProposedPatches: AgentSREdit[];
   failed?: boolean;
@@ -188,10 +188,10 @@ async function buildPerEditMismatchDetails(
 
 function finalizeOutcome(
   logger: AgentLogger,
-  outcome: AgentModeOutcome,
+  outcome: ExecutionResult,
   generatedPatchCount: number,
   appliedPatchCount: number,
-): AgentModeOutcome {
+): ExecutionResult {
   const validCount = outcome.validProposedPatches.length;
   const failedCount = outcome.failedProposedPatches?.length ?? 0;
   const rejectedCount = Math.max(0, generatedPatchCount - validCount);
@@ -221,7 +221,7 @@ export async function executeAgentTurn(params: {
   workspacePath: string;
   scannedFiles: FileMeta[];
   logger: AgentLogger;
-}): Promise<AgentModeOutcome> {
+}): Promise<ExecutionResult> {
   const { provider, messagesForModel, workspacePath, scannedFiles, logger } =
     params;
 
