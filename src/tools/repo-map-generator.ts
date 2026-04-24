@@ -146,6 +146,67 @@ export function generateRepoMap(workspacePath: string): string {
   return skeleton;
 }
 
+export function generateRepoMapForFile(workspacePath: string, absFilePath: string): string | null {
+  const IGNORE_DIRS = ["node_modules", "dist", ".rei", ".git", "bin"];
+  if (IGNORE_DIRS.some((dir) => absFilePath.split(path.sep).includes(dir))) {
+    return null;
+  }
+
+  const sections: string[] = [];
+  const entryPointFiles = getEntryPointFiles(workspacePath);
+  const relPath = path.relative(workspacePath, absFilePath).replace(/\\/g, "/");
+
+  try {
+    // 1. TS/JS (incluyendo tests para ts-morph, como en la generacion global)
+    if (/\.(ts|js|tsx|jsx)$/.test(absFilePath)) {
+      const project = new Project({
+        skipAddingFilesFromTsConfig: true,
+        compilerOptions: { allowJs: true },
+      });
+      project.addSourceFileAtPath(absFilePath);
+      const sourceFile = project.getSourceFile(absFilePath);
+      if (sourceFile) {
+        const section = renderSourceFile(workspacePath, sourceFile, entryPointFiles);
+        if (section) sections.push(section);
+      }
+    }
+
+    // 2. HTML
+    if (absFilePath.endsWith(".html")) {
+      const content = fs.readFileSync(absFilePath, "utf8");
+      const tags = Array.from(content.matchAll(/<([a-zA-Z0-9\-]+)/g))
+        .map((m) => m[1])
+        .filter(
+          (tag) =>
+            tag.includes("-") ||
+            !["div", "span", "p", "b", "i", "tr", "td", "table", "form", "input"].includes(tag.toLowerCase())
+        );
+      sections.push(`// FILE: ${relPath}\nRelevant Tags: ${[...new Set(tags)].join(", ")}`);
+    }
+
+    // 3. CSS/SCSS
+    if (absFilePath.endsWith(".css") || absFilePath.endsWith(".scss")) {
+      const content = fs.readFileSync(absFilePath, "utf8");
+      const classes = Array.from(content.matchAll(/\.(\w[\w-]*)/g)).map((m) => m[1]);
+      const ids = Array.from(content.matchAll(/#(\w[\w-]*)/g)).map((m) => m[1]);
+      sections.push(`// FILE: ${relPath}\nCSS classes: ${[...new Set(classes)].join(", ")}\nCSS ids: ${[...new Set(ids)].join(", ")}`);
+    }
+
+    // 4. TESTS (regex approach)
+    if (/\.(spec|test)\.(ts|js|tsx|jsx)$/.test(absFilePath)) {
+      const content = fs.readFileSync(absFilePath, "utf8");
+      const describes = Array.from(content.matchAll(/describe\s*\(\s*['"`]([^'"]+)['"`]/g)).map((m) => m[1]);
+      const its = Array.from(content.matchAll(/(?:it|test)\s*\(\s*['"`]([^'"]+)['"`]/g)).map((m) => m[1]);
+      sections.push(`// FILE: ${relPath}\nTest suites: ${[...new Set(describes)].join(", ")}\nTest cases: ${[...new Set(its)].join(", ")}`);
+    }
+  } catch (err) {
+    console.error(`[RepoMapGenerator] Error parsing ${absFilePath}:`, err);
+    return null;
+  }
+
+  return sections.length > 0 ? sections.join("\n\n") : null;
+}
+
 function renderSourceFile(
   workspacePath: string,
   sourceFile: SourceFile,
