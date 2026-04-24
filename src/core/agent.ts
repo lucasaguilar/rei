@@ -5,11 +5,13 @@ import { buildTurnContext } from "../context/context-builder.js";
 import { buildMessagesForModel } from "../chat/message-builder.js";
 import { compactSession, needsCompaction } from "../chat/compactor.js";
 import { type ChatSession } from "../chat/types.js";
-import { generateRepoMap } from "../tools/repo-map-generator.js";
+import { generateRepoMap, generateRepoMapForFile } from "../tools/repo-map-generator.js";
 import { VectorStore } from "../context/rag/vector-store.js";
 import { generateEmbedding } from "../context/rag/embedder.js";
-import { chunkRepoMap } from "../context/rag/map-chunker.js";
+import { chunkRepoMap, chunkRepoMapString } from "../context/rag/map-chunker.js";
 import { getRelevantMapContext } from "../context/rag/map-retriever.js";
+import * as path from "node:path";
+import chokidar, { type FSWatcher } from "chokidar";
 import {
   scanWorkspace,
   type FileMeta,
@@ -43,6 +45,7 @@ export class Agent {
   private knowledgeOrchestrator: KnowledgeOrchestrator;
   private vectorStore: VectorStore;
   private repoMapCache?: string;
+  private watcher?: FSWatcher;
   public logger: AgentLogger;
   public readonly provider: ModelProvider;
   private readonly workspacePath: string;
@@ -235,6 +238,7 @@ export class Agent {
           }, vector);
         }
         await this.vectorStore.save();
+        this.initWatcher();
       }
 
       // 2. Recuperar solo fragmentos relevantes basados en la entrada del usuario
@@ -421,5 +425,50 @@ export class Agent {
       `  • \`/discard\`          — reject all patches and start over`,
       `  • **Type a hint**     — describe the fix and the agent will retry with your guidance`,
     ].join("\n");
+  }
+
+  private initWatcher(): void {
+    if (this.watcher) return;
+    
+    this.logger.logInfo("Initializing file watcher for incremental AST updates");
+    this.watcher = chokidar.watch(["**/*.ts", "**/*.js", "**/*.tsx", "**/*.jsx", "**/*.html", "**/*.css", "**/*.scss"], {
+      cwd: this.workspacePath,
+      ignored: ["**/node_modules/**", "**/dist/**", ".rei/**", "**/.rei/**", "**/.git/**", "**/bin/**"],
+      persistent: true,
+      ignoreInitial: true,
+    });
+
+    const handleChange = async (filePath: string) => {
+      this.scanCache = undefined;
+      const absPath = path.join(this.workspacePath, filePath);
+      const relFilePath = filePath.replace(/\\/g, "/");
+      
+      this.vectorStore.deleteByFilePath(relFilePath);
+      
+      const newMapString = generateRepoMapForFile(this.workspacePath, absPath);
+      if (newMapString) {
+        const chunks = chunkRepoMapString(newMapString);
+        for (const chunk of chunks) {
+          const vector = await generateEmbedding(chunk.content);
+          this.vectorStore.upsert({
+            ...chunk.metadata,
+            content: chunk.content,
+          }, vector);
+        }
+      }
+      
+      await this.vectorStore.save();
+    };
+
+    const handleUnlink = async (filePath: string) => {
+      this.scanCache = undefined;
+      const relFilePath = filePath.replace(/\\/g, "/");
+      this.vectorStore.deleteByFilePath(relFilePath);
+      await this.vectorStore.save();
+    };
+
+    this.watcher.on("change", handleChange);
+    this.watcher.on("add", handleChange);
+    this.watcher.on("unlink", handleUnlink);
   }
 }

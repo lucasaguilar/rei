@@ -121,4 +121,17 @@ export class VectorStore {
   getRecordCount(): number {
     return this.records.length;
   }
+
+  /**
+   * Elimina todos los embeddings asociados a un archivo específico.
+   * Utilizado para limpieza antes de actualizaciones incrementales.
+   */
+  deleteByFilePath(filePath: string): void {
+    const initialCount = this.records.length;
+    this.records = this.records.filter((r) => r.metadata.filePath !== filePath);
+    const removed = initialCount - this.records.length;
+    if (removed > 0) {
+      console.log(`[VectorStore] Removed ${removed} stale chunks for ${filePath}`);
+    }
+  }
 }

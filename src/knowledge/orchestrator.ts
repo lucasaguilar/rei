@@ -33,6 +33,15 @@ export class KnowledgeOrchestrator {
     const q = query.trim().toLowerCase();
     if (!q) return [];
 
+    // Validar intención: Solo buscar si el usuario pide explícitamente consultar documentación, 
+    // buscar en la web, o si está haciendo una pregunta técnica directa ("cómo...?", "how to...").
+    const isExplicitRequest = /@docs|@web|documentaci[oó]n|buscar?|busca/i.test(q);
+    const isQuestion = (q.includes("como ") || q.includes("cómo ") || q.includes("how to ")) && q.includes("?");
+    
+    if (!isExplicitRequest && !isQuestion) {
+      return [];
+    }
+
     // Optional: caching per session to avoid re-summarization
     if (this.cache.has(q)) {
       return this.cache.get(q)!;
