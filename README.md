@@ -9,7 +9,7 @@ While commercial giants like Cursor and GitHub Copilot dominate the cloud IDE sp
 
 - **100% Local & Privacy-First**: No more sending sensitive proprietary code to commercial APIs if you don't want to. REI runs locally using `Ollama` (DeepSeek, Llama 3, Qwen) or any proxy. Your codebase never leaves your firewall.
 - **Editor Agnostic & Integratable**: While it provides a native terminal experience, REI also acts as a backend server. You can integrate it into VS Code via **Continue.dev**, allowing you to use REI's repository-aware intelligence directly within your favorite IDE.
-- **Heuristic Repository Context**: REI ranks files from your workspace using keyword/path scoring, explicit path hints (like `@src/file.ts`), and caller discovery so relevant files are loaded without requiring embeddings.
+- **Local Semantic RAG**: REI features a 100% offline Retrieval-Augmented Generation engine. Using local ONNX models via `@xenova/transformers` and AST-aware chunking, it ranks files by semantic cosine similarity and Adjacency Boosting, without ever sending your code to a cloud embedding API.
 - **Caller Graph Discovery**: When you ask REI to change a function, it automatically scans the workspace for every file that references that symbol and pre-loads them into context — so cascade change proposals cover all affected files without you listing them.
 - **Sandbox Validation Loop (Auto-Healing)**: REI validates LLM-generated edits in a temporary sandbox copy of the workspace and runs TypeScript verification (`npx tsc --noEmit --pretty false`). If the model produces broken code, REI feeds the compiler error back to the LLM and forces a correction before showing you anything.
 - **Post-Apply Compile Check**: REI can run project compile checks and report type errors.
@@ -227,7 +227,7 @@ On every user turn, REI rebuilds and injects a rich context bundle into the last
 ### Turn context pipeline
 
 1. **Workspace scan** — file tree is scanned and cached for 30 seconds.
-2. **Heuristic file selector** — keyword and path scoring selects relevant files (with explicit `@path` hints boosted when present).
+2. **Local Semantic RAG** — the user's query is embedded locally using `@xenova/transformers`. REI retrieves context using AST chunks, Cosine Similarity, and Adjacency Boosting to pull in relevant files and their dependencies.
 3. **Caller graph discovery** — when the prompt implies a change, REI extracts symbol names and scans the workspace for every file that references them.
 4. **External knowledge** — if the prompt triggers a known framework keyword, official docs are fetched and summarized.
 5. **Enriched user message** — assembled with caller file previews, heuristic file previews, and external doc summaries.
@@ -254,11 +254,15 @@ When a preview is cut, REI appends:
 
 That marker is important for the agent decision step.
 
-## Semantic Indexing Status
+## Semantic RAG Engine
 
-Embedding-based semantic search is currently disabled in runtime context building. REI uses heuristic file selection + caller discovery as the default source of repository context.
+REI features a highly advanced, fully local RAG (Retrieval-Augmented Generation) pipeline:
+- **Local Embeddings**: Uses `Xenova/all-MiniLM-L6-v2` via `@xenova/transformers` natively in Node.js. No API keys required, completely offline.
+- **AST-Aware Chunking**: Uses `ts-morph` to intelligently chunk files by **Functions**, **Classes**, and **Interfaces** instead of blind character counts.
+- **Multi-Level Relevance**: Uses Cosine Similarity combined with an **Adjacency Boost** (+0.15 score to dependencies of highly relevant files) to pull complete context graphs into the prompt.
+- **Isolated Vector Store**: An ultra-fast, native JSON flat-file database stored at `.rei/rag-index.json`.
 
-If `.rei/rag-index.json` exists from older versions, it is not used while semantic search is disabled.
+See [Semantic RAG Architecture](docs/rag-architecture.md) for more details.
 
 ## Session persistence
 
@@ -505,7 +509,7 @@ npm run check
 ```mermaid
 flowchart TD
   A[User enters message] --> B[Build system prompt for current mode]
-  B --> C[Heuristic file selector]
+  B --> C[Local Semantic RAG & File Selector]
   C --> CG[Caller graph discovery]
   CG --> C2{Keywords match official docs?}
   C2 -->|Yes| C3[Fetch, rank, and summarize internet docs]
