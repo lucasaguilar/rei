@@ -3,6 +3,7 @@ import { getHelpText } from "../cli/constants/chat.constants.js";
 import { saveSession } from "./session-store.js";
 import { compactSession } from "./compactor.js";
 import { startIndexingWorker } from "../context/rag/rag-indexer.js";
+import { generateRepoMap } from "../tools/repo-map-generator.js";
 import type { ModelProvider } from "../providers/model-provider.js";
 
 export interface CommandResult {
@@ -160,13 +161,17 @@ export async function processMenuCommand(
   }
 
   if (trimmed === "/index") {
+    // 1. Generate and persist the AST Skeleton Map
+    generateRepoMap(workspacePath);
+    
+    // 2. Start the RAG vector indexing
     startIndexingWorker(workspacePath, {
       onDone: (msg) => console.log(`[RAG Indexer] ${msg}`),
     });
     return {
       success: true,
       response:
-        "[REI] Repository indexing started in the background. You can monitor the progress in the system logs.",
+        "[REI] Full repository indexing started. The AST skeleton map has been updated and RAG indexing is running in the background.",
     };
   }
 

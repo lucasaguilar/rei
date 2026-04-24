@@ -9,7 +9,9 @@ export interface VectorMetadata {
   nodeName: string; // Nombre de la clase o función
   startLine: number;
   endLine: number;
+  content?: string; // Texto original para recuperación RAG
   fileHash?: string; // Para evitar rediseñar nodos no modificados (futuro)
+  dependencies?: string[]; // Lista de archivos importados por este nodo
 }
 
 export interface VectorRecord {
