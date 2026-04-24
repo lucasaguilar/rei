@@ -5,7 +5,13 @@ import { buildTurnContext } from "../context/context-builder.js";
 import { buildMessagesForModel } from "../chat/message-builder.js";
 import { compactSession, needsCompaction } from "../chat/compactor.js";
 import { type ChatSession } from "../chat/types.js";
-import { generateRepoMap } from "../tools/repo-map-generator.js";
+import { generateRepoMap, generateRepoMapForFile } from "../tools/repo-map-generator.js";
+import { VectorStore } from "../context/rag/vector-store.js";
+import { generateEmbedding } from "../context/rag/embedder.js";
+import { chunkRepoMap, chunkRepoMapString } from "../context/rag/map-chunker.js";
+import { getRelevantMapContext } from "../context/rag/map-retriever.js";
+import * as path from "node:path";
+import chokidar, { type FSWatcher } from "chokidar";
 import {
   scanWorkspace,
   type FileMeta,
@@ -37,7 +43,9 @@ export class Agent {
     timestamp: number;
   };
   private knowledgeOrchestrator: KnowledgeOrchestrator;
+  private vectorStore: VectorStore;
   private repoMapCache?: string;
+  private watcher?: FSWatcher;
   public logger: AgentLogger;
   public readonly provider: ModelProvider;
   private readonly workspacePath: string;
@@ -48,6 +56,7 @@ export class Agent {
     this.workspacePath = workspacePath;
     this.knowledgeOrchestrator = new KnowledgeOrchestrator(this.provider);
     this.logger = new AgentLogger(workspacePath);
+    this.vectorStore = new VectorStore(workspacePath);
     this.correlationId =
       Date.now().toString(36) + Math.random().toString(36).substring(2, 7);
   }
@@ -211,12 +220,38 @@ export class Agent {
     return this.generateAgentAssistantResponse(messagesForModel);
   }
 
-  private async ensureSystemMessage(session: ChatSession): Promise<void> {
-    const repositorySkeletonMap =
-      session.mode === "agent"
-        ? (this.repoMapCache ??
-          (this.repoMapCache = generateRepoMap(this.workspacePath)))
-        : undefined;
+  private async ensureSystemMessage(session: ChatSession, userInput?: string): Promise<void> {
+    let repositorySkeletonMap = undefined;
+
+    if (session.mode === "agent") {
+      // 1. Asegurar que el mapa esté generado e indexado en el VectorStore
+      if (!this.repoMapCache) {
+        this.repoMapCache = generateRepoMap(this.workspacePath);
+        
+        await this.vectorStore.load();
+        const chunks = await chunkRepoMap(this.workspacePath);
+        for (const chunk of chunks) {
+          const vector = await generateEmbedding(chunk.content);
+          this.vectorStore.upsert({
+            ...chunk.metadata,
+            content: chunk.content,
+          }, vector);
+        }
+        await this.vectorStore.save();
+        this.initWatcher();
+      }
+
+      // 2. Recuperar solo fragmentos relevantes basados en la entrada del usuario
+      if (userInput) {
+        const relevantMap = await getRelevantMapContext(this.vectorStore, userInput);
+        repositorySkeletonMap = relevantMap 
+          ? `### RELEVANT REPOSITORY SKELETON MAP\n\n${relevantMap}`
+          : "No specific map fragments found for this query.";
+      } else {
+        repositorySkeletonMap = "Repository map indexed. Ask about specific files or symbols to see relevant structure.";
+      }
+    }
+
     const systemContent = buildSystemMessage(
       session.mode,
       repositorySkeletonMap,
@@ -235,7 +270,7 @@ export class Agent {
     onStatus?: StreamTurnOptions["onStatus"],
   ): Promise<void> {
     onStatus?.("building_context");
-    await this.ensureSystemMessage(session);
+    await this.ensureSystemMessage(session, userInput);
     this.logger.logUserPrompt({
       mode: session.mode,
       prompt: userInput,
@@ -390,5 +425,50 @@ export class Agent {
       `  • \`/discard\`          — reject all patches and start over`,
       `  • **Type a hint**     — describe the fix and the agent will retry with your guidance`,
     ].join("\n");
+  }
+
+  private initWatcher(): void {
+    if (this.watcher) return;
+    
+    this.logger.logInfo("Initializing file watcher for incremental AST updates");
+    this.watcher = chokidar.watch(["**/*.ts", "**/*.js", "**/*.tsx", "**/*.jsx", "**/*.html", "**/*.css", "**/*.scss"], {
+      cwd: this.workspacePath,
+      ignored: ["**/node_modules/**", "**/dist/**", ".rei/**", "**/.rei/**", "**/.git/**", "**/bin/**"],
+      persistent: true,
+      ignoreInitial: true,
+    });
+
+    const handleChange = async (filePath: string) => {
+      this.scanCache = undefined;
+      const absPath = path.join(this.workspacePath, filePath);
+      const relFilePath = filePath.replace(/\\/g, "/");
+      
+      this.vectorStore.deleteByFilePath(relFilePath);
+      
+      const newMapString = generateRepoMapForFile(this.workspacePath, absPath);
+      if (newMapString) {
+        const chunks = chunkRepoMapString(newMapString);
+        for (const chunk of chunks) {
+          const vector = await generateEmbedding(chunk.content);
+          this.vectorStore.upsert({
+            ...chunk.metadata,
+            content: chunk.content,
+          }, vector);
+        }
+      }
+      
+      await this.vectorStore.save();
+    };
+
+    const handleUnlink = async (filePath: string) => {
+      this.scanCache = undefined;
+      const relFilePath = filePath.replace(/\\/g, "/");
+      this.vectorStore.deleteByFilePath(relFilePath);
+      await this.vectorStore.save();
+    };
+
+    this.watcher.on("change", handleChange);
+    this.watcher.on("add", handleChange);
+    this.watcher.on("unlink", handleUnlink);
   }
 }
