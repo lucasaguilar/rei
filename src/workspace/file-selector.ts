@@ -7,37 +7,11 @@ export type RankedFile = FileMeta & {
 };
 
 const TOP_FILES_LIMIT = 6;
-const SPANISH_STOPWORDS = new Set([
-  "que",
-  "como",
-  "donde",
-  "cuando",
-  "para",
-  "una",
-  "del",
-  "los",
-  "las",
-  "por",
-  "con",
-  "sin",
-  "sobre",
-  "desde",
-  "hasta",
-  "este",
-  "esta",
-  "tambien",
-  "todo",
-  "todos",
-  "archivo",
-  "funcion",
-  "clase",
-  "retorno",
-  "cambio",
-  "cambia",
-  "modifica",
-  "agrega",
-  "elimina",
-  "actualiza",
+const STOPWORDS = new Set([
+  // Spanish
+  "que", "como", "donde", "cuando", "para", "una", "del", "los", "las", "por", "con", "sin", "sobre", "desde", "hasta", "este", "esta", "tambien", "todo", "todos", "archivo", "funcion", "clase", "retorno", "cambio", "cambia", "modifica", "agrega", "elimina", "actualiza",
+  // English
+  "that", "how", "where", "when", "for", "the", "and", "with", "without", "from", "until", "this", "also", "all", "file", "function", "class", "return", "change", "changes", "modify", "modifies", "add", "adds", "remove", "removes", "delete", "update", "updates"
 ]);
 
 export function selectRelevantFiles(
@@ -104,7 +78,7 @@ function extractKeywords(input: string): string[] {
     .toLowerCase()
     .split(/\W+/)
     .filter((w) => w.length > 2)
-    .filter((w) => !SPANISH_STOPWORDS.has(w));
+    .filter((w) => !STOPWORDS.has(w));
 }
 
 export function extractExplicitPathHints(input: string): string[] {
