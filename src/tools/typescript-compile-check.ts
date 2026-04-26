@@ -37,7 +37,7 @@ export interface VirtualBatchResult {
 
 const DEFAULT_VERIFY_COMMAND = "npx tsc --noEmit --pretty false";
 
-function shouldCopyToSandbox(relativePath: string): boolean {
+export function shouldCopyToSandbox(relativePath: string): boolean {
   const normalized = relativePath.replace(/\\/g, "/");
   if (!normalized) return true;
 
@@ -101,7 +101,7 @@ async function runVerifyCommand(
   }
 }
 
-function parseTscDiagnostics(
+export function parseTscDiagnostics(
   workspacePath: string,
   output: string,
 ): TypeScriptCompileDiagnostic[] {

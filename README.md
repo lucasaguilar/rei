@@ -1,5 +1,6 @@
 # rei
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 **REI** is a next-generation, compiler-aware AI Coding Agent available as a powerful CLI tool and a high-performance server for IDE integration.
 Engineered for privacy, precision, and local-first execution, REI goes far beyond text completion: it builds a repository-aware context using heuristic file selection and caller discovery before every turn, auto-discovers caller files for cascade changes, and validates proposed edits in a temporary sandbox with real project verification before you ever see them.
 
@@ -261,6 +262,7 @@ REI features a highly advanced, fully local RAG (Retrieval-Augmented Generation)
 - **AST-Aware Chunking**: Uses `ts-morph` to intelligently chunk files by **Functions**, **Classes**, and **Interfaces** instead of blind character counts.
 - **Multi-Level Relevance**: Uses Cosine Similarity combined with an **Adjacency Boost** (+0.15 score to dependencies of highly relevant files) to pull complete context graphs into the prompt.
 - **Isolated Vector Store**: An ultra-fast, native JSON flat-file database stored at `.rei/rag-index.json`.
+- **Real-Time Incremental Updates**: Uses `chokidar` to listen to file system changes, surgically updating the AST vector embeddings of modified files in milliseconds without requiring an agent restart.
 
 See [Semantic RAG Architecture](docs/rag-architecture.md) for more details.
 
@@ -320,8 +322,8 @@ If `COMPACTOR_MODEL` is not set, the main session provider and model are used.
 
 REI features a zero-dependency layer to fetch official documentation when the local model lacks specialized knowledge. This avoids hallucination on framework-specific APIs without needing a fine-tuned model.
 
-### Keyword Domain Detection
-When the user's prompt matches a strict set of heuristic triggers (e.g. `signal store`, `zoneless`), REI automatically invokes its internet search pipeline.
+### Explicit Intent Detection
+To prevent accidental web searches and reduce latency, REI's web scraper only triggers when you explicitly request documentation (e.g., using `@docs`, `buscar en la web`) or ask a direct technical question (e.g., `¿cómo hago...?`) alongside framework-specific keywords.
 
 ### Web Fetching
 REI runs concurrent separate queries via a lightweight DuckDuckGo Lite scraper. It targets exclusively official domains. Supported providers currently include:
@@ -499,6 +501,10 @@ To run in watch mode:
 ```bash
 npm run test:watch
 ```
+To run the test suite and generate a V8 coverage report:
+```bash
+npx vitest run --coverage
+```
 To trigger a full TypeScript type check without emitting:
 ```bash
 npm run check
@@ -578,3 +584,13 @@ flowchart TD
 ## Documentation rule
 
 When core runtime behavior changes, update the README in the same change set.
+
+## Contributing
+
+We welcome community contributions! REI is heavily optimized for TypeScript/JavaScript, and our biggest goal is to expand this strict, AST-driven philosophy to other languages using `Tree-sitter`. 
+
+Please read our [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct, and the process for submitting pull requests to us.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
