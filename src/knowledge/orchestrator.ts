@@ -35,8 +35,8 @@ export class KnowledgeOrchestrator {
 
     // Validar intención: Solo buscar si el usuario pide explícitamente consultar documentación, 
     // buscar en la web, o si está haciendo una pregunta técnica directa ("cómo...?", "how to...").
-    const isExplicitRequest = /@docs|@web|documentaci[oó]n|buscar?|busca/i.test(q);
-    const isQuestion = (q.includes("como ") || q.includes("cómo ") || q.includes("how to ")) && q.includes("?");
+    const isExplicitRequest = /@docs|@web|documentaci[oó]n|documentation|buscar?|busca|search|find/i.test(q);
+    const isQuestion = (q.includes("como ") || q.includes("cómo ") || q.includes("how to ") || q.includes("how do ")) && q.includes("?");
     
     if (!isExplicitRequest && !isQuestion) {
       return [];

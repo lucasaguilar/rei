@@ -1,5 +1,6 @@
 # rei
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 **REI** is a next-generation, compiler-aware AI Coding Agent available as a powerful CLI tool and a high-performance server for IDE integration.
 Engineered for privacy, precision, and local-first execution, REI goes far beyond text completion: it builds a repository-aware context using heuristic file selection and caller discovery before every turn, auto-discovers caller files for cascade changes, and validates proposed edits in a temporary sandbox with real project verification before you ever see them.
 
@@ -500,6 +501,10 @@ To run in watch mode:
 ```bash
 npm run test:watch
 ```
+To run the test suite and generate a V8 coverage report:
+```bash
+npx vitest run --coverage
+```
 To trigger a full TypeScript type check without emitting:
 ```bash
 npm run check
@@ -579,3 +584,13 @@ flowchart TD
 ## Documentation rule
 
 When core runtime behavior changes, update the README in the same change set.
+
+## Contributing
+
+We welcome community contributions! REI is heavily optimized for TypeScript/JavaScript, and our biggest goal is to expand this strict, AST-driven philosophy to other languages using `Tree-sitter`. 
+
+Please read our [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct, and the process for submitting pull requests to us.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
