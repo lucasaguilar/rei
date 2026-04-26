@@ -3,7 +3,7 @@
 export const ALLOWED_WORKSPACES = new Set([
   "/Users/lucasaguilar/www/lab/rei",
   "/Users/lucasaguilar/www/lab/app-for-news",
-  "/Users/lucasaguilar/www/***REMOVED***",
+  "/Users/lucasaguilar/www/lab/new",
   // Agrega más rutas permitidas aquí
 ]);
 

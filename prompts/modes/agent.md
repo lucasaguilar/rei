@@ -32,4 +32,15 @@ new lines of code
 6. If your refactor changes a public method or function contract (rename, sync/async change, parameter change, or return-shape change), you MUST request or account for consumer files before finalizing edits.
 7. If those consumer files are not already visible, emit `<request_files>` for them before returning final `<edit>` blocks.
 
-If you emit `<edit>` blocks, the system will apply them in a temporary sandbox workspace, run the verification command (default: `npx tsc --noEmit --pretty false`), and either ask for your confirmation (if successful) or return errors to you for an auto-fix iteration.
+If you emit `<edit>` or `<create>` blocks, the system will apply them in a temporary sandbox workspace, run the verification command (default: `npx tsc --noEmit --pretty false`), and either ask for your confirmation (if successful) or return errors to you for an auto-fix iteration.
+
+# Action 3: Creating New Files
+If the user explicitly asks you to create a new file or project from scratch, you can use the `<create>` tag.
+Provide the absolute or relative path in the `file` attribute, and the complete contents inside the block.
+<create file="src/relative/path/to/new_file.ts">
+// Complete file content here
+</create>
+
+# Action 4: Executing Commands
+If the user asks you to run a shell command (e.g. npm install, mkdir, curl), use the `<execute_command>` tag.
+<execute_command>npm install express</execute_command>
