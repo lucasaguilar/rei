@@ -3,6 +3,7 @@
   <h1>REI (Repository-Aware AI)</h1>
   <p><em>A sniper-precision, local-first AI coding agent</em></p>
 </div>
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 **REI** is a next-generation, compiler-aware AI Coding Agent available as a powerful CLI tool and a high-performance server for IDE integration.
 Engineered for privacy, precision, and local-first execution, REI goes far beyond text completion: it builds a repository-aware context using heuristic file selection and caller discovery before every turn, auto-discovers caller files for cascade changes, and validates proposed edits in a temporary sandbox with real project verification before you ever see them.
