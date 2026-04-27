@@ -60,8 +60,8 @@ chmod +x "$INSTALL_DIR/rei-server"
 cat > "$INSTALL_DIR/.rei-config.json" << 'EOF'
 {
   "allowedWorkspaces": [
-    "/Users/lucasaguilar/www/lab/rei",
-    "/Users/lucasaguilar/www/projects"
+    "/path/to/your/project1",
+    "/path/to/your/project2"
   ],
   "defaultModel": "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
   "serverPort": 3000

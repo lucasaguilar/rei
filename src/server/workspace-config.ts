@@ -1,11 +1,17 @@
 // Configuración de workspaces permitidos para el servidor
 // Esto evita que cualquier directorio sea accedido por razones de seguridad
-export const ALLOWED_WORKSPACES = new Set([
-  "/Users/lucasaguilar/www/lab/rei",
-  "/Users/lucasaguilar/www/lab/app-for-news",
-  "/Users/lucasaguilar/www/lab/new",
-  // Agrega más rutas permitidas aquí
-]);
+// Leemos de variables de entorno para no hardcodear rutas personales
+function getAllowedWorkspaces(): Set<string> {
+  if (process.env.ALLOWED_WORKSPACES) {
+    const paths = process.env.ALLOWED_WORKSPACES.split(',').map(p => p.trim());
+    return new Set(paths);
+  }
+  
+  // Default fallback: allow the current working directory if nothing is set
+  return new Set([process.cwd()]);
+}
+
+export const ALLOWED_WORKSPACES = getAllowedWorkspaces();
 
 // Función para validar si un workspace es permitido
 export function isWorkspaceAllowed(workspacePath: string): boolean {
@@ -14,5 +20,8 @@ export function isWorkspaceAllowed(workspacePath: string): boolean {
 
 // Función para obtener el workspace por defecto
 export function getDefaultWorkspace(): string {
-  return "/Users/lucasaguilar/www/lab/rei";
+  if (process.env.REI_WORKSPACE_PATH) {
+    return process.env.REI_WORKSPACE_PATH;
+  }
+  return process.cwd();
 }

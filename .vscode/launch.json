@@ -513,13 +513,13 @@
         {
             "type": "node",
             "request": "launch",
-            "name": "TERMINAL REI google/gemma-4-31b-it (OpenRouter)",
+            "name": "new repo TERMINAL REI google/gemma-4-31b-it (OpenRouter)",
             "runtimeExecutable": "npm",
              "runtimeArgs": ["run",
                 "dev",
                 "--",
                 "--workspace",
-                "/Users/lucasaguilar/www/***REMOVED***",
+                "/Users/lucasaguilar/www/lab/new",
                 "chat"],
             "envFile": "${workspaceFolder}/.env",
             "env": {
@@ -528,7 +528,8 @@
             },
             "console": "integratedTerminal",
             "skipFiles": ["<node_internals>/**"]
-        }, 
+        },
+      
                
 
 
