@@ -6,9 +6,9 @@ if [ -f .env ]; then
   export $(grep -v '^#' .env | xargs)
 fi
 
-# Configuración del modelo específico que estabas usando en VS Code
-export MODEL_PROVIDER="openrouter"
-export OPENROUTER_MODEL="nvidia/nemotron-3-super-120b-a12b:free"
+# Configuración del modelo (usará valores del .env si existen, sino usa defaults)
+export MODEL_PROVIDER="${MODEL_PROVIDER:-openrouter}"
+export OPENROUTER_MODEL="${OPENROUTER_MODEL:-nvidia/nemotron-3-super-120b-a12b:free}"
 
 # Usamos un directorio temporal local por si la Mac tiene bloqueado el /var/folders/T
 export TMPDIR="$PWD/.tmp"
