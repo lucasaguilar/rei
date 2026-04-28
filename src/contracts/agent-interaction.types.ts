@@ -4,7 +4,7 @@ export interface AgentFileRequest {
 
 export interface AgentSREdit {
   file: string;
-  description: string;
+  description?: string;
   search: string;
   replace: string;
 }
