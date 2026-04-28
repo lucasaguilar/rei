@@ -231,7 +231,7 @@ export async function runChat(
   process.stdout.on("resize", onResize);
 
   // NOTE: Enable mouse click (1000h) and SGR mouse reporting (1006h)
-  // process.stdout.write("\x1b[?1000h\x1b[?1006h");
+  process.stdout.write("\x1b[?1000h\x1b[?1006h");
   // NOTE: Enter alternate screen buffer (1049h)
   process.stdout.write("\x1b[?1049h");
 
@@ -280,7 +280,7 @@ export async function runChat(
     process.stdin.setRawMode(false);
   }
   // NOTE: Disable mouse click (1000l) and SGR mouse reporting (1006l)
-  // process.stdout.write("\x1b[?1000l\x1b[?1006l");
+  process.stdout.write("\x1b[?1000l\x1b[?1006l");
   // NOTE: Exit alternate screen buffer (1049l) and show cursor (?25h)
   process.stdout.write("\x1b[?1049l\x1b[?25h");
 }
