@@ -8,11 +8,29 @@ export interface CommandResult {
 }
 
 const ALLOWED_COMMANDS = new Set([
-  "npm", "npx", "ls", "git", "mkdir", "cat", "grep", "pwd", "node", "tsc"
+  "npm",
+  "npx",
+  "ls",
+  "git",
+  "mkdir",
+  "cat",
+  "grep",
+  "pwd",
+  "node",
+  "tsc",
+  "find",
 ]);
 
 const DENIED_KEYWORDS = [
-  "rm -rf", "sudo", "chmod", "chown", "mkfs", ">", ">>", "|", "&"
+  "rm -rf",
+  "sudo",
+  "chmod",
+  "chown",
+  "mkfs",
+  ">",
+  ">>",
+  "|",
+  "&",
 ];
 
 /**
@@ -21,7 +39,7 @@ const DENIED_KEYWORDS = [
  */
 export async function executeCommand(
   commandLine: string,
-  workspacePath: string
+  workspacePath: string,
 ): Promise<CommandResult> {
   const trimmedCommand = commandLine.trim();
   const [cmd, ...args] = trimmedCommand.split(/\s+/);
@@ -49,7 +67,7 @@ export async function executeCommand(
   return new Promise((resolve) => {
     const child = spawn(cmd, args, {
       cwd: workspacePath,
-      shell: false, 
+      shell: false,
       env: { ...process.env, FORCE_COLOR: "0" },
     });
 
