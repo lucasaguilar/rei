@@ -132,15 +132,7 @@ export async function buildTurnContext(params: {
       });
       const preview = await readFilePreview(
         path.join(workspacePath, f.path),
-        isExplicitMention
-          ? PREVIEW_MAX_CHARS_FULL
-          : mode === "agent"
-            ? isExplicit
-              ? PREVIEW_MAX_CHARS_FULL
-              : PREVIEW_MAX_CHARS_AGENT
-            : isExplicit
-              ? PREVIEW_MAX_CHARS_AGENT
-              : PREVIEW_MAX_CHARS_DEFAULT,
+        isExplicitMention ? PREVIEW_MAX_CHARS_FULL : PREVIEW_MAX_CHARS_AGENT,
       );
       return {
         path: f.path,

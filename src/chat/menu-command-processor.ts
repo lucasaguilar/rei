@@ -160,6 +160,22 @@ export async function processMenuCommand(
     };
   }
 
+  if (trimmed === "/tdd") {
+    if (process.env.REI_TDD_MODE === "true") {
+      process.env.REI_TDD_MODE = "false";
+      return {
+        success: true,
+        response: "[REI] TDD Mode deactivated. Sandbox will only check types.",
+      };
+    } else {
+      process.env.REI_TDD_MODE = "true";
+      return {
+        success: true,
+        response: "[REI] TDD Mode activated! Sandbox will now run 'npm run test' during edit validation.",
+      };
+    }
+  }
+
   if (trimmed === "/index") {
     // 1. Generate and persist the AST Skeleton Map
     generateRepoMap(workspacePath);

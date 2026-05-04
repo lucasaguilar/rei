@@ -1,5 +1,12 @@
 <div align="center">
-  <img src="docs/assets/logo.png" alt="REI Logo" width="200" />
+<pre>
+██████╗ ███████╗██╗
+██╔══██╗██╔════╝██║
+██████╔╝█████╗  ██║
+██╔══██╗██╔══╝  ██║
+██║  ██║███████╗██║
+╚═╝  ╚═╝╚══════╝╚═╝
+</pre>
   <h1>REI (Repository-Aware AI)</h1>
   <p><em>A sniper-precision, local-first AI coding agent</em></p>
 </div>
@@ -26,9 +33,10 @@ While commercial giants like Cursor and GitHub Copilot dominate the cloud IDE sp
 
 REI can be used as a custom LLM provider for the [Continue](https://www.continue.dev/) extension in VS Code or JetBrains:
 
-1. **Start the REI Server**: 
+1. **Install and Start the REI Server**: 
    ```bash
-   npm run server
+   curl -fsSL https://raw.githubusercontent.com/lucasaguilar/rei/main/install-rei-server.sh | bash
+   ~/.rei/rei-server
    ```
 2. **Configure Continue**: Add a new model in your `config.json` pointing to the REI endpoint:
    - **API Base**: `http://localhost:3000/chat/completions`
@@ -52,8 +60,18 @@ REI is designed with a graceful degradation architecture. It can operate on **an
 
 ## Install
 
+The recommended way to install REI globally is using the official script:
+
 ```bash
-npm install
+curl -fsSL https://raw.githubusercontent.com/lucasaguilar/rei/main/install-rei-cli.sh | bash
+```
+
+Alternatively, you can install it via npm if you clone the repo:
+
+```bash
+git clone https://github.com/lucasaguilar/rei.git
+cd rei
+npm install -g .
 ```
 
 ## Commands
@@ -65,31 +83,31 @@ Global option:
 ### `plan` — one-shot planning
 
 ```bash
-npm run dev -- plan "create a worktree helper CLI"
+rei plan "create a worktree helper CLI"
 ```
 
 With explicit workspace:
 
 ```bash
-npm run dev -- --workspace /workspaces/another-repo plan "create a worktree helper CLI"
+rei --workspace /workspaces/another-repo plan "create a worktree helper CLI"
 ```
 
 ### `chat` — interactive session
 
 ```bash
-npm run dev -- chat
+rei chat
 ```
 
 With explicit workspace:
 
 ```bash
-npm run dev -- --workspace /workspaces/another-repo chat
+rei --workspace /workspaces/another-repo chat
 ```
 
 If only `--workspace` is provided, REI defaults to `chat`:
 
 ```bash
-npm run dev -- --workspace /workspaces/another-repo
+rei --workspace /workspaces/another-repo
 ```
 
 ### Interactive commands
@@ -152,7 +170,7 @@ ollama pull llama3.2
 4. Run REI:
 
 ```bash
-MODEL_PROVIDER=ollama OLLAMA_MODEL=llama3.2 npm run dev -- chat
+MODEL_PROVIDER=ollama OLLAMA_MODEL=llama3.2 rei chat
 ```
 
 Optional configuration:
@@ -165,7 +183,7 @@ Optional configuration:
 When conversation memory is compacted, REI can use a separate cheaper model for summarization instead of the main provider model. This is useful when the main model is expensive or slow.
 
 ```bash
-COMPACTOR_MODEL=openai/gpt-4o-mini npm run dev -- chat
+COMPACTOR_MODEL=openai/gpt-4o-mini rei chat
 ```
 
 If not set, the compactor uses the same provider and model as the main session.
@@ -176,7 +194,7 @@ If not set, the compactor uses the same provider and model as the main session.
 2. Run REI:
 
 ```bash
-MODEL_PROVIDER=gemini GEMINI_API_KEY=your-key GEMINI_MODEL=gemini-2.5-flash npm run dev -- chat
+MODEL_PROVIDER=gemini GEMINI_API_KEY=your-key GEMINI_MODEL=gemini-2.5-flash rei chat
 ```
 
 Optional configuration:
@@ -191,13 +209,13 @@ Optional configuration:
 2. Run REI:
 
 ```bash
-MODEL_PROVIDER=openrouter OPENROUTER_API_KEY=your-key npm run dev -- chat
+MODEL_PROVIDER=openrouter OPENROUTER_API_KEY=your-key rei chat
 ```
 
 To use a specific model:
 
 ```bash
-MODEL_PROVIDER=openrouter OPENROUTER_API_KEY=your-key OPENROUTER_MODEL=anthropic/claude-3.5-sonnet npm run dev -- chat
+MODEL_PROVIDER=openrouter OPENROUTER_API_KEY=your-key OPENROUTER_MODEL=anthropic/claude-3.5-sonnet rei chat
 ```
 
 Optional configuration:

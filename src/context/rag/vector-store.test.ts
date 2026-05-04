@@ -72,6 +72,16 @@ describe("VectorStore", () => {
       const remaining = store.query([0, 1], 1);
       expect(remaining[0].metadata.filePath).toBe("src/b.ts");
     });
+
+    it("should clear all records", async () => {
+      store.upsert({ id: "1", filePath: "a.ts", nodeType: "f", nodeName: "f", startLine: 1, endLine: 1 }, [1, 0]);
+      store.upsert({ id: "2", filePath: "b.ts", nodeType: "f", nodeName: "f", startLine: 1, endLine: 1 }, [0, 1]);
+      expect(store.getRecordCount()).toBe(2);
+
+      await store.clearAll();
+      expect(store.getRecordCount()).toBe(0);
+      expect(store.query([1, 0])).toEqual([]);
+    });
   });
 
   describe("query (Cosine Similarity)", () => {

@@ -134,4 +134,13 @@ export class VectorStore {
       console.log(`[VectorStore] Removed ${removed} stale chunks for ${filePath}`);
     }
   }
+
+  /**
+   * Elimina todos los registros de la base de datos, tanto en memoria como en disco.
+   */
+  async clearAll(): Promise<void> {
+    this.records = [];
+    await this.save();
+    console.log(`[VectorStore] All records have been cleared.`);
+  }
 }

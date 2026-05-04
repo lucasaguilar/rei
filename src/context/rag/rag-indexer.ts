@@ -58,7 +58,7 @@ async function runIndexing(
   }
 
   const store = new VectorStore(workspacePath);
-  await store.load();
+  await store.clearAll();
 
   const tsconfigPath = path.join(workspacePath, "tsconfig.json");
   const project = new Project({

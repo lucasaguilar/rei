@@ -487,7 +487,7 @@
             "request": "launch",
             "name": "SERVER REI google/gemma-4-31b-it (OpenRouter)",
             "runtimeExecutable": "npm",
-            "runtimeArgs": ["run", "server"],
+            "runtimeArgs": ["run", "server:dev"],
             "envFile": "${workspaceFolder}/.env",
             "env": {
                 "MODEL_PROVIDER": "openrouter",
@@ -501,7 +501,7 @@
             "request": "launch",
             "name": "SERVER REI qwen/qwen3-coder-30b-a3b-instruct (OpenRouter)",
             "runtimeExecutable": "npm",
-            "runtimeArgs": ["run", "server"],
+            "runtimeArgs": ["run", "server:dev"],
             "envFile": "${workspaceFolder}/.env",
             "env": {
                 "MODEL_PROVIDER": "openrouter",

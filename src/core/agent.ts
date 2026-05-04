@@ -223,33 +223,31 @@ export class Agent {
   private async ensureSystemMessage(session: ChatSession, userInput?: string): Promise<void> {
     let repositorySkeletonMap = undefined;
 
-    if (session.mode === "agent") {
-      // 1. Asegurar que el mapa esté generado e indexado en el VectorStore
-      if (!this.repoMapCache) {
-        this.repoMapCache = generateRepoMap(this.workspacePath);
-        
-        await this.vectorStore.load();
-        const chunks = await chunkRepoMap(this.workspacePath);
-        for (const chunk of chunks) {
-          const vector = await generateEmbedding(chunk.content);
-          this.vectorStore.upsert({
-            ...chunk.metadata,
-            content: chunk.content,
-          }, vector);
-        }
-        await this.vectorStore.save();
-        this.initWatcher();
+    // 1. Asegurar que el mapa esté generado e indexado en el VectorStore
+    if (!this.repoMapCache) {
+      this.repoMapCache = generateRepoMap(this.workspacePath);
+      
+      await this.vectorStore.load();
+      const chunks = await chunkRepoMap(this.workspacePath);
+      for (const chunk of chunks) {
+        const vector = await generateEmbedding(chunk.content);
+        this.vectorStore.upsert({
+          ...chunk.metadata,
+          content: chunk.content,
+        }, vector);
       }
+      await this.vectorStore.save();
+      this.initWatcher();
+    }
 
-      // 2. Recuperar solo fragmentos relevantes basados en la entrada del usuario
-      if (userInput) {
-        const relevantMap = await getRelevantMapContext(this.vectorStore, userInput);
-        repositorySkeletonMap = relevantMap 
-          ? `### RELEVANT REPOSITORY SKELETON MAP\n\n${relevantMap}`
-          : "No specific map fragments found for this query.";
-      } else {
-        repositorySkeletonMap = "Repository map indexed. Ask about specific files or symbols to see relevant structure.";
-      }
+    // 2. Recuperar solo fragmentos relevantes basados en la entrada del usuario
+    if (userInput) {
+      const relevantMap = await getRelevantMapContext(this.vectorStore, userInput);
+      repositorySkeletonMap = relevantMap 
+        ? `### RELEVANT REPOSITORY SKELETON MAP\n\n${relevantMap}`
+        : "No specific map fragments found for this query.";
+    } else {
+      repositorySkeletonMap = "Repository map indexed. Ask about specific files or symbols to see relevant structure.";
     }
 
     const systemContent = buildSystemMessage(

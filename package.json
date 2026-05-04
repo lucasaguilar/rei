@@ -17,12 +17,17 @@
     "typescript"
   ],
   "type": "module",
+  "bin": {
+    "rei": "./bin/rei.js"
+  },
   "scripts": {
+    "build": "tsc",
     "dev": "tsx src/main.ts",
     "check": "tsc --noEmit",
     "log:viewer": "node tools/log-viewer/server.mjs",
     "live": "npx live-server --config=live-server.config.json",
-    "server": "tsx src/server.ts",
+    "server": "node dist/server.js",
+    "server:dev": "tsx src/server.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
