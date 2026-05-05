@@ -143,4 +143,20 @@ export class VectorStore {
     await this.save();
     console.log(`[VectorStore] All records have been cleared.`);
   }
+
+  /**
+   * Garbage Collector inteligente: Elimina todos los registros cuyos archivos ya no existen.
+   */
+  async cleanupStaleFiles(activePaths: Set<string>): Promise<void> {
+    const initialCount = this.records.length;
+    this.records = this.records.filter(r => 
+      // Mantenemos el registro si es un chunk genérico sin path, o si su path aún existe
+      !r.metadata.filePath || activePaths.has(r.metadata.filePath)
+    );
+    const removed = initialCount - this.records.length;
+    if (removed > 0) {
+      await this.save();
+      console.log(`[VectorStore] Smart GC: Removed ${removed} stale records from deleted files.`);
+    }
+  }
 }

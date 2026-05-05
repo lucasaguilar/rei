@@ -220,7 +220,7 @@ export class Agent {
     return this.generateAgentAssistantResponse(messagesForModel);
   }
 
-  private async ensureSystemMessage(session: ChatSession, userInput?: string): Promise<void> {
+  private async updateSystemContextWithRepoMap(session: ChatSession, userInput?: string): Promise<void> {
     let repositorySkeletonMap = undefined;
 
     // 1. Asegurar que el mapa esté generado e indexado en el VectorStore
@@ -228,6 +228,12 @@ export class Agent {
       this.repoMapCache = generateRepoMap(this.workspacePath);
       
       await this.vectorStore.load();
+      
+      // Limpiar registros fantasma (archivos borrados mientras REI estaba apagado)
+      const currentFiles = scanWorkspace(this.workspacePath);
+      const activePaths = new Set(currentFiles.map(f => f.path));
+      await this.vectorStore.cleanupStaleFiles(activePaths);
+
       const chunks = await chunkRepoMap(this.workspacePath);
       for (const chunk of chunks) {
         const vector = await generateEmbedding(chunk.content);
@@ -268,7 +274,7 @@ export class Agent {
     onStatus?: StreamTurnOptions["onStatus"],
   ): Promise<void> {
     onStatus?.("building_context");
-    await this.ensureSystemMessage(session, userInput);
+    await this.updateSystemContextWithRepoMap(session, userInput);
     this.logger.logUserPrompt({
       mode: session.mode,
       prompt: userInput,
