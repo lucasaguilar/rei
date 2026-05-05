@@ -60,6 +60,9 @@ async function runIndexing(
   const store = new VectorStore(workspacePath);
   await store.load();
 
+  // Smart Garbage Collection: Eliminar del vector store los archivos que ya no existen físicamente
+  const activePaths = new Set(files.map((f) => f.path));
+  await store.cleanupStaleFiles(activePaths);
   const tsconfigPath = path.join(workspacePath, "tsconfig.json");
   const project = new Project({
     tsConfigFilePath: existsSync(tsconfigPath) ? tsconfigPath : undefined,

@@ -220,36 +220,40 @@ export class Agent {
     return this.generateAgentAssistantResponse(messagesForModel);
   }
 
-  private async ensureSystemMessage(session: ChatSession, userInput?: string): Promise<void> {
+  private async updateSystemContextWithRepoMap(session: ChatSession, userInput?: string): Promise<void> {
     let repositorySkeletonMap = undefined;
 
-    if (session.mode === "agent") {
-      // 1. Asegurar que el mapa esté generado e indexado en el VectorStore
-      if (!this.repoMapCache) {
-        this.repoMapCache = generateRepoMap(this.workspacePath);
-        
-        await this.vectorStore.load();
-        const chunks = await chunkRepoMap(this.workspacePath);
-        for (const chunk of chunks) {
-          const vector = await generateEmbedding(chunk.content);
-          this.vectorStore.upsert({
-            ...chunk.metadata,
-            content: chunk.content,
-          }, vector);
-        }
-        await this.vectorStore.save();
-        this.initWatcher();
-      }
+    // 1. Asegurar que el mapa esté generado e indexado en el VectorStore
+    if (!this.repoMapCache) {
+      this.repoMapCache = generateRepoMap(this.workspacePath);
+      
+      await this.vectorStore.load();
+      
+      // Limpiar registros fantasma (archivos borrados mientras REI estaba apagado)
+      const currentFiles = scanWorkspace(this.workspacePath);
+      const activePaths = new Set(currentFiles.map(f => f.path));
+      await this.vectorStore.cleanupStaleFiles(activePaths);
 
-      // 2. Recuperar solo fragmentos relevantes basados en la entrada del usuario
-      if (userInput) {
-        const relevantMap = await getRelevantMapContext(this.vectorStore, userInput);
-        repositorySkeletonMap = relevantMap 
-          ? `### RELEVANT REPOSITORY SKELETON MAP\n\n${relevantMap}`
-          : "No specific map fragments found for this query.";
-      } else {
-        repositorySkeletonMap = "Repository map indexed. Ask about specific files or symbols to see relevant structure.";
+      const chunks = await chunkRepoMap(this.workspacePath);
+      for (const chunk of chunks) {
+        const vector = await generateEmbedding(chunk.content);
+        this.vectorStore.upsert({
+          ...chunk.metadata,
+          content: chunk.content,
+        }, vector);
       }
+      await this.vectorStore.save();
+      this.initWatcher();
+    }
+
+    // 2. Recuperar solo fragmentos relevantes basados en la entrada del usuario
+    if (userInput) {
+      const relevantMap = await getRelevantMapContext(this.vectorStore, userInput);
+      repositorySkeletonMap = relevantMap 
+        ? `### RELEVANT REPOSITORY SKELETON MAP\n\n${relevantMap}`
+        : "No specific map fragments found for this query.";
+    } else {
+      repositorySkeletonMap = "Repository map indexed. Ask about specific files or symbols to see relevant structure.";
     }
 
     const systemContent = buildSystemMessage(
@@ -270,7 +274,7 @@ export class Agent {
     onStatus?: StreamTurnOptions["onStatus"],
   ): Promise<void> {
     onStatus?.("building_context");
-    await this.ensureSystemMessage(session, userInput);
+    await this.updateSystemContextWithRepoMap(session, userInput);
     this.logger.logUserPrompt({
       mode: session.mode,
       prompt: userInput,

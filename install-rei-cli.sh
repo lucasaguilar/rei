@@ -8,7 +8,7 @@ mkdir -p "$BIN_DIR"
 echo "📁 Instalando REI CLI en $INSTALL_DIR y symlink en $BIN_DIR"
 # Clonar el repo oficial de REI
 if [ ! -d "$INSTALL_DIR/.git" ]; then
-	git clone git@github.com:lucasaguilar/rei.git "$INSTALL_DIR"
+	git clone https://github.com/lucasaguilar/rei.git "$INSTALL_DIR"
 else
 	echo "Repositorio ya clonado en $INSTALL_DIR, actualizando..."
 	cd "$INSTALL_DIR"
@@ -16,6 +16,7 @@ else
 fi
 cd "$INSTALL_DIR"
 npm install
+npm run build
 # Crear .env global de ejemplo si no existe
 if [ ! -f "$INSTALL_DIR/.env" ]; then
 	cat > "$INSTALL_DIR/.env" << EENV
@@ -45,7 +46,7 @@ fi
 # Forzar TMPDIR local para evitar problemas de permisos
 export TMPDIR="$HOME/.tmp"
 mkdir -p "$TMPDIR"
-REI_WORKSPACE_PATH="${REI_WORKSPACE_PATH:-"$(pwd)"}" npx tsx "$HOME/.rei/src/main.ts" chat "$@"
+REI_WORKSPACE_PATH="${REI_WORKSPACE_PATH:-"$(pwd)"}" node "$HOME/.rei/bin/rei.js" chat "$@"
 EOF
 chmod +x "$BIN_DIR/rei"
 echo "✅ REI CLI instalado. Ejecuta 'rei' en cualquier carpeta."

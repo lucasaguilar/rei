@@ -10,7 +10,7 @@ import {
 // Imports fundamentales para el REI Flow
 import { scanWorkspace } from "./workspace/workspace-scanner.js";
 import { generateRepoMap } from "./tools/repo-map-generator.js";
-import { startIndexingWorker } from "./context/rag/rag-indexer.js";
+import { startIndexingWorker, hasRagIndex } from "./context/rag/rag-indexer.js";
 
 const PORT = process.env.REI_SERVER_PORT || 3000;
 const WORKSPACE_PATH = process.env.REI_WORKSPACE_PATH || getDefaultWorkspace();
@@ -22,22 +22,25 @@ if (!isWorkspaceAllowed(WORKSPACE_PATH)) {
 }
 
 async function startServer() {
-  console.log(REI_LOGO);
   console.log("🔍 Initializing workspace context (matching CLI flow)...");
 
   // 1. Preparar el contexto igual que en runChat
   //const scannedFiles = scanWorkspace(WORKSPACE_PATH);
-  const repoMap = generateRepoMap(WORKSPACE_PATH);
-  console.log(`📁 Repo map generated with ${repoMap.length} entries.`);
+  //const repoMap = generateRepoMap(WORKSPACE_PATH);
+  //console.log(`📁 Repo map generated with ${repoMap.length} entries.`);
 
-  // Iniciar RAG en background
-  /*
-  startIndexingWorker(WORKSPACE_PATH, {
-    onProgress: (indexed, total) =>
-      console.log(`📦 RAG indexing: ${indexed}/${total} nodes`),
-    onDone: (msg) => console.log(`✅ RAG complete: ${msg}`),
-  });
-  */
+  // Iniciar RAG en background si es la primera vez
+  if (!hasRagIndex(WORKSPACE_PATH)) {
+    console.log("[RAG] First run detected — starting background indexing...");
+    startIndexingWorker(WORKSPACE_PATH, {
+      onProgress: (indexed, total) => {
+        if (indexed % 50 === 0 || indexed === total) {
+          console.log(`📦 RAG indexing: ${indexed}/${total} nodes`);
+        }
+      },
+      onDone: (msg) => console.log(`✅ RAG complete: ${msg}`),
+    });
+  }
 
   // 2. Instanciar Agente y Handler con el contexto inicial
   const provider = createModelProvider();
