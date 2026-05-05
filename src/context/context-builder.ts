@@ -75,7 +75,7 @@ export async function buildTurnContext(params: {
 
   if (ENABLE_SEMANTIC_RAG_SEARCH && hasRagIndex(workspacePath)) {
     try {
-      ragResults = await searchRag(workspacePath, userInput, 5);
+      ragResults = await searchRag(workspacePath, userInput, 15);
       for (const r of ragResults) {
         ragFilePaths.add(r.metadata.filePath);
       }

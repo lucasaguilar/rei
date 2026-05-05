@@ -532,6 +532,16 @@ To trigger a full TypeScript type check without emitting:
 npm run check
 ```
 
+### RAG Effectiveness Evals
+
+While Vitest covers deterministic application logic, REI also includes AI Evaluation scripts (Evals) to measure the semantic quality and effectiveness of the context engine and RAG retrieval pipeline.
+
+To run the RAG diagnostic eval and inspect the Top-K retrieval accuracy:
+```bash
+npm run test:eval
+```
+This is particularly useful when tweaking the `searchRag` weights, model embeddings, or heuristic scoring.
+
 ## Runtime overview
 
 ```mermaid
