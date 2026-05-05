@@ -26,8 +26,8 @@ async function startServer() {
 
   // 1. Preparar el contexto igual que en runChat
   //const scannedFiles = scanWorkspace(WORKSPACE_PATH);
-  const repoMap = generateRepoMap(WORKSPACE_PATH);
-  console.log(`📁 Repo map generated with ${repoMap.length} entries.`);
+  //const repoMap = generateRepoMap(WORKSPACE_PATH);
+  //console.log(`📁 Repo map generated with ${repoMap.length} entries.`);
 
   // Iniciar RAG en background si es la primera vez
   if (!hasRagIndex(WORKSPACE_PATH)) {
