@@ -29,6 +29,15 @@ const LANGUAGE_CAPABILITIES: readonly LanguageCapability[] = [
     supportsAstDependencyExtraction: false,
     supportsSemanticValidation: false,
   },
+  {
+    id: "csharp",
+    extensions: [".cs"],
+    preferredSourceFile: true,
+    supportsAstIndexing: false,
+    supportsCallerDiscovery: false,
+    supportsAstDependencyExtraction: false,
+    supportsSemanticValidation: true,
+  }
 ];
 
 const DEFAULT_LANGUAGE_CAPABILITY: LanguageCapability = {
