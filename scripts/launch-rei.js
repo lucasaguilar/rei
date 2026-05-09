@@ -9,7 +9,7 @@ import { PROJECTS, PROVIDER_MODELS } from './launch-rei.config.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 
-dotenv.config({ path: path.join(ROOT, '.env') });
+dotenv.config({ path: path.join(ROOT, '.env'), quiet: true });
 
 // PROJECTS and PROVIDER_MODELS are loaded from launch-rei.config.js (git-ignored).
 // Copy launch-rei.config.example.js to launch-rei.config.js to get started.

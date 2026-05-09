@@ -9,7 +9,6 @@
             "request": "launch",
             "name": "REI Interactive Launcher",
             "program": "${workspaceFolder}/scripts/launch-rei.js",
-            "envFile": "${workspaceFolder}/.env",
             "console": "integratedTerminal",
             "skipFiles": ["<node_internals>/**"]
         },
