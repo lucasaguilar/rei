@@ -43,14 +43,30 @@ function saveLast(data) {
 async function main() {
     const last = loadLast();
 
-    // Step 1: workspace
-    const { project } = await inquirer.prompt([{
-        type: 'list',
-        name: 'project',
-        message: 'Workspace:',
-        choices: PROJECTS,
-        default: last.project,
-    }]);
+    // Step 1: workspace (with validation)
+    let project;
+    let validProjectSelected = false;
+    while (!validProjectSelected) {
+        const { selectedProject } = await inquirer.prompt([{
+            type: 'list',
+            name: 'selectedProject',
+            message: 'Workspace:',
+            choices: PROJECTS,
+            default: last.project,
+        }]);
+
+        // Validate that the project path exists (works on Windows, macOS, Linux)
+        const projectPath = path.isAbsolute(selectedProject)
+            ? selectedProject
+            : path.resolve(ROOT, selectedProject);
+
+        if (fs.existsSync(projectPath)) {
+            project = selectedProject;
+            validProjectSelected = true;
+        } else {
+            console.log(`\n❌ Path does not exist: ${projectPath}\nPlease select a valid workspace.\n`);
+        }
+    }
 
     // Step 2: provider
     const { provider } = await inquirer.prompt([{
