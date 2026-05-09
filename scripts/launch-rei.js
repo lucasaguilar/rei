@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
-import inquirer from 'inquirer';
+import { select, text, intro, outro, isCancel, cancel } from '@clack/prompts';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { PROJECTS, PROVIDER_MODELS } from './launch-rei.config.js';
@@ -43,19 +43,20 @@ function saveLast(data) {
 async function main() {
     const last = loadLast();
 
+    intro('REI Launcher');
+
     // Step 1: workspace (with validation)
     let project;
     let validProjectSelected = false;
     while (!validProjectSelected) {
-        const { selectedProject } = await inquirer.prompt([{
-            type: 'list',
-            name: 'selectedProject',
+        const selectedProject = await select({
             message: 'Workspace:',
-            choices: PROJECTS,
-            default: last.project,
-        }]);
+            options: PROJECTS.map(p => ({ value: p, label: p })),
+            initialValue: last.project,
+        });
 
-        // Validate that the project path exists (works on Windows, macOS, Linux)
+        if (isCancel(selectedProject)) { cancel('Cancelled'); process.exit(0); }
+
         const projectPath = path.isAbsolute(selectedProject)
             ? selectedProject
             : path.resolve(ROOT, selectedProject);
@@ -69,32 +70,31 @@ async function main() {
     }
 
     // Step 2: provider
-    const { provider } = await inquirer.prompt([{
-        type: 'list',
-        name: 'provider',
+    const provider = await select({
         message: 'Provider:',
-        choices: PROVIDERS,
-        default: last.provider,
-    }]);
+        options: PROVIDERS.map(p => ({ value: p, label: p })),
+        initialValue: last.provider,
+    });
+
+    if (isCancel(provider)) { cancel('Cancelled'); process.exit(0); }
 
     // Step 3: model (suggestions for selected provider + custom option)
     const modelChoices = [...(PROVIDER_MODELS[provider] ?? []), CUSTOM];
-    const { modelChoice } = await inquirer.prompt([{
-        type: 'list',
-        name: 'modelChoice',
+    const modelChoice = await select({
         message: 'Model:',
-        choices: modelChoices,
-        default: last.provider === provider ? last.model : modelChoices[0],
-    }]);
+        options: modelChoices.map(m => ({ value: m, label: m })),
+        initialValue: last.provider === provider ? last.model : modelChoices[0],
+    });
+
+    if (isCancel(modelChoice)) { cancel('Cancelled'); process.exit(0); }
 
     let model = modelChoice;
     if (modelChoice === CUSTOM) {
-        const { customModel } = await inquirer.prompt([{
-            type: 'input',
-            name: 'customModel',
+        const customModel = await text({
             message: 'Enter model name:',
-            validate: (v) => v.trim().length > 0 || 'Model name cannot be empty',
-        }]);
+            validate: (v) => v.trim().length === 0 ? 'Model name cannot be empty' : undefined,
+        });
+        if (isCancel(customModel)) { cancel('Cancelled'); process.exit(0); }
         model = customModel.trim();
     }
 
@@ -110,10 +110,10 @@ async function main() {
 
     console.log(`\nLaunching REI [${provider}] ${model} → ${project}\n`);
 
-    // shell:true resolves npm/npm.cmd on Windows, macOS, and Linux transparently
+    // Quote project path to handle spaces; shell:true is required for .cmd on Windows
+    const projectArg = project.includes(' ') ? `"${project}"` : project;
     const child = spawn(
-        'npm',
-        ['run', 'dev', '--', '--workspace', project, 'chat'],
+        `npm run dev -- --workspace ${projectArg} chat`,
         { env, stdio: 'inherit', shell: true },
     );
 
