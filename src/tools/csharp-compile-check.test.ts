@@ -180,7 +180,9 @@ Program.cs(10,5): error CS0029: Type error.
   describe("runCSharpCompileCheck", () => {
     it("should return success when no .csproj or .sln files exist", async () => {
       // Mock fs to return no C# project files
-      vi.mocked(fs.readdirSync).mockReturnValueOnce(["package.json"]);
+      vi.mocked(fs.readdirSync).mockReturnValueOnce(
+        ["package.json"] as unknown as ReturnType<typeof fs.readdirSync>,
+      );
 
       const result = await runCSharpCompileCheck("/mock/workspace");
 
@@ -198,7 +200,9 @@ Program.cs(10,5): error CS0029: Type error.
 
   describe("applyVirtualBatch", () => {
     it("should handle non-C# projects", async () => {
-      vi.mocked(fs.readdirSync).mockReturnValueOnce(["package.json"]);
+      vi.mocked(fs.readdirSync).mockReturnValueOnce(
+        ["package.json"] as unknown as ReturnType<typeof fs.readdirSync>,
+      );
 
       const result = await applyVirtualBatch("/mock/workspace", []);
 
