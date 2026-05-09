@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 
-export type ProjectType = "angular" | "typescript" | "unknown";
+export type ProjectType = "angular" | "typescript" | "csharp" | "unknown";
 
 export interface ProjectDetection {
   type: ProjectType;
@@ -24,6 +24,16 @@ export function detectProjectType(workspacePath: string): ProjectDetection {
   else if (fs.existsSync(path.join(workspacePath, "tsconfig.json"))) {
     type = "typescript";
     command = "npx tsc --noEmit --pretty false";
+  }
+  // C#: .csproj or .sln in root
+  else if (
+    fs.existsSync(path.join(workspacePath, "Directory.Build.props")) ||
+    fs.readdirSync(workspacePath).some((file) =>
+      file.endsWith(".csproj") || file.endsWith(".sln")
+    )
+  ) {
+    type = "csharp";
+    command = "dotnet build";
   }
 
   // TDD Mode Injection
