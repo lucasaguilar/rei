@@ -6,3 +6,4 @@ dist/
 .rei/
 *.tmp
 coverage/
+scripts/launch-rei.config.js

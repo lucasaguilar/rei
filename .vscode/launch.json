@@ -7,6 +7,15 @@
         {
             "type": "node",
             "request": "launch",
+            "name": "REI Interactive Launcher",
+            "program": "${workspaceFolder}/scripts/launch-rei.js",
+            "envFile": "${workspaceFolder}/.env",
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
             "name": "REI llama3.2:1b (Ollama + Workspace)",
             "runtimeExecutable": "npm",
             "runtimeArgs": [
