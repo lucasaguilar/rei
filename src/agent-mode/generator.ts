@@ -12,7 +12,7 @@ import {
 import {
   applyVirtualBatch,
   formatVirtualBatchResult,
-} from "../tools/typescript-compile-check.js";
+} from "../tools/compile-check-factory.js";
 import { applyFileEdits } from "../tools/search-replace.js";
 import { findSymbolCallers, rankCallerFiles } from "../context/caller-graph.js";
 import * as fs from "fs/promises";
@@ -376,7 +376,7 @@ export async function executeAgentTurn(params: {
           applyErrorCount: valResult.applyErrors.length,
         });
 
-        let feedback = formatVirtualBatchResult(valResult);
+        let feedback = formatVirtualBatchResult(workspacePath, valResult);
         const mismatchOnly = isSearchMismatchOnly(valResult.applyErrors);
         consecutiveSearchMismatchFailures = mismatchOnly
           ? consecutiveSearchMismatchFailures + 1

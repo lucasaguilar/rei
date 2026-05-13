@@ -206,7 +206,7 @@ export class AgentLogger {
       filePath: string;
       line: number;
       column: number;
-      code: number;
+      code: number | string;
       message: string;
     }>;
   }) {

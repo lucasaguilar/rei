@@ -10,36 +10,36 @@ import {
   type GenericCompileCheckResult,
   type GenericVirtualBatchResult,
 } from "./compile-check-core.js";
-import { TypeScriptCompileAdapter } from "./adapters/typescript-compile-adapter.js";
+import { CSharpCompileAdapter } from "./adapters/csharp-compile-adapter.js";
 
 export { shouldCopyToSandbox } from "./compile-check-core.js";
 
-const adapter = new TypeScriptCompileAdapter();
+const adapter = new CSharpCompileAdapter();
 
-export function parseTscDiagnostics(
+export function parseCscDiagnostics(
   workspacePath: string,
   output: string,
-): TypeScriptCompileDiagnostic[] {
-  return adapter.parseDiagnostics(workspacePath, output) as TypeScriptCompileDiagnostic[];
+): CSharpCompileDiagnostic[] {
+  return adapter.parseDiagnostics(workspacePath, output) as CSharpCompileDiagnostic[];
 }
 
-export interface TypeScriptCompileDiagnostic {
+export interface CSharpCompileDiagnostic {
   filePath: string;
   line: number;
   column: number;
   message: string;
-  code: number;
+  code: string;
 }
 
-export interface TypeScriptCompileCheckResult {
+export interface CSharpCompileCheckResult {
   success: boolean;
-  diagnostics: TypeScriptCompileDiagnostic[];
+  diagnostics: CSharpCompileDiagnostic[];
   fileCount: number;
 }
 
 export interface VirtualBatchResult {
   success: boolean;
-  diagnostics: TypeScriptCompileDiagnostic[];
+  diagnostics: CSharpCompileDiagnostic[];
   applyErrors: string[];
   fileCount: number;
   virtualFiles: Map<string, string>;
@@ -48,9 +48,9 @@ export interface VirtualBatchResult {
   verifyStderr: string;
 }
 
-export async function runTypeScriptCompileCheck(
+export async function runCSharpCompileCheck(
   workspacePath: string,
-): Promise<TypeScriptCompileCheckResult> {
+): Promise<CSharpCompileCheckResult> {
   if (!adapter.canValidate(workspacePath)) {
     return { success: true, diagnostics: [], fileCount: 0 };
   }
@@ -60,7 +60,7 @@ export async function runTypeScriptCompileCheck(
   const diagnostics = adapter.parseDiagnostics(
     workspacePath,
     `${verify.stdout}\n${verify.stderr}`,
-  ) as TypeScriptCompileDiagnostic[];
+  ) as CSharpCompileDiagnostic[];
 
   return {
     success: verify.exitCode === 0,
@@ -69,14 +69,14 @@ export async function runTypeScriptCompileCheck(
   };
 }
 
-export function formatTypeScriptCompileResult(
-  result: TypeScriptCompileCheckResult,
+export function formatCSharpCompileResult(
+  result: CSharpCompileCheckResult,
 ): string[] {
   return adapter.formatResult(result as GenericCompileCheckResult);
 }
 
 /**
- * Applies a batch of Search & Replace edits IN-MEMORY to a ts-morph project
+ * Applies a batch of Search & Replace edits IN-MEMORY to a C# project
  * and retrieves any compilation errors caused by the edits.
  * Does not write to disk.
  */
@@ -120,7 +120,7 @@ export async function applyVirtualBatch(
 
     const verify = await runVerifyCommand(sandboxPath, command);
     const output = `${verify.stdout}\n${verify.stderr}`;
-    const diagnostics = adapter.parseDiagnostics(workspacePath, output) as TypeScriptCompileDiagnostic[];
+    const diagnostics = adapter.parseDiagnostics(workspacePath, output) as CSharpCompileDiagnostic[];
 
     return {
       success: verify.exitCode === 0,
