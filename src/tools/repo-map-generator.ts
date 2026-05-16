@@ -9,6 +9,10 @@ import {
   TypeAliasDeclaration,
 } from "ts-morph";
 import { listRelevantFiles } from "./file-globber.js";
+import { AstProviderFactory } from "../context/ast-providers/ast-provider-factory.js";
+import type { SourceFileLike, AstChunk } from "../context/ast-providers/ast-provider.js";
+import { HeuristicAstProvider } from "../context/ast-providers/heuristic-ast-provider.js";
+import { getLanguageCapabilityForExtension } from "../language/language-capabilities.js";
 
 // Detect entry points from package.json
 function getEntryPointFiles(workspacePath: string): Set<string> {
@@ -37,7 +41,7 @@ function getEntryPointFiles(workspacePath: string): Set<string> {
 
 const REPO_MAP_HEADER = "### REPOSITORY SKELETON MAP";
 
-export function generateRepoMap(workspacePath: string): string {
+export async function generateRepoMap(workspacePath: string): Promise<string> {
   // NOTE 1. Filtro de carpetas prohibidas
   const IGNORE_DIRS = ["node_modules", "dist", ".rei", ".git", "bin"];
 
@@ -53,6 +57,9 @@ export function generateRepoMap(workspacePath: string): string {
   );
   const testFiles = files.filter((f) =>
     /\.(spec|test)\.(ts|js|tsx|jsx)$/.test(f),
+  );
+  const polyglotFiles = files.filter((f) =>
+    /\.(py|c|h|cpp|hpp|cc|cxx|cs|rs|go)$/.test(f),
   );
 
   // Procesar archivos TS/JS con ts-morph
@@ -129,6 +136,36 @@ export function generateRepoMap(workspacePath: string): string {
     );
   }
 
+  // POLYGLOT (C, C++, C#, Python, Rust, Go) — AstProviderFactory / Tree-sitter
+  for (const file of polyglotFiles) {
+    const relPath = path.relative(workspacePath, file).replace(/\\/g, "/");
+    try {
+      const content = fs.readFileSync(file, "utf8");
+      const ext = path.extname(file).toLowerCase();
+      const languageId = getLanguageCapabilityForExtension(ext).id;
+      const fileLike: SourceFileLike = { filePath: relPath, languageId, content };
+      const provider = AstProviderFactory.resolve(fileLike);
+      let chunks: AstChunk[] = [];
+      try {
+        chunks = await provider.extractChunks(fileLike);
+      } catch { /* Tree-sitter failed; heuristic fallback below */ }
+      if (chunks.length === 0) {
+        // FR-8: heuristic fallback when Tree-sitter fails or returns no symbols
+        try { chunks = await new HeuristicAstProvider().extractChunks(fileLike); } catch { /* skip */ }
+      }
+      if (chunks.length > 0) {
+        const lines = chunks.map(
+          (c) => `[${c.providerId}] ${c.nodeType} "${c.symbolName ?? "?"}" (L${c.startLine}-${c.endLine})`,
+        );
+        sections.push(`// FILE: ${relPath}\n${lines.join("\n")}`);
+      } else {
+        sections.push(`// FILE: ${relPath}`);
+      }
+    } catch {
+      sections.push(`// FILE: ${relPath}`);
+    }
+  }
+
   const skeleton =
     sections.length > 0
       ? `${REPO_MAP_HEADER}\n\n${sections.join("\n\n")}`
@@ -146,7 +183,7 @@ export function generateRepoMap(workspacePath: string): string {
   return skeleton;
 }
 
-export function generateRepoMapForFile(workspacePath: string, absFilePath: string): string | null {
+export async function generateRepoMapForFile(workspacePath: string, absFilePath: string): Promise<string | null> {
   const IGNORE_DIRS = ["node_modules", "dist", ".rei", ".git", "bin"];
   if (IGNORE_DIRS.some((dir) => absFilePath.split(path.sep).includes(dir))) {
     return null;
@@ -198,6 +235,31 @@ export function generateRepoMapForFile(workspacePath: string, absFilePath: strin
       const describes = Array.from(content.matchAll(/describe\s*\(\s*['"`]([^'"]+)['"`]/g)).map((m) => m[1]);
       const its = Array.from(content.matchAll(/(?:it|test)\s*\(\s*['"`]([^'"]+)['"`]/g)).map((m) => m[1]);
       sections.push(`// FILE: ${relPath}\nTest suites: ${[...new Set(describes)].join(", ")}\nTest cases: ${[...new Set(its)].join(", ")}`);
+    }
+
+    // 5. Polyglot (C, C++, C#, Python, Rust, Go) — AstProviderFactory / Tree-sitter
+    if (/\.(py|c|h|cpp|hpp|cc|cxx|cs|rs|go)$/.test(absFilePath)) {
+      const content = fs.readFileSync(absFilePath, "utf8");
+      const ext = path.extname(absFilePath).toLowerCase();
+      const languageId = getLanguageCapabilityForExtension(ext).id;
+      const fileLike: SourceFileLike = { filePath: relPath, languageId, content };
+      const provider = AstProviderFactory.resolve(fileLike);
+      let chunks: AstChunk[] = [];
+      try {
+        chunks = await provider.extractChunks(fileLike);
+      } catch { /* Tree-sitter failed; heuristic fallback below */ }
+      if (chunks.length === 0) {
+        // FR-8: heuristic fallback when Tree-sitter fails or returns no symbols
+        try { chunks = await new HeuristicAstProvider().extractChunks(fileLike); } catch { /* skip */ }
+      }
+      if (chunks.length > 0) {
+        const lines = chunks.map(
+          (c) => `[${c.providerId}] ${c.nodeType} "${c.symbolName ?? "?"}" (L${c.startLine}-${c.endLine})`,
+        );
+        sections.push(`// FILE: ${relPath}\n${lines.join("\n")}`);
+      } else {
+        sections.push(`// FILE: ${relPath}`);
+      }
     }
   } catch (err) {
     console.error(`[RepoMapGenerator] Error parsing ${absFilePath}:`, err);

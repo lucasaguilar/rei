@@ -2,9 +2,11 @@ import { existsSync } from "node:fs";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Project } from "ts-morph";
 import { scanWorkspace } from "../../workspace/workspace-scanner.js";
-import { supportsAstIndexingExtension } from "../../language/language-capabilities.js";
+import { supportsAstIndexingExtension, getLanguageCapabilityForExtension } from "../../language/language-capabilities.js";
+import { AstProviderFactory } from "../../context/ast-providers/ast-provider-factory.js";
+import type { SourceFileLike, AstChunk } from "../../context/ast-providers/ast-provider.js";
+import { HeuristicAstProvider } from "../../context/ast-providers/heuristic-ast-provider.js";
 import { VectorStore, VectorMetadata } from "./vector-store.js";
 import { generateEmbedding } from "./embedder.js";
 import type { VectorSearchResult } from "./vector-store.js";
@@ -63,12 +65,6 @@ async function runIndexing(
   // Smart Garbage Collection: Eliminar del vector store los archivos que ya no existen físicamente
   const activePaths = new Set(files.map((f) => f.path));
   await store.cleanupStaleFiles(activePaths);
-  const tsconfigPath = path.join(workspacePath, "tsconfig.json");
-  const project = new Project({
-    tsConfigFilePath: existsSync(tsconfigPath) ? tsconfigPath : undefined,
-    skipAddingFilesFromTsConfig: true,
-    compilerOptions: { allowJs: true },
-  });
 
   let indexed = 0;
   const total = files.length;
@@ -85,63 +81,48 @@ async function runIndexing(
     const absPath = path.resolve(workspacePath, file.path);
 
     if (supportsAstIndexingExtension(file.extension)) {
+      let content: string | undefined;
       try {
-        const sourceFile = project.addSourceFileAtPath(absPath);
-        const chunks: Array<{
-          name: string;
-          type: string;
-          text: string;
-          startLine: number;
-          endLine: number;
-        }> = [];
+        content = fs.readFileSync(absPath, "utf8");
+      } catch {
+        // Unreadable file — skip
+      }
 
-        for (const fn of sourceFile.getFunctions()) {
-          chunks.push({
-            name: fn.getName() ?? "anonymous",
-            type: "function",
-            text: fn.getText(),
-            startLine: fn.getStartLineNumber(),
-            endLine: fn.getEndLineNumber(),
-          });
-        }
-        for (const cls of sourceFile.getClasses()) {
-          chunks.push({
-            name: cls.getName() ?? "AnonymousClass",
-            type: "class",
-            text: cls.getText(),
-            startLine: cls.getStartLineNumber(),
-            endLine: cls.getEndLineNumber(),
-          });
-        }
-        for (const iface of sourceFile.getInterfaces()) {
-          chunks.push({
-            name: iface.getName(),
-            type: "interface",
-            text: iface.getText(),
-            startLine: iface.getStartLineNumber(),
-            endLine: iface.getEndLineNumber(),
-          });
-        }
-        for (const vs of sourceFile.getVariableStatements()) {
-          for (const vd of vs.getDeclarations()) {
-            chunks.push({
-              name: vd.getName(),
-              type: "variable",
-              text: vs.getText(),
-              startLine: vs.getStartLineNumber(),
-              endLine: vs.getEndLineNumber(),
-            });
+      if (content !== undefined) {
+        const languageId = getLanguageCapabilityForExtension(file.extension).id;
+        const fileLike: SourceFileLike = { filePath: file.path, languageId, content };
+        const provider = AstProviderFactory.resolve(fileLike);
+
+        let astChunks: AstChunk[] = [];
+        try {
+          astChunks = await provider.extractChunks(fileLike);
+        } catch {
+          // Primary provider threw — fall back to HeuristicAstProvider (FR-8)
+          try {
+            astChunks = await new HeuristicAstProvider().extractChunks(fileLike);
+          } catch {
+            astChunks = [];
           }
         }
-        if (chunks.length === 0) {
-          chunks.push({
-            name: file.path,
-            type: "file_chunk",
-            text: sourceFile.getText().slice(0, 4000),
-            startLine: 1,
-            endLine: 0,
-          });
-        }
+
+        const chunks =
+          astChunks.length > 0
+            ? astChunks.map((c) => ({
+                name: c.symbolName ?? file.path,
+                type: c.nodeType,
+                text: c.content,
+                startLine: c.startLine,
+                endLine: c.endLine,
+              }))
+            : [
+                {
+                  name: file.path,
+                  type: "file_chunk",
+                  text: content.slice(0, 4000),
+                  startLine: 1,
+                  endLine: 0,
+                },
+              ];
 
         for (const chunk of chunks) {
           if (!chunk.text.trim()) continue;
@@ -157,10 +138,6 @@ async function runIndexing(
           const vector = await generateEmbedding(chunk.text.slice(0, 2000));
           store.upsert(metadata, vector);
         }
-
-        project.removeSourceFile(sourceFile);
-      } catch {
-        // Non-parseable files are silently skipped
       }
     } else {
       try {

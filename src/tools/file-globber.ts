@@ -2,15 +2,28 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 const DEFAULT_EXTENSIONS = [
+  // TypeScript / JavaScript
   ".ts",
   ".js",
   ".tsx",
   ".jsx",
+  ".spec.ts",
+  ".test.ts",
+  // Web
   ".html",
   ".css",
   ".scss",
-  ".spec.ts",
-  ".test.ts",
+  // Polyglot (Tree-sitter supported)
+  ".py",
+  ".c",
+  ".h",
+  ".cpp",
+  ".hpp",
+  ".cc",
+  ".cxx",
+  ".cs",
+  ".rs",
+  ".go",
 ];
 
 export function listRelevantFiles(

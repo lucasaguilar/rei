@@ -69,79 +69,148 @@ describe('UserService', () => {
 });
     `;
     await fs.writeFile(path.join(tmpWorkspace, "user.test.ts"), testContent);
-  });
+
+    // 5. Polyglot source files for Tree-sitter integration tests
+    await fs.writeFile(
+      path.join(tmpWorkspace, "script.py"),
+      `def process_data(items: list) -> dict:\n    result = {}\n    return result\n\nclass DataProcessor:\n    def __init__(self, config: dict):\n        self.config = config\n`,
+    );
+
+    await fs.writeFile(
+      path.join(tmpWorkspace, "main.c"),
+      `#include <stdio.h>\n\nint add(int a, int b) {\n    return a + b;\n}\n\nstruct Point {\n    int x;\n    int y;\n};\n`,
+    );
+
+    await fs.writeFile(
+      path.join(tmpWorkspace, "Repository.cs"),
+      `using System;\n\nnamespace MyApp {\n    public class Repository {\n        public string GetById(int id) {\n            return null;\n        }\n    }\n}\n`,
+    );
+
+    await fs.writeFile(
+      path.join(tmpWorkspace, "lib.rs"),
+      `pub fn compute(x: i32, y: i32) -> i32 {\n    x + y\n}\n\npub struct Config {\n    pub name: String,\n}\n`,
+    );
+  }, 30_000);
 
   afterAll(async () => {
     // Cleanup
     await fs.rm(tmpWorkspace, { recursive: true, force: true });
   });
 
-  it("should extract high-quality AST chunks from TypeScript files", () => {
-    const output = generateRepoMapForFile(tmpWorkspace, path.join(tmpWorkspace, "user.ts"));
-    
+  it("should extract high-quality AST chunks from TypeScript files", async () => {
+    const output = await generateRepoMapForFile(tmpWorkspace, path.join(tmpWorkspace, "user.ts"));
+
     expect(output).not.toBeNull();
-    
+
     // Check Imports
-    expect(output).toContain('// Imports: ./dependency.ts');
-    
+    expect(output).toContain("// Imports: ./dependency.ts");
+
     // Check Interfaces & JSDoc
-    expect(output).toContain('// Este es un comentario JSDoc importante');
-    expect(output).toContain('export interface UserData');
-    expect(output).toContain('id: string;');
-    expect(output).toContain('age?: number;');
-    
+    expect(output).toContain("// Este es un comentario JSDoc importante");
+    expect(output).toContain("export interface UserData");
+    expect(output).toContain("id: string;");
+    expect(output).toContain("age?: number;");
+
     // Check Types
     expect(output).toContain('export type Status = "active" | "inactive";');
-    
+
     // Check Classes, Modifiers & JSDoc
-    expect(output).toContain('// Servicio de Usuarios');
-    expect(output).toContain('export class UserService implements BaseService');
-    expect(output).toContain('public static readonly VERSION: any;');
-    
+    expect(output).toContain("// Servicio de Usuarios");
+    expect(output).toContain("export class UserService implements BaseService");
+    expect(output).toContain("public static readonly VERSION: any;");
+
     // Private properties should NOT be exposed in the AST skeleton
-    expect(output).not.toContain('internalToken');
-    
+    expect(output).not.toContain("internalToken");
+
     // Check Methods & JSDoc
-    expect(output).toContain('// Obtiene un usuario');
-    expect(output).toContain('public async getUser(id: string): Promise<');
-    expect(output).toContain('UserData>');
-    
+    expect(output).toContain("// Obtiene un usuario");
+    expect(output).toContain("public async getUser(id: string): Promise<");
+    expect(output).toContain("UserData>");
+
     // Check standard functions
-    expect(output).toContain('export function helperFunction(a: number): string;');
+    expect(output).toContain("export function helperFunction(a: number): string;");
   });
 
-  it("should extract relevant semantic tags from HTML files", () => {
-    const output = generateRepoMapForFile(tmpWorkspace, path.join(tmpWorkspace, "view.html"));
-    
+  it("should extract relevant semantic tags from HTML files", async () => {
+    const output = await generateRepoMapForFile(tmpWorkspace, path.join(tmpWorkspace, "view.html"));
+
     expect(output).not.toBeNull();
-    
+
     // Should extract custom/semantic tags
-    expect(output).toContain('my-custom-header');
-    expect(output).toContain('ion-button');
-    
+    expect(output).toContain("my-custom-header");
+    expect(output).toContain("ion-button");
+
     // Should ignore generic layout tags (div, span)
-    expect(output).not.toContain('div');
-    expect(output).not.toContain('span');
+    expect(output).not.toContain("div");
+    expect(output).not.toContain("span");
   });
 
-  it("should extract classes and IDs from CSS/SCSS files", () => {
-    const output = generateRepoMapForFile(tmpWorkspace, path.join(tmpWorkspace, "styles.css"));
-    
+  it("should extract classes and IDs from CSS/SCSS files", async () => {
+    const output = await generateRepoMapForFile(tmpWorkspace, path.join(tmpWorkspace, "styles.css"));
+
     expect(output).not.toBeNull();
-    expect(output).toContain('CSS classes: container, badge-red');
-    expect(output).toContain('CSS ids: main-form');
+    expect(output).toContain("CSS classes: container, badge-red");
+    expect(output).toContain("CSS ids: main-form");
   });
 
-  it("should extract test suites and cases from Spec/Test files", () => {
-    const output = generateRepoMapForFile(tmpWorkspace, path.join(tmpWorkspace, "user.test.ts"));
-    
+  it("should extract test suites and cases from Spec/Test files", async () => {
+    const output = await generateRepoMapForFile(tmpWorkspace, path.join(tmpWorkspace, "user.test.ts"));
+
     expect(output).not.toBeNull();
-    expect(output).toContain('Test suites: UserService');
-    expect(output).toContain('Test cases: should return a user, should fail if user not found');
+    expect(output).toContain("Test suites: UserService");
+    expect(output).toContain("Test cases: should return a user, should fail if user not found");
   });
 
-  it("should ignore prohibited directories like node_modules", () => {
-    const output = generateRepoMapForFile(tmpWorkspace, path.join(tmpWorkspace, "node_modules", "package", "index.ts"));
+  it("should ignore prohibited directories like node_modules", async () => {
+    const output = await generateRepoMapForFile(
+      tmpWorkspace,
+      path.join(tmpWorkspace, "node_modules", "package", "index.ts"),
+    );
     expect(output).toBeNull();
   });
+
+  // --- Polyglot (Tree-sitter) integration tests ---
+  // These tests verify that the Hybrid AST engine uses Tree-sitter (not local regex)
+  // for polyglot files. A regression to regex/raw-text would break these assertions.
+
+  it("should extract Python functions and classes via Tree-sitter", async () => {
+    const output = await generateRepoMapForFile(tmpWorkspace, path.join(tmpWorkspace, "script.py"));
+
+    expect(output).not.toBeNull();
+    // Verify Tree-sitter provider was used (not heuristic-ast fallback)
+    expect(output).toContain("[tree-sitter]");
+    // Verify structural nodes are extracted
+    expect(output).toContain("process_data");
+    expect(output).toContain("DataProcessor");
+    // Must NOT use the old regex "Symbols: ..." format
+    expect(output).not.toMatch(/^Symbols:/m);
+  }, 15_000);
+
+  it("should extract C functions and structs via Tree-sitter", async () => {
+    const output = await generateRepoMapForFile(tmpWorkspace, path.join(tmpWorkspace, "main.c"));
+
+    expect(output).not.toBeNull();
+    expect(output).toContain("[tree-sitter]");
+    expect(output).toContain("add");
+    expect(output).not.toMatch(/^Symbols:/m);
+  }, 15_000);
+
+  it("should extract C# classes and methods via Tree-sitter", async () => {
+    const output = await generateRepoMapForFile(tmpWorkspace, path.join(tmpWorkspace, "Repository.cs"));
+
+    expect(output).not.toBeNull();
+    expect(output).toContain("[tree-sitter]");
+    expect(output).toContain("Repository");
+    expect(output).not.toMatch(/^Symbols:/m);
+  }, 15_000);
+
+  it("should extract Rust functions and structs via Tree-sitter", async () => {
+    const output = await generateRepoMapForFile(tmpWorkspace, path.join(tmpWorkspace, "lib.rs"));
+
+    expect(output).not.toBeNull();
+    expect(output).toContain("[tree-sitter]");
+    expect(output).toContain("compute");
+    expect(output).toContain("Config");
+    expect(output).not.toMatch(/^Symbols:/m);
+  }, 15_000);
 });

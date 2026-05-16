@@ -296,8 +296,10 @@ export async function processMenuCommand(
   }
 
   if (trimmed === "/index") {
-    // 1. Generate and persist the AST Skeleton Map
-    generateRepoMap(workspacePath);
+    // 1. Generate and persist the AST Skeleton Map (errors are logged, not swallowed)
+    generateRepoMap(workspacePath).catch((err) =>
+      console.error("[/index] Repo map error:", err),
+    );
 
     // 2. Start the RAG vector indexing
     startIndexingWorker(workspacePath, {
@@ -306,7 +308,7 @@ export async function processMenuCommand(
     return {
       success: true,
       response:
-        "[REI] Full repository indexing started. The AST skeleton map has been updated and RAG indexing is running in the background.",
+        "[REI] Full repository indexing started. The AST skeleton map is updating and RAG indexing is running in the background.",
     };
   }
 
