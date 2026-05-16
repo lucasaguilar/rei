@@ -43,7 +43,7 @@ const REPO_MAP_HEADER = "### REPOSITORY SKELETON MAP";
 
 export async function generateRepoMap(workspacePath: string): Promise<string> {
   // NOTE 1. Filtro de carpetas prohibidas
-  const IGNORE_DIRS = ["node_modules", "dist", ".rei", ".git", "bin"];
+  const IGNORE_DIRS = ["node_modules", "dist", ".rei", ".git", "bin", "obj"];
 
   const files = listRelevantFiles(workspacePath).filter(
     (file) => !IGNORE_DIRS.some((dir) => file.split(path.sep).includes(dir)),
