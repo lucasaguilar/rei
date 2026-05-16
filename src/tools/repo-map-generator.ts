@@ -159,9 +159,7 @@ export async function generateRepoMap(workspacePath: string): Promise<string> {
         try { chunks = await new HeuristicAstProvider().extractChunks(fileLike); } catch { /* skip */ }
       }
       if (chunks.length > 0) {
-        const lines = chunks.map(
-          (c) => `[${c.providerId}] ${c.nodeType} "${c.symbolName ?? "?"}" (L${c.startLine}-${c.endLine})`,
-        );
+        const lines = renderPolyglotSkeleton(chunks);
         sections.push(`// FILE: ${relPath}\n${lines.join("\n")}`);
       } else {
         sections.push(`// FILE: ${relPath}`);
@@ -263,9 +261,7 @@ export async function generateRepoMapForFile(workspacePath: string, absFilePath:
         try { chunks = await new HeuristicAstProvider().extractChunks(fileLike); } catch { /* skip */ }
       }
       if (chunks.length > 0) {
-        const lines = chunks.map(
-          (c) => `[${c.providerId}] ${c.nodeType} "${c.symbolName ?? "?"}" (L${c.startLine}-${c.endLine})`,
-        );
+        const lines = renderPolyglotSkeleton(chunks);
         sections.push(`// FILE: ${relPath}\n${lines.join("\n")}`);
       } else {
         sections.push(`// FILE: ${relPath}`);
@@ -277,6 +273,119 @@ export async function generateRepoMapForFile(workspacePath: string, absFilePath:
   }
 
   return sections.length > 0 ? sections.join("\n\n") : null;
+}
+
+function renderPolyglotSkeleton(chunks: AstChunk[]): string[] {
+  const sortedChunks = [...chunks].sort((a, b) => {
+    if (a.startLine !== b.startLine) return a.startLine - b.startLine;
+    return a.endLine - b.endLine;
+  });
+
+  const containerChunks = sortedChunks.filter((chunk) => isContainerChunk(chunk));
+  const containerSymbols = new Set(
+    containerChunks
+      .map((chunk) => chunk.symbolName)
+      .filter((symbol): symbol is string => Boolean(symbol)),
+  );
+
+  const childrenByParent = new Map<string, AstChunk[]>();
+  for (const chunk of sortedChunks) {
+    if (!chunk.parentSymbol) continue;
+    const current = childrenByParent.get(chunk.parentSymbol) ?? [];
+    current.push(chunk);
+    childrenByParent.set(chunk.parentSymbol, current);
+  }
+
+  const lines: string[] = [];
+  const emittedStandalone = new Set<string>();
+
+  for (const container of containerChunks) {
+    const memberChunks = container.symbolName
+      ? (childrenByParent.get(container.symbolName) ?? []).filter((chunk) => !isContainerChunk(chunk))
+      : [];
+    const members = memberChunks
+      .map((chunk) => normalizePrototype(chunk.content))
+      .filter(Boolean);
+    lines.push(renderContainerSkeleton(container, members));
+  }
+
+  for (const chunk of sortedChunks) {
+    if (isContainerChunk(chunk)) continue;
+    if (chunk.parentSymbol && containerSymbols.has(chunk.parentSymbol)) continue;
+    const key = `${chunk.nodeType}:${chunk.symbolName ?? ""}:${chunk.startLine}:${chunk.endLine}`;
+    if (emittedStandalone.has(key)) continue;
+    emittedStandalone.add(key);
+    lines.push(normalizePrototype(chunk.content));
+  }
+
+  return lines.filter(Boolean);
+}
+
+function renderContainerSkeleton(container: AstChunk, members: string[]): string {
+  const keyword = mapContainerKeyword(container.nodeType);
+  const name = container.symbolName ?? "Anonymous";
+  const memberText = members.join(" ");
+  return `${keyword} ${name} { ${memberText} }`;
+}
+
+function mapContainerKeyword(nodeType: string): string {
+  switch (nodeType) {
+    case "class_declaration":
+    case "class_specifier":
+    case "class":
+      return "class";
+    case "interface_declaration":
+    case "interface_type":
+      return "interface";
+    case "namespace_declaration":
+      return "namespace";
+    case "struct_specifier":
+    case "struct_item":
+    case "struct_type":
+    case "struct":
+      return "struct";
+    case "enum_specifier":
+    case "enum_item":
+      return "enum";
+    case "trait_item":
+      return "trait";
+    case "type_declaration":
+      return "type";
+    default:
+      return nodeType;
+  }
+}
+
+function isContainerChunk(chunk: AstChunk): boolean {
+  if (chunk.content.includes("{ members: [")) return true;
+  return new Set([
+    "class_declaration",
+    "interface_declaration",
+    "namespace_declaration",
+    "class_specifier",
+    "struct_specifier",
+    "enum_specifier",
+    "class",
+    "struct",
+    "struct_item",
+    "enum_item",
+    "trait_item",
+    "type_declaration",
+    "struct_type",
+    "interface_type",
+  ]).has(chunk.nodeType);
+}
+
+function normalizePrototype(content: string): string {
+  const compact = content.replace(/\s+/g, " ").trim();
+  if (!compact) return "";
+
+  const noBody = compact.includes("{")
+    ? compact.slice(0, compact.indexOf("{")).trim()
+    : compact;
+
+  if (noBody.endsWith(";") || noBody.endsWith(":")) return noBody;
+  return `${noBody};`;
 }
 
 function renderSourceFile(

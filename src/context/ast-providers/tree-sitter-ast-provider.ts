@@ -104,6 +104,14 @@ export class TreeSitterAstProvider implements AstProvider {
       return undefined;
     }
 
+    // Extract the prototype or signature for a node
+    function extractPrototype(node: SyntaxNode): string {
+      const startLine = node.startPosition.row + 1;
+      const endLine = node.endPosition.row + 1;
+      const lines = file.content.split("\n").slice(startLine - 1, endLine);
+      return lines.join("\n").split("{")[0].trim(); // Extract up to the first '{'
+    }
+
     // Collect direct named members (leaves and nested containers) for summary content.
     function collectMemberNames(node: SyntaxNode): string[] {
       const names: string[] = [];
@@ -124,7 +132,7 @@ export class TreeSitterAstProvider implements AstProvider {
     }
 
     // Containers emit a lightweight summary chunk and recurse to find leaves.
-    // Leaves emit their full source text with a parentSymbol back-reference.
+    // Leaves emit their prototype with a parentSymbol back-reference.
     // This eliminates the content duplication where a method's text appeared
     // both inside the parent class chunk and as its own chunk.
     function walk(node: SyntaxNode, parentSymbol?: string) {
@@ -162,7 +170,7 @@ export class TreeSitterAstProvider implements AstProvider {
           parentSymbol,
           startLine: node.startPosition.row + 1,
           endLine: node.endPosition.row + 1,
-          content: node.text,
+          content: extractPrototype(node), // Use prototype instead of full text
         });
         // Don't recurse into leaf nodes — no nested declarations expected.
         return;
