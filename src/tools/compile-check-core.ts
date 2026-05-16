@@ -98,7 +98,15 @@ export async function createSandboxWorkspace(workspacePath: string): Promise<str
   const sourceNodeModules = path.join(workspacePath, "node_modules");
   const sandboxNodeModules = path.join(sandboxRoot, "node_modules");
   if (fs.existsSync(sourceNodeModules) && !fs.existsSync(sandboxNodeModules)) {
-    await fs.promises.symlink(sourceNodeModules, sandboxNodeModules, "dir");
+    const symlinkType: fs.symlink.Type = process.platform === "win32" ? "junction" : "dir";
+    try {
+      await fs.promises.symlink(sourceNodeModules, sandboxNodeModules, symlinkType);
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      const blocked = err.code === "EPERM" || err.code === "EACCES";
+      if (!blocked) throw error;
+      // Some Windows environments block symlink/junction creation; continue without failing sandbox creation.
+    }
   }
 
   return sandboxRoot;
