@@ -615,6 +615,7 @@ export class Agent {
         "**/.rei/**",
         "**/.git/**",
         "**/bin/**",
+        "**/obj/**",
       ],
       persistent: true,
       ignoreInitial: true,
