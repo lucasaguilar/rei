@@ -86,7 +86,10 @@ export interface SkeletonNode {
 }
 
 export interface SourceFileLike {
+  /** Workspace-relative path used for IDs and metadata. */
   filePath: string;
+  /** Canonical absolute path used by parser backends that read from disk. */
+  absoluteFilePath?: string;
   languageId: string;
   content: string;
 }

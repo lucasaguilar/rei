@@ -90,7 +90,12 @@ async function runIndexing(
 
       if (content !== undefined) {
         const languageId = getLanguageCapabilityForExtension(file.extension).id;
-        const fileLike: SourceFileLike = { filePath: file.path, languageId, content };
+        const fileLike: SourceFileLike = {
+          filePath: file.path,
+          absoluteFilePath: absPath,
+          languageId,
+          content,
+        };
         const provider = AstProviderFactory.resolve(fileLike);
 
         let astChunks: AstChunk[] = [];

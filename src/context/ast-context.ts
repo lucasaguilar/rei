@@ -53,6 +53,7 @@ export async function extractAstDependencies(
 
     const file: SourceFileLike = {
       filePath: relPath,
+      absoluteFilePath: absPath,
       languageId,
       content,
     };

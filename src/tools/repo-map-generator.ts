@@ -143,7 +143,12 @@ export async function generateRepoMap(workspacePath: string): Promise<string> {
       const content = fs.readFileSync(file, "utf8");
       const ext = path.extname(file).toLowerCase();
       const languageId = getLanguageCapabilityForExtension(ext).id;
-      const fileLike: SourceFileLike = { filePath: relPath, languageId, content };
+      const fileLike: SourceFileLike = {
+        filePath: relPath,
+        absoluteFilePath: file,
+        languageId,
+        content,
+      };
       const provider = AstProviderFactory.resolve(fileLike);
       let chunks: AstChunk[] = [];
       try {
@@ -242,7 +247,12 @@ export async function generateRepoMapForFile(workspacePath: string, absFilePath:
       const content = fs.readFileSync(absFilePath, "utf8");
       const ext = path.extname(absFilePath).toLowerCase();
       const languageId = getLanguageCapabilityForExtension(ext).id;
-      const fileLike: SourceFileLike = { filePath: relPath, languageId, content };
+      const fileLike: SourceFileLike = {
+        filePath: relPath,
+        absoluteFilePath: absFilePath,
+        languageId,
+        content,
+      };
       const provider = AstProviderFactory.resolve(fileLike);
       let chunks: AstChunk[] = [];
       try {

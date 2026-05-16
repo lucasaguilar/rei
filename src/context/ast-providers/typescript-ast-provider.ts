@@ -1,38 +1,20 @@
 
 import { AstProvider, AstChunk, DependencyHint, SkeletonNode, SourceFileLike } from "./ast-provider.js";
 import { Project } from "ts-morph";
-import * as path from "node:path";
 
 export class TypeScriptAstProvider implements AstProvider {
   readonly providerId = "ts-morph";
 
-  private createVirtualSourceFile(project: Project, file: SourceFileLike) {
+  private createSourceFile(project: Project, file: SourceFileLike) {
+    if (file.absoluteFilePath) {
+      const existing = project.getSourceFile(file.absoluteFilePath);
+      if (existing) return existing;
+      return project.addSourceFileAtPath(file.absoluteFilePath);
+    }
+
     const sourceText = typeof file.content === "string" ? file.content : "";
-    const virtualPath = this.toVirtualPath(file.filePath, file.languageId);
-    const fileSystem = project.getFileSystem();
-    const virtualDir = path.posix.dirname(virtualPath);
-    if (!fileSystem.directoryExistsSync(virtualDir)) {
-      fileSystem.mkdirSync(virtualDir);
-    }
-    fileSystem.writeFileSync(virtualPath, sourceText);
-
-    const existing = project.getSourceFile(virtualPath);
-    if (existing) {
-      existing.replaceWithText(sourceText);
-      return existing;
-    }
-
-    return project.addSourceFileAtPath(virtualPath);
-  }
-
-  private toVirtualPath(filePath: string, languageId: string): string {
-    const normalized = (filePath || "source").replace(/\\/g, "/").trim();
-    const providedExt = path.extname(normalized);
-    const fallbackExt = languageId.toLowerCase().includes("javascript") ? ".js" : ".ts";
-    const extension = providedExt || fallbackExt;
-    const baseName = path.basename(normalized, providedExt || extension) || "source";
-    const safeBaseName = baseName.replace(/[^a-zA-Z0-9._-]/g, "_");
-    return `/__rei__/${safeBaseName}${extension}`;
+    const fallbackExt = file.languageId.toLowerCase().includes("javascript") ? ".js" : ".ts";
+    return project.createSourceFile(`source${fallbackExt}`, sourceText, { overwrite: true });
   }
 
   supports(file: SourceFileLike): boolean {
@@ -41,8 +23,12 @@ export class TypeScriptAstProvider implements AstProvider {
 
   async extractChunks(file: SourceFileLike): Promise<AstChunk[]> {
     // Use ts-morph to parse the file and extract classes, interfaces, types, functions, variables
-    const project = new Project({ useInMemoryFileSystem: true });
-    const sourceFile = this.createVirtualSourceFile(project, file);
+    const project = new Project({
+      useInMemoryFileSystem: !file.absoluteFilePath,
+      skipAddingFilesFromTsConfig: true,
+      compilerOptions: { allowJs: true },
+    });
+    const sourceFile = this.createSourceFile(project, file);
     const chunks: AstChunk[] = [];
     // Classes
     for (const cls of sourceFile.getClasses()) {
@@ -134,8 +120,12 @@ export class TypeScriptAstProvider implements AstProvider {
 
   async extractDependencies(file: SourceFileLike): Promise<DependencyHint[]> {
     // Use ts-morph to extract import dependencies
-    const project = new Project({ useInMemoryFileSystem: true });
-    const sourceFile = this.createVirtualSourceFile(project, file);
+    const project = new Project({
+      useInMemoryFileSystem: !file.absoluteFilePath,
+      skipAddingFilesFromTsConfig: true,
+      compilerOptions: { allowJs: true },
+    });
+    const sourceFile = this.createSourceFile(project, file);
     const dependencies: DependencyHint[] = [];
     for (const imp of sourceFile.getImportDeclarations()) {
       const spec = imp.getModuleSpecifierValue();
@@ -150,8 +140,12 @@ export class TypeScriptAstProvider implements AstProvider {
 
   async extractSkeleton(file: SourceFileLike): Promise<SkeletonNode[]> {
     // Use ts-morph to extract skeleton nodes (signatures only)
-    const project = new Project({ useInMemoryFileSystem: true });
-    const sourceFile = this.createVirtualSourceFile(project, file);
+    const project = new Project({
+      useInMemoryFileSystem: !file.absoluteFilePath,
+      skipAddingFilesFromTsConfig: true,
+      compilerOptions: { allowJs: true },
+    });
+    const sourceFile = this.createSourceFile(project, file);
     const skeleton: SkeletonNode[] = [];
     // Classes
     for (const cls of sourceFile.getClasses()) {
