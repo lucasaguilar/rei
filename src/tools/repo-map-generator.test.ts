@@ -83,12 +83,17 @@ describe('UserService', () => {
 
     await fs.writeFile(
       path.join(tmpWorkspace, "Repository.cs"),
-      `using System;\n\nnamespace MyApp {\n    public class Repository {\n        public string GetById(int id) {\n            return null;\n        }\n    }\n}\n`,
+      `using System;\n\nnamespace MyApp {\n    public class Repository {\n        private readonly string _prefix = "repo";\n        public string Prefix { get; set; }\n\n        public string GetById(int id) {\n            return _prefix + id;\n        }\n    }\n}\n`,
     );
 
     await fs.writeFile(
       path.join(tmpWorkspace, "lib.rs"),
       `pub fn compute(x: i32, y: i32) -> i32 {\n    x + y\n}\n\npub struct Config {\n    pub name: String,\n}\n`,
+    );
+
+    await fs.writeFile(
+      path.join(tmpWorkspace, "service.go"),
+      `package main\n\ntype Service struct {\n    Name string\n}\n\nfunc (s Service) Process(input string) string {\n    return s.Name + input\n}\n`,
     );
   }, 30_000);
 
@@ -177,11 +182,10 @@ describe('UserService', () => {
     const output = await generateRepoMapForFile(tmpWorkspace, path.join(tmpWorkspace, "script.py"));
 
     expect(output).not.toBeNull();
-    // Verify Tree-sitter provider was used (not heuristic-ast fallback)
-    expect(output).toContain("[tree-sitter]");
-    // Verify structural nodes are extracted
-    expect(output).toContain("process_data");
-    expect(output).toContain("DataProcessor");
+    // Verify structural skeleton is extracted
+    expect(output).toContain("def process_data(items: list) -> dict:");
+    expect(output).toContain("class DataProcessor {");
+    expect(output).toContain("def __init__(self, config: dict):");
     // Must NOT use the old regex "Symbols: ..." format
     expect(output).not.toMatch(/^Symbols:/m);
   }, 15_000);
@@ -190,8 +194,10 @@ describe('UserService', () => {
     const output = await generateRepoMapForFile(tmpWorkspace, path.join(tmpWorkspace, "main.c"));
 
     expect(output).not.toBeNull();
-    expect(output).toContain("[tree-sitter]");
-    expect(output).toContain("add");
+    expect(output).toContain("int add(int a, int b);");
+    expect(output).toContain("struct Point {");
+    expect(output).toContain("int x;");
+    expect(output).toContain("int y;");
     expect(output).not.toMatch(/^Symbols:/m);
   }, 15_000);
 
@@ -199,8 +205,10 @@ describe('UserService', () => {
     const output = await generateRepoMapForFile(tmpWorkspace, path.join(tmpWorkspace, "Repository.cs"));
 
     expect(output).not.toBeNull();
-    expect(output).toContain("[tree-sitter]");
-    expect(output).toContain("Repository");
+    expect(output).toContain("namespace MyApp {");
+    expect(output).toContain("class Repository {");
+    expect(output).toContain("public string Prefix");
+    expect(output).toContain("public string GetById(int id)");
     expect(output).not.toMatch(/^Symbols:/m);
   }, 15_000);
 
@@ -208,9 +216,18 @@ describe('UserService', () => {
     const output = await generateRepoMapForFile(tmpWorkspace, path.join(tmpWorkspace, "lib.rs"));
 
     expect(output).not.toBeNull();
-    expect(output).toContain("[tree-sitter]");
-    expect(output).toContain("compute");
-    expect(output).toContain("Config");
+    expect(output).toContain("pub fn compute(x: i32, y: i32) -> i32;");
+    expect(output).toContain("struct Config {");
+    expect(output).not.toMatch(/^Symbols:/m);
+  }, 15_000);
+
+  it("should extract Go methods and struct fields via Tree-sitter", async () => {
+    const output = await generateRepoMapForFile(tmpWorkspace, path.join(tmpWorkspace, "service.go"));
+
+    expect(output).not.toBeNull();
+    expect(output).toContain("type Service {");
+    expect(output).toContain("Name string;");
+    expect(output).toContain("func (s Service) Process(input string) string;");
     expect(output).not.toMatch(/^Symbols:/m);
   }, 15_000);
 });

@@ -24,41 +24,44 @@ function grammarPath(name: string): string {
   return path.join(wasmDir, "out", `tree-sitter-${name}.wasm`);
 }
 
+function normalizeLanguageId(languageId: string): string {
+  const id = languageId.toLowerCase();
+  if (id === "c#") return "csharp";
+  return id;
+}
+
 // languageId -> wasm grammar file path
 const LANGUAGE_GRAMMAR_MAP: Record<string, string> = {
-  c: grammarPath("c"),
-  cpp: grammarPath("cpp"),
+  "c": grammarPath("c"),
+  "cpp": grammarPath("cpp"),
   "c++": grammarPath("cpp"),
-  "c#": grammarPath("c_sharp"),
-  csharp: grammarPath("c_sharp"),
-  python: grammarPath("python"),
-  rust: grammarPath("rust"),
-  go: grammarPath("go"),
+  "csharp": grammarPath("c_sharp"),
+  "python": grammarPath("python"),
+  "rust": grammarPath("rust"),
+  "go": grammarPath("go"),
 };
 
 // Container types: emit a structural summary chunk (member list) and recurse to find leaves.
 // This avoids duplicating leaf code inside the parent's full text blob.
 const CONTAINER_NODE_TYPES: Record<string, string[]> = {
-  c: ["struct_specifier", "enum_specifier"],
-  cpp: ["class_specifier", "struct_specifier", "enum_specifier"],
+  "c": ["struct_specifier", "enum_specifier"],
+  "cpp": ["class_specifier", "struct_specifier", "enum_specifier"],
   "c++": ["class_specifier", "struct_specifier", "enum_specifier"],
-  "c#": ["class_declaration", "interface_declaration", "namespace_declaration"],
-  csharp: ["class_declaration", "interface_declaration", "namespace_declaration"],
-  python: ["class_definition"],
-  rust: ["struct_item", "enum_item", "trait_item"],
-  go: ["type_declaration", "struct_type", "interface_type"],
+  "csharp": ["class_declaration", "interface_declaration", "namespace_declaration"],
+  "python": ["class_definition"],
+  "rust": ["struct_item", "enum_item", "trait_item"],
+  "go": ["type_declaration", "struct_type", "interface_type"],
 };
 
 // Leaf types: emit full source text and stop recursing (no further nesting expected).
 const LEAF_NODE_TYPES: Record<string, string[]> = {
-  c: ["function_definition", "typedef"],
-  cpp: ["function_definition", "typedef"],
-  "c++": ["function_definition", "typedef"],
-  "c#": ["method_declaration"],
-  csharp: ["method_declaration"],
-  python: ["function_definition"],
-  rust: ["function_item"],
-  go: ["function_declaration"],
+  "c": ["function_definition", "typedef", "field_declaration", "enumerator"],
+  "cpp": ["function_definition", "typedef", "field_declaration", "enumerator"],
+  "c++": ["function_definition", "typedef", "field_declaration", "enumerator"],
+  "csharp": ["method_declaration", "constructor_declaration", "field_declaration", "property_declaration"],
+  "python": ["function_definition", "assignment"],
+  "rust": ["function_item", "function_signature_item", "field_declaration", "enum_variant"],
+  "go": ["function_declaration", "method_declaration", "field_declaration", "method_spec"],
 };
 
 const grammarCache: Record<string, Language> = {};
@@ -69,22 +72,25 @@ export class TreeSitterAstProvider implements AstProvider {
   readonly providerId = "tree-sitter";
 
   supports(file: SourceFileLike): boolean {
-    return Object.keys(LANGUAGE_GRAMMAR_MAP).includes(file.languageId.toLowerCase());
+    return Object.keys(LANGUAGE_GRAMMAR_MAP).includes(normalizeLanguageId(file.languageId));
   }
 
   async ensureGrammar(languageId: string): Promise<Language> {
+    const normalizedLanguageId = normalizeLanguageId(languageId);
     if (!initPromise) {
       initPromise = Parser.init();
     }
     await initPromise;
-    if (!grammarCache[languageId]) {
-      grammarCache[languageId] = await LanguageClass.load(LANGUAGE_GRAMMAR_MAP[languageId]);
+    if (!grammarCache[normalizedLanguageId]) {
+      grammarCache[normalizedLanguageId] = await LanguageClass.load(
+        LANGUAGE_GRAMMAR_MAP[normalizedLanguageId],
+      );
     }
-    return grammarCache[languageId];
+    return grammarCache[normalizedLanguageId];
   }
 
   async extractChunks(file: SourceFileLike): Promise<AstChunk[]> {
-    const languageId = file.languageId.toLowerCase();
+    const languageId = normalizeLanguageId(file.languageId);
     const grammar = await this.ensureGrammar(languageId);
     const parser = new Parser();
     parser.setLanguage(grammar);
@@ -98,18 +104,62 @@ export class TreeSitterAstProvider implements AstProvider {
     function resolveSymbolName(node: SyntaxNode): string | undefined {
       const direct = node.childForFieldName("name");
       if (direct) return direct.text;
+
+      // Common alternatives across grammars (Python assignments, C-style declarations, etc.)
+      const left = node.childForFieldName("left");
+      if (left) return resolveSymbolName(left);
+      const value = node.childForFieldName("value");
+      if (value) return resolveSymbolName(value);
+
       const decl = node.childForFieldName("declarator");
       if (decl) return resolveSymbolName(decl);
-      if (node.type === "identifier" || node.type === "type_identifier") return node.text;
+      if (
+        node.type === "identifier" ||
+        node.type === "type_identifier" ||
+        node.type === "field_identifier" ||
+        node.type === "property_identifier"
+      ) {
+        return node.text;
+      }
+
+      // Last-resort walk: pick the first identifier-like named child.
+      for (let i = 0; i < node.namedChildCount; i++) {
+        const named = node.namedChild(i);
+        if (!named) continue;
+        const candidate = resolveSymbolName(named);
+        if (candidate) return candidate;
+      }
       return undefined;
     }
 
-    // Extract the prototype or signature for a node
+    // Extract a compact signature/prototype for leaf nodes.
     function extractPrototype(node: SyntaxNode): string {
-      const startLine = node.startPosition.row + 1;
-      const endLine = node.endPosition.row + 1;
-      const lines = file.content.split("\n").slice(startLine - 1, endLine);
-      return lines.join("\n").split("{")[0].trim(); // Extract up to the first '{'
+      const compact = node.text.replace(/\s+/g, " ").trim();
+      if (!compact) return "";
+
+      // Python signatures end with ':' and should stay as-is.
+      if (languageId === "python") {
+        const firstLine = node.text.split("\n")[0]?.trim() ?? compact;
+        return firstLine;
+      }
+
+      // C# expression-bodied members may contain interpolated strings with '{...}'.
+      // Strip at '=>' first so we don't truncate inside string interpolation.
+      if (languageId === "csharp") {
+        if (compact.includes("=>")) {
+          const head = compact.slice(0, compact.indexOf("=>")).trim();
+          return head.endsWith(";") ? head : `${head};`;
+        }
+      }
+
+      if (compact.includes("{")) {
+        const head = compact.slice(0, compact.indexOf("{")).trim();
+        return head.endsWith(";") || head.endsWith(":") ? head : `${head};`;
+      }
+
+      return compact.endsWith(";") || compact.endsWith(":")
+        ? compact
+        : `${compact};`;
     }
 
     // Collect direct named members (leaves and nested containers) for summary content.
@@ -185,7 +235,7 @@ export class TreeSitterAstProvider implements AstProvider {
   }
 
   async extractDependencies(file: SourceFileLike): Promise<DependencyHint[]> {
-    const languageId = file.languageId.toLowerCase();
+    const languageId = normalizeLanguageId(file.languageId);
     const dependencies: DependencyHint[] = [];
     if (languageId === "c" || languageId === "cpp" || languageId === "c++") {
       // #include "..."
@@ -215,7 +265,7 @@ export class TreeSitterAstProvider implements AstProvider {
       while ((match = importRegex.exec(file.content))) {
         dependencies.push({ kind: "import", name: match[1], raw: match[0] });
       }
-    } else if (languageId === "c#" || languageId === "csharp") {
+    } else if (languageId === "csharp") {
       // using ...
       const usingRegex = /using\s+([\w\.]+)\s*;/g;
       let match: RegExpExecArray | null;

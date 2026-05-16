@@ -51,7 +51,7 @@ describe("repo-map-generator fallback behavior", () => {
 
     expect(output).not.toBeNull();
     expect(output).toContain("// FILE: fallback.py");
-    expect(output).toContain('[heuristic-ast] def "fallback_func"');
-    expect(output).toContain('[heuristic-ast] class "FallbackClass"');
+    expect(output).toContain("def fallback_func;");
+    expect(output).toContain("class FallbackClass {");
   });
 });

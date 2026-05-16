@@ -330,6 +330,7 @@ function renderContainerSkeleton(container: AstChunk, members: string[]): string
 
 function mapContainerKeyword(nodeType: string): string {
   switch (nodeType) {
+    case "class_definition":
     case "class_declaration":
     case "class_specifier":
     case "class":
@@ -379,6 +380,12 @@ function isContainerChunk(chunk: AstChunk): boolean {
 function normalizePrototype(content: string): string {
   const compact = content.replace(/\s+/g, " ").trim();
   if (!compact) return "";
+
+  if (compact.includes("=>")) {
+    const head = compact.slice(0, compact.indexOf("=>")).trim();
+    if (!head) return "";
+    return head.endsWith(";") || head.endsWith(":") ? head : `${head};`;
+  }
 
   const noBody = compact.includes("{")
     ? compact.slice(0, compact.indexOf("{")).trim()
