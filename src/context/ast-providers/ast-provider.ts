@@ -65,6 +65,8 @@ export interface AstChunk {
   providerId: string;
   nodeType: string;
   symbolName?: string;
+  /** Symbol name of the enclosing container (class, namespace, etc.), if any. */
+  parentSymbol?: string;
   startLine: number;
   endLine: number;
   content: string;
