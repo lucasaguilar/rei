@@ -93,8 +93,20 @@ async function startServer() {
             res.write(`data: ${JSON.stringify(payload)}\n\n`);
           };
 
-          // Ejecutar el flow de REI con streaming
-          await chatHandler.handleChatStream(jsonBody, sendChunk);
+          // Ejecutar el flow de REI con streaming.
+          // Durante operaciones largas (ng build, tsc, etc.) no se envían
+          // tokens al cliente, lo que puede causar que el SSE idle timeout
+          // cierre la conexión. Enviamos SSE comments (": heartbeat") cada
+          // 10 segundos — son ignorados como datos pero mantienen el canal abierto.
+          const keepalive = setInterval(() => {
+            if (!res.writableEnded) res.write(": heartbeat\n\n");
+          }, 10_000);
+
+          try {
+            await chatHandler.handleChatStream(jsonBody, sendChunk);
+          } finally {
+            clearInterval(keepalive);
+          }
 
           // Enviar señal de finalización
           res.write(`data: [DONE]\n\n`);

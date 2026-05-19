@@ -1,4 +1,7 @@
-import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
+import type {
+  AgentSREdit,
+  AgentWholeFileEdit,
+} from "../contracts/agent-interaction.types.js";
 import { formatCodeDiff } from "../cli/markdown-renderer.js";
 
 function normalizeBlockContent(raw: string): string {
@@ -108,6 +111,20 @@ export function extractCreateFileRequests(
     creates.push({ file, content });
   }
   return creates;
+}
+
+/**
+ * Extracts <wholefile path="..."> blocks for complete file rewrites.
+ */
+export function extractWholeFileEdits(response: string): AgentWholeFileEdit[] {
+  const edits: AgentWholeFileEdit[] = [];
+  const regex = /<wholefile\s+path="([^"]+)">([\.\s\S]*?)<\/wholefile>/gi;
+  for (const match of response.matchAll(regex)) {
+    const file = match[1].trim();
+    const content = match[2].replace(/^\n/, "").replace(/\n$/, "");
+    edits.push({ file, content });
+  }
+  return edits;
 }
 
 /**

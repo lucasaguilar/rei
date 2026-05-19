@@ -10,6 +10,7 @@ export interface InputHandlerContext {
   workspacePath: string;
   actions: {
     pushTranscript(value: string): void;
+    streamText(value: string): void;
     draw(): void;
     startSpinner(): void;
     stopSpinner(): void;

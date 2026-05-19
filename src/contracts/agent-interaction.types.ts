@@ -8,3 +8,8 @@ export interface AgentSREdit {
   search: string;
   replace: string;
 }
+
+export interface AgentWholeFileEdit {
+  file: string;
+  content: string;
+}

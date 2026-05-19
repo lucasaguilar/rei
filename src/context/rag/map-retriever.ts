@@ -27,7 +27,7 @@ function extractImports(content: string): string[] {
 export async function getRelevantMapContext(
   vectorStore: VectorStore,
   query: string,
-  topK: number = 10
+  topK: number = 5
 ): Promise<string> {
   if (!query) return "";
 
@@ -71,11 +71,11 @@ export async function getRelevantMapContext(
   let skeletonCount = 0;
 
   for (const node of mapNodes) {
-    if (node.score > 0.85 && fullCount < 3) {
+    if (node.score > 0.85 && fullCount < 2) {
       // Level 'Full': Complete block
       finalContext.push(node.content);
       fullCount++;
-    } else if (node.score > 0.6 && skeletonCount < 7) {
+    } else if (node.score > 0.6 && skeletonCount < 4) {
       // Level 'Skeleton': Only File and Imports
       const lines = node.content.split("\n");
       const fileLine = lines.find((l) => l.startsWith("// FILE:"));

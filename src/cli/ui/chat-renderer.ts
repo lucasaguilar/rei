@@ -21,9 +21,52 @@ import { TurnStatus } from "../../core/models/agent.types.js";
 import { SessionMode } from "../../chat/types.js";
 
 export class ChatRenderer {
+  private static lastDrawnLinesCount = 0;
+  private static lastDrawnCols = 0;
+
+  public static clearUI(): void {
+    if (this.lastDrawnLinesCount <= 0) return;
+
+    process.stdout.write("\x1b[?25l"); // Hide cursor
+    process.stdout.write("\x1b[1B"); // Move down 1 line from input to bottom border
+
+    for (let i = 0; i < this.lastDrawnLinesCount; i++) {
+      process.stdout.write("\x1b[2K"); // Clear line
+      if (i < this.lastDrawnLinesCount - 1) {
+        process.stdout.write("\x1b[1A"); // Move up
+      }
+    }
+
+    process.stdout.write("\x1b[1G"); // Move to column 1
+    process.stdout.write("\x1b[?25h"); // Show cursor
+
+    this.lastDrawnLinesCount = 0;
+  }
+
   public static draw(state: ChatRendererState): void {
-    const cols = Math.max(40, state.cols - 1);
-    const rows = Math.max(12, state.rows);
+    const currentCols = Math.max(40, state.cols - 1);
+    const currentRows = Math.max(12, state.rows);
+
+    if (
+      this.lastDrawnCols !== 0 &&
+      this.lastDrawnCols !== currentCols &&
+      this.lastDrawnLinesCount > 0
+    ) {
+      // Terminal was resized: relative cursor arithmetic in clearUI() is now
+      // invalid because old lines may have visually reflowed at the new width.
+      // Use absolute positioning to clear: jump to the last terminal row (known
+      // position regardless of reflow), move up past the old UI, clear to end.
+      process.stdout.write(`\x1b[${currentRows};1H`); // absolute: last row, col 1
+      process.stdout.write(`\x1b[${this.lastDrawnLinesCount + 2}A`); // up past old UI
+      process.stdout.write("\x1b[J"); // clear from here to end of screen
+      this.lastDrawnLinesCount = 0;
+    } else {
+      this.clearUI();
+    }
+    this.lastDrawnCols = currentCols;
+
+    const cols = currentCols;
+    const rows = currentRows;
     const activePalette = state.activePalette;
     const paletteItems = activePalette.items;
     const paletteVisible = paletteItems.length > 0;
@@ -34,10 +77,7 @@ export class ChatRenderer {
       Math.max(0, paletteItems.length - 1),
     );
 
-    const inputHeight = 3;
     const maxPaletteItems = Math.min(5, paletteItems.length);
-    const paletteHeight = paletteVisible ? maxPaletteItems + 2 : 0;
-    const outputHeight = Math.max(1, rows - inputHeight - paletteHeight);
 
     const statusLine = state.historySearchMode
       ? (() => {
@@ -51,33 +91,12 @@ export class ChatRenderer {
         ? `[REI] Thinking ${SPINNER_FRAMES[state.spinnerIndex % SPINNER_FRAMES.length]} ${
             THINKING_TEXT[state.activeStatus as TurnStatus]
           }`
-        : state.scrollOffset > 0
-          ? `↑ Scrolled up ${state.scrollOffset} lines — Ctrl+D to scroll down`
-          : SHORTCUT_HINT;
+        : SHORTCUT_HINT;
 
-    const messageSlots = statusLine ? outputHeight - 1 : outputHeight;
-    const wrappedTranscriptLines = state.transcript.flatMap((line) =>
-      wrapAnsi(line, cols, { hard: true, trim: false, wordWrap: true }).split(
-        "\n",
-      ),
-    );
-    const totalWrapped = wrappedTranscriptLines.length;
-    const maxScrollOffset = Math.max(0, totalWrapped - messageSlots);
-    const effectiveOffset = Math.min(state.scrollOffset, maxScrollOffset);
-    const endIdx = totalWrapped - effectiveOffset;
-    const startIdx = Math.max(0, endIdx - messageSlots);
-    const outputLines = wrappedTranscriptLines.slice(startIdx, endIdx);
+    const uiLines: string[] = [];
 
-    const screen: string[] = [];
-    const remaining = Math.max(0, messageSlots - outputLines.length);
-    for (let i = 0; i < remaining; i += 1) {
-      screen.push(" ".repeat(cols));
-    }
-    for (const line of outputLines) {
-      screen.push(padRight(fitLine(line, cols), cols));
-    }
     if (statusLine) {
-      screen.push(padRight(fitLine(statusLine, cols), cols));
+      uiLines.push(padRight(fitLine(statusLine, cols), cols));
     }
 
     if (paletteVisible) {
@@ -93,7 +112,7 @@ export class ChatRenderer {
         listStart,
         listStart + maxPaletteItems,
       );
-      screen.push(`+${"-".repeat(cols - 2)}+`);
+      uiLines.push(`+${"-".repeat(cols - 2)}+`);
       for (let i = 0; i < visibleItems.length; i += 1) {
         const entry = visibleItems[i];
         const absoluteIndex = listStart + i;
@@ -106,9 +125,9 @@ export class ChatRenderer {
           const commandEntry = entry as CommandEntry;
           text = `${marker} ${commandEntry.command} - ${commandEntry.description}`;
         }
-        screen.push(`| ${padRight(fitLine(text, innerWidth), innerWidth)} |`);
+        uiLines.push(`| ${padRight(fitLine(text, innerWidth), innerWidth)} |`);
       }
-      screen.push(`+${"-".repeat(cols - 2)}+`);
+      uiLines.push(`+${"-".repeat(cols - 2)}+`);
     }
 
     const promptText = MODE_PROMPTS[state.sessionMode as SessionMode];
@@ -126,24 +145,15 @@ export class ChatRenderer {
       Math.max(0, viewport.visible.length),
     );
 
-    screen.push(`-${"-".repeat(cols - 2)}-`);
-    screen.push(`| ${padRight(viewport.visible, inputInnerWidth)} |`);
-    screen.push(`-${"-".repeat(cols - 2)}-`);
+    uiLines.push(`-${"-".repeat(cols - 2)}-`);
+    uiLines.push(`| ${padRight(viewport.visible, inputInnerWidth)} |`);
+    uiLines.push(`-${"-".repeat(cols - 2)}-`);
 
-    while (screen.length < rows) {
-      screen.unshift(" ".repeat(cols));
-    }
-    if (screen.length > rows) {
-      screen.splice(0, screen.length - rows);
-    }
+    process.stdout.write("\x1b[?25l");
+    process.stdout.write(uiLines.join("\r\n"));
+    this.lastDrawnLinesCount = uiLines.length;
 
-    // NOTE: Hide cursor (?25l), move to home (H), and clear screen (2J)
-    process.stdout.write("\x1b[?25l\x1b[H\x1b[2J");
-    process.stdout.write(screen.join("\r\n"));
-
-    const inputLineRow = rows - 1;
     const inputColumn = 3 + cursorInViewport;
-    // NOTE: Move cursor to input position (row;colH) and show cursor (?25h)
-    process.stdout.write(`\x1b[${inputLineRow};${inputColumn}H\x1b[?25h`);
+    process.stdout.write(`\x1b[1A\x1b[${inputColumn}G\x1b[?25h`);
   }
 }

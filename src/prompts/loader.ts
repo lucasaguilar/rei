@@ -7,6 +7,8 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROMPTS_ROOT = path.resolve(__dirname, "../../prompts");
+// REI project root (one level above prompts/)
+const REI_ROOT = path.resolve(PROMPTS_ROOT, "..");
 
 // In-memory cache: section key -> trimmed file contents.
 const cache = new Map<string, string>();
@@ -49,15 +51,34 @@ export function clearPromptCache(): void {
 }
 
 // NOTE ONWARD: The following function is not related to prompt loading but is a convenient place to put it since it's used by prompt-building logic and we want to keep all prompt-related code in this directory.
-export function loadLocalRules(): string {
-  const rulesPath = path.join(PROMPTS_ROOT, ".rei-rules.md");
-  if (fs.existsSync(rulesPath)) {
+export function loadLocalRules(workspacePath?: string): string {
+  const parts: string[] = [];
+
+  // 1. Global REI rules: .rei/rules.md at REI project root (applies to all workspaces)
+  const globalRulesPath = path.join(REI_ROOT, ".rei", "rules.md");
+  if (fs.existsSync(globalRulesPath)) {
     try {
-      const content = fs.readFileSync(rulesPath, "utf-8");
-      return `\n\n### MANDATORY CODING RULES (Follow strictly):\n${content}`;
-    } catch (e) {
-      return "";
+      const content = fs.readFileSync(globalRulesPath, "utf-8").trim();
+      if (content) parts.push(content);
+    } catch {
+      /* ignore */
     }
   }
-  return "";
+
+  // 2. Per-workspace rules: {workspace}/.rei/rules.md (project-specific conventions)
+  const wsPath = workspacePath ?? process.env.REI_WORKSPACE_PATH;
+  if (wsPath) {
+    const wsRulesPath = path.join(wsPath, ".rei", "rules.md");
+    if (fs.existsSync(wsRulesPath)) {
+      try {
+        const content = fs.readFileSync(wsRulesPath, "utf-8").trim();
+        if (content) parts.push(content);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  if (parts.length === 0) return "";
+  return `\n\n### MANDATORY CODING RULES (Follow strictly):\n${parts.join("\n\n")}`;
 }

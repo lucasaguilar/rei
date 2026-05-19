@@ -2,7 +2,10 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
-import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
+import type {
+  AgentSREdit,
+  AgentWholeFileEdit,
+} from "../contracts/agent-interaction.types.js";
 import { applyFileEdits } from "./search-replace.js";
 
 const execFileAsync = promisify(execFile);
@@ -77,6 +80,42 @@ export async function applySREditBatchFS(
     success: allSuccess,
     results,
   };
+}
+
+/**
+ * Writes complete file contents directly to the filesystem (wholefile format).
+ * Creates parent directories if they don't exist.
+ */
+export async function applyWholeFileBatchFS(
+  edits: AgentWholeFileEdit[],
+  workspacePath: string,
+): Promise<BatchPatchApplyResult> {
+  const results: BatchPatchApplyItemResult[] = [];
+  let allSuccess = true;
+
+  for (const edit of edits) {
+    const absPath = path.join(workspacePath, edit.file);
+    try {
+      await fs.mkdir(path.dirname(absPath), { recursive: true });
+      await fs.writeFile(absPath, edit.content, "utf-8");
+      results.push({
+        file: edit.file,
+        applied: true,
+        skipped: false,
+        validationErrors: [],
+      });
+    } catch (err) {
+      allSuccess = false;
+      results.push({
+        file: edit.file,
+        applied: false,
+        skipped: false,
+        validationErrors: [`Failed to write file: ${err}`],
+      });
+    }
+  }
+
+  return { success: allSuccess, results };
 }
 
 /**

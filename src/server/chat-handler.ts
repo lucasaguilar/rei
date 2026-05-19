@@ -46,7 +46,7 @@ export class ChatHandler {
         promptTrimmed,
         session,
         this.workspacePath,
-        this.agent.provider
+        this.agent.provider,
       );
 
       if (cmdResult.success) {
@@ -57,7 +57,10 @@ export class ChatHandler {
 
         // Guardamos la sesión actualizada y devolvemos la respuesta del comando
         session.messages.push({ role: "user", content: promptTrimmed });
-        session.messages.push({ role: "assistant", content: cmdResult.response });
+        session.messages.push({
+          role: "assistant",
+          content: cmdResult.response,
+        });
         saveSession(
           this.workspacePath,
           session.messages,
@@ -87,10 +90,9 @@ export class ChatHandler {
       onChunk(chunk);
     }
 
-    // Guardar la sesión actualizada después del turno (igual que en terminal)
-    // Agregar el mensaje del usuario y del asistente a la sesión
-    session.messages.push({ role: "user", content: promptTrimmed });
-    session.messages.push({ role: "assistant", content: fullResponse });
+    // streamTurn already pushes user + assistant messages to session.messages
+    // internally (via prepareSessionForTurn and the various return paths).
+    // We only need to persist the session here — do NOT push again.
     saveSession(
       this.workspacePath,
       session.messages,

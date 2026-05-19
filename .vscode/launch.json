@@ -521,18 +521,139 @@
         {
             "type": "node",
             "request": "launch",
-            "name": "new repo TERMINAL REI google/gemma-4-31b-it (OpenRouter)",
+            "name": "SERVER REI deepseek-coder-v2:16b (Ollama local) [rei-chat]",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "server:dev"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "ollama",
+                "OLLAMA_MODEL": "deepseek-coder-v2:16b",
+                "OLLAMA_MODEL_AGENT": "deepseek-coder-v2:16b",
+                "OLLAMA_MODEL_ASK": "deepseek-coder-v2:16b",
+                "OLLAMA_MODEL_PLANNING": "deepseek-coder-v2:16b",
+                "AGENT_EDIT_FORMAT": "wholefile",
+                "REI_WORKSPACE_PATH": "/Users/lucas/www/rei-chat",
+                "ALLOWED_WORKSPACES": "/Users/lucas/www/rei-chat"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "SERVER REI qwen3-coder-30b (OpenRouter) [rei-chat]",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "server:dev"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "MODEL_PROVIDER": "openrouter",
+                "OPENROUTER_MODEL": "qwen/qwen3-coder-30b-a3b-instruct",
+                "REI_WORKSPACE_PATH": "/Users/lucas/www/rei-chat",
+                "ALLOWED_WORKSPACES": "/Users/lucas/www/rei-chat"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "SERVER REI multi: gemma-4-31b agent + qwen14b local [rei-chat]",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "server:dev"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                // ask + planning: Ollama local (rápido, sin costo)
+                "MODEL_PROVIDER": "ollama",
+                "OLLAMA_MODEL": "qwen2.5-coder:14b",
+                "OLLAMA_MODEL_ASK": "qwen2.5-coder:14b",
+                "OLLAMA_MODEL_PLANNING": "qwen2.5-coder:14b",
+                "OLLAMA_NUM_CTX": "32768",
+                // agent: OpenRouter gemma-4-31b (potente, soporta sr/create/exec)
+                "AGENT_MODEL_PROVIDER": "openrouter",
+                "OPENROUTER_MODEL_AGENT": "google/gemma-4-31b-it",
+                "REI_WORKSPACE_PATH": "/Users/lucas/www/rei-chat",
+                "ALLOWED_WORKSPACES": "/Users/lucas/www/rei-chat"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "SERVER REI multi: openrouter gemma4 agent + qwen2.5-coder:14b local [rei-chat]",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "server:dev"],
+            "envFile": "${workspaceFolder}/.env",
+             "env": {
+               // ask + planning: Ollama local (rápido, sin costo)
+                "MODEL_PROVIDER": "ollama",
+                "OLLAMA_MODEL": "qwen2.5-coder:14b",
+                "OLLAMA_MODEL_ASK": "qwen2.5-coder:14b",
+                "OLLAMA_MODEL_PLANNING": "qwen2.5-coder:14b",
+                //"OLLAMA_MODEL_AGENT": "gemma4:31b",
+                "OLLAMA_NUM_CTX": "32768",
+                // agent: OpenRouter gemma-4-31b (potente, soporta sr/create/exec)
+                "AGENT_MODEL_PROVIDER": "openrouter",
+                "OPENROUTER_MODEL_AGENT": "google/gemma-4-31b-it",
+                "REI_WORKSPACE_PATH": "/Users/lucas/www/rei-chat",
+                "ALLOWED_WORKSPACES": "/Users/lucas/www/rei-chat"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "TERMINAL REI multi: gemma-4-31b agent + qwen14b local [rei-chat]",
             "runtimeExecutable": "npm",
              "runtimeArgs": ["run",
                 "dev",
                 "--",
                 "--workspace",
-                "/Users/lucasaguilar/www/lab/new",
+                "/Users/lucas/www/rei-chat",
                 "chat"],
             "envFile": "${workspaceFolder}/.env",
             "env": {
-                "MODEL_PROVIDER": "openrouter",
-                "OPENROUTER_MODEL": "google/gemma-4-31b-it"
+               // ask + planning: Ollama local (rápido, sin costo)
+                "MODEL_PROVIDER": "ollama",
+                "OLLAMA_MODEL": "qwen2.5-coder:14b",
+                "OLLAMA_MODEL_ASK": "qwen2.5-coder:14b",
+                "OLLAMA_MODEL_PLANNING": "qwen2.5-coder:14b",
+                "OLLAMA_NUM_CTX": "32768",
+                // agent: OpenRouter gemma-4-31b (potente, soporta sr/create/exec)
+                "AGENT_MODEL_PROVIDER": "openrouter",
+                "OPENROUTER_MODEL_AGENT": "google/gemma-4-31b-it",
+                "REI_WORKSPACE_PATH": "/Users/lucas/www/rei-chat",
+                "ALLOWED_WORKSPACES": "/Users/lucas/www/rei-chat"
+            },
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "TERMINAL REI multi ollama: deepseek-r1:14b agent + qwen2.5-coder:14b local [rei-chat]",
+            "runtimeExecutable": "npm",
+             "runtimeArgs": ["run",
+                "dev",
+                "--",
+                "--workspace",
+                "/Users/lucas/www/rei-chat",
+                "chat"],
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+               // ask + planning: Ollama local (rápido, sin costo)
+                "MODEL_PROVIDER": "ollama",
+                "OLLAMA_MODEL": "qwen2.5-coder:14b",
+                "OLLAMA_MODEL_ASK": "qwen2.5-coder:14b",
+                "OLLAMA_MODEL_PLANNING": "qwen2.5-coder:14b",
+                "OLLAMA_MODEL_AGENT": "deepseek-r1:14b",
+                "OLLAMA_NUM_CTX": "32768",
+                // agent: OpenRouter gemma-4-31b (potente, soporta sr/create/exec)
+                //"AGENT_MODEL_PROVIDER": "openrouter",
+                //"OPENROUTER_MODEL_AGENT": "google/gemma-4-31b-it",
+                "REI_WORKSPACE_PATH": "/Users/lucas/www/rei-chat",
+                "ALLOWED_WORKSPACES": "/Users/lucas/www/rei-chat"
             },
             "console": "integratedTerminal",
             "skipFiles": ["<node_internals>/**"]

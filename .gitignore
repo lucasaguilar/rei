@@ -5,5 +5,24 @@ dist/
 .DS_Store
 .rei/
 *.tmp
+*.log
 coverage/
 scripts/launch-rei.config.js
+.aider*
+
+# Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+!.vscode/mcp.json
+.history/*
+
+# Cursor
+.cursor/
+.cursorrules
+.cursorignore
+
+# Windsurf
+.windsurf/

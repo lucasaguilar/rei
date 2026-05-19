@@ -5,6 +5,7 @@ interface OllamaChatResponse {
   message?: {
     role?: string;
     content?: string;
+    thinking?: string; // Ollama 0.6+: thinking models stream reasoning here
   };
   error?: string;
   done?: boolean;
@@ -13,11 +14,14 @@ interface OllamaChatResponse {
 const OLLAMA_FETCH_MAX_RETRIES = 1;
 const OLLAMA_FETCH_RETRY_DELAY_MS = 900;
 const DEFAULT_OLLAMA_REQUEST_TIMEOUT_MS = 300_000;
+const DEFAULT_OLLAMA_KEEP_ALIVE = "30m";
 
 export class OllamaProvider implements ModelProvider {
   private readonly baseUrl: string;
   private readonly model: string;
   private readonly requestTimeoutMs: number;
+  private readonly keepAlive: string;
+  private readonly ollamaOptions: OllamaRequestOptions;
 
   constructor(params?: { baseUrl?: string; model?: string }) {
     this.baseUrl = normalizeBaseUrl(
@@ -30,6 +34,8 @@ export class OllamaProvider implements ModelProvider {
       process.env.OLLAMA_REQUEST_TIMEOUT_MS,
       DEFAULT_OLLAMA_REQUEST_TIMEOUT_MS,
     );
+    this.keepAlive = process.env.OLLAMA_KEEP_ALIVE ?? DEFAULT_OLLAMA_KEEP_ALIVE;
+    this.ollamaOptions = buildOllamaRequestOptions();
   }
 
   async complete(prompt: string, options?: CompletionOptions): Promise<string> {
@@ -70,6 +76,18 @@ export class OllamaProvider implements ModelProvider {
       });
       throw new Error(
         `Ollama response missing message content or content is not a string: ${sanitizedDetails}`,
+      );
+    }
+
+    // Empty content on thinking models means num_predict was exhausted by the
+    // <think> block. Raise num_predict (32768+ for 35B thinking models).
+    if (!content.trim()) {
+      const hasThinking = !!data.message?.thinking;
+      const hint = hasThinking
+        ? `Model used all tokens on thinking. Increase OLLAMA_NUM_PREDICT (32768+ recommended for thinking models).`
+        : `Check OLLAMA_NUM_PREDICT (recommended: 16384+).`;
+      throw new Error(
+        `Ollama returned empty response. ${hint} Current model: ${options?.model ?? this.model}`,
       );
     }
 
@@ -114,6 +132,8 @@ export class OllamaProvider implements ModelProvider {
           if (data.error) {
             throw new Error(`Ollama error: ${data.error}`);
           }
+          // Skip thinking-only chunks (Ollama 0.6+ thinking models):
+          // during reasoning phase, message.thinking has content but message.content is empty.
           const content = data.message?.content;
           if (content) {
             yield content;
@@ -145,6 +165,7 @@ export class OllamaProvider implements ModelProvider {
   }): Promise<Response> {
     const { messages, stream, operation, modelOverride } = params;
     const endpoint = `${this.baseUrl}/api/chat`;
+    const resolvedModel = modelOverride ?? this.model;
 
     const requestInit: RequestInit = {
       method: "POST",
@@ -152,11 +173,13 @@ export class OllamaProvider implements ModelProvider {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: modelOverride ?? this.model,
+        model: resolvedModel,
         messages,
         stream,
+        keep_alive: this.keepAlive,
         options: {
           temperature: 0, // Low temperature for more deterministic JSON output
+          ...this.ollamaOptions,
         },
       }),
     };
@@ -189,7 +212,7 @@ export class OllamaProvider implements ModelProvider {
       buildOllamaFetchFailureMessage({
         operation,
         endpoint,
-        model: this.model,
+        model: resolvedModel,
         error: lastError,
         retries: OLLAMA_FETCH_MAX_RETRIES,
         requestTimeoutMs: this.requestTimeoutMs,
@@ -197,6 +220,14 @@ export class OllamaProvider implements ModelProvider {
     );
   }
 }
+
+interface OllamaRequestOptions {
+  num_ctx?: number;
+  num_predict?: number;
+  num_thread?: number;
+}
+
+const DEFAULT_OLLAMA_NUM_PREDICT = 16384; // Generous default to prevent empty responses
 
 function parseOllamaLine(line: string): OllamaChatResponse {
   try {
@@ -296,6 +327,29 @@ function parseRequestTimeoutMs(
   if (!value) return fallback;
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 1000) {
+    return fallback;
+  }
+  return Math.floor(parsed);
+}
+
+function buildOllamaRequestOptions(): OllamaRequestOptions {
+  return {
+    num_ctx: parseOptionalPositiveInteger(process.env.OLLAMA_NUM_CTX),
+    num_predict: parseOptionalPositiveInteger(
+      process.env.OLLAMA_NUM_PREDICT,
+      DEFAULT_OLLAMA_NUM_PREDICT,
+    ),
+    num_thread: parseOptionalPositiveInteger(process.env.OLLAMA_NUM_THREAD),
+  };
+}
+
+function parseOptionalPositiveInteger(
+  value: string | undefined,
+  fallback?: number,
+): number | undefined {
+  if (!value) return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
     return fallback;
   }
   return Math.floor(parsed);

@@ -36,8 +36,6 @@ export interface ChatRendererState {
   busy: boolean;
   activeStatus?: string; // TurnStatus
   spinnerIndex: number;
-  scrollOffset: number;
-  transcript: string[];
   sessionMode: string; // SessionMode
   inputBuffer: string;
   inputCursor: number;
@@ -48,7 +46,6 @@ export interface ChatUIState {
   busy: boolean;
   activeStatus?: string; // TurnStatus
   spinnerIndex: number;
-  suppressAnsiInputUntil: number;
 
   historySearchMode: boolean;
   historySearchQuery: string;
@@ -63,7 +60,6 @@ export interface ChatUIState {
 
   selectedCommandIndex: number;
   paletteClosed: boolean;
-  scrollOffset: number;
 }
 
 export interface KeyboardActions {

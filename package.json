@@ -31,7 +31,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:eval": "tsx scripts/rag-eval.ts"
+    "test:eval": "tsx scripts/rag-eval.ts",
+    "test:speed": "tsx scripts/test_speed.js"
   },
   "dependencies": {
     "@clack/prompts": "^1.3.0",

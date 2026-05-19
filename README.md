@@ -110,6 +110,29 @@ If only `--workspace` is provided, REI defaults to `chat`:
 rei --workspace /workspaces/another-repo
 ```
 
+## Workspace resolution
+
+REI resolves the workspace path differently depending on how it runs.
+
+**CLI mode** — workspace is always one of:
+- `process.cwd()` (default, no flags) — the directory where you ran `rei chat`
+- `--workspace /path/to/repo` — explicit override at launch time
+
+`REI_WORKSPACE_PATH` has no effect in CLI mode.
+
+**Server mode** — two environment variables control workspace access:
+
+- `REI_WORKSPACE_PATH`: the default workspace the server operates on. Falls back to `process.cwd()` if not set.
+- `ALLOWED_WORKSPACES`: comma-separated security whitelist. The server rejects any workspace not in this list. Falls back to `process.cwd()` if not set.
+
+```bash
+REI_WORKSPACE_PATH=/Users/you/my-project \
+ALLOWED_WORKSPACES=/Users/you/my-project,/Users/you/another-project \
+rei-server
+```
+
+The server validates every incoming request against `ALLOWED_WORKSPACES`. Requests targeting unlisted paths are rejected with a `403`.
+
 ### Interactive commands
 
 | Command | Description |
@@ -177,6 +200,22 @@ Optional configuration:
 
 - `OLLAMA_BASE_URL` default: `http://127.0.0.1:11434`
 - `OLLAMA_MODEL` default: `llama3.2`
+- `OLLAMA_REQUEST_TIMEOUT_MS` default: `300000`
+- `OLLAMA_KEEP_ALIVE` default: `30m`
+- `OLLAMA_NUM_CTX` optional (example: `8192`)
+- `OLLAMA_NUM_PREDICT` optional (example: `512`)
+- `OLLAMA_NUM_THREAD` optional (example for Apple Silicon: `8`)
+
+Performance tip for local Apple Silicon runs:
+
+```bash
+MODEL_PROVIDER=ollama \
+OLLAMA_MODEL=qwen2.5-coder:7b \
+OLLAMA_KEEP_ALIVE=2h \
+OLLAMA_NUM_CTX=8192 \
+OLLAMA_NUM_PREDICT=512 \
+rei chat
+```
 
 ### Compactor model (optional)
 
@@ -223,6 +262,46 @@ Optional configuration:
 - `OPENROUTER_API_KEY` required
 - `OPENROUTER_MODEL` default: `openai/gpt-4o-mini`
 - `OPENROUTER_REQUEST_TIMEOUT_MS` default: `120000`
+
+### Multi-provider setup (different providers per mode)
+
+REI can route each session mode to a different provider and model. The typical pattern is a fast local model for ask/planning and a more capable cloud model for agent edits.
+
+Set `AGENT_MODEL_PROVIDER` to override the provider used only in agent mode. The default `MODEL_PROVIDER` continues to handle ask and planning.
+
+The agent model is resolved as `<PROVIDER>_MODEL_AGENT`, falling back to the provider's base model if the `_AGENT` variant is not set.
+
+**Example: Ollama (ask/planning) + OpenRouter (agent)**
+
+```bash
+# ask + planning: local Ollama, fast and free
+MODEL_PROVIDER=ollama
+OLLAMA_MODEL=qwen2.5-coder:14b
+OLLAMA_MODEL_ASK=qwen2.5-coder:14b
+OLLAMA_MODEL_PLANNING=qwen2.5-coder:14b
+OLLAMA_NUM_CTX=32768
+
+# agent: OpenRouter, more capable for XML edits
+AGENT_MODEL_PROVIDER=openrouter
+OPENROUTER_API_KEY=your-key
+OPENROUTER_MODEL_AGENT=google/gemma-4-31b-it
+```
+
+All providers support the `_AGENT` model suffix: `OPENROUTER_MODEL_AGENT`, `OLLAMA_MODEL_AGENT`, `GROQ_MODEL_AGENT`, `GEMINI_MODEL_AGENT`, `HF_MODEL_AGENT`.
+
+### Per-mode model overrides (Ollama single-provider)
+
+When using Ollama as the sole provider, each mode can use a different model:
+
+```bash
+MODEL_PROVIDER=ollama
+OLLAMA_MODEL=qwen2.5-coder:14b       # fallback for all modes
+OLLAMA_MODEL_ASK=gemma3:12b          # fast, conversational
+OLLAMA_MODEL_PLANNING=gemma3:12b     # fast, structured output
+OLLAMA_MODEL_AGENT=qwen3:30b-a3b     # heavier model for XML edits
+```
+
+Per-mode overrides are only supported for Ollama in single-provider mode. For all other providers, use `AGENT_MODEL_PROVIDER` to assign a dedicated agent provider.
 
 ## Terminal output
 

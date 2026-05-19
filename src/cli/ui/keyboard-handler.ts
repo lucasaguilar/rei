@@ -18,20 +18,6 @@ export class KeyboardHandler {
     const keyWithSequence = key as readline.Key & { sequence?: string };
     const sequence = keyWithSequence.sequence ?? str;
 
-    // NOTE: Detect starting mouse sequences to suppress immediate following SGR pieces
-    if (sequence.includes("\x1b[<") || sequence.startsWith("\x1b[M")) {
-      state.suppressAnsiInputUntil = Date.now() + 250;
-      return;
-    }
-
-    // Mouse data also generates keypress events; suppress ANSI fragments for a short window.
-    if (
-      Date.now() < state.suppressAnsiInputUntil &&
-      looksLikeAnsiNoise(str, key)
-    ) {
-      return;
-    }
-
     // Ignore terminal mouse SGR sequences so they never leak into input text.
     if (isMouseSgrSequence(str, key)) {
       return;
@@ -130,58 +116,12 @@ export class KeyboardHandler {
       return;
     }
 
-    // Scroll keys work regardless of busy state.
-    // Ctrl+U = half page up, Ctrl+D = half page down (vim/less convention).
-    // Also support PageUp/PageDown and Shift+arrows as fallback.
-    if (
-      key.name === "pageup" ||
-      (key.name === "up" && key.shift) ||
-      (key.ctrl && key.name === "u")
-    ) {
-      const rows = Math.max(12, process.stdout.rows || 24);
-      const pageSize = Math.max(1, Math.floor((rows - 4) / 2));
-      state.scrollOffset += pageSize;
-      actions.draw();
-      return;
-    }
-
-    if (
-      key.name === "pagedown" ||
-      (key.name === "down" && key.shift) ||
-      (key.ctrl && key.name === "d")
-    ) {
-      const rows = Math.max(12, process.stdout.rows || 24);
-      const pageSize = Math.max(1, Math.floor((rows - 4) / 2));
-      state.scrollOffset = Math.max(0, state.scrollOffset - pageSize);
-      actions.draw();
-      return;
-    }
-
     if (state.busy) {
       return;
     }
 
     const activePalette = actions.getActivePalette();
     const palette = activePalette.items;
-
-    // Native-feeling behavior: if transcript is scrolled and input is idle,
-    // use Up/Down to continue scrolling results. At bottom, Up/Down returns to history/palette.
-    if (
-      palette.length === 0 &&
-      state.inputBuffer.length === 0 &&
-      !state.historySearchMode
-    ) {
-      if (key.name === "up" && state.scrollOffset > 0) {
-        state.scrollOffset += 1;
-        actions.draw();
-        return;
-      }
-      if (key.name === "down" && state.scrollOffset > 0) {
-        state.scrollOffset = Math.max(0, state.scrollOffset - 1);
-        actions.draw();
-        return;
-      }
-    }
 
     if (key.name === "up") {
       if (state.historyCursor !== undefined) {

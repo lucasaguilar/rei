@@ -1,10 +1,16 @@
 import type { ChatMessage, ChatSession, SessionMode } from "./types.js";
 import { getHelpText } from "../cli/constants/chat.constants.js";
-import { saveSession } from "./session-store.js";
+import {
+  archiveCurrentSession,
+  listSessions,
+  loadSessionById,
+  saveSession,
+} from "./session-store.js";
 import { compactSession } from "./compactor.js";
 import { startIndexingWorker } from "../context/rag/rag-indexer.js";
 import { generateRepoMap } from "../tools/repo-map-generator.js";
 import type { ModelProvider } from "../providers/model-provider.js";
+import { clearPromptCache } from "../prompts/loader.js";
 
 export interface CommandResult {
   success: boolean;
@@ -20,6 +26,118 @@ export async function processMenuCommand(
   provider: ModelProvider,
 ): Promise<CommandResult> {
   const trimmed = command.trim();
+
+  if (trimmed === "/session") {
+    const nonSystem = session.messages.filter(
+      (message) => message.role !== "system",
+    );
+    const turns = Math.floor(nonSystem.length / 2);
+    return {
+      success: true,
+      response:
+        `[REI] Current session\n` +
+        `- Mode: ${session.mode}\n` +
+        `- Messages: ${session.messages.length} (${turns} turns)\n` +
+        `- Created: ${session.createdAt ?? "unknown"}\n` +
+        `- Summary: ${session.summary ? "yes" : "no"}`,
+    };
+  }
+
+  if (trimmed === "/session new") {
+    const archivedId = archiveCurrentSession(workspacePath);
+    const freshMessages: ChatMessage[] = [];
+
+    saveSession(
+      workspacePath,
+      freshMessages,
+      session.mode,
+      undefined,
+      undefined,
+    );
+
+    return {
+      success: true,
+      response: archivedId
+        ? `[REI] Started a new session. Previous session archived as ${archivedId}.`
+        : "[REI] Started a new session.",
+      newSession: {
+        ...session,
+        messages: freshMessages,
+        createdAt: undefined,
+        summary: undefined,
+      },
+    };
+  }
+
+  if (trimmed === "/session list") {
+    const sessions = listSessions(workspacePath);
+    if (sessions.length === 0) {
+      return {
+        success: true,
+        response: "[REI] No archived sessions found.",
+      };
+    }
+
+    const lines = sessions
+      .slice(0, 20)
+      .map(
+        (entry) =>
+          `- ${entry.id} | mode=${entry.mode} | turns=${entry.turns} | updated=${entry.updatedAt}`,
+      );
+
+    return {
+      success: true,
+      response:
+        `[REI] Archived sessions (${sessions.length}):\n` +
+        lines.join("\n") +
+        (sessions.length > 20
+          ? "\n... (showing first 20, use /session load <id>)"
+          : ""),
+    };
+  }
+
+  const sessionLoadMatch = trimmed.match(/^\/session\s+load\s+(.+)$/);
+  if (sessionLoadMatch) {
+    const sessionId = sessionLoadMatch[1].trim();
+    const loaded = loadSessionById(workspacePath, sessionId);
+    if (!loaded) {
+      return {
+        success: false,
+        response: `[REI] Session '${sessionId}' was not found.`,
+      };
+    }
+
+    saveSession(
+      workspacePath,
+      loaded.messages,
+      loaded.mode,
+      loaded.summary,
+      loaded.createdAt,
+    );
+
+    const nonSystem = loaded.messages.filter(
+      (message) => message.role !== "system",
+    );
+    return {
+      success: true,
+      response: `[REI] Session '${sessionId}' loaded (${Math.floor(nonSystem.length / 2)} turns, mode=${loaded.mode}).`,
+      newSession: {
+        messages: loaded.messages,
+        mode: loaded.mode,
+        createdAt: loaded.createdAt,
+        summary: loaded.summary,
+      },
+    };
+  }
+
+  if (trimmed === "/reloadprompts") {
+    clearPromptCache();
+    return {
+      success: true,
+      response:
+        "[REI] Prompt cache cleared. All prompts will be reloaded from disk on next request.",
+    };
+  }
 
   if (trimmed === "/clear") {
     const newMessages: ChatMessage[] = [];
@@ -171,7 +289,8 @@ export async function processMenuCommand(
       process.env.REI_TDD_MODE = "true";
       return {
         success: true,
-        response: "[REI] TDD Mode activated! Sandbox will now run 'npm run test' during edit validation.",
+        response:
+          "[REI] TDD Mode activated! Sandbox will now run 'npm run test' during edit validation.",
       };
     }
   }
@@ -179,7 +298,7 @@ export async function processMenuCommand(
   if (trimmed === "/index") {
     // 1. Generate and persist the AST Skeleton Map
     generateRepoMap(workspacePath);
-    
+
     // 2. Start the RAG vector indexing
     startIndexingWorker(workspacePath, {
       onDone: (msg) => console.log(`[RAG Indexer] ${msg}`),

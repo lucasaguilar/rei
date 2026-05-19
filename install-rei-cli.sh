@@ -8,7 +8,7 @@ mkdir -p "$BIN_DIR"
 echo "📁 Instalando REI CLI en $INSTALL_DIR y symlink en $BIN_DIR"
 # Clonar el repo oficial de REI
 if [ ! -d "$INSTALL_DIR/.git" ]; then
-	git clone https://github.com/lucasaguilar/rei.git "$INSTALL_DIR"
+	git clone git@github.com:lucasaguilar/rei.git "$INSTALL_DIR"
 else
 	echo "Repositorio ya clonado en $INSTALL_DIR, actualizando..."
 	cd "$INSTALL_DIR"
@@ -37,11 +37,19 @@ fi
 # Crear script global 'rei' en ~/.local/bin
 cat > "$BIN_DIR/rei" << 'EOF'
 #!/bin/bash
-# Cargar .env local o global
+# Cargar .env local o global (solo lineas KEY=VALUE validas)
+load_env_file() {
+	local env_file="$1"
+	while IFS= read -r line; do
+		[[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
+		export "$line"
+	done < "$env_file"
+}
+
 if [ -f .env ]; then
-	export $(grep -v '^#' .env | xargs)
+	load_env_file .env
 elif [ -f "$HOME/.rei/.env" ]; then
-	export $(grep -v '^#' "$HOME/.rei/.env" | xargs)
+	load_env_file "$HOME/.rei/.env"
 fi
 # Forzar TMPDIR local para evitar problemas de permisos
 export TMPDIR="$HOME/.tmp"
