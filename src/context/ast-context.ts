@@ -89,9 +89,3 @@ export async function extractAstDependencies(
     dependenciesFound: scrapedDependencies.size,
   };
 }
-
-/**
- * Parses the raw AST of a TS Module and extracts a clean, body-less representation
- * of exported Classes, Interfaces, Types, and Functions. (Simulates .d.ts extremely fast).
- */
-// extractSignatures removed: now handled by provider abstraction

@@ -2,6 +2,12 @@
 import { AstProvider, AstChunk, DependencyHint, SkeletonNode, SourceFileLike } from "./ast-provider.js";
 import { Project } from "ts-morph";
 
+/**
+ * TypeScript/JavaScript provider backed by ts-morph.
+ *
+ * NOTE: Legacy extractSignatures logic from ast-context was migrated into
+ * this provider abstraction so TS/JS parsing quality remains unchanged.
+ */
 export class TypeScriptAstProvider implements AstProvider {
   readonly providerId = "ts-morph";
 
