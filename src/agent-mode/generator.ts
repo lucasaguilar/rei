@@ -7,8 +7,11 @@ import {
   extractFileRequests,
   extractSREdits,
   extractCreateFileRequests,
+  extractWholeFileEdits,
+  extractCommandRequests,
   formatSREditsForLog,
 } from "./response-handler.js";
+import { executeCommand } from "../tools/command-executor.js";
 import {
   applyVirtualBatch,
   formatVirtualBatchResult,
@@ -17,7 +20,14 @@ import { applyFileEdits } from "../tools/search-replace.js";
 import { findSymbolCallers, rankCallerFiles } from "../context/caller-graph.js";
 import * as fs from "fs/promises";
 import * as path from "path";
-import { applyCreateFileBatchFS } from "../tools/patch-applier.js";
+import {
+  applyCreateFileBatchFS,
+  applyWholeFileBatchFS,
+} from "../tools/patch-applier.js";
+import {
+  resolveVerifyCommand,
+  runVerifyCommand,
+} from "../tools/compile-check-core.js";
 
 export interface ExecutionResult {
   response: string;
@@ -221,9 +231,16 @@ export async function executeAgentTurn(params: {
   workspacePath: string;
   scannedFiles: FileMeta[];
   logger: AgentLogger;
+  modelOverride?: string;
 }): Promise<ExecutionResult> {
-  const { provider, messagesForModel, workspacePath, scannedFiles, logger } =
-    params;
+  const {
+    provider,
+    messagesForModel,
+    workspacePath,
+    scannedFiles,
+    logger,
+    modelOverride,
+  } = params;
 
   let currentMessages = [...messagesForModel];
   let loopCount = 0;
@@ -239,9 +256,35 @@ export async function executeAgentTurn(params: {
     loopCount++;
 
     // 1. Ask the LLM
-    const rawResponse = await provider.completeChat(currentMessages);
+    const rawResponse = await provider.completeChat(currentMessages, {
+      model: modelOverride,
+    });
     lastRawResponse = rawResponse;
     logger.logInfo("Raw LLM Response", { rawResponse });
+
+    if (!rawResponse.trim()) {
+      logger.logInfo("Model returned empty response", { loopCount });
+      if (loopCount < MAX_TURNS) {
+        currentMessages.push({ role: "assistant", content: rawResponse });
+        currentMessages.push({
+          role: "user",
+          content:
+            "Your previous response was empty. Reply with either plain text guidance or valid <edit>/<request_files> tags.",
+        });
+        continue;
+      }
+
+      return finalizeOutcome(
+        logger,
+        {
+          response:
+            "The model returned an empty response for this turn. Please retry or switch to a smaller/faster model.",
+          validProposedPatches: [],
+        },
+        0,
+        0,
+      );
+    }
 
     // 1a. Handle <create> blocks (file creation requests)
     const createFileRequests = extractCreateFileRequests(rawResponse);
@@ -493,11 +536,238 @@ export async function executeAgentTurn(params: {
   );
 }
 
-export function prepareAgentContext(): any {
-  // Deprecated shell function, kept to avoid circular/import crashes temporarily
-  // if run-chat references this directly.
-  return {};
+/**
+ * Simplified agent executor for the "wholefile" edit format.
+ * Handles <wholefile>, <execute_command>, and <request_files> tags.
+ * No search/replace matching required — works reliably with models ≤14b.
+ * Files are written directly inside this executor; agent.ts must NOT re-apply.
+ */
+export async function executeAgentTurnWholefile(params: {
+  provider: ModelProvider;
+  messagesForModel: ChatSession["messages"];
+  workspacePath: string;
+  logger: AgentLogger;
+  modelOverride?: string;
+}): Promise<ExecutionResult> {
+  const { provider, messagesForModel, workspacePath, logger, modelOverride } =
+    params;
+  let currentMessages = [...messagesForModel];
+  let loopCount = 0;
+  let lastRawResponse = "";
+
+  while (loopCount < MAX_TURNS) {
+    loopCount++;
+
+    const rawResponse = await provider.completeChat(currentMessages, {
+      model: modelOverride,
+    });
+    lastRawResponse = rawResponse;
+    logger.logInfo("Raw LLM Response (wholefile mode)", { rawResponse });
+
+    if (!rawResponse.trim()) {
+      if (loopCount < MAX_TURNS) {
+        currentMessages.push({ role: "assistant", content: rawResponse });
+        currentMessages.push({
+          role: "user",
+          content:
+            "Your previous response was empty. Reply with plain text guidance or <wholefile> tags.",
+        });
+        continue;
+      }
+      return finalizeOutcome(
+        logger,
+        { response: "Empty response.", validProposedPatches: [] },
+        0,
+        0,
+      );
+    }
+
+    // 1. <request_files> — inject file contents and continue
+    const fileRequests = extractFileRequests(rawResponse);
+    if (fileRequests.length > 0) {
+      logger.logInfo(`Agent requested files: ${fileRequests.join(", ")}`);
+      const contextMessage = await buildFileContextMessage(
+        workspacePath,
+        fileRequests,
+      );
+      currentMessages.push({ role: "assistant", content: rawResponse });
+      currentMessages.push({
+        role: "user",
+        content: `Here are the requested files:\n${contextMessage}\nPlease continue your task.`,
+      });
+      continue;
+    }
+
+    // 2. Extract all action blocks
+    const wholefileEdits = extractWholeFileEdits(rawResponse);
+    const commands = extractCommandRequests(rawResponse);
+
+    // 3. Apply <wholefile> blocks if present
+    if (wholefileEdits.length > 0) {
+      logger.logInfo(
+        `Agent proposed ${wholefileEdits.length} wholefile rewrite(s)`,
+        { files: wholefileEdits.map((e) => e.file) },
+      );
+
+      const result = await applyWholeFileBatchFS(wholefileEdits, workspacePath);
+      const failed = result.results.filter((r) => !r.applied);
+
+      if (failed.length > 0) {
+        const feedback =
+          "Some <wholefile> blocks failed to write:\n" +
+          failed
+            .map((r) => `- ${r.file}: ${r.validationErrors.join("; ")}`)
+            .join("\n");
+        if (loopCount < MAX_TURNS) {
+          currentMessages.push({ role: "assistant", content: rawResponse });
+          currentMessages.push({
+            role: "user",
+            content: feedback + "\nPlease retry.",
+          });
+          continue;
+        }
+        return finalizeOutcome(
+          logger,
+          { response: rawResponse, validProposedPatches: [], failed: true },
+          wholefileEdits.length,
+          0,
+        );
+      }
+
+      const appliedFiles = result.results.map((r) => r.file);
+      let summary =
+        `\n\n---\n\u001b[32m\u001b[1m${wholefileEdits.length} file(s) written.\u001b[0m\n` +
+        appliedFiles.map((f) => `- ${f}`).join("\n");
+
+      // 4. Also execute any <execute_command> tags in the same response
+      if (commands.length > 0) {
+        summary += "\n\n--- Command Execution Results ---";
+        for (const cmd of commands) {
+          logger.logInfo(`Executing command: ${cmd}`);
+          const cmdResult = await executeCommand(cmd, workspacePath);
+          logger.logCommandExecution(cmd, cmdResult);
+          summary +=
+            `\nCommand: ${cmd}\nExit Code: ${cmdResult.exitCode}` +
+            `\nStdout: ${cmdResult.stdout || "none"}\nStderr: ${cmdResult.stderr || "none"}`;
+        }
+      }
+
+      // 5. Post-apply validation — always uses the project's full verify command.
+      //    Angular (ng build): runs once and reports to the user — no auto-retry
+      //    because ng build is slow (30-120s). The user can ask for a follow-up fix.
+      //    TypeScript/C# (tsc / dotnet build): fast enough to auto-retry in the loop.
+      //    Skip if REI_WHOLEFILE_SKIP_VALIDATE=true for speed.
+      const skipValidate = process.env.REI_WHOLEFILE_SKIP_VALIDATE === "true";
+      if (!skipValidate) {
+        const verifyCmd = resolveVerifyCommand(workspacePath);
+        const isAngularProject = verifyCmd.includes("ng build");
+
+        logger.logInfo(`Running post-apply validation: ${verifyCmd}`);
+        const verifyResult = await runVerifyCommand(workspacePath, verifyCmd);
+
+        if (verifyResult.exitCode !== 0) {
+          const errorOutput = [verifyResult.stderr, verifyResult.stdout]
+            .filter(Boolean)
+            .join("\n")
+            .split("\n")
+            .slice(0, 40)
+            .join("\n");
+
+          logger.logInfo("Post-apply validation failed", {
+            verifyCmd,
+            errorPreview: errorOutput.slice(0, 300),
+          });
+
+          if (!isAngularProject && loopCount < MAX_TURNS) {
+            currentMessages.push({ role: "assistant", content: rawResponse });
+            currentMessages.push({
+              role: "user",
+              content:
+                `Files were written, but the project failed to compile.\n` +
+                `Verify command: \`${verifyCmd}\`\n\n` +
+                `Errors:\n\`\`\`\n${errorOutput}\n\`\`\`\n\n` +
+                `Please fix the errors and resubmit the corrected files using <wholefile> blocks.`,
+            });
+            continue;
+          }
+
+          summary += `\n\n\u001b[31m\u001b[1mValidation failed:\u001b[0m\n${errorOutput}`;
+        } else {
+          summary += `\n\u001b[32m✓ Validation passed (${verifyCmd.split(" ")[1] ?? verifyCmd})\u001b[0m`;
+        }
+      }
+
+      // validProposedPatches is intentionally empty — files are already written.
+      // Returning non-empty patches would cause agent.ts to re-apply via applySREditBatchFS.
+      return finalizeOutcome(
+        logger,
+        { response: rawResponse + summary, validProposedPatches: [] },
+        wholefileEdits.length,
+        wholefileEdits.length,
+      );
+    }
+
+    // 5. Commands only (no wholefile) — execute and feed back for follow-up turn
+    if (commands.length > 0) {
+      let commandFeedback = "";
+      for (const cmd of commands) {
+        logger.logInfo(`Executing command: ${cmd}`);
+        const cmdResult = await executeCommand(cmd, workspacePath);
+        logger.logCommandExecution(cmd, cmdResult);
+        commandFeedback +=
+          `\nCommand: ${cmd}\nExit Code: ${cmdResult.exitCode}` +
+          `\nStdout: ${cmdResult.stdout || "none"}\nStderr: ${cmdResult.stderr || "none"}\n`;
+      }
+
+      if (loopCount < MAX_TURNS) {
+        currentMessages.push({ role: "assistant", content: rawResponse });
+        currentMessages.push({
+          role: "user",
+          content: `Command execution results:\n${commandFeedback}\nPlease continue with the task.`,
+        });
+        continue;
+      }
+
+      return finalizeOutcome(
+        logger,
+        {
+          response:
+            rawResponse +
+            "\n\n--- Command Execution Results ---\n" +
+            commandFeedback,
+          validProposedPatches: [],
+        },
+        0,
+        0,
+      );
+    }
+
+    // 6. Plain text response — no action blocks found
+    logger.logNoEditsReason("model_returned_text_only", {
+      loopCount,
+      rawResponsePreview: rawResponse.substring(0, 200),
+    });
+    return finalizeOutcome(
+      logger,
+      { response: rawResponse, validProposedPatches: [] },
+      0,
+      0,
+    );
+  }
+
+  return finalizeOutcome(
+    logger,
+    {
+      response: lastRawResponse || "Agent loop exceeded maximum turns.",
+      validProposedPatches: [],
+      failed: true,
+    },
+    0,
+    0,
+  );
 }
+
+export function prepareAgentContext(): any {}
 
 export function buildAgentFinalResponse(answer: string): any {
   // Same as above.

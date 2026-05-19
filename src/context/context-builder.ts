@@ -21,7 +21,6 @@ import {
   buildCallerFilesContext,
   buildRagNodeSnippets,
   buildRepoSummary,
-  isExplicitContentRequest,
 } from "./helpers/context-builder.helpers.js";
 import { extractExplicitPathHints } from "../workspace/file-selector.js";
 import { ENABLE_SEMANTIC_RAG_SEARCH } from "./constants/context-builder.constants.js";
@@ -75,7 +74,7 @@ export async function buildTurnContext(params: {
 
   if (ENABLE_SEMANTIC_RAG_SEARCH && hasRagIndex(workspacePath)) {
     try {
-      ragResults = await searchRag(workspacePath, userInput, 15);
+      ragResults = await searchRag(workspacePath, userInput, 10);
       for (const r of ragResults) {
         ragFilePaths.add(r.metadata.filePath);
       }
@@ -106,22 +105,42 @@ export async function buildTurnContext(params: {
     }
   }
 
-  const mergedPaths: Array<{ path: string; score: number }> = Array.from(
-    mergedMap.entries(),
-  )
-    .map(([p, s]) => ({ path: p, score: s }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 8);
-
-  const isExplicit = isExplicitContentRequest(userInput);
-  // Detectar archivos mencionados explícitamente en el input
+  // Detect files explicitly mentioned in the user input
   const explicitPathHints = extractExplicitPathHints(userInput).map((p) =>
     p.toLowerCase(),
   );
 
+  const top5: Array<{ path: string; score: number }> = Array.from(
+    mergedMap.entries(),
+  )
+    .map(([p, s]) => ({ path: p, score: s }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5);
+
+  // Force-include any explicitly mentioned file that scored out of top-5
+  const top5Paths = new Set(top5.map((f) => f.path.toLowerCase()));
+  const forcedEntries: Array<{ path: string; score: number }> = [];
+
+  if (explicitPathHints.length > 0) {
+    for (const file of files) {
+      const filePathLower = file.path.toLowerCase();
+      const isHinted = explicitPathHints.some(
+        (hint) =>
+          filePathLower === hint ||
+          filePathLower.endsWith(hint) ||
+          hint.endsWith(filePathLower),
+      );
+      if (isHinted && !top5Paths.has(filePathLower)) {
+        forcedEntries.push({ path: file.path, score: 999 });
+      }
+    }
+  }
+
+  const mergedPaths = [...top5, ...forcedEntries];
+
   const relevantFiles = await Promise.all(
     mergedPaths.map(async (f) => {
-      // Si el archivo fue mencionado explícitamente, siempre incluirlo completo
+      // Always include full content for explicitly mentioned files
       const isExplicitMention = explicitPathHints.some((hint) => {
         const filePathLower = f.path.toLowerCase();
         return (

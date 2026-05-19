@@ -19,12 +19,12 @@ export async function handleInputCommand(
     trimmed,
     session,
     ctx.workspacePath,
-    agent.provider
+    agent.provider,
   );
 
   if (result.success) {
     actions.pushTranscript(result.response);
-    
+
     if (result.newSession) {
       Object.assign(session, result.newSession);
     }
@@ -33,19 +33,28 @@ export async function handleInputCommand(
     if (result.autoExecute) {
       const { prompt } = result.autoExecute;
       session.messages.push({ role: "user", content: prompt });
-      
+
       state.busy = true;
       actions.draw();
       try {
         const response = await agent.runTurn(session, prompt);
         actions.pushTranscript(response);
       } catch (err) {
-        actions.pushTranscript(`Error: ${err instanceof Error ? err.message : String(err)}`);
+        actions.pushTranscript(
+          `Error: ${err instanceof Error ? err.message : String(err)}`,
+        );
       } finally {
         state.busy = false;
         actions.draw();
       }
     }
+    return true;
+  }
+
+  // Any slash-prefixed input is treated as a command. If it fails,
+  // surface the command error and do not fall through to model execution.
+  if (trimmed.startsWith("/")) {
+    actions.pushTranscript(result.response);
     return true;
   }
 

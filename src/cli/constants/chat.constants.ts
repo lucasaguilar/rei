@@ -43,8 +43,7 @@ export const THINKING_TEXT: Record<TurnStatus, string> = {
 
 export const SPINNER_FRAMES = ["|", "/", "-", "\\"];
 export const SHORTCUT_HINT =
-  "Shortcuts: Up/Down history (at bottom) | Ctrl+U/D scroll | / commands | @ files | Tab complete | Esc close | Ctrl+R search";
-export const MOUSE_SCROLL_STEP = 3;
+  "Shortcuts: Up/Down history | / commands | @ files | Tab complete | Esc close | Ctrl+R search";
 
 export const COMMANDS: Array<{
   command: string;

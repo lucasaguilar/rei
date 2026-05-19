@@ -19,6 +19,7 @@ const ALLOWED_COMMANDS = new Set([
   "node",
   "tsc",
   "find",
+  "ng",
 ]);
 
 const DENIED_KEYWORDS = [

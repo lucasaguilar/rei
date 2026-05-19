@@ -1,16 +1,33 @@
 import type { ModelProvider } from "../providers/model-provider.js";
-import { executeAgentTurn } from "../agent-mode/generator.js";
-import { buildSystemMessage } from "../prompts/prompt-builder.js";
+import {
+  resolveModelForMode,
+  createProviderForMode,
+} from "../providers/provider-factory.js";
+import {
+  executeAgentTurn,
+  executeAgentTurnWholefile,
+} from "../agent-mode/generator.js";
+import {
+  buildSystemMessage,
+  getAgentEditFormat,
+} from "../prompts/prompt-builder.js";
 import { buildTurnContext } from "../context/context-builder.js";
 import { buildMessagesForModel } from "../chat/message-builder.js";
 import { compactSession, needsCompaction } from "../chat/compactor.js";
 import { type ChatSession } from "../chat/types.js";
-import { generateRepoMap, generateRepoMapForFile } from "../tools/repo-map-generator.js";
+import {
+  generateRepoMap,
+  generateRepoMapForFile,
+} from "../tools/repo-map-generator.js";
 import { VectorStore } from "../context/rag/vector-store.js";
 import { generateEmbedding } from "../context/rag/embedder.js";
-import { chunkRepoMap, chunkRepoMapString } from "../context/rag/map-chunker.js";
+import {
+  chunkRepoMap,
+  chunkRepoMapString,
+} from "../context/rag/map-chunker.js";
 import { getRelevantMapContext } from "../context/rag/map-retriever.js";
 import * as path from "node:path";
+import * as crypto from "node:crypto";
 import chokidar, { type FSWatcher } from "chokidar";
 import {
   scanWorkspace,
@@ -77,20 +94,32 @@ export class Agent {
   async runTurn(session: ChatSession, userInput: string): Promise<string> {
     this.logger.startTurn();
     this.logger.setCorrelationId(this.correlationId);
-    await this.prepareSessionForTurn(session, userInput);
+    const enrichedUserMessage = await this.prepareSessionForTurn(
+      session,
+      userInput,
+    );
     await this.compactSessionIfNeeded(session);
 
     // session.messages holds the complete history; send only a trimmed
     // window to the provider to keep prompt size under control.
-    const messagesForModel = buildMessagesForModel(
+    const baseMessagesForModel = buildMessagesForModel(
       session.messages,
       session.mode,
+      session.mode === "agent" ? getAgentEditFormat() : undefined,
+    );
+    const messagesForModel = this.injectCurrentTurnContext(
+      baseMessagesForModel,
+      enrichedUserMessage,
     );
     const response = await this.generateAssistantResponse(
       session.mode,
       messagesForModel,
     );
-    session.messages.push({ role: "assistant", content: response });
+    session.messages.push({
+      role: "assistant",
+      content: response,
+      sourceMode: session.mode,
+    });
     return response;
   }
 
@@ -101,23 +130,44 @@ export class Agent {
   ): AsyncIterable<string> {
     this.logger.startTurn();
     this.logger.setCorrelationId(this.correlationId);
-    await this.prepareSessionForTurn(session, userInput, options?.onStatus);
+    const enrichedUserMessage = await this.prepareSessionForTurn(
+      session,
+      userInput,
+      options?.onStatus,
+    );
     await this.compactSessionIfNeeded(session, options?.onStatus);
 
-    const messagesForModel = buildMessagesForModel(
+    const baseMessagesForModel = buildMessagesForModel(
       session.messages,
       session.mode,
+      session.mode === "agent" ? getAgentEditFormat() : undefined,
+    );
+    const messagesForModel = this.injectCurrentTurnContext(
+      baseMessagesForModel,
+      enrichedUserMessage,
     );
     options?.onStatus?.("calling_model");
 
     if (session.mode === "agent") {
-      const outcome = await executeAgentTurn({
-        provider: this.provider,
-        messagesForModel,
-        workspacePath: this.workspacePath,
-        scannedFiles: this.getWorkspaceFiles(),
-        logger: this.logger,
-      });
+      const editFormat = getAgentEditFormat();
+      const agentProvider = createProviderForMode("agent", this.provider);
+      const outcome =
+        editFormat === "wholefile"
+          ? await executeAgentTurnWholefile({
+              provider: agentProvider,
+              messagesForModel,
+              workspacePath: this.workspacePath,
+              logger: this.logger,
+              modelOverride: resolveModelForMode("agent"),
+            })
+          : await executeAgentTurn({
+              provider: agentProvider,
+              messagesForModel,
+              workspacePath: this.workspacePath,
+              scannedFiles: this.getWorkspaceFiles(),
+              logger: this.logger,
+              modelOverride: resolveModelForMode("agent"),
+            });
 
       // Si hay parches válidos, aplicarlos directamente
       if (
@@ -161,7 +211,10 @@ export class Agent {
           commandFeedback += `\nCommand: ${cmd}\nExit Code: ${result.exitCode}\nStdout: ${result.stdout || "none"}\nStderr: ${result.stderr || "none"}\n`;
         }
         session.messages.push({ role: "assistant", content: outcome.response });
-        session.messages.push({ role: "user", content: `System Feedback: ${commandFeedback}` });
+        session.messages.push({
+          role: "user",
+          content: `System Feedback: ${commandFeedback}`,
+        });
         options?.onStatus?.("producing_response");
         yield outcome.response + commandFeedback;
         return;
@@ -177,16 +230,31 @@ export class Agent {
     if (this.provider.streamChat) {
       let fullResponse = "";
       options?.onStatus?.("producing_response");
-      for await (const token of this.provider.streamChat(messagesForModel)) {
+      for await (const token of this.provider.streamChat(messagesForModel, {
+        model: resolveModelForMode(session.mode),
+      })) {
         fullResponse += token;
         yield token;
       }
-      session.messages.push({ role: "assistant", content: fullResponse });
+      const cmdFeedback = await this.executeCommandsFromResponse(fullResponse);
+      if (cmdFeedback) yield cmdFeedback;
+      session.messages.push({
+        role: "assistant",
+        content: fullResponse + cmdFeedback,
+        sourceMode: session.mode,
+      });
     } else {
-      const response = await this.provider.completeChat(messagesForModel);
-      session.messages.push({ role: "assistant", content: response });
+      const response = await this.provider.completeChat(messagesForModel, {
+        model: resolveModelForMode(session.mode),
+      });
+      const cmdFeedback = await this.executeCommandsFromResponse(response);
+      session.messages.push({
+        role: "assistant",
+        content: response + cmdFeedback,
+        sourceMode: session.mode,
+      });
       options?.onStatus?.("producing_response");
-      yield response;
+      yield response + cmdFeedback;
     }
   }
 
@@ -220,27 +288,44 @@ export class Agent {
     return this.generateAgentAssistantResponse(messagesForModel);
   }
 
-  private async updateSystemContextWithRepoMap(session: ChatSession, userInput?: string): Promise<void> {
+  private async updateSystemContextWithRepoMap(
+    session: ChatSession,
+    userInput?: string,
+  ): Promise<void> {
     let repositorySkeletonMap = undefined;
 
     // 1. Asegurar que el mapa esté generado e indexado en el VectorStore
     if (!this.repoMapCache) {
       this.repoMapCache = generateRepoMap(this.workspacePath);
-      
+
       await this.vectorStore.load();
-      
+
       // Limpiar registros fantasma (archivos borrados mientras REI estaba apagado)
       const currentFiles = scanWorkspace(this.workspacePath);
-      const activePaths = new Set(currentFiles.map(f => f.path));
+      const activePaths = new Set(currentFiles.map((f) => f.path));
       await this.vectorStore.cleanupStaleFiles(activePaths);
 
       const chunks = await chunkRepoMap(this.workspacePath);
       for (const chunk of chunks) {
+        const hash = crypto
+          .createHash("md5")
+          .update(chunk.content)
+          .digest("hex");
+        const existing = this.vectorStore.getById(chunk.metadata.id);
+
+        if (existing && existing.metadata.fileHash === hash) {
+          continue; // Saltar cálculo pesado, el contenido no cambió
+        }
+
         const vector = await generateEmbedding(chunk.content);
-        this.vectorStore.upsert({
-          ...chunk.metadata,
-          content: chunk.content,
-        }, vector);
+        this.vectorStore.upsert(
+          {
+            ...chunk.metadata,
+            content: chunk.content,
+            fileHash: hash,
+          },
+          vector,
+        );
       }
       await this.vectorStore.save();
       this.initWatcher();
@@ -248,17 +333,22 @@ export class Agent {
 
     // 2. Recuperar solo fragmentos relevantes basados en la entrada del usuario
     if (userInput) {
-      const relevantMap = await getRelevantMapContext(this.vectorStore, userInput);
-      repositorySkeletonMap = relevantMap 
+      const relevantMap = await getRelevantMapContext(
+        this.vectorStore,
+        userInput,
+      );
+      repositorySkeletonMap = relevantMap
         ? `### RELEVANT REPOSITORY SKELETON MAP\n\n${relevantMap}`
         : "No specific map fragments found for this query.";
     } else {
-      repositorySkeletonMap = "Repository map indexed. Ask about specific files or symbols to see relevant structure.";
+      repositorySkeletonMap =
+        "Repository map indexed. Ask about specific files or symbols to see relevant structure.";
     }
 
     const systemContent = buildSystemMessage(
       session.mode,
       repositorySkeletonMap,
+      this.workspacePath,
     );
 
     if (session.messages.length > 0 && session.messages[0].role === "system") {
@@ -272,7 +362,7 @@ export class Agent {
     session: ChatSession,
     userInput: string,
     onStatus?: StreamTurnOptions["onStatus"],
-  ): Promise<void> {
+  ): Promise<string> {
     onStatus?.("building_context");
     await this.updateSystemContextWithRepoMap(session, userInput);
     this.logger.logUserPrompt({
@@ -302,7 +392,28 @@ export class Agent {
     }
 
     const enrichedMessage = buildTurnUserMessage({ userInput, context });
-    session.messages.push({ role: "user", content: enrichedMessage });
+
+    // Persist only the raw user input so historical turns stay compact.
+    session.messages.push({ role: "user", content: userInput });
+
+    return enrichedMessage;
+  }
+
+  private injectCurrentTurnContext(
+    messagesForModel: ChatSession["messages"],
+    enrichedUserMessage: string,
+  ): ChatSession["messages"] {
+    const patched = [...messagesForModel];
+    for (let index = patched.length - 1; index >= 0; index -= 1) {
+      if (patched[index].role === "user") {
+        patched[index] = {
+          ...patched[index],
+          content: enrichedUserMessage,
+        };
+        return patched;
+      }
+    }
+    return patched;
   }
 
   private async compactSessionIfNeeded(
@@ -321,13 +432,36 @@ export class Agent {
     });
   }
 
+  /** Executes any <execute_command> tags found in a response and returns formatted feedback. */
+  private async executeCommandsFromResponse(response: string): Promise<string> {
+    const commands = extractCommandRequests(response);
+    if (commands.length === 0) return "";
+
+    let feedback = "\n\n---\n**Command Results:**\n```\n";
+    for (const cmd of commands) {
+      this.logger.logInfo(`Executing command: ${cmd}`);
+      const result = await executeCommand(cmd, this.workspacePath);
+      this.logger.logCommandExecution(cmd, result);
+      const output = [result.stdout, result.stderr]
+        .filter(Boolean)
+        .join("\n")
+        .trim();
+      feedback += `$ ${cmd}\n${output || "(no output)"} [exit: ${result.exitCode}]\n\n`;
+    }
+    feedback += "```";
+    return feedback;
+  }
+
   private async generateNonAgentAssistantResponse(
     mode: ChatSession["mode"],
     messagesForModel: ChatSession["messages"],
   ): Promise<string> {
-    const raw = await this.provider.completeChat(messagesForModel);
+    const raw = await this.provider.completeChat(messagesForModel, {
+      model: resolveModelForMode(mode),
+    });
     if (!looksLikeAgentJson(raw)) {
-      return raw;
+      const cmdFeedback = await this.executeCommandsFromResponse(raw);
+      return raw + cmdFeedback;
     }
 
     const retryMessages: ChatSession["messages"] = [
@@ -342,24 +476,39 @@ export class Agent {
       },
     ];
 
-    const retried = await this.provider.completeChat(retryMessages);
+    const retried = await this.provider.completeChat(retryMessages, {
+      model: resolveModelForMode(mode),
+    });
     if (looksLikeAgentJson(retried)) {
       return `I'm in ${mode} mode and my response came out as structured JSON, which is not valid here. Please rephrase your question or switch to agent mode if you need structured output.`;
     }
 
-    return retried;
+    const cmdFeedback = await this.executeCommandsFromResponse(retried);
+    return retried + cmdFeedback;
   }
 
   private async generateAgentAssistantResponse(
     messagesForModel: ChatSession["messages"],
   ): Promise<string> {
-    const outcome = await executeAgentTurn({
-      provider: this.provider,
-      messagesForModel,
-      workspacePath: this.workspacePath,
-      scannedFiles: this.getWorkspaceFiles(),
-      logger: this.logger,
-    });
+    const editFormat = getAgentEditFormat();
+    const agentProvider = createProviderForMode("agent", this.provider);
+    const outcome =
+      editFormat === "wholefile"
+        ? await executeAgentTurnWholefile({
+            provider: agentProvider,
+            messagesForModel,
+            workspacePath: this.workspacePath,
+            logger: this.logger,
+            modelOverride: resolveModelForMode("agent"),
+          })
+        : await executeAgentTurn({
+            provider: agentProvider,
+            messagesForModel,
+            workspacePath: this.workspacePath,
+            scannedFiles: this.getWorkspaceFiles(),
+            logger: this.logger,
+            modelOverride: resolveModelForMode("agent"),
+          });
 
     // Aplica los parches válidos directamente
     if (
@@ -433,34 +582,65 @@ export class Agent {
 
   private initWatcher(): void {
     if (this.watcher) return;
-    
-    this.logger.logInfo("Initializing file watcher for incremental AST updates");
-    this.watcher = chokidar.watch(["**/*.ts", "**/*.js", "**/*.tsx", "**/*.jsx", "**/*.html", "**/*.css", "**/*.scss"], {
-      cwd: this.workspacePath,
-      ignored: ["**/node_modules/**", "**/dist/**", ".rei/**", "**/.rei/**", "**/.git/**", "**/bin/**"],
-      persistent: true,
-      ignoreInitial: true,
-    });
+
+    this.logger.logInfo(
+      "Initializing file watcher for incremental AST updates",
+    );
+    this.watcher = chokidar.watch(
+      [
+        "**/*.ts",
+        "**/*.js",
+        "**/*.tsx",
+        "**/*.jsx",
+        "**/*.html",
+        "**/*.css",
+        "**/*.scss",
+      ],
+      {
+        cwd: this.workspacePath,
+        ignored: [
+          "**/node_modules/**",
+          "**/dist/**",
+          ".rei/**",
+          "**/.rei/**",
+          "**/.git/**",
+          "**/bin/**",
+        ],
+        persistent: true,
+        ignoreInitial: true,
+      },
+    );
 
     const handleChange = async (filePath: string) => {
       this.scanCache = undefined;
       const absPath = path.join(this.workspacePath, filePath);
       const relFilePath = filePath.replace(/\\/g, "/");
-      
+
       this.vectorStore.deleteByFilePath(relFilePath);
-      
+
       const newMapString = generateRepoMapForFile(this.workspacePath, absPath);
       if (newMapString) {
         const chunks = chunkRepoMapString(newMapString);
         for (const chunk of chunks) {
+          const hash = crypto
+            .createHash("md5")
+            .update(chunk.content)
+            .digest("hex");
+          const existing = this.vectorStore.getById(chunk.metadata.id);
+          if (existing && existing.metadata.fileHash === hash) continue;
+
           const vector = await generateEmbedding(chunk.content);
-          this.vectorStore.upsert({
-            ...chunk.metadata,
-            content: chunk.content,
-          }, vector);
+          this.vectorStore.upsert(
+            {
+              ...chunk.metadata,
+              content: chunk.content,
+              fileHash: hash,
+            },
+            vector,
+          );
         }
       }
-      
+
       await this.vectorStore.save();
     };
 

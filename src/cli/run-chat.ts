@@ -18,10 +18,6 @@ import {
   getActivePalette,
   getMentionContext,
 } from "./helpers/chat-input.helpers.js";
-import {
-  appendTranscriptLines,
-  applyMouseWheelScroll,
-} from "./helpers/chat-runtime.helpers.js";
 import { ChatRenderer } from "./ui/chat-renderer.js";
 import { KeyboardHandler } from "./ui/keyboard-handler.js";
 import { InputHandler } from "./ui/input-handler.js";
@@ -65,14 +61,12 @@ export async function runChat(
 
   let spinnerTimer: NodeJS.Timeout | undefined;
   const transcript: string[] = [];
-  const MOUSE_SCROLL_STEP = 3;
 
   const state: ChatUIState = {
     running: true,
     busy: false,
     activeStatus: undefined,
     spinnerIndex: 0,
-    suppressAnsiInputUntil: 0,
 
     historySearchMode: false,
     historySearchQuery: "",
@@ -87,11 +81,24 @@ export async function runChat(
 
     selectedCommandIndex: 0,
     paletteClosed: false,
-    scrollOffset: 0,
   };
 
   const pushTranscript = (value: string): void => {
-    appendTranscriptLines(transcript, value);
+    ChatRenderer.clearUI();
+    const normalized = value.replace(/\r\n/g, "\n");
+    for (const line of normalized.split("\n")) {
+      process.stdout.write(line + "\n");
+      transcript.push(line);
+    }
+    // We only keep transcript in memory for metrics, not for rendering
+    if (transcript.length > 3000) {
+      transcript.splice(0, transcript.length - 3000);
+    }
+  };
+
+  const streamText = (value: string): void => {
+    ChatRenderer.clearUI();
+    process.stdout.write(value);
   };
 
   const getPalette = () => getActivePalette(state, mentionEntries);
@@ -119,8 +126,6 @@ export async function runChat(
       busy: state.busy,
       activeStatus: state.activeStatus,
       spinnerIndex: state.spinnerIndex,
-      scrollOffset: state.scrollOffset,
-      transcript,
       sessionMode: session.mode,
       inputBuffer: state.inputBuffer,
       inputCursor: state.inputCursor,
@@ -160,7 +165,6 @@ export async function runChat(
     state.paletteClosed = false;
     state.historyCursor = undefined;
     state.historyDraft = "";
-    state.scrollOffset = 0; // snap to bottom on submit
   };
 
   const rememberHistory = (value: string): void => {
@@ -185,6 +189,7 @@ export async function runChat(
     workspacePath,
     actions: {
       pushTranscript,
+      streamText,
       draw,
       startSpinner,
       stopSpinner,
@@ -213,27 +218,17 @@ export async function runChat(
     KeyboardHandler.handleKeypress(str, key, state, kbActions);
   };
 
+  let resizeTimer: ReturnType<typeof setTimeout> | undefined;
   const onResize = (): void => {
-    draw();
-  };
-
-  const onMouseData = (chunk: Buffer): void => {
-    const data = chunk.toString("utf8");
-    const changed = applyMouseWheelScroll(data, state, MOUSE_SCROLL_STEP);
-    if (!changed) return;
-
-    state.suppressAnsiInputUntil = Date.now() + 250;
-    draw();
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      resizeTimer = undefined;
+      draw();
+    }, 50);
   };
 
   process.stdin.on("keypress", onKeypress);
-  process.stdin.on("data", onMouseData);
   process.stdout.on("resize", onResize);
-
-  // NOTE: Enable mouse click (1000h) and SGR mouse reporting (1006h)
-  process.stdout.write("\x1b[?1000h\x1b[?1006h");
-  // NOTE: Enter alternate screen buffer (1049h)
-  process.stdout.write("\x1b[?1049h");
 
   if (existing) {
     const nonSystem = existing.messages.filter((m) => m.role !== "system");
@@ -273,14 +268,12 @@ export async function runChat(
 
   stopSpinner();
   process.stdin.off("keypress", onKeypress);
-  process.stdin.off("data", onMouseData);
   process.stdout.off("resize", onResize);
 
   if (process.stdin.isTTY) {
     process.stdin.setRawMode(false);
   }
-  // NOTE: Disable mouse click (1000l) and SGR mouse reporting (1006l)
-  process.stdout.write("\x1b[?1000l\x1b[?1006l");
-  // NOTE: Exit alternate screen buffer (1049l) and show cursor (?25h)
-  process.stdout.write("\x1b[?1049l\x1b[?25h");
+
+  ChatRenderer.clearUI();
+  process.stdout.write("\x1b[?25h"); // Show cursor
 }

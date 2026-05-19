@@ -123,6 +123,13 @@ export class VectorStore {
   }
 
   /**
+   * Obtiene un registro vectorial completo por su ID único.
+   */
+  getById(id: string): VectorRecord | undefined {
+    return this.records.find((r) => r.metadata.id === id);
+  }
+
+  /**
    * Elimina todos los embeddings asociados a un archivo específico.
    * Utilizado para limpieza antes de actualizaciones incrementales.
    */

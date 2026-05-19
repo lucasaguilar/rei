@@ -26,19 +26,23 @@ export class KnowledgeOrchestrator {
 
   /**
    * Evaluates the query against all registered providers.
-   * If a domain matches, it queries the web docs, summarizes them, 
+   * If a domain matches, it queries the web docs, summarizes them,
    * and returns the knowledge chunks to inject into the LLM context.
    */
   async getExternalKnowledge(query: string): Promise<KnowledgeChunk[]> {
     const q = query.trim().toLowerCase();
     if (!q) return [];
 
-    // Validar intención: Solo buscar si el usuario pide explícitamente consultar documentación, 
-    // buscar en la web, o si está haciendo una pregunta técnica directa ("cómo...?", "how to...").
-    const isExplicitRequest = /@docs|@web|documentaci[oó]n|documentation|buscar?|busca|search|find/i.test(q);
-    const isQuestion = (q.includes("como ") || q.includes("cómo ") || q.includes("how to ") || q.includes("how do ")) && q.includes("?");
-    
-    if (!isExplicitRequest && !isQuestion) {
+    // Validar intención: Solo buscar si el usuario pide explícitamente consultar la web
+    const isExplicitRequest =
+      /@(docs|web)\b/i.test(q) ||
+      /busca(r)?\s+(en\s+)?(internet|la\s+web|online)/i.test(q) ||
+      /search\s+(the\s+)?(web|internet|online|docs)/i.test(q) ||
+      /\b(googlealo?|googlea)\b/i.test(q) ||
+      /consulta(r)?\s+(la\s+)?(web|internet|documentaci[oó]n)/i.test(q) ||
+      /look\s+(it\s+)?up\s+online/i.test(q);
+
+    if (!isExplicitRequest) {
       return [];
     }
 
@@ -58,29 +62,34 @@ export class KnowledgeOrchestrator {
     // Limit to running max 2 providers if the query somehow overlaps both heavily
     for (const provider of matchedProviders.slice(0, 2)) {
       try {
-        const chunks = await provider.search(query, this.searchClient, summarizer);
-        
+        const chunks = await provider.search(
+          query,
+          this.searchClient,
+          summarizer,
+        );
+
         // Filter out useless chunks
-        const validChunks = chunks.filter(c => 
-           c.content && 
-           !c.content.includes("No relevant technical implementation found")
+        const validChunks = chunks.filter(
+          (c) =>
+            c.content &&
+            !c.content.includes("No relevant technical implementation found"),
         );
 
         allChunks.push(...validChunks);
       } catch (err) {
         fs.appendFileSync(
           path.join(process.cwd(), ".rei-debug.log"),
-          `[${new Date().toISOString()}] Provider ${provider.name} error: ${err}\n`
+          `[${new Date().toISOString()}] Provider ${provider.name} error: ${err}\n`,
         );
       }
     }
 
     // Sort heavily by score, ensuring best snippet first
     allChunks.sort((a, b) => b.relevanceScore - a.relevanceScore);
-    
+
     // Take the absolute best 3 chunks maximum across providers
     const topContext = allChunks.slice(0, 3);
-    
+
     // Cache the result to avoid spamming searches
     this.cache.set(q, topContext);
 

@@ -18,7 +18,7 @@ export function detectProjectType(workspacePath: string): ProjectDetection {
   // Angular: angular.json in root
   if (fs.existsSync(path.join(workspacePath, "angular.json"))) {
     type = "angular";
-    command = "npx ng build --configuration=production --no-progress --output-hashing=none";
+    command = "npx tsc --noEmit --pretty false";
   }
   // TypeScript: tsconfig.json in root
   else if (fs.existsSync(path.join(workspacePath, "tsconfig.json"))) {
@@ -28,9 +28,9 @@ export function detectProjectType(workspacePath: string): ProjectDetection {
   // C#: .csproj or .sln in root
   else if (
     fs.existsSync(path.join(workspacePath, "Directory.Build.props")) ||
-    fs.readdirSync(workspacePath).some((file) =>
-      file.endsWith(".csproj") || file.endsWith(".sln")
-    )
+    fs
+      .readdirSync(workspacePath)
+      .some((file) => file.endsWith(".csproj") || file.endsWith(".sln"))
   ) {
     type = "csharp";
     command = "dotnet build";

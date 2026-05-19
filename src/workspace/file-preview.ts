@@ -1,8 +1,8 @@
 import * as fs from "fs/promises";
 
-export const PREVIEW_MAX_CHARS_DEFAULT = 900;
-export const PREVIEW_MAX_CHARS_AGENT = 4000;
-export const PREVIEW_MAX_CHARS_FULL = 20_000;
+export const PREVIEW_MAX_CHARS_DEFAULT = 500;
+export const PREVIEW_MAX_CHARS_AGENT = 1500;
+export const PREVIEW_MAX_CHARS_FULL = 60_000;
 
 export async function readFilePreview(
   filePath: string,
