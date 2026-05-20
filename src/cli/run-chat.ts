@@ -231,16 +231,27 @@ export async function runChat(
   const onResize = (): void => {
     // Clear UI immediately on the very first resize tick to prevent trailing layout artifacts
     if (resizeTimer === undefined) {
-      ChatRenderer.clearUI();
+      ChatRenderer.clearUI(process.stdout.columns || 80);
     }
 
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       resizeTimer = undefined;
 
+      // Clean the entire visible terminal viewport without pushing anything to scrollback
+      process.stdout.write("\x1b[H\x1b[J");
+
+      // Reset the drawn state in the renderer since we cleared the screen
+      ChatRenderer.resetDrawnState();
+
       // Forzar a Node a actualizar las propiedades internas de filas y columnas
       state.cols = process.stdout.columns || 80;
       state.rows = process.stdout.rows || 24;
+
+      // Reprint the entire transcript to the screen at the new terminal width
+      for (const line of transcript) {
+        process.stdout.write(line + "\n");
+      }
 
       draw();
     }, 100); // 100ms le da un respiro más estable al buffer de la Mac
