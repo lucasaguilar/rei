@@ -1,7 +1,5 @@
-import {
-  compressSkeletonMap,
-  lightweightCompress,
-} from "./helpers/chat.helpers.js";
+import { lightweightCompress } from "./helpers/chat.helpers.js";
+import { compressSkeletonMap } from "./helpers/compression.js";
 import type { AgentEditFormat } from "../prompts/prompt-builder.js";
 import type { ChatMessage, SessionMode } from "./types.js";
 
@@ -76,10 +74,6 @@ export function buildMessagesForModel(
     messages.length > 0 && messages[0].role === "system"
       ? messages[0]
       : undefined;
-
-  if (systemMessage) {
-    systemMessage.content = compressSkeletonMap(systemMessage.content);
-  }
 
   // Non-system messages start at index 1 when a system message is present,
   // otherwise the entire array is non-system messages.

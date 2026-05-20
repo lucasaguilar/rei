@@ -58,7 +58,10 @@ export class ChatHandler {
         // Guardamos la sesión actualizada y devolvemos la respuesta del comando
         if (cmdResult.recordInSession !== false) {
           session.messages.push({ role: "user", content: promptTrimmed });
-          session.messages.push({ role: "assistant", content: cmdResult.response });
+          session.messages.push({
+            role: "assistant",
+            content: cmdResult.response,
+          });
           saveSession(
             this.workspacePath,
             session.messages,
@@ -82,9 +85,7 @@ export class ChatHandler {
     // para asegurar que la lógica de negocio sea consistente en CLI y Server.
     let fullResponse = "";
     const stream = this.agent.streamTurn(session, promptTrimmed, {
-      onStatus: (status) => {
-        console.log(`[Agent Status]: ${status}`);
-      },
+      onStatus: () => {},
     });
 
     for await (const chunk of stream) {

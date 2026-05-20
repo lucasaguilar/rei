@@ -22,8 +22,15 @@ import {
   buildRagNodeSnippets,
   buildRepoSummary,
 } from "./helpers/context-builder.helpers.js";
+import { smartCompress } from "../chat/helpers/chat.helpers.js";
 import { extractExplicitPathHints } from "../workspace/file-selector.js";
-import { ENABLE_SEMANTIC_RAG_SEARCH } from "./constants/context-builder.constants.js";
+import {
+  ENABLE_SEMANTIC_RAG_SEARCH,
+  MAX_RELEVANT_FILES_AGENT,
+  MAX_RELEVANT_FILES_NON_AGENT,
+  MIN_RAG_SCORE_FOR_FILE_PREVIEW,
+  ON_DEMAND_FILE_CONTEXT,
+} from "./constants/context-builder.constants.js";
 
 export type RagNodeSnippet = {
   filePath: string;
@@ -63,25 +70,38 @@ export async function buildTurnContext(params: {
   const { workspacePath, userInput, mode, scannedFiles } = params;
 
   const files = scannedFiles ?? scanWorkspace(workspacePath);
-  const repoSummary = await buildRepoSummary({
-    workspacePath,
-    fileCount: files.length,
-  });
 
-  // RAG semantic search: if an index exists, find the most relevant AST nodes first
-  let ragResults: RagSearchResult[] | undefined;
-  const ragFilePaths = new Set<string>();
-
-  if (ENABLE_SEMANTIC_RAG_SEARCH && hasRagIndex(workspacePath)) {
-    try {
-      ragResults = await searchRag(workspacePath, userInput, 10);
-      for (const r of ragResults) {
-        ragFilePaths.add(r.metadata.filePath);
+  // Run repoSummary and RAG search in parallel — they are independent
+  const [repoSummary, ragResults] = await Promise.all([
+    buildRepoSummary({ workspacePath, fileCount: files.length }),
+    (async (): Promise<RagSearchResult[] | undefined> => {
+      if (!ENABLE_SEMANTIC_RAG_SEARCH || !hasRagIndex(workspacePath))
+        return undefined;
+      try {
+        return await searchRag(workspacePath, userInput, 10);
+      } catch {
+        // RAG is best-effort — if it fails, fall back to the heuristic selector
+        return undefined;
       }
-    } catch {
-      // RAG is best-effort — if it fails, fall back to the heuristic selector
+    })(),
+  ]);
+
+  const ragMaxScoreByFile = new Map<string, number>();
+  if (ragResults) {
+    for (const hit of ragResults) {
+      const filePath = hit.metadata.filePath.toLowerCase();
+      const existing =
+        ragMaxScoreByFile.get(filePath) ?? Number.NEGATIVE_INFINITY;
+      if (hit.score > existing) {
+        ragMaxScoreByFile.set(filePath, hit.score);
+      }
     }
   }
+
+  const rawSnippets = buildRagNodeSnippets({ workspacePath, ragResults });
+  const ragSnippetFilePaths = new Set(
+    rawSnippets.map((snippet) => snippet.filePath.toLowerCase()),
+  );
 
   // Merge RAG hits with the heuristic selector.
   const heuristicSelected = selectRelevantFiles(files, userInput, mode);
@@ -110,15 +130,18 @@ export async function buildTurnContext(params: {
     p.toLowerCase(),
   );
 
-  const top5: Array<{ path: string; score: number }> = Array.from(
+  const maxRelevantFiles =
+    mode === "agent" ? MAX_RELEVANT_FILES_AGENT : MAX_RELEVANT_FILES_NON_AGENT;
+
+  const topRanked: Array<{ path: string; score: number }> = Array.from(
     mergedMap.entries(),
   )
     .map(([p, s]) => ({ path: p, score: s }))
     .sort((a, b) => b.score - a.score)
-    .slice(0, 5);
+    .slice(0, maxRelevantFiles);
 
-  // Force-include any explicitly mentioned file that scored out of top-5
-  const top5Paths = new Set(top5.map((f) => f.path.toLowerCase()));
+  // Force-include any explicitly mentioned file that scored out of top ranked list.
+  const topRankedPaths = new Set(topRanked.map((f) => f.path.toLowerCase()));
   const forcedEntries: Array<{ path: string; score: number }> = [];
 
   if (explicitPathHints.length > 0) {
@@ -130,53 +153,88 @@ export async function buildTurnContext(params: {
           filePathLower.endsWith(hint) ||
           hint.endsWith(filePathLower),
       );
-      if (isHinted && !top5Paths.has(filePathLower)) {
+      if (isHinted && !topRankedPaths.has(filePathLower)) {
         forcedEntries.push({ path: file.path, score: 999 });
       }
     }
   }
 
-  const mergedPaths = [...top5, ...forcedEntries];
+  const mergedPaths = [...topRanked, ...forcedEntries];
 
-  const relevantFiles = await Promise.all(
-    mergedPaths.map(async (f) => {
-      // Always include full content for explicitly mentioned files
-      const isExplicitMention = explicitPathHints.some((hint) => {
+  const relevantFiles = (
+    await Promise.all(
+      mergedPaths.map(async (f) => {
+        // Always include full content for explicitly mentioned files
+        const isExplicitMention = explicitPathHints.some((hint) => {
+          const filePathLower = f.path.toLowerCase();
+          return (
+            filePathLower === hint ||
+            filePathLower.endsWith(hint) ||
+            hint.endsWith(filePathLower)
+          );
+        });
+
         const filePathLower = f.path.toLowerCase();
-        return (
-          filePathLower === hint ||
-          filePathLower.endsWith(hint) ||
-          hint.endsWith(filePathLower)
+
+        if (!isExplicitMention) {
+          if (ON_DEMAND_FILE_CONTEXT) {
+            return null;
+          }
+
+          // If exact semantic code is already attached for this file, skip the broader file preview.
+          if (ragSnippetFilePaths.has(filePathLower)) {
+            return null;
+          }
+
+          // When semantic RAG is available, only include previews for strong matches.
+          if (ragResults && ragResults.length > 0) {
+            const ragScore = ragMaxScoreByFile.get(filePathLower);
+            if (
+              ragScore === undefined ||
+              ragScore < MIN_RAG_SCORE_FOR_FILE_PREVIEW
+            ) {
+              return null;
+            }
+          }
+        }
+
+        const preview = await readFilePreview(
+          path.join(workspacePath, f.path),
+          isExplicitMention ? PREVIEW_MAX_CHARS_FULL : PREVIEW_MAX_CHARS_AGENT,
+          !isExplicitMention,
         );
-      });
-      const preview = await readFilePreview(
-        path.join(workspacePath, f.path),
-        isExplicitMention ? PREVIEW_MAX_CHARS_FULL : PREVIEW_MAX_CHARS_AGENT,
-      );
-      return {
-        path: f.path,
-        score: f.score,
-        preview,
-      };
-    }),
+        return {
+          path: f.path,
+          score: f.score,
+          preview,
+        };
+      }),
+    )
+  ).filter(
+    (file): file is { path: string; score: number; preview: string } =>
+      file !== null,
   );
 
-  const callerFiles = await buildCallerFilesContext({
-    workspacePath,
-    userInput,
-    scannedFiles: files,
-    alreadyIncludedPaths: new Set(mergedPaths.map((file) => file.path)),
-  });
-
-  if (params.knowledgeOrchestrator) {
-    params.onStatus?.("fetching_external_knowledge");
-  }
-
-  const externalKnowledge = params.knowledgeOrchestrator
-    ? await params.knowledgeOrchestrator.getExternalKnowledge(userInput)
-    : [];
-
-  const ragNodeSnippets = buildRagNodeSnippets({ workspacePath, ragResults });
+  // Run all three independent async operations in parallel
+  const [callerFiles, externalKnowledge, ragNodeSnippets] = await Promise.all([
+    buildCallerFilesContext({
+      workspacePath,
+      userInput,
+      scannedFiles: files,
+      alreadyIncludedPaths: new Set(relevantFiles.map((file) => file.path)),
+    }),
+    params.knowledgeOrchestrator
+      ? (params.onStatus?.("fetching_external_knowledge"),
+        params.knowledgeOrchestrator.getExternalKnowledge(userInput))
+      : Promise.resolve([] as KnowledgeChunk[]),
+    Promise.all(
+      rawSnippets.map(async (snippet) => {
+        const lang = snippet.filePath.split(".").pop() ?? "";
+        const code = await smartCompress(snippet.code, userInput, lang);
+        return { ...snippet, code };
+      }),
+    ),
+  ]);
 
   return {
     workspacePath,

@@ -6,9 +6,17 @@ import type {
 export function buildTurnUserMessage(params: {
   userInput: string;
   context: TurnContext;
+  repositorySkeletonMap?: string;
 }): string {
-  const { userInput, context } = params;
+  const { userInput, context, repositorySkeletonMap } = params;
   const lines: string[] = [];
+
+  // Dynamic repo map goes at the top of the user message — NOT in the system message.
+  // This keeps the system message byte-identical across turns, preserving the Ollama KV cache prefix.
+  if (repositorySkeletonMap) {
+    lines.push(repositorySkeletonMap);
+    lines.push(``);
+  }
 
   lines.push(`Task: ${userInput}`);
   lines.push(``);

@@ -19,3 +19,8 @@ export const MAX_CALLER_SEARCH_RESULTS = 15;
 export const MAX_CALLER_CONTEXT_FILES = 3;
 export const MAX_RAG_NODE_SNIPPET_CHARS = 2000;
 export const ENABLE_SEMANTIC_RAG_SEARCH = true;
+export const MAX_RELEVANT_FILES_AGENT = 5;
+export const MAX_RELEVANT_FILES_NON_AGENT = 3;
+export const MIN_RAG_SCORE_FOR_FILE_PREVIEW = 0.4;
+export const ON_DEMAND_FILE_CONTEXT =
+  process.env.REI_ON_DEMAND_FILE_CONTEXT === "1";
