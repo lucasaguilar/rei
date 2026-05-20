@@ -16,6 +16,7 @@ import {
   padRight,
   fitLine,
   viewportForInput,
+  visibleLength,
 } from "../helpers/terminal.helpers.js";
 import { TurnStatus } from "../../core/models/agent.types.js";
 import { SessionMode } from "../../chat/types.js";
@@ -23,46 +24,52 @@ import { SessionMode } from "../../chat/types.js";
 export class ChatRenderer {
   private static lastDrawnLinesCount = 0;
   private static lastDrawnCols = 0;
+  private static lastDrawnLines: string[] = [];
 
-  public static clearUI(): void {
+  public static resetDrawnState(): void {
+    this.lastDrawnLinesCount = 0;
+    this.lastDrawnCols = 0;
+    this.lastDrawnLines = [];
+  }
+
+  // Dentro de tu ChatRenderer o helper de limpieza:
+  public static hardResetTerminal() {
+    // \x1bc limpia la pantalla, \x1b[3J limpia el scrollback buffer de la terminal
+    process.stdout.write("\x1bc\x1b[3J");
+  }
+
+  public static clearUI(newCols?: number): void {
     if (this.lastDrawnLinesCount <= 0) return;
 
     process.stdout.write("\x1b[?25l"); // Hide cursor
-    process.stdout.write("\x1b[1B"); // Move down 1 line from input to bottom border
 
-    for (let i = 0; i < this.lastDrawnLinesCount; i++) {
-      process.stdout.write("\x1b[2K"); // Clear line
-      if (i < this.lastDrawnLinesCount - 1) {
-        process.stdout.write("\x1b[1A"); // Move up
+    let reflowedRows = this.lastDrawnLinesCount;
+    if (newCols && newCols !== this.lastDrawnCols && this.lastDrawnLines.length > 0) {
+      reflowedRows = 0;
+      for (const line of this.lastDrawnLines) {
+        const len = visibleLength(line);
+        reflowedRows += Math.max(1, Math.ceil(len / newCols));
       }
     }
 
+    const moveUp = reflowedRows - 1;
+    if (moveUp > 0) {
+      process.stdout.write(`\x1b[${moveUp}A`);
+    }
+
+    process.stdout.write("\x1b[J"); // Clear to end of screen
     process.stdout.write("\x1b[1G"); // Move to column 1
     process.stdout.write("\x1b[?25h"); // Show cursor
 
     this.lastDrawnLinesCount = 0;
+    this.lastDrawnLines = [];
   }
 
   public static draw(state: ChatRendererState): void {
     const currentCols = Math.max(40, state.cols - 1);
     const currentRows = Math.max(12, state.rows);
 
-    if (
-      this.lastDrawnCols !== 0 &&
-      this.lastDrawnCols !== currentCols &&
-      this.lastDrawnLinesCount > 0
-    ) {
-      // Terminal was resized: relative cursor arithmetic in clearUI() is now
-      // invalid because old lines may have visually reflowed at the new width.
-      // Use absolute positioning to clear: jump to the last terminal row (known
-      // position regardless of reflow), move up past the old UI, clear to end.
-      process.stdout.write(`\x1b[${currentRows};1H`); // absolute: last row, col 1
-      process.stdout.write(`\x1b[${this.lastDrawnLinesCount + 2}A`); // up past old UI
-      process.stdout.write("\x1b[J"); // clear from here to end of screen
-      this.lastDrawnLinesCount = 0;
-    } else {
-      this.clearUI();
-    }
+    this.clearUI(currentCols);
     this.lastDrawnCols = currentCols;
 
     const cols = currentCols;
@@ -130,30 +137,36 @@ export class ChatRenderer {
       uiLines.push(`+${"-".repeat(cols - 2)}+`);
     }
 
-    const promptText = MODE_PROMPTS[state.sessionMode as SessionMode];
-    const fullInput = `${promptText}${state.inputBuffer}`;
-    const inputInnerWidth = Math.max(1, cols - 4);
-    const inputAbsoluteCursor = promptText.length + state.inputCursor;
+    const rawPrompt = MODE_PROMPTS[state.sessionMode as SessionMode];
+    const promptColor =
+      state.sessionMode === "ask"
+        ? "\x1b[1;32m"      // Bold Green
+        : state.sessionMode === "planning"
+          ? "\x1b[1;33m"    // Bold Yellow
+          : "\x1b[1;35m";   // Bold Magenta/Purple
+    const promptText = `${promptColor}${rawPrompt}\x1b[0m`;
+    const promptLen = visibleLength(promptText);
+
+    const inputInnerWidth = Math.max(1, cols - promptLen - 1);
     const viewport = viewportForInput(
-      fullInput,
-      inputAbsoluteCursor,
+      state.inputBuffer,
+      state.inputCursor,
       inputInnerWidth,
     );
     const cursorInViewport = clamp(
-      inputAbsoluteCursor - viewport.start,
+      state.inputCursor - viewport.start,
       0,
       Math.max(0, viewport.visible.length),
     );
 
-    uiLines.push(`-${"-".repeat(cols - 2)}-`);
-    uiLines.push(`| ${padRight(viewport.visible, inputInnerWidth)} |`);
-    uiLines.push(`-${"-".repeat(cols - 2)}-`);
+    uiLines.push(`${promptText}${viewport.visible}`);
 
     process.stdout.write("\x1b[?25l");
     process.stdout.write(uiLines.join("\r\n"));
     this.lastDrawnLinesCount = uiLines.length;
+    this.lastDrawnLines = uiLines;
 
-    const inputColumn = 3 + cursorInViewport;
-    process.stdout.write(`\x1b[1A\x1b[${inputColumn}G\x1b[?25h`);
+    const inputColumn = promptLen + 1 + cursorInViewport;
+    process.stdout.write(`\x1b[${inputColumn}G\x1b[?25h`);
   }
 }

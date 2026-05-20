@@ -81,13 +81,19 @@ export async function runChat(
 
     selectedCommandIndex: 0,
     paletteClosed: false,
+    cols: process.stdout.columns || 80,
+    rows: process.stdout.rows || 24,
   };
 
-  const pushTranscript = (value: string): void => {
-    ChatRenderer.clearUI();
+  const pushTranscript = (value: string, writeToStdout = true): void => {
+    if (writeToStdout) {
+      ChatRenderer.clearUI();
+    }
     const normalized = value.replace(/\r\n/g, "\n");
     for (const line of normalized.split("\n")) {
-      process.stdout.write(line + "\n");
+      if (writeToStdout) {
+        process.stdout.write(line + "\n");
+      }
       transcript.push(line);
     }
     // We only keep transcript in memory for metrics, not for rendering
@@ -114,6 +120,9 @@ export async function runChat(
   };
 
   const draw = (): void => {
+    // Skip rendering if actively resizing to avoid overlapping visual frames
+    if (resizeTimer !== undefined) return;
+
     const renderState: ChatRendererState = {
       cols: process.stdout.columns || 80,
       rows: process.stdout.rows || 24,
@@ -220,11 +229,21 @@ export async function runChat(
 
   let resizeTimer: ReturnType<typeof setTimeout> | undefined;
   const onResize = (): void => {
+    // Clear UI immediately on the very first resize tick to prevent trailing layout artifacts
+    if (resizeTimer === undefined) {
+      ChatRenderer.clearUI();
+    }
+
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       resizeTimer = undefined;
+
+      // Forzar a Node a actualizar las propiedades internas de filas y columnas
+      state.cols = process.stdout.columns || 80;
+      state.rows = process.stdout.rows || 24;
+
       draw();
-    }, 50);
+    }, 100); // 100ms le da un respiro más estable al buffer de la Mac
   };
 
   process.stdin.on("keypress", onKeypress);
@@ -262,7 +281,6 @@ export async function runChat(
   draw();
 
   while (state.running) {
-    // eslint-disable-next-line no-await-in-loop
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 

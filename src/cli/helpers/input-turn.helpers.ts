@@ -97,10 +97,6 @@ export async function handleInputTurn(
       }
     }
 
-    if (liveStart > 0) {
-      actions.streamText("\n");
-    }
-
     const endTime = Date.now();
 
     // Procesar el buffer final: extraer edits y formatear
@@ -110,6 +106,11 @@ export async function handleInputTurn(
     if (edits.length > 0) {
       // Limpiar el buffer de los tags XML para el renderizado markdown
       finalContent = buffer.replace(/<edit[\s\S]*?<\/edit>/gi, "").trim();
+    }
+
+    if (liveStart > 0) {
+      actions.streamText("\n");
+      actions.pushTranscript(renderMarkdown(finalContent), false);
     }
 
     if (liveStart < 0) {

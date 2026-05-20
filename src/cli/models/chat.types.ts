@@ -60,6 +60,8 @@ export interface ChatUIState {
 
   selectedCommandIndex: number;
   paletteClosed: boolean;
+  cols: number;
+  rows: number;
 }
 
 export interface KeyboardActions {
