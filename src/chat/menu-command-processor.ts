@@ -17,6 +17,7 @@ export interface CommandResult {
   response: string;
   newSession?: ChatSession;
   autoExecute?: { prompt: string };
+  recordInSession?: boolean;
 }
 
 export async function processMenuCommand(
@@ -28,44 +29,37 @@ export async function processMenuCommand(
   const trimmed = command.trim();
 
   if (trimmed === "/session") {
-    const nonSystem = session.messages.filter(
-      (message) => message.role !== "system",
-    );
+    const nonSystem = session.messages.filter((m) => m.role !== "system");
     const turns = Math.floor(nonSystem.length / 2);
+    const created = session.createdAt
+      ? new Date(session.createdAt).toLocaleString()
+      : "not saved yet";
+
     return {
       success: true,
       response:
         `[REI] Current session\n` +
-        `- Mode: ${session.mode}\n` +
-        `- Messages: ${session.messages.length} (${turns} turns)\n` +
-        `- Created: ${session.createdAt ?? "unknown"}\n` +
-        `- Summary: ${session.summary ? "yes" : "no"}`,
+        `Mode: ${session.mode}\n` +
+        `Turns: ${turns}\n` +
+        `Created: ${created}\n` +
+        `Summary: ${session.summary ? "yes" : "no"}`,
     };
   }
 
   if (trimmed === "/session new") {
-    const archivedId = archiveCurrentSession(workspacePath);
-    const freshMessages: ChatMessage[] = [];
+    const archivedName =
+      session.messages.length > 0 ? archiveCurrentSession(workspacePath) : null;
+    const newSession: ChatSession = { messages: [], mode: session.mode };
 
-    saveSession(
-      workspacePath,
-      freshMessages,
-      session.mode,
-      undefined,
-      undefined,
-    );
+    saveSession(workspacePath, newSession.messages, newSession.mode);
 
     return {
       success: true,
-      response: archivedId
-        ? `[REI] Started a new session. Previous session archived as ${archivedId}.`
-        : "[REI] Started a new session.",
-      newSession: {
-        ...session,
-        messages: freshMessages,
-        createdAt: undefined,
-        summary: undefined,
-      },
+      response: archivedName
+        ? `[REI] Archived current session as ${archivedName}. Started a new ${newSession.mode} session.`
+        : `[REI] Started a new ${newSession.mode} session.`,
+      newSession,
+      recordInSession: false,
     };
   }
 
@@ -78,34 +72,33 @@ export async function processMenuCommand(
       };
     }
 
-    const lines = sessions
-      .slice(0, 20)
-      .map(
-        (entry) =>
-          `- ${entry.id} | mode=${entry.mode} | turns=${entry.turns} | updated=${entry.updatedAt}`,
-      );
+    const lines = sessions.slice(0, 20).map((entry) => {
+      const updated = new Date(entry.updatedAt).toLocaleString();
+      return `- ${entry.id} | ${entry.mode} | ${entry.turns} turns | updated ${updated}`;
+    });
 
     return {
       success: true,
-      response:
-        `[REI] Archived sessions (${sessions.length}):\n` +
-        lines.join("\n") +
-        (sessions.length > 20
-          ? "\n... (showing first 20, use /session load <id>)"
-          : ""),
+      response: `[REI] Archived sessions:\n${lines.join("\n")}`,
     };
   }
 
-  const sessionLoadMatch = trimmed.match(/^\/session\s+load\s+(.+)$/);
-  if (sessionLoadMatch) {
-    const sessionId = sessionLoadMatch[1].trim();
-    const loaded = loadSessionById(workspacePath, sessionId);
+  const loadSessionMatch = trimmed.match(/^\/session\s+load\s+(\S+)$/);
+  if (loadSessionMatch) {
+    const id = loadSessionMatch[1];
+    const loaded = loadSessionById(workspacePath, id);
+
     if (!loaded) {
       return {
         success: false,
-        response: `[REI] Session '${sessionId}' was not found.`,
+        response: `[REI] Session not found: ${id}`,
       };
     }
+
+    const currentHadContent = session.messages.length > 0;
+    const archivedName = currentHadContent
+      ? archiveCurrentSession(workspacePath)
+      : null;
 
     saveSession(
       workspacePath,
@@ -115,12 +108,11 @@ export async function processMenuCommand(
       loaded.createdAt,
     );
 
-    const nonSystem = loaded.messages.filter(
-      (message) => message.role !== "system",
-    );
     return {
       success: true,
-      response: `[REI] Session '${sessionId}' loaded (${Math.floor(nonSystem.length / 2)} turns, mode=${loaded.mode}).`,
+      response: archivedName
+        ? `[REI] Archived current session as ${archivedName}. Loaded session ${id}.`
+        : `[REI] Loaded session ${id}.`,
       newSession: {
         messages: loaded.messages,
         mode: loaded.mode,
@@ -138,7 +130,6 @@ export async function processMenuCommand(
         "[REI] Prompt cache cleared. All prompts will be reloaded from disk on next request.",
     };
   }
-
   if (trimmed === "/clear") {
     const newMessages: ChatMessage[] = [];
     saveSession(
@@ -153,6 +144,7 @@ export async function processMenuCommand(
       response:
         "[REI] Conversation history has been cleared. Starting with a fresh context.",
       newSession: { ...session, messages: newMessages },
+      recordInSession: false,
     };
   }
 
@@ -296,8 +288,10 @@ export async function processMenuCommand(
   }
 
   if (trimmed === "/index") {
-    // 1. Generate and persist the AST Skeleton Map
-    generateRepoMap(workspacePath);
+    // 1. Generate and persist the AST Skeleton Map (errors are logged, not swallowed)
+    generateRepoMap(workspacePath).catch((err) =>
+      console.error("[/index] Repo map error:", err),
+    );
 
     // 2. Start the RAG vector indexing
     startIndexingWorker(workspacePath, {
@@ -306,7 +300,7 @@ export async function processMenuCommand(
     return {
       success: true,
       response:
-        "[REI] Full repository indexing started. The AST skeleton map has been updated and RAG indexing is running in the background.",
+        "[REI] Full repository indexing started. The AST skeleton map is updating and RAG indexing is running in the background.",
     };
   }
 

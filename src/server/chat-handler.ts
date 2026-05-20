@@ -56,19 +56,21 @@ export class ChatHandler {
         }
 
         // Guardamos la sesión actualizada y devolvemos la respuesta del comando
-        session.messages.push({ role: "user", content: promptTrimmed });
-        session.messages.push({
-          role: "assistant",
-          content: cmdResult.response,
-        });
-        saveSession(
-          this.workspacePath,
-          session.messages,
-          session.mode,
-          session.summary,
-          session.createdAt,
-        );
+        if (cmdResult.recordInSession !== false) {
+          session.messages.push({ role: "user", content: promptTrimmed });
+          session.messages.push({ role: "assistant", content: cmdResult.response });
+          saveSession(
+            this.workspacePath,
+            session.messages,
+            session.mode,
+            session.summary,
+            session.createdAt,
+          );
+        }
 
+        onChunk(cmdResult.response);
+        return cmdResult.response;
+      } else {
         onChunk(cmdResult.response);
         return cmdResult.response;
       }

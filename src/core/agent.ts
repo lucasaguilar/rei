@@ -295,8 +295,8 @@ export class Agent {
     let repositorySkeletonMap = undefined;
 
     // 1. Asegurar que el mapa esté generado e indexado en el VectorStore
-    if (!this.repoMapCache) {
-      this.repoMapCache = generateRepoMap(this.workspacePath);
+        if (!this.repoMapCache) {
+      this.repoMapCache = await generateRepoMap(this.workspacePath);
 
       await this.vectorStore.load();
 
@@ -595,19 +595,30 @@ export class Agent {
         "**/*.html",
         "**/*.css",
         "**/*.scss",
+        "**/*.py",
+        "**/*.c",
+        "**/*.h",
+        "**/*.cpp",
+        "**/*.hpp",
+        "**/*.cc",
+        "**/*.cxx",
+        "**/*.cs",
+        "**/*.rs",
+        "**/*.go",
       ],
       {
-        cwd: this.workspacePath,
-        ignored: [
-          "**/node_modules/**",
-          "**/dist/**",
-          ".rei/**",
-          "**/.rei/**",
-          "**/.git/**",
-          "**/bin/**",
-        ],
-        persistent: true,
-        ignoreInitial: true,
+      cwd: this.workspacePath,
+      ignored: [
+        "**/node_modules/**",
+        "**/dist/**",
+        ".rei/**",
+        "**/.rei/**",
+        "**/.git/**",
+        "**/bin/**",
+        "**/obj/**",
+      ],
+      persistent: true,
+      ignoreInitial: true,
       },
     );
 
@@ -618,7 +629,10 @@ export class Agent {
 
       this.vectorStore.deleteByFilePath(relFilePath);
 
-      const newMapString = generateRepoMapForFile(this.workspacePath, absPath);
+      const newMapString = await generateRepoMapForFile(
+        this.workspacePath,
+        absPath,
+      );
       if (newMapString) {
         const chunks = chunkRepoMapString(newMapString);
         for (const chunk of chunks) {

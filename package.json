@@ -43,8 +43,10 @@
     "jsonrepair": "^3.13.3",
     "marked": "^15.0.12",
     "marked-terminal": "^7.3.0",
+    "tree-sitter-wasms": "^0.1.13",
     "ts-morph": "^27.0.2",
     "tsx": "^4.19.2",
+    "web-tree-sitter": "^0.25.0",
     "wrap-ansi": "^9.0.2"
   },
   "devDependencies": {

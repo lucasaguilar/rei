@@ -9,6 +9,10 @@ import {
   TypeAliasDeclaration,
 } from "ts-morph";
 import { listRelevantFiles } from "./file-globber.js";
+import { AstProviderFactory } from "../context/ast-providers/ast-provider-factory.js";
+import type { SourceFileLike, AstChunk } from "../context/ast-providers/ast-provider.js";
+import { HeuristicAstProvider } from "../context/ast-providers/heuristic-ast-provider.js";
+import { getLanguageCapabilityForExtension } from "../language/language-capabilities.js";
 
 // Detect entry points from package.json
 function getEntryPointFiles(workspacePath: string): Set<string> {
@@ -37,9 +41,9 @@ function getEntryPointFiles(workspacePath: string): Set<string> {
 
 const REPO_MAP_HEADER = "### REPOSITORY SKELETON MAP";
 
-export function generateRepoMap(workspacePath: string): string {
+export async function generateRepoMap(workspacePath: string): Promise<string> {
   // NOTE 1. Filtro de carpetas prohibidas
-  const IGNORE_DIRS = ["node_modules", "dist", ".rei", ".git", "bin"];
+  const IGNORE_DIRS = ["node_modules", "dist", ".rei", ".git", "bin", "obj"];
 
   const files = listRelevantFiles(workspacePath).filter(
     (file) => !IGNORE_DIRS.some((dir) => file.split(path.sep).includes(dir)),
@@ -53,6 +57,9 @@ export function generateRepoMap(workspacePath: string): string {
   );
   const testFiles = files.filter((f) =>
     /\.(spec|test)\.(ts|js|tsx|jsx)$/.test(f),
+  );
+  const polyglotFiles = files.filter((f) =>
+    /\.(py|c|h|cpp|hpp|cc|cxx|cs|rs|go)$/.test(f),
   );
 
   // Procesar archivos TS/JS con ts-morph
@@ -129,6 +136,39 @@ export function generateRepoMap(workspacePath: string): string {
     );
   }
 
+  // POLYGLOT (C, C++, C#, Python, Rust, Go) — AstProviderFactory / Tree-sitter
+  for (const file of polyglotFiles) {
+    const relPath = path.relative(workspacePath, file).replace(/\\/g, "/");
+    try {
+      const content = fs.readFileSync(file, "utf8");
+      const ext = path.extname(file).toLowerCase();
+      const languageId = getLanguageCapabilityForExtension(ext).id;
+      const fileLike: SourceFileLike = {
+        filePath: relPath,
+        absoluteFilePath: file,
+        languageId,
+        content,
+      };
+      const provider = AstProviderFactory.resolve(fileLike);
+      let chunks: AstChunk[] = [];
+      try {
+        chunks = await provider.extractChunks(fileLike);
+      } catch { /* Tree-sitter failed; heuristic fallback below */ }
+      if (chunks.length === 0) {
+        // FR-8: heuristic fallback when Tree-sitter fails or returns no symbols
+        try { chunks = await new HeuristicAstProvider().extractChunks(fileLike); } catch { /* skip */ }
+      }
+      if (chunks.length > 0) {
+        const lines = renderPolyglotSkeleton(chunks);
+        sections.push(`// FILE: ${relPath}\n${lines.join("\n")}`);
+      } else {
+        sections.push(`// FILE: ${relPath}`);
+      }
+    } catch {
+      sections.push(`// FILE: ${relPath}`);
+    }
+  }
+
   const skeleton =
     sections.length > 0
       ? `${REPO_MAP_HEADER}\n\n${sections.join("\n\n")}`
@@ -146,7 +186,7 @@ export function generateRepoMap(workspacePath: string): string {
   return skeleton;
 }
 
-export function generateRepoMapForFile(workspacePath: string, absFilePath: string): string | null {
+export async function generateRepoMapForFile(workspacePath: string, absFilePath: string): Promise<string | null> {
   const IGNORE_DIRS = ["node_modules", "dist", ".rei", ".git", "bin"];
   if (IGNORE_DIRS.some((dir) => absFilePath.split(path.sep).includes(dir))) {
     return null;
@@ -199,12 +239,160 @@ export function generateRepoMapForFile(workspacePath: string, absFilePath: strin
       const its = Array.from(content.matchAll(/(?:it|test)\s*\(\s*['"`]([^'"]+)['"`]/g)).map((m) => m[1]);
       sections.push(`// FILE: ${relPath}\nTest suites: ${[...new Set(describes)].join(", ")}\nTest cases: ${[...new Set(its)].join(", ")}`);
     }
+
+    // 5. Polyglot (C, C++, C#, Python, Rust, Go) — AstProviderFactory / Tree-sitter
+    if (/\.(py|c|h|cpp|hpp|cc|cxx|cs|rs|go)$/.test(absFilePath)) {
+      const content = fs.readFileSync(absFilePath, "utf8");
+      const ext = path.extname(absFilePath).toLowerCase();
+      const languageId = getLanguageCapabilityForExtension(ext).id;
+      const fileLike: SourceFileLike = {
+        filePath: relPath,
+        absoluteFilePath: absFilePath,
+        languageId,
+        content,
+      };
+      const provider = AstProviderFactory.resolve(fileLike);
+      let chunks: AstChunk[] = [];
+      try {
+        chunks = await provider.extractChunks(fileLike);
+      } catch { /* Tree-sitter failed; heuristic fallback below */ }
+      if (chunks.length === 0) {
+        // FR-8: heuristic fallback when Tree-sitter fails or returns no symbols
+        try { chunks = await new HeuristicAstProvider().extractChunks(fileLike); } catch { /* skip */ }
+      }
+      if (chunks.length > 0) {
+        const lines = renderPolyglotSkeleton(chunks);
+        sections.push(`// FILE: ${relPath}\n${lines.join("\n")}`);
+      } else {
+        sections.push(`// FILE: ${relPath}`);
+      }
+    }
   } catch (err) {
     console.error(`[RepoMapGenerator] Error parsing ${absFilePath}:`, err);
     return null;
   }
 
   return sections.length > 0 ? sections.join("\n\n") : null;
+}
+
+function renderPolyglotSkeleton(chunks: AstChunk[]): string[] {
+  const sortedChunks = [...chunks].sort((a, b) => {
+    if (a.startLine !== b.startLine) return a.startLine - b.startLine;
+    return a.endLine - b.endLine;
+  });
+
+  const containerChunks = sortedChunks.filter((chunk) => isContainerChunk(chunk));
+  const containerSymbols = new Set(
+    containerChunks
+      .map((chunk) => chunk.symbolName)
+      .filter((symbol): symbol is string => Boolean(symbol)),
+  );
+
+  const childrenByParent = new Map<string, AstChunk[]>();
+  for (const chunk of sortedChunks) {
+    if (!chunk.parentSymbol) continue;
+    const current = childrenByParent.get(chunk.parentSymbol) ?? [];
+    current.push(chunk);
+    childrenByParent.set(chunk.parentSymbol, current);
+  }
+
+  const lines: string[] = [];
+  const emittedStandalone = new Set<string>();
+
+  for (const container of containerChunks) {
+    const memberChunks = container.symbolName
+      ? (childrenByParent.get(container.symbolName) ?? []).filter((chunk) => !isContainerChunk(chunk))
+      : [];
+    const members = memberChunks
+      .map((chunk) => normalizePrototype(chunk.content))
+      .filter(Boolean);
+    lines.push(renderContainerSkeleton(container, members));
+  }
+
+  for (const chunk of sortedChunks) {
+    if (isContainerChunk(chunk)) continue;
+    if (chunk.parentSymbol && containerSymbols.has(chunk.parentSymbol)) continue;
+    const key = `${chunk.nodeType}:${chunk.symbolName ?? ""}:${chunk.startLine}:${chunk.endLine}`;
+    if (emittedStandalone.has(key)) continue;
+    emittedStandalone.add(key);
+    lines.push(normalizePrototype(chunk.content));
+  }
+
+  return lines.filter(Boolean);
+}
+
+function renderContainerSkeleton(container: AstChunk, members: string[]): string {
+  const keyword = mapContainerKeyword(container.nodeType);
+  const name = container.symbolName ?? "Anonymous";
+  const memberText = members.join(" ");
+  return `${keyword} ${name} { ${memberText} }`;
+}
+
+function mapContainerKeyword(nodeType: string): string {
+  switch (nodeType) {
+    case "class_definition":
+    case "class_declaration":
+    case "class_specifier":
+    case "class":
+      return "class";
+    case "interface_declaration":
+    case "interface_type":
+      return "interface";
+    case "namespace_declaration":
+      return "namespace";
+    case "struct_specifier":
+    case "struct_item":
+    case "struct_type":
+    case "struct":
+      return "struct";
+    case "enum_specifier":
+    case "enum_item":
+      return "enum";
+    case "trait_item":
+      return "trait";
+    case "type_declaration":
+      return "type";
+    default:
+      return nodeType;
+  }
+}
+
+function isContainerChunk(chunk: AstChunk): boolean {
+  if (chunk.content.includes("{ members: [")) return true;
+  return new Set([
+    "class_declaration",
+    "interface_declaration",
+    "namespace_declaration",
+    "class_specifier",
+    "struct_specifier",
+    "enum_specifier",
+    "class",
+    "struct",
+    "struct_item",
+    "enum_item",
+    "trait_item",
+    "type_declaration",
+    "struct_type",
+    "interface_type",
+  ]).has(chunk.nodeType);
+}
+
+function normalizePrototype(content: string): string {
+  const compact = content.replace(/\s+/g, " ").trim();
+  if (!compact) return "";
+
+  if (compact.includes("=>")) {
+    const head = compact.slice(0, compact.indexOf("=>")).trim();
+    if (!head) return "";
+    return head.endsWith(";") || head.endsWith(":") ? head : `${head};`;
+  }
+
+  const noBody = compact.includes("{")
+    ? compact.slice(0, compact.indexOf("{")).trim()
+    : compact;
+
+  if (noBody.endsWith(";") || noBody.endsWith(":")) return noBody;
+  return `${noBody};`;
 }
 
 function renderSourceFile(
