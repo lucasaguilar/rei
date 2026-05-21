@@ -28,9 +28,9 @@ export function getHelpText(): string {
 }
 
 export const MODE_PROMPTS: Record<SessionMode, string> = {
-  ask: "ask > ",
-  planning: "plan > ",
-  agent: "agent > ",
+  ask: "🔍 ask > ",
+  planning: "📝 plan > ",
+  agent: "🤖 agent > ",
 };
 
 export const THINKING_TEXT: Record<TurnStatus, string> = {

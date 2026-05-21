@@ -37,7 +37,7 @@ import {
   applySREditBatchFS,
   type BatchPatchApplyResult,
 } from "../tools/patch-applier.js";
-import { executeCommand } from "../tools/command-executor.js";
+import { executeCommand, limitCommandOutput } from "../tools/command-executor.js";
 import { extractCommandRequests } from "../agent-mode/response-handler.js";
 import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
 import { KnowledgeOrchestrator } from "../knowledge/orchestrator.js";
@@ -501,10 +501,12 @@ export class Agent {
       this.logger.logInfo(`Executing command: ${cmd}`);
       const result = await executeCommand(cmd, this.workspacePath);
       this.logger.logCommandExecution(cmd, result);
-      const output = [result.stdout, result.stderr]
-        .filter(Boolean)
-        .join("\n")
-        .trim();
+      const output = limitCommandOutput(
+        [result.stdout, result.stderr]
+          .filter(Boolean)
+          .join("\n")
+          .trim()
+      );
       feedback += `$ ${cmd}\n${output || "(no output)"} [exit: ${result.exitCode}]\n\n`;
     }
     feedback += "```";

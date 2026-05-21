@@ -65,30 +65,30 @@ export async function handleInputTurn(
     for await (const token of agent.streamTurn(session, trimmed, {
       onStatus: (status) => {
         if (lastStatus === status) return;
+        if (status === "producing_response") return;
+
         lastStatus = status;
         state.activeStatus = status;
         state.busy = true;
 
-        if (status !== "producing_response") {
-          // Force immediate UI refresh so short phases still become visible.
-          actions.draw();
-        }
+        // Force immediate UI refresh so short phases still become visible.
+        actions.draw();
 
         if (status === "calling_model" && callingModelTime < 0) {
           callingModelTime = Date.now();
-        }
-
-        if (status === "producing_response" && liveStart < 0) {
-          // Stop spinner REDRAWS to prevent interleaving with streaming output,
-          // but keep state.busy = true so input stays blocked until stream ends.
-          actions.stopSpinner();
-          state.activeStatus = undefined;
-          liveStart = 1;
         }
       },
     })) {
       if (firstTokenTime < 0 && token.trim()) {
         firstTokenTime = Date.now();
+        if (liveStart < 0) {
+          // Stop spinner REDRAWS to prevent interleaving with streaming output,
+          // but keep state.busy = true so input stays blocked until stream ends.
+          actions.stopSpinner();
+          state.activeStatus = undefined;
+          liveStart = 1;
+          actions.streamText(`\x1b[1;32mREI: \x1b[0m`);
+        }
       }
       chunkCount++;
       buffer += token;
@@ -110,14 +110,14 @@ export async function handleInputTurn(
 
     if (liveStart > 0) {
       actions.streamText("\n");
-      actions.pushTranscript(renderMarkdown(finalContent), false);
+      actions.pushTranscript(`\x1b[1;32mREI: \x1b[0m${renderMarkdown(finalContent)}`, false);
     }
 
     if (liveStart < 0) {
       actions.pushTranscript("");
-      actions.pushTranscript(`You: ${trimmed}`);
+      actions.pushTranscript(`\x1b[1;36mYou: ${trimmed}\x1b[0m`);
       actions.pushTranscript("");
-      actions.pushTranscript(renderMarkdown(finalContent));
+      actions.pushTranscript(`\x1b[1;32mREI: \x1b[0m${renderMarkdown(finalContent)}`);
     }
 
     // Si hubo edits, los añadimos formateados al final

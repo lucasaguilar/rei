@@ -11,7 +11,7 @@ import {
   extractCommandRequests,
   formatSREditsForLog,
 } from "./response-handler.js";
-import { executeCommand } from "../tools/command-executor.js";
+import { executeCommand, limitCommandOutput } from "../tools/command-executor.js";
 import {
   applyVirtualBatch,
   formatVirtualBatchResult,
@@ -502,6 +502,41 @@ export async function executeAgentTurn(params: {
       );
     }
 
+    // 3b. Did the model request commands?
+    const commands = extractCommandRequests(rawResponse);
+    if (commands.length > 0) {
+      let commandFeedback = "";
+      for (const cmd of commands) {
+        logger.logInfo(`Executing command: ${cmd}`);
+        const cmdResult = await executeCommand(cmd, workspacePath);
+        logger.logCommandExecution(cmd, cmdResult);
+        const truncatedStdout = limitCommandOutput(cmdResult.stdout || "none");
+        const truncatedStderr = limitCommandOutput(cmdResult.stderr || "none");
+        commandFeedback +=
+          `\nCommand: ${cmd}\nExit Code: ${cmdResult.exitCode}` +
+          `\nStdout: ${truncatedStdout}\nStderr: ${truncatedStderr}\n`;
+      }
+
+      if (loopCount < MAX_TURNS) {
+        currentMessages.push({ role: "assistant", content: rawResponse });
+        currentMessages.push({
+          role: "user",
+          content: `Command execution results:\n${commandFeedback}\nPlease continue with the task.`,
+        });
+        continue;
+      }
+
+      return finalizeOutcome(
+        logger,
+        {
+          response: rawResponse + "\n\n--- Command Execution Results ---\n" + commandFeedback,
+          validProposedPatches: [],
+        },
+        0,
+        0,
+      );
+    }
+
     // 4. Simple text response — no edits, no file requests
     logger.logNoEditsReason("model_returned_text_only", {
       loopCount,
@@ -646,9 +681,11 @@ export async function executeAgentTurnWholefile(params: {
           logger.logInfo(`Executing command: ${cmd}`);
           const cmdResult = await executeCommand(cmd, workspacePath);
           logger.logCommandExecution(cmd, cmdResult);
+          const truncatedStdout = limitCommandOutput(cmdResult.stdout || "none");
+          const truncatedStderr = limitCommandOutput(cmdResult.stderr || "none");
           summary +=
             `\nCommand: ${cmd}\nExit Code: ${cmdResult.exitCode}` +
-            `\nStdout: ${cmdResult.stdout || "none"}\nStderr: ${cmdResult.stderr || "none"}`;
+            `\nStdout: ${truncatedStdout}\nStderr: ${truncatedStderr}`;
         }
       }
 
@@ -714,9 +751,11 @@ export async function executeAgentTurnWholefile(params: {
         logger.logInfo(`Executing command: ${cmd}`);
         const cmdResult = await executeCommand(cmd, workspacePath);
         logger.logCommandExecution(cmd, cmdResult);
+        const truncatedStdout = limitCommandOutput(cmdResult.stdout || "none");
+        const truncatedStderr = limitCommandOutput(cmdResult.stderr || "none");
         commandFeedback +=
           `\nCommand: ${cmd}\nExit Code: ${cmdResult.exitCode}` +
-          `\nStdout: ${cmdResult.stdout || "none"}\nStderr: ${cmdResult.stderr || "none"}\n`;
+          `\nStdout: ${truncatedStdout}\nStderr: ${truncatedStderr}\n`;
       }
 
       if (loopCount < MAX_TURNS) {

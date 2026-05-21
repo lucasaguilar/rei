@@ -2,9 +2,11 @@ import * as http from 'node:http';
 import * as fs from 'node:fs';
 
 // Borrar sesión actual para que el contexto no crezca infinitamente
+/*
 try {
   fs.unlinkSync('.rei/sessions/current.json');
 } catch(e) {}
+ */
 
 // Primero forzamos el modo ASK enviando un comando, para que la respuesta fluya token por token
 const setModeData = JSON.stringify({
@@ -47,7 +49,7 @@ const req1 = http.request({
           firstTokenTime = Date.now();
           console.log(`⏱️ Time to First Token (TTFT): ${firstTokenTime - startTime} ms`);
         }
-        
+
         const lines = chunkStr.split('\n');
         for (const line of lines) {
           if (line.startsWith('data: ') && line !== 'data: [DONE]') {
@@ -57,7 +59,7 @@ const req1 = http.request({
                 totalContentLength += parsed.choices[0].delta.content.length;
                 chunkCount++;
               }
-            } catch(e) {}
+            } catch (e) { }
           }
         }
       });
@@ -66,9 +68,9 @@ const req1 = http.request({
         const endTime = Date.now();
         const totalTime = endTime - startTime;
         const streamTime = endTime - firstTokenTime;
-        
+
         const tokensPerSec = streamTime > 0 ? (chunkCount / (streamTime / 1000)).toFixed(2) : 0;
-        
+
         console.log(`\n📊 Results:`);
         console.log(`- Total Time: ${totalTime} ms`);
         console.log(`- Stream Time (after first token): ${streamTime} ms`);
@@ -82,7 +84,7 @@ const req1 = http.request({
     req.write(data);
     req.end();
   });
-  
+
   res1.resume(); // Consume data
 });
 
