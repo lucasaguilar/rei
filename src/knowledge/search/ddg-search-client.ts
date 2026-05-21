@@ -95,29 +95,31 @@ export class DuckDuckGoLiteClient implements WebSearchClient {
 
   private parseResults(html: string): SearchResult[] {
     const results: SearchResult[] = [];
-
-    // Very naive HTML regex extraction intended exclusively for DuckDuckGo Lite tabular structure.
-    // <tr>...<a class="result-url" href="URL">TITLE</a>...</tr>
-    // <tr>...<td class="result-snippet">SNIPPET</td>...</tr>
     const docSplit = html.split("<tr");
 
     let currentTitle = "";
     let currentUrl = "";
 
     for (const chunk of docSplit) {
-      // Find Title and URL
-      const urlMatch = chunk.match(
-        /class="result-url"\s+href="([^"]+)">([^<]+)<\/a>/i,
-      );
-      if (urlMatch) {
-        currentUrl = urlMatch[1];
-        currentTitle = urlMatch[2];
-        continue; // Wait for snippet in the next <tr>
+      // Ignorar publicidad patrocinada (ruido)
+      if (chunk.includes("result-sponsored")) {
+        continue;
       }
 
-      // Find Snippet
+      // Extraer URL, clase y título de forma flexible y tolerante a comillas
+      const hrefMatch = chunk.match(/href=['"]([^'"]+)['"]/i);
+      const classMatch = chunk.match(/class=['"]result-(url|link)['"]/i);
+      const titleMatch = chunk.match(/<a[^>]*>([\s\S]*?)<\/a>/i);
+
+      if (hrefMatch && classMatch && titleMatch) {
+        currentUrl = hrefMatch[1];
+        currentTitle = titleMatch[1];
+        continue; // Esperar al snippet en el siguiente <tr>
+      }
+
+      // Extraer snippet de forma flexible y tolerante a comillas
       const snippetMatch = chunk.match(
-        /class="result-snippet"[^>]*>([\s\S]*?)<\/td>/i,
+        /class=['"]result-snippet['"][^>]*>([\s\S]*?)<\/td>/i,
       );
       if (snippetMatch && currentUrl) {
         let rawSnippet = snippetMatch[1];
@@ -142,7 +144,7 @@ export class DuckDuckGoLiteClient implements WebSearchClient {
         }
 
         results.push({
-          title: currentTitle.trim(),
+          title: currentTitle.replace(/<[^>]+>/g, "").trim(),
           url: realUrl,
           snippet: rawSnippet,
         });

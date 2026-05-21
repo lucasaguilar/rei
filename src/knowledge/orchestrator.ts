@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import * as readline from "node:readline/promises";
 import { KnowledgeChunk, KnowledgeProvider, WebSearchClient } from "./types.js";
 import { AngularOfficialProvider } from "./providers/angular-official.js";
 import { IonicOfficialProvider } from "./providers/ionic-official.js";
@@ -52,9 +53,53 @@ export class KnowledgeOrchestrator {
     }
 
     const matchedProviders = this.providers.filter((p) => p.canHandle(query));
+
     if (matchedProviders.length === 0) {
-      return [];
+      // Fallback: Búsqueda general con confirmación del usuario
+      /*
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      });
+
+      const answer = await rl.question(
+        `\n[REI] No encontré un proveedor técnico específico para: "${query}".\n¿Deseas realizar una búsqueda general en la web? (s/n): `
+      );
+      rl.close();
+      */
+
+      //if (answer.toLowerCase() === 's') {
+      const summarizer = createKnowledgeSummarizer(this.modelProvider);
+      try {
+        // Pasar array vacío de dominios activa la búsqueda general en DuckDuckGo
+        const results = await this.searchClient.search(query, []);
+
+        const combinedContent = results
+          .map((r) => `Title: ${r.title}\nURL: ${r.url}\nSnippet: ${r.snippet}`)
+          .join("\n\n");
+
+        // El resumidor espera (query,ﬂ content)
+        const summary = await summarizer(query, combinedContent);
+
+        const generalChunk: KnowledgeChunk = {
+          content: summary,
+          url: results[0]?.url || "web-search",
+          title: results[0]?.title || "General Web Search",
+          relevanceScore: 1,
+          source: "web",
+          domain: "general",
+          provider: "DuckDuckGo",
+        };
+
+        this.cache.set(q, [generalChunk]);
+        return [generalChunk];
+      } catch (err) {
+        console.error(`[REI] Error en búsqueda general: ${err}`);
+        return [];
+      }
     }
+    //return [];
+    //}
 
     const allChunks: KnowledgeChunk[] = [];
     const summarizer = createKnowledgeSummarizer(this.modelProvider);
