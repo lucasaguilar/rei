@@ -169,6 +169,8 @@ async function main() {
         Object.assign(config, { provider, model });
         envVars.MODEL_PROVIDER = provider;
         envVars[`${provider.toUpperCase()}_MODEL`] = model;
+        // Explicitly clear AGENT_MODEL_PROVIDER to prevent .env bleed-through in single provider mode
+        envVars.AGENT_MODEL_PROVIDER = '';
 
         // Ollama: optionally set different models per mode
         if (provider === 'ollama') {
@@ -187,6 +189,11 @@ async function main() {
                 envVars.OLLAMA_MODEL_AGENT    = agentModel;
                 Object.assign(config, { ollamaPerMode: true, ollamaAskModel: askModel, ollamaAgentModel: agentModel });
             } else {
+                // Single provider without per-mode overrides: override all modes to the selected model
+                // to prevent falling back to values in .env
+                envVars.OLLAMA_MODEL_ASK      = model;
+                envVars.OLLAMA_MODEL_PLANNING = model;
+                envVars.OLLAMA_MODEL_AGENT    = model;
                 Object.assign(config, { ollamaPerMode: false });
             }
         }

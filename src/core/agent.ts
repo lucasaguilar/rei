@@ -37,7 +37,7 @@ import {
   applySREditBatchFS,
   type BatchPatchApplyResult,
 } from "../tools/patch-applier.js";
-import { executeCommand } from "../tools/command-executor.js";
+import { executeCommand, limitCommandOutput } from "../tools/command-executor.js";
 import { extractCommandRequests } from "../agent-mode/response-handler.js";
 import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
 import { KnowledgeOrchestrator } from "../knowledge/orchestrator.js";
@@ -228,53 +228,56 @@ export class Agent {
     }
 
     if (this.provider.streamChat) {
-      let firstResponse = "";
-      options?.onStatus?.("producing_response");
-      for await (const token of this.provider.streamChat(messagesForModel, {
-        model: resolveModelForMode(session.mode),
-      })) {
-        firstResponse += token;
-        yield token;
-      }
-      const commands = extractCommandRequests(firstResponse);
-      if (commands.length > 0) {
-        const cmdFeedback =
-          await this.executeCommandsFromResponse(firstResponse);
-        yield cmdFeedback;
-        const feedbackMessages: ChatSession["messages"] = [
-          ...messagesForModel,
-          { role: "assistant", content: firstResponse },
-          {
-            role: "user",
-            content: `System: Command execution results:\n${cmdFeedback}\n\nNow provide your complete answer using these results.`,
-          },
-        ];
+      let currentMessages = [...messagesForModel];
+      let hasMoreCommands = true;
+      let depth = 0;
+      const maxDepth = 3;
+
+      while (hasMoreCommands && depth < maxDepth) {
+        let streamResponse = "";
         options?.onStatus?.("producing_response");
-        let finalResponse = "";
-        for await (const token of this.provider.streamChat(feedbackMessages, {
+        for await (const token of this.provider.streamChat(currentMessages, {
           model: resolveModelForMode(session.mode),
         })) {
-          finalResponse += token;
+          streamResponse += token;
           yield token;
         }
-        const firstWithoutCmds = firstResponse
-          .replace(/<execute_command>[\s\S]*?<\/execute_command>/gi, "")
-          .trim();
-        session.messages.push({
-          role: "assistant",
-          content:
-            (firstWithoutCmds ? firstWithoutCmds + "\n\n" : "") +
-            cmdFeedback +
-            "\n\n" +
-            finalResponse,
-          sourceMode: session.mode,
-        });
-      } else {
-        session.messages.push({
-          role: "assistant",
-          content: firstResponse,
-          sourceMode: session.mode,
-        });
+
+        const commands = extractCommandRequests(streamResponse);
+        if (commands.length > 0) {
+          depth++;
+          const cmdFeedback = await this.executeCommandsFromResponse(streamResponse);
+          yield cmdFeedback;
+          currentMessages = [
+            ...currentMessages,
+            { role: "assistant", content: streamResponse },
+            {
+              role: "user",
+              content: `System: Command execution results:\n${cmdFeedback}\n\nNow continue your process or provide your complete answer using these results.`,
+            },
+          ];
+        } else {
+          hasMoreCommands = false;
+          
+          // Concat all assistant chunks for session storage
+          const allAssistantChunks = currentMessages
+            .slice(messagesForModel.length)
+            .filter((m) => m.role === "assistant")
+            .map((m) => m.content);
+          
+          allAssistantChunks.push(streamResponse);
+
+          const finalContent = allAssistantChunks.join("\n\n");
+          const cleanAssistantContent = finalContent
+            .replace(/<execute_command>[\s\S]*?<\/execute_command>/gi, "")
+            .trim();
+
+          session.messages.push({
+            role: "assistant",
+            content: cleanAssistantContent,
+            sourceMode: session.mode,
+          });
+        }
       }
     } else {
       const response = await this.generateNonAgentAssistantResponse(
@@ -498,10 +501,12 @@ export class Agent {
       this.logger.logInfo(`Executing command: ${cmd}`);
       const result = await executeCommand(cmd, this.workspacePath);
       this.logger.logCommandExecution(cmd, result);
-      const output = [result.stdout, result.stderr]
-        .filter(Boolean)
-        .join("\n")
-        .trim();
+      const output = limitCommandOutput(
+        [result.stdout, result.stderr]
+          .filter(Boolean)
+          .join("\n")
+          .trim()
+      );
       feedback += `$ ${cmd}\n${output || "(no output)"} [exit: ${result.exitCode}]\n\n`;
     }
     feedback += "```";
@@ -512,59 +517,64 @@ export class Agent {
     mode: ChatSession["mode"],
     messagesForModel: ChatSession["messages"],
   ): Promise<string> {
-    const raw = await this.provider.completeChat(messagesForModel, {
-      model: resolveModelForMode(mode),
-    });
-    if (!looksLikeAgentJson(raw)) {
-      const commands = extractCommandRequests(raw);
-      if (commands.length > 0) {
-        const cmdFeedback = await this.executeCommandsFromResponse(raw);
-        const rawWithoutCmds = raw
-          .replace(/<execute_command>[\s\S]*?<\/execute_command>/gi, "")
-          .trim();
-        const feedbackMessages: ChatSession["messages"] = [
-          ...messagesForModel,
+    let currentMessages = [...messagesForModel];
+    let hasMoreCommands = true;
+    let depth = 0;
+    const maxDepth = 3;
+    let lastResponse = "";
+
+    while (hasMoreCommands && depth < maxDepth) {
+      const raw = await this.provider.completeChat(currentMessages, {
+        model: resolveModelForMode(mode),
+      });
+
+      if (looksLikeAgentJson(raw) && depth === 0) {
+        const retryMessages: ChatSession["messages"] = [
+          ...currentMessages,
           { role: "assistant", content: raw },
           {
             role: "user",
-            content: `System: Command execution results:\n${cmdFeedback}\n\nNow provide your complete answer using these results.`,
+            content:
+              `You are in ${mode} mode. Your previous response was a JSON object. ` +
+              "That is not valid for this mode. " +
+              "Return a plain text answer only. Do not output JSON. Do not use markdown code blocks.",
           },
         ];
-        const finalResponse = await this.provider.completeChat(
-          feedbackMessages,
-          { model: resolveModelForMode(mode) },
-        );
-        return (
-          (rawWithoutCmds ? rawWithoutCmds + "\n\n" : "") +
-          cmdFeedback +
-          "\n\n" +
-          finalResponse
-        );
+        const retried = await this.provider.completeChat(retryMessages, {
+          model: resolveModelForMode(mode),
+        });
+        if (looksLikeAgentJson(retried)) {
+          return `I'm in ${mode} mode and my response came out as structured JSON, which is not valid here. Please rephrase your question or switch to agent mode if you need structured output.`;
+        }
+        lastResponse = retried;
+      } else {
+        lastResponse = raw;
       }
-      return raw;
+
+      currentMessages.push({ role: "assistant", content: lastResponse });
+
+      const commands = extractCommandRequests(lastResponse);
+      if (commands.length > 0) {
+        depth++;
+        const cmdFeedback = await this.executeCommandsFromResponse(lastResponse);
+        currentMessages.push({
+          role: "user",
+          content: `System: Command execution results:\n${cmdFeedback}\n\nNow continue your process or provide your complete answer using these results.`,
+        });
+      } else {
+        hasMoreCommands = false;
+      }
     }
 
-    const retryMessages: ChatSession["messages"] = [
-      ...messagesForModel,
-      { role: "assistant", content: raw },
-      {
-        role: "user",
-        content:
-          `You are in ${mode} mode. Your previous response was a JSON object. ` +
-          "That is not valid for this mode. " +
-          "Return a plain text answer only. Do not output JSON. Do not use markdown code blocks.",
-      },
-    ];
+    const allAssistantChunks = currentMessages
+      .slice(messagesForModel.length)
+      .filter((m) => m.role === "assistant")
+      .map((m) => m.content);
 
-    const retried = await this.provider.completeChat(retryMessages, {
-      model: resolveModelForMode(mode),
-    });
-    if (looksLikeAgentJson(retried)) {
-      return `I'm in ${mode} mode and my response came out as structured JSON, which is not valid here. Please rephrase your question or switch to agent mode if you need structured output.`;
-    }
-
-    const cmdFeedback = await this.executeCommandsFromResponse(retried);
-    return retried + cmdFeedback;
+    const finalContent = allAssistantChunks.join("\n\n");
+    return finalContent
+      .replace(/<execute_command>[\s\S]*?<\/execute_command>/gi, "")
+      .trim();
   }
 
   private async generateAgentAssistantResponse(

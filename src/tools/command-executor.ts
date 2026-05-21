@@ -7,6 +7,24 @@ export interface CommandResult {
   success: boolean;
 }
 
+/**
+ * Limits the length of a command output to prevent context window explosion.
+ * Truncates from the middle, leaving the beginning (initial errors/output)
+ * and the end (final status/summary) intact.
+ */
+export function limitCommandOutput(output: string, maxChars: number = 6000): string {
+  if (output.length <= maxChars) {
+    return output;
+  }
+  const half = Math.floor(maxChars / 2);
+  const start = output.slice(0, half);
+  const end = output.slice(-half);
+  const truncatedLength = output.length - maxChars;
+  const linesTruncated = output.slice(half, -half).split("\n").length;
+  
+  return `${start}\n\n[... Truncated ${truncatedLength} characters (${linesTruncated} lines) of middle output for context safety ...]\n\n${end}`;
+}
+
 const ALLOWED_COMMANDS = new Set([
   "npm",
   "npx",
