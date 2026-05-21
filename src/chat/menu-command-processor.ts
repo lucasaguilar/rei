@@ -295,7 +295,7 @@ export async function processMenuCommand(
 
     // 2. Start the RAG vector indexing
     startIndexingWorker(workspacePath, {
-      onDone: (msg) => console.log(`[RAG Indexer] ${msg}`),
+      onDone: () => {},
     });
     return {
       success: true,

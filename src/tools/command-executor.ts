@@ -35,6 +35,35 @@ const DENIED_KEYWORDS = [
 ];
 
 /**
+ * Parses a command line string into tokens, respecting single and double
+ * quoted strings. Quotes are stripped from the resulting tokens.
+ * Example: `grep -r "some pattern" src` → ["grep", "-r", "some pattern", "src"]
+ */
+function parseCommandLine(commandLine: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let inSingle = false;
+  let inDouble = false;
+
+  for (const ch of commandLine) {
+    if (ch === "'" && !inDouble) {
+      inSingle = !inSingle;
+    } else if (ch === '"' && !inSingle) {
+      inDouble = !inDouble;
+    } else if (ch === " " && !inSingle && !inDouble) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+    } else {
+      current += ch;
+    }
+  }
+  if (current) tokens.push(current);
+  return tokens;
+}
+
+/**
  * Executes a terminal command safely within the workspace path.
  * Uses spawn with shell: false to prevent shell injection.
  */
@@ -43,7 +72,7 @@ export async function executeCommand(
   workspacePath: string,
 ): Promise<CommandResult> {
   const trimmedCommand = commandLine.trim();
-  const [cmd, ...args] = trimmedCommand.split(/\s+/);
+  const [cmd, ...args] = parseCommandLine(trimmedCommand);
 
   // 1. Security Validation: Allow-list
   if (!ALLOWED_COMMANDS.has(cmd)) {

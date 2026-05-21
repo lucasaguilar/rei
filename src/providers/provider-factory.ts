@@ -32,7 +32,6 @@ export function createModelProvider(providerNameArg?: string): ModelProvider {
     case "gemini":
       return new GeminiProvider();
     case "openrouter":
-      console.log("Creating OpenRouterProvider with");
       return new OpenRouterProvider();
     case "huggingface":
       return new HuggingFaceProvider();

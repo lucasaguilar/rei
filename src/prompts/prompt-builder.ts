@@ -29,13 +29,11 @@ function buildProjectRules(workspacePath?: string): string {
 
 export function buildSystemMessage(
   mode: SessionMode,
-  repositorySkeletonMap?: string,
   workspacePath?: string,
 ): string {
   const projectRules = buildProjectRules(workspacePath);
 
   const sections: string[] = [
-    ...(repositorySkeletonMap ? [repositorySkeletonMap, ""] : []),
     loadPrompt("shared/base"),
     "",
     `Active mode: ${mode}`,

@@ -134,12 +134,7 @@ export class VectorStore {
    * Utilizado para limpieza antes de actualizaciones incrementales.
    */
   deleteByFilePath(filePath: string): void {
-    const initialCount = this.records.length;
     this.records = this.records.filter((r) => r.metadata.filePath !== filePath);
-    const removed = initialCount - this.records.length;
-    if (removed > 0) {
-      console.log(`[VectorStore] Removed ${removed} stale chunks for ${filePath}`);
-    }
   }
 
   /**
@@ -148,7 +143,6 @@ export class VectorStore {
   async clearAll(): Promise<void> {
     this.records = [];
     await this.save();
-    console.log(`[VectorStore] All records have been cleared.`);
   }
 
   /**
@@ -156,14 +150,14 @@ export class VectorStore {
    */
   async cleanupStaleFiles(activePaths: Set<string>): Promise<void> {
     const initialCount = this.records.length;
-    this.records = this.records.filter(r => 
-      // Mantenemos el registro si es un chunk genérico sin path, o si su path aún existe
-      !r.metadata.filePath || activePaths.has(r.metadata.filePath)
+    this.records = this.records.filter(
+      (r) =>
+        // Mantenemos el registro si es un chunk genérico sin path, o si su path aún existe
+        !r.metadata.filePath || activePaths.has(r.metadata.filePath),
     );
     const removed = initialCount - this.records.length;
     if (removed > 0) {
       await this.save();
-      console.log(`[VectorStore] Smart GC: Removed ${removed} stale records from deleted files.`);
     }
   }
 }

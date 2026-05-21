@@ -228,33 +228,66 @@ export class Agent {
     }
 
     if (this.provider.streamChat) {
-      let fullResponse = "";
+      let firstResponse = "";
       options?.onStatus?.("producing_response");
       for await (const token of this.provider.streamChat(messagesForModel, {
         model: resolveModelForMode(session.mode),
       })) {
-        fullResponse += token;
+        firstResponse += token;
         yield token;
       }
-      const cmdFeedback = await this.executeCommandsFromResponse(fullResponse);
-      if (cmdFeedback) yield cmdFeedback;
-      session.messages.push({
-        role: "assistant",
-        content: fullResponse + cmdFeedback,
-        sourceMode: session.mode,
-      });
+      const commands = extractCommandRequests(firstResponse);
+      if (commands.length > 0) {
+        const cmdFeedback =
+          await this.executeCommandsFromResponse(firstResponse);
+        yield cmdFeedback;
+        const feedbackMessages: ChatSession["messages"] = [
+          ...messagesForModel,
+          { role: "assistant", content: firstResponse },
+          {
+            role: "user",
+            content: `System: Command execution results:\n${cmdFeedback}\n\nNow provide your complete answer using these results.`,
+          },
+        ];
+        options?.onStatus?.("producing_response");
+        let finalResponse = "";
+        for await (const token of this.provider.streamChat(feedbackMessages, {
+          model: resolveModelForMode(session.mode),
+        })) {
+          finalResponse += token;
+          yield token;
+        }
+        const firstWithoutCmds = firstResponse
+          .replace(/<execute_command>[\s\S]*?<\/execute_command>/gi, "")
+          .trim();
+        session.messages.push({
+          role: "assistant",
+          content:
+            (firstWithoutCmds ? firstWithoutCmds + "\n\n" : "") +
+            cmdFeedback +
+            "\n\n" +
+            finalResponse,
+          sourceMode: session.mode,
+        });
+      } else {
+        session.messages.push({
+          role: "assistant",
+          content: firstResponse,
+          sourceMode: session.mode,
+        });
+      }
     } else {
-      const response = await this.provider.completeChat(messagesForModel, {
-        model: resolveModelForMode(session.mode),
-      });
-      const cmdFeedback = await this.executeCommandsFromResponse(response);
+      const response = await this.generateNonAgentAssistantResponse(
+        session.mode,
+        messagesForModel,
+      );
       session.messages.push({
         role: "assistant",
-        content: response + cmdFeedback,
+        content: response,
         sourceMode: session.mode,
       });
       options?.onStatus?.("producing_response");
-      yield response + cmdFeedback;
+      yield response;
     }
   }
 
@@ -291,11 +324,11 @@ export class Agent {
   private async updateSystemContextWithRepoMap(
     session: ChatSession,
     userInput?: string,
-  ): Promise<void> {
-    let repositorySkeletonMap = undefined;
+  ): Promise<string | undefined> {
+    let repositorySkeletonMap: string | undefined = undefined;
 
     // 1. Asegurar que el mapa esté generado e indexado en el VectorStore
-        if (!this.repoMapCache) {
+    if (!this.repoMapCache) {
       this.repoMapCache = await generateRepoMap(this.workspacePath);
 
       await this.vectorStore.load();
@@ -339,23 +372,34 @@ export class Agent {
       );
       repositorySkeletonMap = relevantMap
         ? `### RELEVANT REPOSITORY SKELETON MAP\n\n${relevantMap}`
-        : "No specific map fragments found for this query.";
+        : undefined;
     } else {
-      repositorySkeletonMap =
-        "Repository map indexed. Ask about specific files or symbols to see relevant structure.";
+      repositorySkeletonMap = undefined;
     }
 
-    const systemContent = buildSystemMessage(
-      session.mode,
-      repositorySkeletonMap,
-      this.workspacePath,
-    );
+    // Rebuild system message only when it doesn't exist yet or mode changed.
+    // Keeping it stable across turns preserves the Ollama KV cache prefix.
+    const needsRebuild =
+      session.messages.length === 0 ||
+      session.messages[0].role !== "system" ||
+      !session.messages[0].content.includes(`Active mode: ${session.mode}`);
 
-    if (session.messages.length > 0 && session.messages[0].role === "system") {
-      session.messages[0] = { role: "system", content: systemContent };
-    } else {
-      session.messages.unshift({ role: "system", content: systemContent });
+    if (needsRebuild) {
+      const systemContent = buildSystemMessage(
+        session.mode,
+        this.workspacePath,
+      );
+      if (
+        session.messages.length > 0 &&
+        session.messages[0].role === "system"
+      ) {
+        session.messages[0] = { role: "system", content: systemContent };
+      } else {
+        session.messages.unshift({ role: "system", content: systemContent });
+      }
     }
+
+    return repositorySkeletonMap;
   }
 
   private async prepareSessionForTurn(
@@ -364,7 +408,10 @@ export class Agent {
     onStatus?: StreamTurnOptions["onStatus"],
   ): Promise<string> {
     onStatus?.("building_context");
-    await this.updateSystemContextWithRepoMap(session, userInput);
+    const repositorySkeletonMap = await this.updateSystemContextWithRepoMap(
+      session,
+      userInput,
+    );
     this.logger.logUserPrompt({
       mode: session.mode,
       prompt: userInput,
@@ -391,7 +438,16 @@ export class Agent {
       );
     }
 
-    const enrichedMessage = buildTurnUserMessage({ userInput, context });
+    const enrichedMessage = buildTurnUserMessage({
+      userInput,
+      context,
+      repositorySkeletonMap,
+    });
+
+    this.logger.logInfo("Enriched user message size", {
+      chars: enrichedMessage.length,
+      estimatedTokens: Math.round(enrichedMessage.length / 4),
+    });
 
     // Persist only the raw user input so historical turns stay compact.
     session.messages.push({ role: "user", content: userInput });
@@ -460,8 +516,32 @@ export class Agent {
       model: resolveModelForMode(mode),
     });
     if (!looksLikeAgentJson(raw)) {
-      const cmdFeedback = await this.executeCommandsFromResponse(raw);
-      return raw + cmdFeedback;
+      const commands = extractCommandRequests(raw);
+      if (commands.length > 0) {
+        const cmdFeedback = await this.executeCommandsFromResponse(raw);
+        const rawWithoutCmds = raw
+          .replace(/<execute_command>[\s\S]*?<\/execute_command>/gi, "")
+          .trim();
+        const feedbackMessages: ChatSession["messages"] = [
+          ...messagesForModel,
+          { role: "assistant", content: raw },
+          {
+            role: "user",
+            content: `System: Command execution results:\n${cmdFeedback}\n\nNow provide your complete answer using these results.`,
+          },
+        ];
+        const finalResponse = await this.provider.completeChat(
+          feedbackMessages,
+          { model: resolveModelForMode(mode) },
+        );
+        return (
+          (rawWithoutCmds ? rawWithoutCmds + "\n\n" : "") +
+          cmdFeedback +
+          "\n\n" +
+          finalResponse
+        );
+      }
+      return raw;
     }
 
     const retryMessages: ChatSession["messages"] = [
@@ -607,18 +687,18 @@ export class Agent {
         "**/*.go",
       ],
       {
-      cwd: this.workspacePath,
-      ignored: [
-        "**/node_modules/**",
-        "**/dist/**",
-        ".rei/**",
-        "**/.rei/**",
-        "**/.git/**",
-        "**/bin/**",
-        "**/obj/**",
-      ],
-      persistent: true,
-      ignoreInitial: true,
+        cwd: this.workspacePath,
+        ignored: [
+          "**/node_modules/**",
+          "**/dist/**",
+          ".rei/**",
+          "**/.rei/**",
+          "**/.git/**",
+          "**/bin/**",
+          "**/obj/**",
+        ],
+        persistent: true,
+        ignoreInitial: true,
       },
     );
 

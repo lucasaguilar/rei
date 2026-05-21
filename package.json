@@ -40,6 +40,7 @@
     "chokidar": "^5.0.0",
     "diff": "^8.0.4",
     "dotenv": "^17.4.2",
+    "esbuild": "^0.28.0",
     "jsonrepair": "^3.13.3",
     "marked": "^15.0.12",
     "marked-terminal": "^7.3.0",

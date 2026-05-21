@@ -82,12 +82,6 @@ export class DuckDuckGoLiteClient implements WebSearchClient {
           });
 
           res.on("end", () => {
-            try {
-              // fs.writeFileSync(".rei-debug.html", data);
-              console.log(
-                `DuckDuckGo search for "${query}" returned ${data.length} characters of HTML.`,
-              );
-            } catch (e) {}
             resolve(data);
           });
         },
