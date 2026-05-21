@@ -24,6 +24,9 @@ else
   echo "rsync not found, using cp fallback"
   rm -rf "$INSTALL_DIR"/*
   cp -R "$SOURCE_DIR"/* "$INSTALL_DIR"/
+  if [ -f "$SOURCE_DIR/.env" ]; then
+    cp "$SOURCE_DIR/.env" "$INSTALL_DIR/.env"
+  fi
 fi
 
 cd "$INSTALL_DIR"
