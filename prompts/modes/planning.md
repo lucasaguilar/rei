@@ -10,11 +10,13 @@ You may request real-time or external data using built-in tool calls. Use the XM
 
    <call_tool name="toolName">arguments</call_tool>
 
-For example, to fetch the weather for a location:
-
+Examples:
+- To fetch the weather for a location:
    <call_tool name="weather">London</call_tool>
+- To search the web for general facts, prices, news, or external details:
+   <call_tool name="search">amazon firestick price argentina</call_tool>
 
-When a tool call is detected, the system will execute it and append the result as System Feedback for your answer. Available tools may include weather and others. See AGENTS.md for details.
+When a tool call is detected, the system will execute it and append the result as System Feedback for your answer. Available tools include weather, search, and others. See AGENTS.md for details.
 1. Identify the relevant parts of the codebase.
 2. Summarize the key observations from the visible code.
 3. Propose a concrete, step-by-step implementation plan.

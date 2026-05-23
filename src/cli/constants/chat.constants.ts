@@ -28,9 +28,9 @@ export function getHelpText(): string {
 }
 
 export const MODE_PROMPTS: Record<SessionMode, string> = {
-  ask: "🔍 ask > ",
-  planning: "📝 plan > ",
-  agent: "🤖 agent > ",
+  ask: "🚀 ask » ",
+  planning: "🎯 plan » ",
+  agent: "🧠 agent » ",
 };
 
 export const THINKING_TEXT: Record<TurnStatus, string> = {
@@ -43,7 +43,7 @@ export const THINKING_TEXT: Record<TurnStatus, string> = {
 
 export const SPINNER_FRAMES = ["|", "/", "-", "\\"];
 export const SHORTCUT_HINT =
-  "Shortcuts: Up/Down history | / commands | @ files | Tab complete | Esc close | Ctrl+R search";
+  "\x1b[90mShortcuts: Up/Down history | / commands | @ files | Tab complete | Esc close | Ctrl+R search\x1b[0m";
 
 export const COMMANDS: Array<{
   command: string;

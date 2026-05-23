@@ -175,6 +175,8 @@ export function extractToolCalls(response: string): Array<{ name: string; args: 
         const cleanArg = argsStr.replace(/^["']|["']$/g, '');
         if (name === 'weather') {
           args = { location: cleanArg };
+        } else if (name === 'search') {
+          args = { query: cleanArg };
         } else {
           args = { input: cleanArg };
         }

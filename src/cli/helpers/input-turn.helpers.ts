@@ -5,6 +5,11 @@ import { saveSession } from "../../chat/session-store.js";
 import { extractSREdits } from "../../agent-mode/response-handler.js";
 import { formatCodeDiff } from "../markdown-renderer.js";
 
+/**
+ * Resolves the active model label and maps it to its corresponding brand icon or emoji
+ * (e.g. 🦙 for Ollama, 🧠 for OpenRouter, ⚡ for Groq, ♊ for Gemini, 💻 for LM Studio).
+ * Supports dedicated agent provider resolution in multi-provider environments.
+ */
 function resolveActiveModelLabel(mode?: string): string {
   const isAgentMode = mode === "agent";
   const agentProvider = process.env.AGENT_MODEL_PROVIDER?.trim().toLowerCase();
@@ -68,6 +73,18 @@ function resolveActiveModelLabel(mode?: string): string {
   return "unknown";
 }
 
+function isInsideXmlBlock(text: string): boolean {
+  const tags = ["edit", "wholefile", "create", "request_files", "execute_command", "call_tool"];
+  for (const tag of tags) {
+    const lastOpen = text.lastIndexOf(`<${tag}`);
+    const lastClose = text.lastIndexOf(`</${tag}>`);
+    if (lastOpen > lastClose) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export async function handleInputTurn(
   trimmed: string,
   ctx: InputHandlerContext,
@@ -124,9 +141,14 @@ export async function handleInputTurn(
         }
       }
       chunkCount++;
+      const wasInside = isInsideXmlBlock(buffer);
       buffer += token;
+      const isNowInside = isInsideXmlBlock(buffer);
+
       if (liveStart > 0) {
-        actions.streamText(token);
+        if (!isNowInside && !wasInside) {
+          actions.streamText(token);
+        }
       }
     }
 
@@ -134,12 +156,14 @@ export async function handleInputTurn(
 
     // Procesar el buffer final: extraer edits y formatear
     const edits = extractSREdits(buffer);
-    let finalContent = buffer;
-
-    if (edits.length > 0) {
-      // Limpiar el buffer de los tags XML para el renderizado markdown
-      finalContent = buffer.replace(/<edit[\s\S]*?<\/edit>/gi, "").trim();
-    }
+    let finalContent = buffer
+      .replace(/<edit[\s\S]*?<\/edit>/gi, "")
+      .replace(/<wholefile[\s\S]*?<\/wholefile>/gi, "")
+      .replace(/<create[\s\S]*?<\/create>/gi, "")
+      .replace(/<request_files[\s\S]*?<\/request_files>/gi, "")
+      .replace(/<execute_command[\s\S]*?<\/execute_command>/gi, "")
+      .replace(/<call_tool[\s\S]*?<\/call_tool>/gi, "")
+      .trim();
 
     if (liveStart > 0) {
       actions.streamText("\n");

@@ -39,7 +39,8 @@ import {
 } from "../tools/patch-applier.js";
 import { executeCommand, limitCommandOutput } from "../tools/command-executor.js";
 import { extractCommandRequests, extractToolCalls } from "../agent-mode/response-handler.js";
-import { getWeather } from "../tools/weather-tool.js";
+import { getWeather, formatWeatherOutput, type WeatherResult } from "../tools/weather-tool.js";
+import { searchWeb } from "../tools/search-tool.js";
 import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
 import { KnowledgeOrchestrator } from "../knowledge/orchestrator.js";
 import { AgentLogger } from "./logger.js";
@@ -212,13 +213,15 @@ export class Agent {
         for (const call of toolCalls) {
           this.logger.logInfo(`Calling tool: ${call.name}`, { args: call.args });
           try {
-            let result: unknown;
             if (call.name === 'weather') {
-              result = await getWeather(call.args.location as string);
+              const weatherRes = await getWeather(call.args.location as string);
+              feedback += `\n### 🌤️ Weather: ${call.args.location}\n${formatWeatherOutput(weatherRes)}\n`;
+            } else if (call.name === 'search') {
+              const searchRes = await searchWeb(call.args.query as string, this.provider);
+              feedback += `\n### 🔍 Search Results: ${call.args.query}\n${searchRes}\n`;
             } else {
-              throw new Error(`Tool \"${call.name}\" is not implemented.`);
+              throw new Error(`Tool "${call.name}" is not implemented.`);
             }
-            feedback += `\n[TOOL] ${call.name}(${JSON.stringify(call.args)}) -> ${JSON.stringify(result)}\n`;
           } catch (err) {
             const errorMsg = err instanceof Error ? err.message : String(err);
             feedback += `\n[TOOL] ${call.name}(${JSON.stringify(call.args)}) -> ERROR: ${errorMsg}\n`;
@@ -551,13 +554,15 @@ export class Agent {
     for (const call of toolCalls) {
       this.logger.logInfo(`Calling tool: ${call.name}`, { args: call.args });
       try {
-        let result: unknown;
         if (call.name === "weather") {
-          result = await getWeather(call.args.location as string);
+          const weatherRes = await getWeather(call.args.location as string);
+          feedback += `\n### 🌤️ Weather: ${call.args.location}\n${formatWeatherOutput(weatherRes)}\n`;
+        } else if (call.name === "search") {
+          const searchRes = await searchWeb(call.args.query as string, this.provider);
+          feedback += `\n### 🔍 Search Results: ${call.args.query}\n${searchRes}\n`;
         } else {
           throw new Error(`Tool "${call.name}" is not implemented.`);
         }
-        feedback += `\n[TOOL] ${call.name}(${JSON.stringify(call.args)}) -> ${JSON.stringify(result)}\n`;
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         feedback += `\n[TOOL] ${call.name}(${JSON.stringify(call.args)}) -> ERROR: ${errorMsg}\n`;
@@ -703,13 +708,15 @@ export class Agent {
       for (const call of toolCalls) {
         this.logger.logInfo(`Calling tool: ${call.name}`, { args: call.args });
         try {
-          let result: unknown;
           if (call.name === 'weather') {
-            result = await getWeather(call.args.location as string);
+            const weatherRes = await getWeather(call.args.location as string);
+            feedback += `\n### 🌤️ Weather: ${call.args.location}\n${formatWeatherOutput(weatherRes)}\n`;
+          } else if (call.name === 'search') {
+            const searchRes = await searchWeb(call.args.query as string, this.provider);
+            feedback += `\n### 🔍 Search Results: ${call.args.query}\n${searchRes}\n`;
           } else {
             throw new Error(`Tool "${call.name}" is not implemented.`);
           }
-          feedback += `\n[TOOL] ${call.name}(${JSON.stringify(call.args)}) -> ${JSON.stringify(result)}\n`;
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : String(err);
           feedback += `\n[TOOL] ${call.name}(${JSON.stringify(call.args)}) -> ERROR: ${errorMsg}\n`;

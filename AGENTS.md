@@ -73,6 +73,7 @@ When a tool call is detected, REI executes it, appends the result to the convers
 
 Currently available tools include:
 - `weather(location)` — Returns current weather for the specified location.
+- `search(query)` — Performs a web search and returns a factual summary.
 
 Additional tools may be added in the future. See the contributor documentation for implementation details.
 

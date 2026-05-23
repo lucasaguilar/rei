@@ -7,6 +7,19 @@ export interface WeatherResult {
 }
 
 /**
+ * Formats a WeatherResult into a clean, readable markdown string.
+ */
+export function formatWeatherOutput(result: WeatherResult): string {
+  return [
+    `📍 **Location:** ${result.location.replace('📍 ', '')}`,
+    `🌡️ **Temperature:** ${result.temp.replace('🌡️ ', '')}`,
+    `☁️ **Condition:** ${result.condition.replace('☁️ ', '')}`,
+    `💧 **Humidity:** ${result.humidity.replace('💧 ', '')}`,
+    `💨 **Wind:** ${result.wind.replace('💨 ', '')}`
+  ].join('\n');
+}
+
+/**
  * Obtiene el clima actual de una ubicación usando wttr.in.
  * @param location La ciudad o región (ej: "London", "Madrid").
  */

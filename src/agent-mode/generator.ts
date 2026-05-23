@@ -251,6 +251,14 @@ export async function executeAgentTurn(params: {
   let lastValidationError = "";
   let consecutiveSearchMismatchFailures = 0;
   const autoInjectedCallerFiles = new Set<string>();
+  let firstTurnExplanation = "";
+
+  const getFinalResponse = (resp: string) => {
+    if (loopCount > 1 && firstTurnExplanation && !resp.includes(firstTurnExplanation)) {
+      return firstTurnExplanation + "\n\n" + resp;
+    }
+    return resp;
+  };
 
   while (loopCount < MAX_TURNS) {
     loopCount++;
@@ -262,7 +270,13 @@ export async function executeAgentTurn(params: {
     lastRawResponse = rawResponse;
     logger.logInfo("Raw LLM Response", { rawResponse });
 
-    if (!rawResponse.trim()) {
+    if (rawResponse.trim()) {
+      if (loopCount === 1) {
+        firstTurnExplanation = rawResponse
+          .replace(/<(edit|create|request_files|execute_command|call_tool|wholefile)\b[\s\S]*?<\/\1>/gi, "")
+          .trim();
+      }
+    } else {
       logger.logInfo("Model returned empty response", { loopCount });
       if (loopCount < MAX_TURNS) {
         currentMessages.push({ role: "assistant", content: rawResponse });
@@ -479,7 +493,7 @@ export async function executeAgentTurn(params: {
         return finalizeOutcome(
           logger,
           {
-            response: lastRawResponse,
+            response: getFinalResponse(lastRawResponse),
             validProposedPatches: [],
             failed: true,
             failedProposedPatches: lastEdits,
@@ -494,7 +508,7 @@ export async function executeAgentTurn(params: {
       return finalizeOutcome(
         logger,
         {
-          response: rawResponse,
+          response: getFinalResponse(rawResponse),
           validProposedPatches: edits,
         },
         edits.length,
@@ -529,7 +543,7 @@ export async function executeAgentTurn(params: {
       return finalizeOutcome(
         logger,
         {
-          response: rawResponse + "\n\n--- Command Execution Results ---\n" + commandFeedback,
+          response: getFinalResponse(rawResponse + "\n\n--- Command Execution Results ---\n" + commandFeedback),
           validProposedPatches: [],
         },
         0,
@@ -545,7 +559,7 @@ export async function executeAgentTurn(params: {
     return finalizeOutcome(
       logger,
       {
-        response: rawResponse,
+        response: getFinalResponse(rawResponse),
         validProposedPatches: [],
       },
       0,
@@ -557,9 +571,10 @@ export async function executeAgentTurn(params: {
   return finalizeOutcome(
     logger,
     {
-      response:
+      response: getFinalResponse(
         lastRawResponse ||
-        "Agent loop exceeded maximum turns without producing edits.",
+        "Agent loop exceeded maximum turns without producing edits."
+      ),
       validProposedPatches: [],
       failed: true,
       failedProposedPatches: lastEdits,
@@ -589,6 +604,14 @@ export async function executeAgentTurnWholefile(params: {
   let currentMessages = [...messagesForModel];
   let loopCount = 0;
   let lastRawResponse = "";
+  let firstTurnExplanation = "";
+
+  const getFinalResponse = (resp: string) => {
+    if (loopCount > 1 && firstTurnExplanation && !resp.includes(firstTurnExplanation)) {
+      return firstTurnExplanation + "\n\n" + resp;
+    }
+    return resp;
+  };
 
   while (loopCount < MAX_TURNS) {
     loopCount++;
@@ -599,7 +622,13 @@ export async function executeAgentTurnWholefile(params: {
     lastRawResponse = rawResponse;
     logger.logInfo("Raw LLM Response (wholefile mode)", { rawResponse });
 
-    if (!rawResponse.trim()) {
+    if (rawResponse.trim()) {
+      if (loopCount === 1) {
+        firstTurnExplanation = rawResponse
+          .replace(/<(edit|create|request_files|execute_command|call_tool|wholefile)\b[\s\S]*?<\/\1>/gi, "")
+          .trim();
+      }
+    } else {
       if (loopCount < MAX_TURNS) {
         currentMessages.push({ role: "assistant", content: rawResponse });
         currentMessages.push({
@@ -663,7 +692,7 @@ export async function executeAgentTurnWholefile(params: {
         }
         return finalizeOutcome(
           logger,
-          { response: rawResponse, validProposedPatches: [], failed: true },
+          { response: getFinalResponse(rawResponse), validProposedPatches: [], failed: true },
           wholefileEdits.length,
           0,
         );
@@ -738,7 +767,7 @@ export async function executeAgentTurnWholefile(params: {
       // Returning non-empty patches would cause agent.ts to re-apply via applySREditBatchFS.
       return finalizeOutcome(
         logger,
-        { response: rawResponse + summary, validProposedPatches: [] },
+        { response: getFinalResponse(rawResponse + summary), validProposedPatches: [] },
         wholefileEdits.length,
         wholefileEdits.length,
       );
@@ -771,9 +800,11 @@ export async function executeAgentTurnWholefile(params: {
         logger,
         {
           response:
-            rawResponse +
-            "\n\n--- Command Execution Results ---\n" +
-            commandFeedback,
+            getFinalResponse(
+              rawResponse +
+              "\n\n--- Command Execution Results ---\n" +
+              commandFeedback
+            ),
           validProposedPatches: [],
         },
         0,
@@ -788,7 +819,7 @@ export async function executeAgentTurnWholefile(params: {
     });
     return finalizeOutcome(
       logger,
-      { response: rawResponse, validProposedPatches: [] },
+      { response: getFinalResponse(rawResponse), validProposedPatches: [] },
       0,
       0,
     );
@@ -797,7 +828,7 @@ export async function executeAgentTurnWholefile(params: {
   return finalizeOutcome(
     logger,
     {
-      response: lastRawResponse || "Agent loop exceeded maximum turns.",
+      response: getFinalResponse(lastRawResponse || "Agent loop exceeded maximum turns."),
       validProposedPatches: [],
       failed: true,
     },
