@@ -68,6 +68,8 @@ export const COMMANDS: Array<{
   },
   { command: "/session new", description: "start a new session" },
   { command: "/compact", description: "manually compact conversation memory" },
+  { command: "/provider", description: "show or switch the active LLM provider" },
+  { command: "/model", description: "show or switch the active LLM model" },
 ];
 
 // NOTE: Global regex to match and strip standard ANSI console escape sequences

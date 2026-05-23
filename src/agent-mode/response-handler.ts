@@ -127,6 +127,25 @@ export function extractWholeFileEdits(response: string): AgentWholeFileEdit[] {
   return edits;
 }
 
+function normalizeCommandContent(raw: string): string {
+  let content = raw.replace(/\r\n/g, "\n").trim();
+
+  // Strip markdown code block fences (e.g. ```bash ... ```)
+  content = content.replace(/^\s*```[a-zA-Z0-9_-]*\s*\n/, "");
+  content = content.replace(/\n\s*```\s*$/, "");
+  content = content.replace(/^\s*```[a-zA-Z0-9_-]*\s*/, "");
+  content = content.replace(/\s*```\s*$/, "");
+
+  content = content.trim();
+
+  // Strip leading and trailing single backticks (e.g. `some command`)
+  if (content.startsWith("`") && content.endsWith("`")) {
+    content = content.slice(1, -1).trim();
+  }
+
+  return content;
+}
+
 /**
  * Extracts <execute_command> tags from the agent response.
  */
@@ -134,7 +153,7 @@ export function extractCommandRequests(response: string): string[] {
   const matches = [
     ...response.matchAll(/<execute_command>([\s\S]*?)<\/execute_command>/gi),
   ];
-  return matches.map((match) => match[1].trim());
+  return matches.map((match) => normalizeCommandContent(match[1]));
 }
 
 /**

@@ -132,7 +132,7 @@ export async function executeCommand(
     };
   }
 
-  const useRtk = isRtkAvailable();
+  const useRtk = isRtkAvailable() && cmd !== "rtk";
   const finalCmd = useRtk ? "rtk" : cmd;
   const finalArgs = useRtk ? [cmd, ...args] : args;
 

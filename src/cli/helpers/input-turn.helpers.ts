@@ -6,30 +6,63 @@ import { extractSREdits } from "../../agent-mode/response-handler.js";
 import { formatCodeDiff } from "../markdown-renderer.js";
 
 function resolveActiveModelLabel(mode?: string): string {
-  const provider = (process.env.MODEL_PROVIDER ?? "").trim().toLowerCase();
+  const isAgentMode = mode === "agent";
+  const agentProvider = process.env.AGENT_MODEL_PROVIDER?.trim().toLowerCase();
+  
+  const provider = (isAgentMode && agentProvider)
+    ? agentProvider
+    : (process.env.MODEL_PROVIDER ?? "").trim().toLowerCase();
+
+  const getModelName = (prov: string): string => {
+    switch (prov) {
+      case "ollama":
+        if (isAgentMode) {
+          return process.env.OLLAMA_MODEL_AGENT?.trim() || process.env.OLLAMA_MODEL?.trim() || "default";
+        }
+        const modeKey = mode ? `OLLAMA_MODEL_${mode.toUpperCase()}` : undefined;
+        const modeSpecific = modeKey ? process.env[modeKey]?.trim() : undefined;
+        return (modeSpecific ?? process.env.OLLAMA_MODEL?.trim()) || "default";
+      case "openrouter":
+        return (isAgentMode ? process.env.OPENROUTER_MODEL_AGENT : undefined)?.trim() || process.env.OPENROUTER_MODEL?.trim() || "default";
+      case "groq":
+        return (isAgentMode ? process.env.GROQ_MODEL_AGENT : undefined)?.trim() || process.env.GROQ_MODEL?.trim() || "default";
+      case "gemini":
+        return (isAgentMode ? process.env.GEMINI_MODEL_AGENT : undefined)?.trim() || process.env.GEMINI_MODEL?.trim() || "default";
+      case "huggingface":
+        return (isAgentMode ? process.env.HF_MODEL_AGENT : undefined)?.trim() || process.env.HF_MODEL?.trim() || "default";
+      case "llmstudio":
+        return (isAgentMode ? process.env.LLM_STUDIO_MODEL_AGENT : undefined)?.trim() || process.env.LLM_STUDIO_MODEL?.trim() || "default";
+      default:
+        return "default";
+    }
+  };
+
+  const modelName = getModelName(provider);
 
   if (provider === "ollama") {
-    const modeKey = mode
-      ? `OLLAMA_MODEL_${mode.toUpperCase()}`
-      : undefined;
-    const modeSpecific = modeKey ? process.env[modeKey]?.trim() : undefined;
-    return `🦙 ${(modeSpecific ?? process.env.OLLAMA_MODEL?.trim()) || "ollama(default)"}`;
+    return `🦙 ${modelName}`;
   }
   if (provider === "openrouter") {
-    return `🧠 ${process.env.OPENROUTER_MODEL?.trim() || "openrouter(default)"}`;
+    return `🧠 ${modelName}`;
   }
   if (provider === "groq") {
-    return `Groq ${(process.env.GROQ_MODEL?.trim()) || "groq(default)"}`;
+    return `⚡ ${modelName}`;
   }
   if (provider === "gemini") {
-    return `♊ ${process.env.GEMINI_MODEL?.trim() || "gemini(default)"}`;
+    return `♊ ${modelName}`;
   }
   if (provider === "huggingface") {
-    return `🤗 ${process.env.HF_MODEL?.trim() || "huggingface(default)"}`;
+    return `🤗 ${modelName}`;
+  }
+  if (provider === "llmstudio") {
+    return `💻 ${modelName}`;
+  }
+  if (provider === "mock") {
+    return `🧪 ${modelName}`;
   }
 
   if (provider) {
-    return `${provider}(default)`;
+    return `${provider}(${modelName})`;
   }
 
   return "unknown";
