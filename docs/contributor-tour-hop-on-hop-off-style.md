@@ -17,8 +17,9 @@ The format is a hop-on hop-off route:
 3. Stop 3: Turn context building (repo, RAG, caller graph, docs)
 4. Stop 4: Mode behavior (ask, planning, agent)
 5. Stop 5: Agent edit pipeline (request files, validate, apply)
-6. Stop 6: Example walk-through: add sum command to cliCalc
-7. Stop 7: How to add support for a new language
+6. Stop 6: Built-in tools & interception (weather, command execution)
+7. Stop 7: Example walk-through: add sum command to cliCalc
+8. Stop 8: How to add support for a new language
 
 ---
 
@@ -159,7 +160,24 @@ Important details:
 
 ---
 
-## Stop 6: Example Walk-Through
+## Stop 6: Built-in Tools & Interception
+
+REI supports built-in tool calls that are intercepted during the agent loop before patch application.
+
+Tool invocation pattern:
+- `<call_tool name="weather">Santa Fe, Argentina</call_tool>`
+- `<call_tool name="weather">{"location": "London"}</call_tool>`
+
+Implementation:
+- Extraction: [../src/agent-mode/response-handler.ts](../src/agent-mode/response-handler.ts) (`extractToolCalls`)
+- Execution: [../src/core/agent.ts](../src/core/agent.ts) (intercepts `weather` calls in `streamTurn` and `generateAgentAssistantResponse`)
+- Logic: [../src/tools/weather-tool.ts](../src/tools/weather-tool.ts) (`getWeather` using wttr.in API)
+
+When a tool call is detected, REI executes it, appends the result to the conversation as `System Feedback`, and continues the turn. This allows the model to use real-time data without leaving the chat context.
+
+---
+
+## Stop 7: Example Walk-Through
 
 ### Scenario
 
@@ -204,7 +222,7 @@ Practical note for contributors:
 
 ---
 
-## Stop 7: If a New Language Is Supported
+## Stop 8: If a New Language Is Supported
 
 Language capability registry starts here:
 

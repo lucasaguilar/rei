@@ -311,6 +311,25 @@ export async function processMenuCommand(
     };
   }
 
+  if (trimmed === "/env") {
+    const ollamaVars = Object.entries(process.env)
+      .filter(([key]) => key.startsWith("OLLAMA"))
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, value]) => `${key}=${value ?? ""}`);
+
+    if (ollamaVars.length === 0) {
+      return {
+        success: true,
+        response: "[REI] No OLLAMA environment variables found.",
+      };
+    }
+
+    return {
+      success: true,
+      response: `[REI] OLLAMA environment variables:\n${ollamaVars.join("\n")}`,
+    };
+  }
+
   return {
     success: false,
     response: `Unknown command: ${trimmed}`,

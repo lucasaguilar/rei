@@ -136,3 +136,34 @@ export function extractCommandRequests(response: string): string[] {
   ];
   return matches.map((match) => match[1].trim());
 }
+
+/**
+ * Extrae llamadas a herramientas con el patrón XML <call_tool name="name">args</call_tool>
+ * Ejemplo: <call_tool name="weather">London</call_tool> o <call_tool name="weather">{"location": "London"}</call_tool>
+ */
+export function extractToolCalls(response: string): Array<{ name: string; args: Record<string, unknown> }> {
+  const matches = [...response.matchAll(/<call_tool\s+name="([^"]+)">([\s\S]*?)<\/call_tool>/gi)];
+  
+  return matches.map((match) => {
+    const name = match[1].trim();
+    const argsStr = match[2].trim();
+    let args: Record<string, unknown> = {};
+
+    try {
+      if (argsStr.startsWith('{')) {
+        args = JSON.parse(argsStr) as Record<string, unknown>;
+      } else {
+        const cleanArg = argsStr.replace(/^["']|["']$/g, '');
+        if (name === 'weather') {
+          args = { location: cleanArg };
+        } else {
+          args = { input: cleanArg };
+        }
+      }
+    } catch (e) {
+      args = { input: argsStr };
+    }
+
+    return { name, args };
+  });
+}

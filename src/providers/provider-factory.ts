@@ -1,6 +1,7 @@
 import type { ModelProvider } from "./model-provider.js";
 import type { SessionMode } from "../chat/types.js";
 import { GeminiProvider } from "./gemini-provider.js";
+import { LlmStudioProvider } from "./llm-studio-provider.js";
 import { MockProvider } from "./mock-provider.js";
 import { OllamaProvider } from "./ollama-provider.js";
 import { GroqProvider } from "./groq-provider.js";
@@ -13,7 +14,8 @@ export type ProviderName =
   | "groq"
   | "gemini"
   | "openrouter"
-  | "huggingface";
+  | "huggingface"
+  | "llmstudio";
 
 export function createModelProvider(providerNameArg?: string): ModelProvider {
   const providerName = (
@@ -35,9 +37,11 @@ export function createModelProvider(providerNameArg?: string): ModelProvider {
       return new OpenRouterProvider();
     case "huggingface":
       return new HuggingFaceProvider();
+    case "llmstudio":
+      return new LlmStudioProvider();
     default:
       throw new Error(
-        `Unknown MODEL_PROVIDER: ${providerNameArg ?? process.env.MODEL_PROVIDER}. Expected one of: mock, ollama, groq, gemini, openrouter, huggingface`,
+        `Unknown MODEL_PROVIDER: ${providerNameArg ?? process.env.MODEL_PROVIDER}. Expected one of: mock, ollama, groq, gemini, openrouter, huggingface, llmstudio`,
       );
   }
 }
@@ -86,6 +90,8 @@ export function resolveModelForMode(mode: SessionMode): string | undefined {
         return process.env.GEMINI_MODEL_AGENT ?? process.env.GEMINI_MODEL;
       case "huggingface":
         return process.env.HF_MODEL_AGENT ?? process.env.HF_MODEL;
+      case "llmstudio":
+        return process.env.LLM_STUDIO_MODEL_AGENT ?? process.env.LLM_STUDIO_MODEL;
       default:
         return undefined;
     }

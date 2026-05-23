@@ -59,7 +59,22 @@ sandbox before being applied directly to the workspace.
 
 "Contract Integrity: When a task involves changing a public method, exported function, or interface, you must use the Repository Skeleton Map and Caller Graph to identify all affected consumers. You are responsible for ensuring the entire workspace remains in a valid state by proposing edits for both the definition and its references."
 
----
+#### Tool Calls
+
+The agent can execute built-in tools during the action loop. Tool calls are detected using the XML tag format:
+
+  <call_tool name="toolName">arguments</call_tool>
+
+For example, to fetch the weather for a location:
+
+  <call_tool name="weather">London</call_tool>
+
+When a tool call is detected, REI executes it, appends the result to the conversation as System Feedback, and continues the turn. This enables the agent to use real-time or external data as part of its reasoning and edits.
+
+Currently available tools include:
+- `weather(location)` — Returns current weather for the specified location.
+
+Additional tools may be added in the future. See the contributor documentation for implementation details.
 
 ## Adding New Modes
 

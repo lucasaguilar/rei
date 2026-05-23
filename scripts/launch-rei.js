@@ -67,6 +67,23 @@ function getOllamaModels() {
 }
 
 /**
+ * Returns available models from a running LLM Studio instance.
+ * Falls back to PROVIDER_MODELS.llmstudio if the request fails.
+ */
+async function getLlmStudioModels() {
+    try {
+        const baseUrl = process.env.LLM_STUDIO_BASE_URL || 'http://localhost:1234';
+        const res = await fetch(`${baseUrl}/v1/models`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const models = (data.data || []).map(m => m.id).filter(Boolean);
+        return models.length > 0 ? models : (PROVIDER_MODELS.llmstudio ?? []);
+    } catch {
+        return PROVIDER_MODELS.llmstudio ?? [];
+    }
+}
+
+/**
  * Builds a display summary of Ollama performance env vars.
  * Shows which are set (from system env or wizard) and which aren't.
  */
@@ -94,7 +111,14 @@ async function pickProvider(message, initialValue) {
 }
 
 async function pickModel(provider, message, initialModel) {
-    const baseList = provider === 'ollama' ? getOllamaModels() : (PROVIDER_MODELS[provider] ?? []);
+    let baseList;
+    if (provider === 'ollama') {
+        baseList = getOllamaModels();
+    } else if (provider === 'llmstudio') {
+        baseList = await getLlmStudioModels();
+    } else {
+        baseList = PROVIDER_MODELS[provider] ?? [];
+    }
     const choices = [...baseList, CUSTOM];
     const choice = await select({
         message,

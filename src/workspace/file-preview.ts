@@ -1,8 +1,8 @@
 import * as fs from "fs/promises";
 
-export const PREVIEW_MAX_CHARS_DEFAULT = 500;
-export const PREVIEW_MAX_CHARS_AGENT = 1500;
-export const PREVIEW_MAX_CHARS_FULL = 12_000;
+export const PREVIEW_MAX_CHARS_DEFAULT = 300;
+export const PREVIEW_MAX_CHARS_AGENT = 800;
+export const PREVIEW_MAX_CHARS_FULL = 6000;
 
 function slimContent(text: string): string {
   return text
