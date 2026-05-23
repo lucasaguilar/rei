@@ -631,6 +631,7 @@ export class Agent {
       .filter((m) => m.role === "assistant")
       .map((m) => m.content);
 
+    const finalContent = allAssistantChunks.join("\n\n");
     return finalContent
       .replace(/<execute_command>[\s\S]*?<\/execute_command>/gi, "")
       .replace(/<call_tool\s+name="[^"]+">[\s\S]*?<\/call_tool>/gi, "")

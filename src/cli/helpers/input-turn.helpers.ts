@@ -13,19 +13,19 @@ function resolveActiveModelLabel(mode?: string): string {
       ? `OLLAMA_MODEL_${mode.toUpperCase()}`
       : undefined;
     const modeSpecific = modeKey ? process.env[modeKey]?.trim() : undefined;
-    return (modeSpecific ?? process.env.OLLAMA_MODEL?.trim()) || "ollama(default)";
+    return `🦙 ${(modeSpecific ?? process.env.OLLAMA_MODEL?.trim()) || "ollama(default)"}`;
   }
   if (provider === "openrouter") {
-    return process.env.OPENROUTER_MODEL?.trim() || "openrouter(default)";
+    return `🧠 ${process.env.OPENROUTER_MODEL?.trim() || "openrouter(default)"}`;
   }
   if (provider === "groq") {
-    return process.env.GROQ_MODEL?.trim() || "groq(default)";
+    return `Groq ${(process.env.GROQ_MODEL?.trim()) || "groq(default)"}`;
   }
   if (provider === "gemini") {
-    return process.env.GEMINI_MODEL?.trim() || "gemini(default)";
+    return `♊ ${process.env.GEMINI_MODEL?.trim() || "gemini(default)"}`;
   }
   if (provider === "huggingface") {
-    return process.env.HF_MODEL?.trim() || "huggingface(default)";
+    return `🤗 ${process.env.HF_MODEL?.trim() || "huggingface(default)"}`;
   }
 
   if (provider) {
