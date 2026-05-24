@@ -256,7 +256,6 @@ export class Agent {
       let hasMoreCommands = true;
       let depth = 0;
       const maxDepth = 3;
-      let suppressYield = false;
 
       while (hasMoreCommands && depth < maxDepth) {
         let streamResponse = "";
@@ -265,28 +264,8 @@ export class Agent {
           model: resolveModelForMode(session.mode),
         })) {
           streamResponse += token;
-          
-          // Detect opening: not suppressed yet, but streamResponse now contains the tag
-          if (!suppressYield && (streamResponse.length < 20 ||
-            streamResponse.includes("<call_tool") || streamResponse.includes("<execute_command")
-          )) {
-            suppressYield = true;
-          }
-
-          // Detect closing
-          if (suppressYield && (
-            streamResponse.includes("</call_tool>") || streamResponse.includes("</execute_command>")
-          )) {
-            suppressYield = false;
-            continue;
-          }
-
-          if (!suppressYield) {
-            yield token;
-          }
+          yield token;
         }
-
-        this.logger?.logInfo("RAW_MODEL_OUTPUT", { content: streamResponse });
 
         const commands = extractCommandRequests(streamResponse);
         const toolCalls = extractToolCalls(streamResponse);
