@@ -45,6 +45,7 @@ const ALLOWED_COMMANDS = new Set([
   "curl",
   "rtk",
   "which",
+  "date",
 ]);
 
 const DENIED_KEYWORDS = [
