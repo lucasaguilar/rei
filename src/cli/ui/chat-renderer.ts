@@ -52,12 +52,14 @@ export class ChatRenderer {
       }
     }
 
-    const moveUp = reflowedRows - 1;
-    if (moveUp > 0) {
-      process.stdout.write(`\x1b[${moveUp}A`);
+    // Clear each UI line individually, from bottom to top,
+    // so we never touch anything above the UI area.
+    for (let i = 0; i < reflowedRows; i++) {
+      if (i > 0) {
+        process.stdout.write("\x1b[1A"); // Move up one line
+      }
+      process.stdout.write("\x1b[2K"); // Clear the entire line
     }
-
-    process.stdout.write("\x1b[J"); // Clear to end of screen
     process.stdout.write("\x1b[1G"); // Move to column 1
     process.stdout.write("\x1b[?25h"); // Show cursor
 
@@ -170,3 +172,4 @@ export class ChatRenderer {
     process.stdout.write(`\x1b[${inputColumn}G\x1b[?25h`);
   }
 }
+
