@@ -260,16 +260,32 @@ export class Agent {
       while (hasMoreCommands && depth < maxDepth) {
         let streamResponse = "";
         options?.onStatus?.("producing_response");
+
+        // Collect tokens into a buffer first so we can inspect the full
+        // response before deciding what to yield. This prevents partial
+        // <call_tool> / <execute_command> XML from being printed to the
+        // terminal before the tool-call detection logic runs.
+        const tokenBuffer: string[] = [];
         for await (const token of this.provider.streamChat(currentMessages, {
           model: resolveModelForMode(session.mode),
         })) {
           streamResponse += token;
-          yield token;
+          tokenBuffer.push(token);
         }
 
         const commands = extractCommandRequests(streamResponse);
         const toolCalls = extractToolCalls(streamResponse);
         if (commands.length > 0 || toolCalls.length > 0) {
+          // Yield the visible part of the response (strip XML tags) before
+          // the tool-result block so the user sees the prose intro, if any.
+          const visibleResponse = streamResponse
+            .replace(/<execute_command>[\s\S]*?<\/execute_command>/gi, "")
+            .replace(/<call_tool\s+name="[^"]+">[\s\S]*?<\/call_tool>/gi, "")
+            .trim();
+          if (visibleResponse) {
+            yield visibleResponse + "\n";
+          }
+
           depth++;
           let executionFeedback = "";
           if (commands.length > 0) {
@@ -289,7 +305,13 @@ export class Agent {
           ];
         } else {
           hasMoreCommands = false;
-          
+
+          // No tool calls — stream was buffered, so replay tokens now for
+          // real-time output on the terminal.
+          for (const token of tokenBuffer) {
+            yield token;
+          }
+
           // Concat all assistant chunks for session storage
           const allAssistantChunks = currentMessages
             .slice(messagesForModel.length)
