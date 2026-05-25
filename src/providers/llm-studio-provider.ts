@@ -184,7 +184,7 @@ export class LlmStudioProvider implements ModelProvider {
       },
       body: JSON.stringify({
         model: modelOverride ?? this.model,
-        messages,
+        messages: messages.map((m) => ({ role: m.role, content: m.content })),
         stream,
         temperature: 0,
       }),

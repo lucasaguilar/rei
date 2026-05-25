@@ -100,6 +100,12 @@ function buildOllamaSummary(envVars) {
     }).join('\n');
 }
 
+function getEnvPrefix(provider) {
+    if (provider === 'llmstudio') return 'LLM_STUDIO';
+    if (provider === 'huggingface') return 'HF';
+    return provider.toUpperCase();
+}
+
 async function pickProvider(message, initialValue) {
     const provider = await select({
         message,
@@ -192,7 +198,8 @@ async function main() {
 
         Object.assign(config, { provider, model });
         envVars.MODEL_PROVIDER = provider;
-        envVars[`${provider.toUpperCase()}_MODEL`] = model;
+        const prefix = getEnvPrefix(provider);
+        envVars[`${prefix}_MODEL`] = model;
         // Explicitly clear AGENT_MODEL_PROVIDER to prevent .env bleed-through in single provider mode
         envVars.AGENT_MODEL_PROVIDER = '';
 
@@ -234,9 +241,13 @@ async function main() {
 
         Object.assign(config, { askProvider, askModel, agentProvider, agentModel });
         envVars.MODEL_PROVIDER = askProvider;
-        envVars[`${askProvider.toUpperCase()}_MODEL`]              = askModel;
+        
+        const askPrefix = getEnvPrefix(askProvider);
+        const agentPrefix = getEnvPrefix(agentProvider);
+        
+        envVars[`${askPrefix}_MODEL`]              = askModel;
         envVars.AGENT_MODEL_PROVIDER                               = agentProvider;
-        envVars[`${agentProvider.toUpperCase()}_MODEL_AGENT`]      = agentModel;
+        envVars[`${agentPrefix}_MODEL_AGENT`]      = agentModel;
 
         // Explicitly set per-mode vars so ask/planning don't inherit the agent model
         if (askProvider === 'ollama') {
