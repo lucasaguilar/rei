@@ -37,9 +37,19 @@ import {
   applySREditBatchFS,
   type BatchPatchApplyResult,
 } from "../tools/patch-applier.js";
-import { executeCommand, limitCommandOutput } from "../tools/command-executor.js";
-import { extractCommandRequests, extractToolCalls } from "../agent-mode/response-handler.js";
-import { getWeather, formatWeatherOutput, type WeatherResult } from "../tools/weather-tool.js";
+import {
+  executeCommand,
+  limitCommandOutput,
+} from "../tools/command-executor.js";
+import {
+  extractCommandRequests,
+  extractToolCalls,
+} from "../agent-mode/response-handler.js";
+import {
+  getWeather,
+  formatWeatherOutput,
+  type WeatherResult,
+} from "../tools/weather-tool.js";
 import { searchWeb } from "../tools/search-tool.js";
 import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
 import { KnowledgeOrchestrator } from "../knowledge/orchestrator.js";
@@ -211,13 +221,18 @@ export class Agent {
 
         // 1. Procesar Tool Calls
         for (const call of toolCalls) {
-          this.logger.logInfo(`Calling tool: ${call.name}`, { args: call.args });
+          this.logger.logInfo(`Calling tool: ${call.name}`, {
+            args: call.args,
+          });
           try {
-            if (call.name === 'weather') {
+            if (call.name === "weather") {
               const weatherRes = await getWeather(call.args.location as string);
               feedback += `\n### 🌤️ Weather: ${call.args.location}\n${formatWeatherOutput(weatherRes)}\n`;
-            } else if (call.name === 'search') {
-              const searchRes = await searchWeb(call.args.query as string, this.provider);
+            } else if (call.name === "search") {
+              const searchRes = await searchWeb(
+                call.args.query as string,
+                this.provider,
+              );
               feedback += `\n### 🔍 Search Results: ${call.args.query}\n${searchRes}\n`;
             } else {
               throw new Error(`Tool "${call.name}" is not implemented.`);
@@ -238,7 +253,10 @@ export class Agent {
 
         // Mostrar feedback al usuario final, no solo al modelo
         const userVisibleResponse = outcome.response + feedback;
-        session.messages.push({ role: "assistant", content: userVisibleResponse });
+        session.messages.push({
+          role: "assistant",
+          content: userVisibleResponse,
+        });
         options?.onStatus?.("producing_response");
         yield userVisibleResponse;
         return;
@@ -265,15 +283,18 @@ export class Agent {
           model: resolveModelForMode(session.mode),
         })) {
           streamResponse += token;
-          
+
           // Detect opening: not suppressed yet, but streamResponse now contains the tag
+          /*
           if (!suppressYield && (streamResponse.length < 20 ||
             streamResponse.includes("<call_tool") || streamResponse.includes("<execute_command")
           )) {
             suppressYield = true;
           }
+          */
 
           // Detect closing
+          /*
           if (suppressYield && (
             streamResponse.includes("</call_tool>") || streamResponse.includes("</execute_command>")
           )) {
@@ -284,6 +305,8 @@ export class Agent {
           if (!suppressYield) {
             yield token;
           }
+            */
+          yield token;
         }
 
         this.logger?.logInfo("RAW_MODEL_OUTPUT", { content: streamResponse });
@@ -294,10 +317,12 @@ export class Agent {
           depth++;
           let executionFeedback = "";
           if (commands.length > 0) {
-            executionFeedback += await this.executeCommandsFromResponse(streamResponse);
+            executionFeedback +=
+              await this.executeCommandsFromResponse(streamResponse);
           }
           if (toolCalls.length > 0) {
-            executionFeedback += await this.executeToolCallsFromResponse(streamResponse);
+            executionFeedback +=
+              await this.executeToolCallsFromResponse(streamResponse);
           }
           yield executionFeedback;
           currentMessages = [
@@ -310,13 +335,13 @@ export class Agent {
           ];
         } else {
           hasMoreCommands = false;
-          
+
           // Concat all assistant chunks for session storage
           const allAssistantChunks = currentMessages
             .slice(messagesForModel.length)
             .filter((m) => m.role === "assistant")
             .map((m) => m.content);
-          
+
           allAssistantChunks.push(streamResponse);
 
           const finalContent = allAssistantChunks.join("\n\n");
@@ -555,10 +580,7 @@ export class Agent {
       const result = await executeCommand(cmd, this.workspacePath);
       this.logger.logCommandExecution(cmd, result);
       const output = limitCommandOutput(
-        [result.stdout, result.stderr]
-          .filter(Boolean)
-          .join("\n")
-          .trim()
+        [result.stdout, result.stderr].filter(Boolean).join("\n").trim(),
       );
       feedback += `$ ${cmd}\n${output || "(no output)"} [exit: ${result.exitCode}]\n\n`;
     }
@@ -567,7 +589,9 @@ export class Agent {
   }
 
   /** Executes any <call_tool> tags found in a response and returns formatted feedback. */
-  private async executeToolCallsFromResponse(response: string): Promise<string> {
+  private async executeToolCallsFromResponse(
+    response: string,
+  ): Promise<string> {
     const toolCalls = extractToolCalls(response);
     if (toolCalls.length === 0) return "";
 
@@ -579,7 +603,10 @@ export class Agent {
           const weatherRes = await getWeather(call.args.location as string);
           feedback += `\n### 🌤️ Weather: ${call.args.location}\n${formatWeatherOutput(weatherRes)}\n`;
         } else if (call.name === "search") {
-          const searchRes = await searchWeb(call.args.query as string, this.provider);
+          const searchRes = await searchWeb(
+            call.args.query as string,
+            this.provider,
+          );
           feedback += `\n### 🔍 Search Results: ${call.args.query}\n${searchRes}\n`;
         } else {
           throw new Error(`Tool "${call.name}" is not implemented.`);
@@ -638,10 +665,12 @@ export class Agent {
         depth++;
         let executionFeedback = "";
         if (commands.length > 0) {
-          executionFeedback += await this.executeCommandsFromResponse(lastResponse);
+          executionFeedback +=
+            await this.executeCommandsFromResponse(lastResponse);
         }
         if (toolCalls.length > 0) {
-          executionFeedback += await this.executeToolCallsFromResponse(lastResponse);
+          executionFeedback +=
+            await this.executeToolCallsFromResponse(lastResponse);
         }
         currentMessages.push({
           role: "user",
@@ -729,11 +758,14 @@ export class Agent {
       for (const call of toolCalls) {
         this.logger.logInfo(`Calling tool: ${call.name}`, { args: call.args });
         try {
-          if (call.name === 'weather') {
+          if (call.name === "weather") {
             const weatherRes = await getWeather(call.args.location as string);
             feedback += `\n### 🌤️ Weather: ${call.args.location}\n${formatWeatherOutput(weatherRes)}\n`;
-          } else if (call.name === 'search') {
-            const searchRes = await searchWeb(call.args.query as string, this.provider);
+          } else if (call.name === "search") {
+            const searchRes = await searchWeb(
+              call.args.query as string,
+              this.provider,
+            );
             feedback += `\n### 🔍 Search Results: ${call.args.query}\n${searchRes}\n`;
           } else {
             throw new Error(`Tool "${call.name}" is not implemented.`);
