@@ -29,7 +29,7 @@ import {
   MAX_RELEVANT_FILES_AGENT,
   MAX_RELEVANT_FILES_NON_AGENT,
   MIN_RAG_SCORE_FOR_FILE_PREVIEW,
-  ON_DEMAND_FILE_CONTEXT,
+  isOnDemandFileContextEnabled,
 } from "./constants/context-builder.constants.js";
 
 export type RagNodeSnippet = {
@@ -78,7 +78,7 @@ export async function buildTurnContext(params: {
       if (!ENABLE_SEMANTIC_RAG_SEARCH || !hasRagIndex(workspacePath))
         return undefined;
       try {
-        return await searchRag(workspacePath, userInput, 10);
+        return await searchRag(workspacePath, userInput, 4);
       } catch {
         // RAG is best-effort — if it fails, fall back to the heuristic selector
         return undefined;
@@ -177,7 +177,7 @@ export async function buildTurnContext(params: {
         const filePathLower = f.path.toLowerCase();
 
         if (!isExplicitMention) {
-          if (ON_DEMAND_FILE_CONTEXT) {
+          if (isOnDemandFileContextEnabled(mode)) {
             return null;
           }
 

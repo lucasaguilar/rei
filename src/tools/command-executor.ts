@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 
 export interface CommandResult {
   stdout: string;
@@ -12,7 +12,10 @@ export interface CommandResult {
  * Truncates from the middle, leaving the beginning (initial errors/output)
  * and the end (final status/summary) intact.
  */
-export function limitCommandOutput(output: string, maxChars: number = 6000): string {
+export function limitCommandOutput(
+  output: string,
+  maxChars: number = 6000,
+): string {
   if (output.length <= maxChars) {
     return output;
   }
@@ -21,7 +24,7 @@ export function limitCommandOutput(output: string, maxChars: number = 6000): str
   const end = output.slice(-half);
   const truncatedLength = output.length - maxChars;
   const linesTruncated = output.slice(half, -half).split("\n").length;
-  
+
   return `${start}\n\n[... Truncated ${truncatedLength} characters (${linesTruncated} lines) of middle output for context safety ...]\n\n${end}`;
 }
 
@@ -38,6 +41,11 @@ const ALLOWED_COMMANDS = new Set([
   "tsc",
   "find",
   "ng",
+  "env",
+  "curl",
+  "rtk",
+  "which",
+  "date",
 ]);
 
 const DENIED_KEYWORDS = [
@@ -46,11 +54,24 @@ const DENIED_KEYWORDS = [
   "chmod",
   "chown",
   "mkfs",
-  ">",
-  ">>",
-  "|",
-  "&",
+  //">",
+  //">>",
+  //"|",
+  //"&",
 ];
+
+let rtkAvailableCache: boolean | undefined = undefined;
+
+function isRtkAvailable(): boolean {
+  if (rtkAvailableCache !== undefined) return rtkAvailableCache;
+  try {
+    execSync("command -v rtk", { stdio: "ignore" });
+    rtkAvailableCache = true;
+  } catch {
+    rtkAvailableCache = false;
+  }
+  return rtkAvailableCache;
+}
 
 /**
  * Parses a command line string into tokens, respecting single and double
@@ -112,8 +133,12 @@ export async function executeCommand(
     };
   }
 
+  const useRtk = isRtkAvailable() && cmd !== "rtk";
+  const finalCmd = useRtk ? "rtk" : cmd;
+  const finalArgs = useRtk ? [cmd, ...args] : args;
+
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, {
+    const child = spawn(finalCmd, finalArgs, {
       cwd: workspacePath,
       shell: false,
       env: { ...process.env, FORCE_COLOR: "0" },

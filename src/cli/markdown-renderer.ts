@@ -18,19 +18,25 @@ const underline = (s: string): string => `\x1b[4;34m${s}\x1b[0m`;
  */
 export function formatCodeDiff(search: string, replace: string): string {
   const diff = diffLines(search, replace);
-  let formattedDiff = '';
+  const formattedLines: string[] = [];
 
   diff.forEach((part) => {
-    if (part.added) {
-      formattedDiff += `\x1b[32m+ ${part.value}\x1b[0m`; // Verde para añadido
-    } else if (part.removed) {
-      formattedDiff += `\x1b[31m- ${part.value}\x1b[0m`; // Rojo para eliminado
-    } else {
-      formattedDiff += `  ${part.value}`; // Blanco para sin cambios
+    const prefix = part.added ? '+' : part.removed ? '-' : ' ';
+    const color = part.added ? '\x1b[32m' : part.removed ? '\x1b[31m' : '';
+    const reset = '\x1b[0m';
+
+    const lines = part.value.split('\n');
+    // Remove trailing empty string caused by split on trailing newline
+    if (lines.length > 0 && lines[lines.length - 1] === '') {
+      lines.pop();
     }
+
+    lines.forEach((line) => {
+      formattedLines.push(`${color}${prefix} ${line}${reset}`);
+    });
   });
 
-  return formattedDiff.trim();
+  return formattedLines.join('\n');
 }
 
 /**

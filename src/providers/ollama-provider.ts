@@ -225,6 +225,7 @@ interface OllamaRequestOptions {
   num_ctx?: number;
   num_predict?: number;
   num_thread?: number;
+  temperature?: number;
 }
 
 const DEFAULT_OLLAMA_NUM_PREDICT = 16384; // Generous default to prevent empty responses
@@ -340,6 +341,10 @@ function buildOllamaRequestOptions(): OllamaRequestOptions {
       DEFAULT_OLLAMA_NUM_PREDICT,
     ),
     num_thread: parseOptionalPositiveInteger(process.env.OLLAMA_NUM_THREAD),
+    temperature: parseOptionalPositiveInteger(
+      process.env.OLLAMA_TEMPERATURE,
+      0,
+    ),
   };
 }
 

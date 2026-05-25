@@ -38,6 +38,8 @@ export class KnowledgeOrchestrator {
     const isExplicitRequest =
       /@(docs|web)\b/i.test(q) ||
       /busca(r)?\s+(en\s+)?(internet|la\s+web|online)/i.test(q) ||
+      /investiga(r)?\s+(en\s+)?(internet|la\s+web|online)/i.test(q) ||
+      /averigua(r)?\s+(en\s+)?(internet|la\s+web|online)/i.test(q) ||
       /search\s+(the\s+)?(web|internet|online|docs)/i.test(q) ||
       /\b(googlealo?|googlea)\b/i.test(q) ||
       /consulta(r)?\s+(la\s+)?(web|internet|documentaci[oó]n)/i.test(q) ||
@@ -69,17 +71,34 @@ export class KnowledgeOrchestrator {
       */
 
       //if (answer.toLowerCase() === 's') {
-      const summarizer = createKnowledgeSummarizer(this.modelProvider);
+      const summarizer = createKnowledgeSummarizer(this.modelProvider, true);
       try {
+        // Limpiar frases introductorias comunes de búsqueda para obtener mejores términos en el motor
+        let cleanQuery = query
+          .replace(/@(docs|web)\b/gi, "")
+          .replace(/busca(r)?\s+(en\s+)?(internet|la\s+web|online|google)?(\s+el|\s+la|\s+los|\s+las)?/gi, "")
+          .replace(/investiga(r)?\s+(en\s+)?(internet|la\s+web|online)?(\s+el|\s+la|\s+los|\s+las)?/gi, "")
+          .replace(/averigua(r)?\s+(en\s+)?(internet|la\s+web|online)?(\s+el|\s+la|\s+los|\s+las)?/gi, "")
+          .replace(/search\s+(the\s+)?(web|internet|online|docs)?(\s+for)?/gi, "")
+          .replace(/\b(googlealo?|googlea)\b(\s+el|\s+la|\s+los|\s+las)?/gi, "")
+          .replace(/consulta(r)?\s+(la\s+)?(web|internet|documentaci[oó]n)?(\s+el|\s+la|\s+los|\s+las)?/gi, "")
+          .replace(/look\s+(it\s+)?up\s+online/gi, "")
+          .replace(/\s+/g, " ")
+          .trim();
+
+        if (!cleanQuery) {
+          cleanQuery = query;
+        }
+
         // Pasar array vacío de dominios activa la búsqueda general en DuckDuckGo
-        const results = await this.searchClient.search(query, []);
+        const results = await this.searchClient.search(cleanQuery, []);
 
         const combinedContent = results
           .map((r) => `Title: ${r.title}\nURL: ${r.url}\nSnippet: ${r.snippet}`)
           .join("\n\n");
 
-        // El resumidor espera (query,ﬂ content)
-        const summary = await summarizer(query, combinedContent);
+        // El resumidor espera (query, content)
+        const summary = await summarizer(cleanQuery, combinedContent);
 
         const generalChunk: KnowledgeChunk = {
           content: summary,

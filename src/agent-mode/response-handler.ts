@@ -127,6 +127,25 @@ export function extractWholeFileEdits(response: string): AgentWholeFileEdit[] {
   return edits;
 }
 
+function normalizeCommandContent(raw: string): string {
+  let content = raw.replace(/\r\n/g, "\n").trim();
+
+  // Strip markdown code block fences (e.g. ```bash ... ```)
+  content = content.replace(/^\s*```[a-zA-Z0-9_-]*\s*\n/, "");
+  content = content.replace(/\n\s*```\s*$/, "");
+  content = content.replace(/^\s*```[a-zA-Z0-9_-]*\s*/, "");
+  content = content.replace(/\s*```\s*$/, "");
+
+  content = content.trim();
+
+  // Strip leading and trailing single backticks (e.g. `some command`)
+  if (content.startsWith("`") && content.endsWith("`")) {
+    content = content.slice(1, -1).trim();
+  }
+
+  return content;
+}
+
 /**
  * Extracts <execute_command> tags from the agent response.
  */
@@ -134,5 +153,38 @@ export function extractCommandRequests(response: string): string[] {
   const matches = [
     ...response.matchAll(/<execute_command>([\s\S]*?)<\/execute_command>/gi),
   ];
-  return matches.map((match) => match[1].trim());
+  return matches.map((match) => normalizeCommandContent(match[1]));
+}
+
+/**
+ * Extrae llamadas a herramientas con el patrón XML <call_tool name="name">args</call_tool>
+ * Ejemplo: <call_tool name="weather">London</call_tool> o <call_tool name="weather">{"location": "London"}</call_tool>
+ */
+export function extractToolCalls(response: string): Array<{ name: string; args: Record<string, unknown> }> {
+  const matches = [...response.matchAll(/<call_tool\s+name="([^"]+)">([\s\S]*?)<\/call_tool>/gi)];
+  
+  return matches.map((match) => {
+    const name = match[1].trim();
+    const argsStr = match[2].trim();
+    let args: Record<string, unknown> = {};
+
+    try {
+      if (argsStr.startsWith('{')) {
+        args = JSON.parse(argsStr) as Record<string, unknown>;
+      } else {
+        const cleanArg = argsStr.replace(/^["']|["']$/g, '');
+        if (name === 'weather') {
+          args = { location: cleanArg };
+        } else if (name === 'search') {
+          args = { query: cleanArg };
+        } else {
+          args = { input: cleanArg };
+        }
+      }
+    } catch (e) {
+      args = { input: argsStr };
+    }
+
+    return { name, args };
+  });
 }

@@ -36,6 +36,19 @@ Sessions are stored in [src/chat/session-store.ts](../src/chat/session-store.ts)
 
 ---
 
+## Built-in Tools & Interception
+
+REI intercepts tool calls during the agent loop using the XML tag format `<call_tool name="name">args</call_tool>`.
+Currently, the **Weather Tool** is implemented:
+- Pattern: `<call_tool name="weather">City, Country</call_tool>`
+- Extraction: [src/agent-mode/response-handler.ts](../src/agent-mode/response-handler.ts)
+- Execution: [src/core/agent.ts](../src/core/agent.ts)
+- Logic: [src/tools/weather-tool.ts](../src/tools/weather-tool.ts) (fetches data from wttr.in)
+
+Results are injected back into the conversation as `System Feedback`, enabling the model to reason over live data.
+
+---
+
 ## Walk-Through Example: add sum command to cliCalc
 
 Step 1: User starts CLI on a target project.

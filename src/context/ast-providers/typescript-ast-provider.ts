@@ -38,10 +38,14 @@ export class TypeScriptAstProvider implements AstProvider {
     const chunks: AstChunk[] = [];
     // Classes
     for (const cls of sourceFile.getClasses()) {
-      if (!cls.isExported()) continue;
       const className = cls.getName() || "AnonymousClass";
       const startLine = cls.getStartLineNumber();
       const endLine = cls.getEndLineNumber();
+      let content = cls.getText();
+      const jsDocs = cls.getJsDocs();
+      if (jsDocs.length > 0) {
+        content = jsDocs.map((j) => j.getText()).join("\n") + "\n" + content;
+      }
       chunks.push({
         filePath: file.filePath,
         languageId: file.languageId,
@@ -50,15 +54,19 @@ export class TypeScriptAstProvider implements AstProvider {
         symbolName: className,
         startLine,
         endLine,
-        content: cls.getText(),
+        content,
       });
     }
     // Interfaces
     for (const iface of sourceFile.getInterfaces()) {
-      if (!iface.isExported()) continue;
       const ifaceName = iface.getName();
       const startLine = iface.getStartLineNumber();
       const endLine = iface.getEndLineNumber();
+      let content = iface.getText();
+      const jsDocs = iface.getJsDocs();
+      if (jsDocs.length > 0) {
+        content = jsDocs.map((j) => j.getText()).join("\n") + "\n" + content;
+      }
       chunks.push({
         filePath: file.filePath,
         languageId: file.languageId,
@@ -67,14 +75,18 @@ export class TypeScriptAstProvider implements AstProvider {
         symbolName: ifaceName,
         startLine,
         endLine,
-        content: iface.getText(),
+        content,
       });
     }
     // Types
     for (const t of sourceFile.getTypeAliases()) {
-      if (!t.isExported()) continue;
       const startLine = t.getStartLineNumber();
       const endLine = t.getEndLineNumber();
+      let content = t.getText();
+      const jsDocs = t.getJsDocs();
+      if (jsDocs.length > 0) {
+        content = jsDocs.map((j) => j.getText()).join("\n") + "\n" + content;
+      }
       chunks.push({
         filePath: file.filePath,
         languageId: file.languageId,
@@ -83,15 +95,19 @@ export class TypeScriptAstProvider implements AstProvider {
         symbolName: t.getName(),
         startLine,
         endLine,
-        content: t.getText(),
+        content,
       });
     }
     // Functions
     for (const func of sourceFile.getFunctions()) {
-      if (!func.isExported()) continue;
       const name = func.getName() || "anonymous";
       const startLine = func.getStartLineNumber();
       const endLine = func.getEndLineNumber();
+      let content = func.getText();
+      const jsDocs = func.getJsDocs();
+      if (jsDocs.length > 0) {
+        content = jsDocs.map((j) => j.getText()).join("\n") + "\n" + content;
+      }
       chunks.push({
         filePath: file.filePath,
         languageId: file.languageId,
@@ -100,12 +116,13 @@ export class TypeScriptAstProvider implements AstProvider {
         symbolName: name,
         startLine,
         endLine,
-        content: func.getText(),
+        content,
       });
     }
-    // Variables (exported)
+    // Variables
     for (const vs of sourceFile.getVariableStatements()) {
-      if (!vs.isExported()) continue;
+      const jsDocs = vs.getJsDocs();
+      const docsPrefix = jsDocs.length > 0 ? jsDocs.map((j) => j.getText()).join("\n") + "\n" : "";
       for (const vd of vs.getDeclarations()) {
         const startLine = vd.getStartLineNumber();
         const endLine = vd.getEndLineNumber();
@@ -117,7 +134,7 @@ export class TypeScriptAstProvider implements AstProvider {
           symbolName: vd.getName(),
           startLine,
           endLine,
-          content: vd.getText(),
+          content: docsPrefix + vd.getText(),
         });
       }
     }

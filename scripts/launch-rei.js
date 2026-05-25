@@ -67,6 +67,23 @@ function getOllamaModels() {
 }
 
 /**
+ * Returns available models from a running LLM Studio instance.
+ * Falls back to PROVIDER_MODELS.llmstudio if the request fails.
+ */
+async function getLlmStudioModels() {
+    try {
+        const baseUrl = process.env.LLM_STUDIO_BASE_URL || 'http://localhost:1234';
+        const res = await fetch(`${baseUrl}/v1/models`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const models = (data.data || []).map(m => m.id).filter(Boolean);
+        return models.length > 0 ? models : (PROVIDER_MODELS.llmstudio ?? []);
+    } catch {
+        return PROVIDER_MODELS.llmstudio ?? [];
+    }
+}
+
+/**
  * Builds a display summary of Ollama performance env vars.
  * Shows which are set (from system env or wizard) and which aren't.
  */
@@ -83,6 +100,12 @@ function buildOllamaSummary(envVars) {
     }).join('\n');
 }
 
+function getEnvPrefix(provider) {
+    if (provider === 'llmstudio') return 'LLM_STUDIO';
+    if (provider === 'huggingface') return 'HF';
+    return provider.toUpperCase();
+}
+
 async function pickProvider(message, initialValue) {
     const provider = await select({
         message,
@@ -94,7 +117,14 @@ async function pickProvider(message, initialValue) {
 }
 
 async function pickModel(provider, message, initialModel) {
-    const baseList = provider === 'ollama' ? getOllamaModels() : (PROVIDER_MODELS[provider] ?? []);
+    let baseList;
+    if (provider === 'ollama') {
+        baseList = getOllamaModels();
+    } else if (provider === 'llmstudio') {
+        baseList = await getLlmStudioModels();
+    } else {
+        baseList = PROVIDER_MODELS[provider] ?? [];
+    }
     const choices = [...baseList, CUSTOM];
     const choice = await select({
         message,
@@ -168,7 +198,8 @@ async function main() {
 
         Object.assign(config, { provider, model });
         envVars.MODEL_PROVIDER = provider;
-        envVars[`${provider.toUpperCase()}_MODEL`] = model;
+        const prefix = getEnvPrefix(provider);
+        envVars[`${prefix}_MODEL`] = model;
         // Explicitly clear AGENT_MODEL_PROVIDER to prevent .env bleed-through in single provider mode
         envVars.AGENT_MODEL_PROVIDER = '';
 
@@ -210,9 +241,13 @@ async function main() {
 
         Object.assign(config, { askProvider, askModel, agentProvider, agentModel });
         envVars.MODEL_PROVIDER = askProvider;
-        envVars[`${askProvider.toUpperCase()}_MODEL`]              = askModel;
+        
+        const askPrefix = getEnvPrefix(askProvider);
+        const agentPrefix = getEnvPrefix(agentProvider);
+        
+        envVars[`${askPrefix}_MODEL`]              = askModel;
         envVars.AGENT_MODEL_PROVIDER                               = agentProvider;
-        envVars[`${agentProvider.toUpperCase()}_MODEL_AGENT`]      = agentModel;
+        envVars[`${agentPrefix}_MODEL_AGENT`]      = agentModel;
 
         // Explicitly set per-mode vars so ask/planning don't inherit the agent model
         if (askProvider === 'ollama') {

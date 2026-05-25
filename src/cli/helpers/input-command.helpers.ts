@@ -1,5 +1,7 @@
 import { processMenuCommand } from "../../chat/menu-command-processor.js";
 import type { InputHandlerContext } from "../models/input-handler.types.js";
+import { createModelProvider } from "../../providers/provider-factory.js";
+import { Agent } from "../../core/agent.js";
 
 export async function handleInputCommand(
   trimmed: string,
@@ -24,6 +26,11 @@ export async function handleInputCommand(
 
   if (result.success) {
     actions.pushTranscript(result.response);
+
+    if (result.recreateAgent) {
+      const newProvider = createModelProvider();
+      ctx.agent = new Agent(newProvider, ctx.workspacePath);
+    }
 
     if (result.newSession) {
       Object.assign(session, result.newSession);

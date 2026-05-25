@@ -38,7 +38,9 @@ import {
   type BatchPatchApplyResult,
 } from "../tools/patch-applier.js";
 import { executeCommand, limitCommandOutput } from "../tools/command-executor.js";
-import { extractCommandRequests } from "../agent-mode/response-handler.js";
+import { extractCommandRequests, extractToolCalls } from "../agent-mode/response-handler.js";
+import { getWeather, formatWeatherOutput, type WeatherResult } from "../tools/weather-tool.js";
+import { searchWeb } from "../tools/search-tool.js";
 import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
 import { KnowledgeOrchestrator } from "../knowledge/orchestrator.js";
 import { AgentLogger } from "./logger.js";
@@ -200,23 +202,45 @@ export class Agent {
         return;
       }
 
-      // Interceptación de comandos antes de finalizar el turno
+      // Interceptación de herramientas y comandos antes de finalizar el turno
+      const toolCalls = extractToolCalls(outcome.response);
       const commands = extractCommandRequests(outcome.response);
-      if (commands.length > 0) {
-        let commandFeedback = "\n\n--- Command Execution Results ---\n";
+
+      if (toolCalls.length > 0 || commands.length > 0) {
+        let feedback = "\n\n--- Execution Results ---\n";
+
+        // 1. Procesar Tool Calls
+        for (const call of toolCalls) {
+          this.logger.logInfo(`Calling tool: ${call.name}`, { args: call.args });
+          try {
+            if (call.name === 'weather') {
+              const weatherRes = await getWeather(call.args.location as string);
+              feedback += `\n### 🌤️ Weather: ${call.args.location}\n${formatWeatherOutput(weatherRes)}\n`;
+            } else if (call.name === 'search') {
+              const searchRes = await searchWeb(call.args.query as string, this.provider);
+              feedback += `\n### 🔍 Search Results: ${call.args.query}\n${searchRes}\n`;
+            } else {
+              throw new Error(`Tool "${call.name}" is not implemented.`);
+            }
+          } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : String(err);
+            feedback += `\n[TOOL] ${call.name}(${JSON.stringify(call.args)}) -> ERROR: ${errorMsg}\n`;
+          }
+        }
+
+        // 2. Procesar Commands (si existen)
         for (const cmd of commands) {
           this.logger.logInfo(`Executing command: ${cmd}`);
           const result = await executeCommand(cmd, this.workspacePath);
           this.logger.logCommandExecution(cmd, result);
-          commandFeedback += `\nCommand: ${cmd}\nExit Code: ${result.exitCode}\nStdout: ${result.stdout || "none"}\nStderr: ${result.stderr || "none"}\n`;
+          feedback += `\n[COMMAND] ${cmd} (Exit: ${result.exitCode})\nStdout: ${result.stdout || "none"}\nStderr: ${result.stderr || "none"}\n`;
         }
-        session.messages.push({ role: "assistant", content: outcome.response });
-        session.messages.push({
-          role: "user",
-          content: `System Feedback: ${commandFeedback}`,
-        });
+
+        // Mostrar feedback al usuario final, no solo al modelo
+        const userVisibleResponse = outcome.response + feedback;
+        session.messages.push({ role: "assistant", content: userVisibleResponse });
         options?.onStatus?.("producing_response");
-        yield outcome.response + commandFeedback;
+        yield userVisibleResponse;
         return;
       }
 
@@ -232,6 +256,7 @@ export class Agent {
       let hasMoreCommands = true;
       let depth = 0;
       const maxDepth = 3;
+      let suppressYield = false;
 
       while (hasMoreCommands && depth < maxDepth) {
         let streamResponse = "";
@@ -240,20 +265,47 @@ export class Agent {
           model: resolveModelForMode(session.mode),
         })) {
           streamResponse += token;
-          yield token;
+          
+          // Detect opening: not suppressed yet, but streamResponse now contains the tag
+          if (!suppressYield && (streamResponse.length < 20 ||
+            streamResponse.includes("<call_tool") || streamResponse.includes("<execute_command")
+          )) {
+            suppressYield = true;
+          }
+
+          // Detect closing
+          if (suppressYield && (
+            streamResponse.includes("</call_tool>") || streamResponse.includes("</execute_command>")
+          )) {
+            suppressYield = false;
+            continue;
+          }
+
+          if (!suppressYield) {
+            yield token;
+          }
         }
 
+        this.logger?.logInfo("RAW_MODEL_OUTPUT", { content: streamResponse });
+
         const commands = extractCommandRequests(streamResponse);
-        if (commands.length > 0) {
+        const toolCalls = extractToolCalls(streamResponse);
+        if (commands.length > 0 || toolCalls.length > 0) {
           depth++;
-          const cmdFeedback = await this.executeCommandsFromResponse(streamResponse);
-          yield cmdFeedback;
+          let executionFeedback = "";
+          if (commands.length > 0) {
+            executionFeedback += await this.executeCommandsFromResponse(streamResponse);
+          }
+          if (toolCalls.length > 0) {
+            executionFeedback += await this.executeToolCallsFromResponse(streamResponse);
+          }
+          yield executionFeedback;
           currentMessages = [
             ...currentMessages,
             { role: "assistant", content: streamResponse },
             {
               role: "user",
-              content: `System: Command execution results:\n${cmdFeedback}\n\nNow continue your process or provide your complete answer using these results.`,
+              content: `System: Execution results:\n${executionFeedback}\n\nNow continue your process or provide your complete answer using these results.`,
             },
           ];
         } else {
@@ -270,6 +322,7 @@ export class Agent {
           const finalContent = allAssistantChunks.join("\n\n");
           const cleanAssistantContent = finalContent
             .replace(/<execute_command>[\s\S]*?<\/execute_command>/gi, "")
+            .replace(/<call_tool\s+name="[^"]+">[\s\S]*?<\/call_tool>/gi, "")
             .trim();
 
           session.messages.push({
@@ -513,6 +566,32 @@ export class Agent {
     return feedback;
   }
 
+  /** Executes any <call_tool> tags found in a response and returns formatted feedback. */
+  private async executeToolCallsFromResponse(response: string): Promise<string> {
+    const toolCalls = extractToolCalls(response);
+    if (toolCalls.length === 0) return "";
+
+    let feedback = "\n\n---\n**Tool Call Results:**\n";
+    for (const call of toolCalls) {
+      this.logger.logInfo(`Calling tool: ${call.name}`, { args: call.args });
+      try {
+        if (call.name === "weather") {
+          const weatherRes = await getWeather(call.args.location as string);
+          feedback += `\n### 🌤️ Weather: ${call.args.location}\n${formatWeatherOutput(weatherRes)}\n`;
+        } else if (call.name === "search") {
+          const searchRes = await searchWeb(call.args.query as string, this.provider);
+          feedback += `\n### 🔍 Search Results: ${call.args.query}\n${searchRes}\n`;
+        } else {
+          throw new Error(`Tool "${call.name}" is not implemented.`);
+        }
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        feedback += `\n[TOOL] ${call.name}(${JSON.stringify(call.args)}) -> ERROR: ${errorMsg}\n`;
+      }
+    }
+    return feedback;
+  }
+
   private async generateNonAgentAssistantResponse(
     mode: ChatSession["mode"],
     messagesForModel: ChatSession["messages"],
@@ -554,12 +633,19 @@ export class Agent {
       currentMessages.push({ role: "assistant", content: lastResponse });
 
       const commands = extractCommandRequests(lastResponse);
-      if (commands.length > 0) {
+      const toolCalls = extractToolCalls(lastResponse);
+      if (commands.length > 0 || toolCalls.length > 0) {
         depth++;
-        const cmdFeedback = await this.executeCommandsFromResponse(lastResponse);
+        let executionFeedback = "";
+        if (commands.length > 0) {
+          executionFeedback += await this.executeCommandsFromResponse(lastResponse);
+        }
+        if (toolCalls.length > 0) {
+          executionFeedback += await this.executeToolCallsFromResponse(lastResponse);
+        }
         currentMessages.push({
           role: "user",
-          content: `System: Command execution results:\n${cmdFeedback}\n\nNow continue your process or provide your complete answer using these results.`,
+          content: `System: Execution results:\n${executionFeedback}\n\nNow continue your process or provide your complete answer using these results.`,
         });
       } else {
         hasMoreCommands = false;
@@ -574,6 +660,7 @@ export class Agent {
     const finalContent = allAssistantChunks.join("\n\n");
     return finalContent
       .replace(/<execute_command>[\s\S]*?<\/execute_command>/gi, "")
+      .replace(/<call_tool\s+name="[^"]+">[\s\S]*?<\/call_tool>/gi, "")
       .trim();
   }
 
@@ -633,16 +720,37 @@ export class Agent {
         );
       }
     }
+    const toolCalls = extractToolCalls(outcome.response);
     const commands = extractCommandRequests(outcome.response);
-    if (commands.length > 0) {
-      let commandFeedback = "\n\n--- Command Execution Results ---\n";
+
+    if (toolCalls.length > 0 || commands.length > 0) {
+      let feedback = "\n\n--- Execution Results ---\n";
+
+      for (const call of toolCalls) {
+        this.logger.logInfo(`Calling tool: ${call.name}`, { args: call.args });
+        try {
+          if (call.name === 'weather') {
+            const weatherRes = await getWeather(call.args.location as string);
+            feedback += `\n### 🌤️ Weather: ${call.args.location}\n${formatWeatherOutput(weatherRes)}\n`;
+          } else if (call.name === 'search') {
+            const searchRes = await searchWeb(call.args.query as string, this.provider);
+            feedback += `\n### 🔍 Search Results: ${call.args.query}\n${searchRes}\n`;
+          } else {
+            throw new Error(`Tool "${call.name}" is not implemented.`);
+          }
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          feedback += `\n[TOOL] ${call.name}(${JSON.stringify(call.args)}) -> ERROR: ${errorMsg}\n`;
+        }
+      }
+
       for (const cmd of commands) {
         this.logger.logInfo(`Executing command: ${cmd}`);
         const result = await executeCommand(cmd, this.workspacePath);
         this.logger.logCommandExecution(cmd, result);
-        commandFeedback += `\nCommand: ${cmd}\nExit Code: ${result.exitCode}\nStdout: ${result.stdout || "none"}\nStderr: ${result.stderr || "none"}\n`;
+        feedback += `\n[COMMAND] ${cmd} (Exit: ${result.exitCode})\nStdout: ${result.stdout || "none"}\nStderr: ${result.stderr || "none"}\n`;
       }
-      return outcome.response + commandFeedback;
+      return outcome.response + feedback;
     }
     return outcome.response;
   }

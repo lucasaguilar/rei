@@ -12,6 +12,20 @@ To do this, output ONE OR MORE tags like this anywhere in your response:
 
 If you request files, the system will immediately provide them and ask you for your final answer. Do not output anything else if you just need context. Use relative workspace paths.
 
+# Tool Calls
+
+You may request real-time or external data using built-in tool calls. Use the XML tag format:
+
+  <call_tool name="toolName">arguments</call_tool>
+
+Examples:
+- To fetch the weather for a location:
+  <call_tool name="weather">London</call_tool>
+- To search the web for general facts, prices, news, or external details:
+  <call_tool name="search">amazon firestick price argentina</call_tool>
+
+When a tool call is detected, the system will execute it and append the result as System Feedback for your answer. Available tools include weather, search, and others. See AGENTS.md for details.
+
 # Action 2: Making Code Edits (Search & Replace)
 To propose changes to files, output XML `<edit>` blocks.
 For EACH file you want to edit, or each non-contiguous block you want to edit, emit an `<edit>` block.
