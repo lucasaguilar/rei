@@ -47,9 +47,11 @@ export async function processMenuCommand(
     };
   }
 
-  if (trimmed === "/session new") {
+  const sessionNewMatch = trimmed.match(/^\/session\s+new(?:\s+(.+))?$/);
+  if (sessionNewMatch) {
+    const customName = sessionNewMatch[1]?.trim();
     const archivedName =
-      session.messages.length > 0 ? archiveCurrentSession(workspacePath) : null;
+      session.messages.length > 0 ? archiveCurrentSession(workspacePath, customName) : null;
     const newSession: ChatSession = { messages: [], mode: session.mode };
 
     saveSession(workspacePath, newSession.messages, newSession.mode);
@@ -59,6 +61,29 @@ export async function processMenuCommand(
       response: archivedName
         ? `[REI] Archived current session as ${archivedName}. Started a new ${newSession.mode} session.`
         : `[REI] Started a new ${newSession.mode} session.`,
+      newSession,
+      recordInSession: false,
+    };
+  }
+
+  const sessionArchiveMatch = trimmed.match(/^\/session\s+archive(?:\s+(.+))?$/);
+  if (sessionArchiveMatch) {
+    const customName = sessionArchiveMatch[1]?.trim();
+    if (session.messages.length === 0) {
+      return {
+        success: false,
+        response: "[REI] Current session is empty. Nothing to archive.",
+      };
+    }
+    const archivedName = archiveCurrentSession(workspacePath, customName);
+    const newSession: ChatSession = { messages: [], mode: session.mode };
+    saveSession(workspacePath, newSession.messages, newSession.mode);
+
+    return {
+      success: true,
+      response: archivedName
+        ? `[REI] Archived current session as ${archivedName}. Started a new ${newSession.mode} session.`
+        : `[REI] Failed to archive session.`,
       newSession,
       recordInSession: false,
     };

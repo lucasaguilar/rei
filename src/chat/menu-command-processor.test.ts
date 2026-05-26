@@ -56,6 +56,76 @@ describe("menu-command-processor session commands", () => {
     expect(archived).toHaveLength(1);
     expect(archived[0].turns).toBe(1);
   });
+
+  it("archives session with a custom descriptive name via /session new", async () => {
+    const session: ChatSession = {
+      mode: "ask",
+      createdAt: "2026-05-16T00:00:00.000Z",
+      messages: [
+        { role: "user", content: "old question" },
+        { role: "assistant", content: "old answer" },
+      ],
+    };
+
+    saveSession(tmpWorkspace, session.messages, session.mode, session.summary, session.createdAt);
+
+    const result = await processMenuCommand("/session new agregar-login-social", session, tmpWorkspace, provider);
+
+    expect(result.success).toBe(true);
+    expect(result.response).toContain("agregar-login-social.json");
+    expect(result.newSession).toEqual({ messages: [], mode: "ask" });
+
+    const archived = listSessions(tmpWorkspace);
+    expect(archived).toHaveLength(1);
+    expect(archived[0].id).toBe("agregar-login-social");
+  });
+
+  it("archives session with a custom name via /session archive", async () => {
+    const session: ChatSession = {
+      mode: "agent",
+      createdAt: "2026-05-16T00:00:00.000Z",
+      messages: [{ role: "user", content: "do something" }],
+    };
+
+    saveSession(tmpWorkspace, session.messages, session.mode, session.summary, session.createdAt);
+
+    const result = await processMenuCommand("/session archive fix-bug-123", session, tmpWorkspace, provider);
+
+    expect(result.success).toBe(true);
+    expect(result.response).toContain("fix-bug-123.json");
+    expect(result.newSession).toEqual({ messages: [], mode: "agent" });
+
+    const archived = listSessions(tmpWorkspace);
+    expect(archived).toHaveLength(1);
+    expect(archived[0].id).toBe("fix-bug-123");
+  });
+
+  it("handles name collisions by appending a numeric suffix", async () => {
+    const session: ChatSession = {
+      mode: "ask",
+      createdAt: "2026-05-16T00:00:00.000Z",
+      messages: [{ role: "user", content: "msg1" }],
+    };
+
+    saveSession(tmpWorkspace, session.messages, session.mode, session.summary, session.createdAt);
+    await processMenuCommand("/session new my-feature", session, tmpWorkspace, provider);
+
+    // Create a new session and archive with the same name
+    const session2: ChatSession = {
+      mode: "ask",
+      messages: [{ role: "user", content: "msg2" }],
+    };
+    saveSession(tmpWorkspace, session2.messages, session2.mode);
+    const result2 = await processMenuCommand("/session new my-feature", session2, tmpWorkspace, provider);
+
+    expect(result2.success).toBe(true);
+    expect(result2.response).toContain("my-feature-1.json");
+
+    const archived = listSessions(tmpWorkspace);
+    expect(archived).toHaveLength(2);
+    const ids = archived.map((s) => s.id).sort();
+    expect(ids).toEqual(["my-feature", "my-feature-1"]);
+  });
 });
 
 describe("menu-command-processor /provider and /model commands", () => {

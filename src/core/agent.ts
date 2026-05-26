@@ -26,6 +26,7 @@ import {
   chunkRepoMapString,
 } from "../context/rag/map-chunker.js";
 import { getRelevantMapContext } from "../context/rag/map-retriever.js";
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 import chokidar, { type FSWatcher } from "chokidar";
@@ -44,6 +45,7 @@ import {
 import {
   extractCommandRequests,
   extractToolCalls,
+  extractFileRequests,
 } from "../agent-mode/response-handler.js";
 import {
   getWeather,
@@ -273,7 +275,7 @@ export class Agent {
       let currentMessages = [...messagesForModel];
       let hasMoreCommands = true;
       let depth = 0;
-      const maxDepth = 3;
+      const maxDepth = process.env.REI_MAX_TURNS ? parseInt(process.env.REI_MAX_TURNS, 10) : 7;
 
       while (hasMoreCommands && depth < maxDepth) {
         let streamResponse = "";
@@ -293,12 +295,15 @@ export class Agent {
 
         const commands = extractCommandRequests(streamResponse);
         const toolCalls = extractToolCalls(streamResponse);
-        if (commands.length > 0 || toolCalls.length > 0) {
+        const fileRequests = extractFileRequests(streamResponse);
+
+        if (commands.length > 0 || toolCalls.length > 0 || fileRequests.length > 0) {
           // Yield the visible part of the response (strip XML tags) before
           // the tool-result block so the user sees the prose intro, if any.
           const visibleResponse = streamResponse
             .replace(/<execute_command>[\s\S]*?<\/execute_command>/gi, "")
             .replace(/<call_tool\s+name="[^"]+">[\s\S]*?<\/call_tool>/gi, "")
+            .replace(/<request_files>[\s\S]*?<\/request_files>/gi, "")
             .trim();
           if (visibleResponse) {
             yield visibleResponse + "\n";
@@ -306,15 +311,26 @@ export class Agent {
 
           depth++;
           let executionFeedback = "";
+          let userVisibleFeedback = "";
+
+          if (fileRequests.length > 0) {
+            const fileFeedback = await this.executeFileRequestsFromResponse(streamResponse);
+            executionFeedback += fileFeedback;
+            userVisibleFeedback += `\n📂 **[REI] Injected ${fileRequests.length} requested file(s) into context:**\n` +
+              fileRequests.map((f) => `- \`${f}\``).join("\n") + "\n";
+          }
           if (commands.length > 0) {
-            executionFeedback +=
-              await this.executeCommandsFromResponse(streamResponse);
+            const cmdFeedback = await this.executeCommandsFromResponse(streamResponse);
+            executionFeedback += cmdFeedback;
+            userVisibleFeedback += cmdFeedback;
           }
           if (toolCalls.length > 0) {
-            executionFeedback +=
-              await this.executeToolCallsFromResponse(streamResponse);
+            const toolFeedback = await this.executeToolCallsFromResponse(streamResponse);
+            executionFeedback += toolFeedback;
+            userVisibleFeedback += toolFeedback;
           }
-          yield executionFeedback;
+
+          yield userVisibleFeedback;
           currentMessages = [
             ...currentMessages,
             { role: "assistant", content: streamResponse },
@@ -344,6 +360,7 @@ export class Agent {
           const cleanAssistantContent = finalContent
             .replace(/<execute_command>[\s\S]*?<\/execute_command>/gi, "")
             .replace(/<call_tool\s+name="[^"]+">[\s\S]*?<\/call_tool>/gi, "")
+            .replace(/<request_files>[\s\S]*?<\/request_files>/gi, "")
             .trim();
 
           session.messages.push({
@@ -565,6 +582,26 @@ export class Agent {
     });
   }
 
+  /** Reads the contents of any <request_files> tags found in a response and returns formatted feedback. */
+  private async executeFileRequestsFromResponse(response: string): Promise<string> {
+    const fileRequests = extractFileRequests(response);
+    if (fileRequests.length === 0) return "";
+
+    let feedback = "\n\n---\n**Requested Files Context:**\n";
+    for (const f of fileRequests) {
+      this.logger.logInfo(`Non-agent requested file: ${f}`);
+      const absPath = path.join(this.workspacePath, f);
+      try {
+        const content = await fs.readFile(absPath, "utf-8");
+        feedback += `\n### File: ${f}\n\`\`\`\n${content}\n\`\`\`\n`;
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        feedback += `\n### File: ${f}\n(Could not read file: ${errorMsg})\n`;
+      }
+    }
+    return feedback;
+  }
+
   /** Executes any <execute_command> tags found in a response and returns formatted feedback. */
   private async executeCommandsFromResponse(response: string): Promise<string> {
     const commands = extractCommandRequests(response);
@@ -622,7 +659,7 @@ export class Agent {
     let currentMessages = [...messagesForModel];
     let hasMoreCommands = true;
     let depth = 0;
-    const maxDepth = 3;
+    const maxDepth = process.env.REI_MAX_TURNS ? parseInt(process.env.REI_MAX_TURNS, 10) : 7;
     let lastResponse = "";
 
     while (hasMoreCommands && depth < maxDepth) {
@@ -657,9 +694,14 @@ export class Agent {
 
       const commands = extractCommandRequests(lastResponse);
       const toolCalls = extractToolCalls(lastResponse);
-      if (commands.length > 0 || toolCalls.length > 0) {
+      const fileRequests = extractFileRequests(lastResponse);
+      if (commands.length > 0 || toolCalls.length > 0 || fileRequests.length > 0) {
         depth++;
         let executionFeedback = "";
+        if (fileRequests.length > 0) {
+          executionFeedback +=
+            await this.executeFileRequestsFromResponse(lastResponse);
+        }
         if (commands.length > 0) {
           executionFeedback +=
             await this.executeCommandsFromResponse(lastResponse);
@@ -686,6 +728,7 @@ export class Agent {
     return finalContent
       .replace(/<execute_command>[\s\S]*?<\/execute_command>/gi, "")
       .replace(/<call_tool\s+name="[^"]+">[\s\S]*?<\/call_tool>/gi, "")
+      .replace(/<request_files>[\s\S]*?<\/request_files>/gi, "")
       .trim();
   }
 
