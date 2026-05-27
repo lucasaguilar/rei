@@ -304,26 +304,187 @@ rei --config
 This forces the Interactive Wizard to launch, allowing you to update your settings and cleanly overwrite the active `.env` file.
 
 ### 3. How the Generated `.env` Looks (Hybrid Model Routing)
-The generated `.env` file leverages REI's **Multi-Cerebro (Hybrid Local/Cloud Model Routing)** architecture, allowing you to route each conversational mode to a different model for maximum efficiency:
+
+When you run the Interactive Configuration Wizard, it reads the template from [`.env.example`](file:///Users/lucas/www/rei/.env.example) and generates a workspace-local `.env` file containing comprehensive comments for every single tuning parameter. 
+
+Below is the **complete `.env.example` configuration template** recommended for high-performance hybrid setups:
 
 ```ini
-# --- Primary Model Provider (conversational Q&A / Planning) ---
-# Routes conversational Ask and Planning to a fast, free local model
-# Recommended local options: qwen2.5-coder:7b, gemma2:9b, or the highly recommended qwen/qwen3.6-35b-a3b (via Ollama / LM Studio)
+# ==============================================================================
+# REI (Repository-Aware AI Agent) - Environment Configuration Example
+# ==============================================================================
+# Copy this file to .env in your repository root and fill in your desired settings:
+# cp .env.example .env
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. PRIMARY ORCHESTRATION & PROVIDERS
+# ------------------------------------------------------------------------------
+
+# Main LLM provider for the chat session.
+# Supported values: mock, ollama, groq, gemini, openrouter, huggingface, llmstudio
 MODEL_PROVIDER=ollama
+
+# (Optional) Dedicated provider used ONLY for AGENT mode execution.
+# Allows using a light local provider (e.g., ollama) for fast Ask/Planning turns, 
+# while delegating heavier XML-producing actions to a premium cloud model.
+# E.g., AGENT_MODEL_PROVIDER=openrouter
+AGENT_MODEL_PROVIDER=openrouter
+
+
+# ------------------------------------------------------------------------------
+# 2. CLOUD PROVIDER CREDENTIALS & API KEYS
+# ------------------------------------------------------------------------------
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+GEMINI_API_KEY=your_gemini_api_key_here
+GROQ_API_KEY=your_groq_api_key_here
+HF_TOKEN=your_huggingface_token_here
+
+
+# ------------------------------------------------------------------------------
+# 3. CLOUD PROVIDER MODEL SELECTION
+# ------------------------------------------------------------------------------
+
+# --- OpenRouter Models ---
+# Default model for all modes using OpenRouter
+OPENROUTER_MODEL=qwen/qwen3-coder-30b-a3b-instruct
+# Specific model used only in Agent mode (optional)
+# OPENROUTER_MODEL_AGENT=qwen/qwen3.6-plus
+OPENROUTER_MODEL_AGENT=qwen/qwen3.6-plus
+
+# --- Gemini Models ---
+# Default model for all modes using Gemini
+GEMINI_MODEL=gemini-2.5-flash
+# Specific model used only in Agent mode (optional)
+# GEMINI_MODEL_AGENT=gemini-2.5-pro
+
+# --- Groq Models ---
+# Default model for all modes using Groq
+GROQ_MODEL=deepseek-r1-distill-llama-70b
+# Specific model used only in Agent mode (optional)
+# GROQ_MODEL_AGENT=deepseek-r1-distill-llama-70b
+
+
+# ------------------------------------------------------------------------------
+# 4. LOCAL PROVIDER MODEL SELECTION
+# ------------------------------------------------------------------------------
+
+# --- Ollama Configuration ---
+# Default model used as fallback for all modes using Ollama
 OLLAMA_MODEL=qwen2.5-coder:7b
+
+# Mode-specific overrides (optional). If not set, falls back to OLLAMA_MODEL.
+# Highly recommended: use the ultra-fast local model qwen/qwen3.6-35b-a3b (via Ollama / LM Studio)
 OLLAMA_MODEL_ASK=qwen/qwen3.6-35b-a3b
 OLLAMA_MODEL_PLANNING=qwen/qwen3.6-35b-a3b
-OLLAMA_NUM_CTX=32768
+# OLLAMA_MODEL_AGENT=qwen3.6:27b-coding-nvfp4
 
-# --- Dedicated Agent Provider (complex file editing & execution) ---
-# Routes surgical XML-patch editing tasks to a premium high-reasoning cloud model
-AGENT_MODEL_PROVIDER=openrouter
-OPENROUTER_API_KEY=your-api-key-here
-OPENROUTER_MODEL_AGENT=qwen/qwen3.6-plus
+# --- LM Studio Configuration (llmstudio) ---
+# Supports qwen/qwen3.6-35b-a3b for fast offline reasoning with GPU offloading
+LLM_STUDIO_MODEL=qwen/qwen3.6-35b-a3b
+# Specific model used only in Agent mode (optional)
+# LLM_STUDIO_MODEL_AGENT=qwen/qwen3.6-35b-a3b
+
+# --- Hugging Face Inference API Models ---
+HF_MODEL=Qwen/Qwen2.5-Coder-32B-Instruct
+# Specific model used only in Agent mode (optional)
+# HF_MODEL_AGENT=Qwen/Qwen2.5-Coder-32B-Instruct
+
+
+# ------------------------------------------------------------------------------
+# 5. OLLAMA ENGINE PERFORMANCE TUNING (ADVANCED)
+# ------------------------------------------------------------------------------
+
+# Base URL to reach the Ollama API (defaults to http://127.0.0.1:11434)
+# OLLAMA_BASE_URL=http://127.0.0.1:11434
+
+# Temperature parameter for local generations.
+# 0 is strongly recommended for deterministic, structured coding/XML outputs.
+OLLAMA_TEMPERATURE=0
+
+# Total token context window (input + output).
+# Standard models: 8192 or 12288 works fine.
+# Thinking models (e.g. Qwen 3.6, DeepSeek R1): 16384 to 32768 is recommended to avoid window exhaustion.
+OLLAMA_NUM_CTX=16384
+
+# Maximum tokens predicted (generated response length).
+# For reasoning/thinking models whose reasoning traces are long, set to 4096 or higher.
+OLLAMA_NUM_PREDICT=4096
+
+# Number of CPU threads to allocate for local inference
+# OLLAMA_NUM_THREAD=8
+
+# Duration to keep models loaded in Ollama's memory (defaults to 30m)
+# OLLAMA_KEEP_ALIVE=2h
+
+# Network request timeout in milliseconds for local Ollama completions (defaults to 300000)
+# OLLAMA_REQUEST_TIMEOUT_MS=600000
+
+
+# ------------------------------------------------------------------------------
+# 6. CONTEXT REDUCTION & PERFORMANCE OPTIMIZATIONS
+# ------------------------------------------------------------------------------
+
+# Master toggle for on-demand context injection (1 = Enabled, 0 = Disabled).
+# When enabled, files are only loaded when explicitly referenced by the user (e.g. @filename),
+# keeping prompt context small, fast, and highly resource-efficient for local execution.
+REI_ON_DEMAND_FILE_CONTEXT=1
+
+# Mode-specific overrides (optional)
+REI_ON_DEMAND_FILE_CONTEXT_ASK=1
+REI_ON_DEMAND_FILE_CONTEXT_PLANNING=1
+REI_ON_DEMAND_FILE_CONTEXT_AGENT=0
+
+
+# ------------------------------------------------------------------------------
+# 7. WORKSPACE, SERVER & TOOL SETTINGS
+# ------------------------------------------------------------------------------
+
+# Default directory path to target upon starting the chat
+REI_WORKSPACE_PATH=/path/to/your/default/workspace
+
+# List of authorized directories for the server backend (comma-separated)
+# ALLOWED_WORKSPACES=/path/to/project1,/path/to/project2
+
+# Model used specifically to summarize historical messages during session compaction
+# COMPACTOR_MODEL=gemini-2.5-flash
+
+# Test-Driven Development (TDD) Mode (true/false)
+# If enabled, sandbox execution will run project test suite ('npm run test')
+# in addition to type checks to validate proposed edits before presenting them.
+REI_TDD_MODE=false
+
+# Code Modification Formatting Scheme (sr | wholefile)
+# - sr (default): Emits search-replace tags (<search> / <replace>), highly efficient for large files.
+# - wholefile: Emits the complete file replacement within the <edit> tag.
+# AGENT_EDIT_FORMAT=sr
+
+# Network request timeout in milliseconds for LM Studio completions
+LLM_STUDIO_REQUEST_TIMEOUT_MS=600000
 ```
 
-REI supports the following providers out-of-the-box: `ollama`, `openrouter`, `gemini`, `groq`, `llmstudio`, `huggingface`, and `mock`.
+---
+
+### 🧠 Fundamental Configurations Explained
+
+To truly understand how REI operates and tune it for your workspace, pay close attention to these key environment switches:
+
+#### A. Multi-Brain Routing Orchestration
+* **`MODEL_PROVIDER`**: Controls the provider for conversational turns (`/mode ask` and `/mode planning`). Setting this to `ollama` or `llmstudio` routes standard chat and planning queries locally to keep them 100% free and fast.
+* **`AGENT_MODEL_PROVIDER`**: Instructs REI to route **Agent Mode** surgical code modifications to a different provider. Enforcing `AGENT_MODEL_PROVIDER=openrouter` with a premium model like `qwen/qwen3.6-plus` ensures top-tier reasoning capabilities when producing XML search-replace patches, while keeping conversational costs at zero.
+
+#### B. Context Window Tuning for Local Reasoning Models
+* **`OLLAMA_NUM_CTX`**: Configures the context size in Ollama. For high-performance local reasoning models (like `qwen/qwen3.6-35b-a3b`), setting this to at least `16384` or `32768` is critical to prevent context truncation during deep repository scans.
+* **`OLLAMA_NUM_PREDICT`**: Controls the maximum length of generated outputs. Set this to `4096` or higher when running reasoning models, since their internal thinking chains consume substantial output tokens before emitting the final code.
+
+#### C. Context Reduction & On-Demand Context Injection
+* **`REI_ON_DEMAND_FILE_CONTEXT`**: When set to `1`, REI operates in an ultra-efficient on-demand mode. Files are only loaded into the prompt context when explicitly referenced by the user (e.g., using `@filename`). This keeps conversation speeds lightning-fast.
+* **`REI_ON_DEMAND_FILE_CONTEXT_AGENT`**: Set to `0` by default. This ensures that when executing a plan in **Agent Mode**, the agent has full access to load whatever files it deems necessary to guarantee type safety and compile diagnostics, while conversation/planning remain lightweight.
+
+#### D. Test-Driven Development Auto-Healing
+* **`REI_TDD_MODE`**: Setting this to `true` (or toggling via `/tdd` inside chat) tells REI's sandbox validation loop to execute your project's test suite (`npm run test`) in addition to standard TypeScript compilation diagnostics. Any failing test traces will be fed back to the LLM automatically, enabling REI to auto-heal logical errors before applying edits to your workspace.
+
+REI supports the following model providers out-of-the-box: `ollama`, `openrouter`, `gemini`, `groq`, `llmstudio`, `huggingface`, and `mock`.
 
 ### Compactor model (optional)
 
