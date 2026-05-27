@@ -457,6 +457,7 @@ export class Agent {
   private async updateSystemContextWithRepoMap(
     session: ChatSession,
     userInput?: string,
+    onStatus?: StreamTurnOptions["onStatus"],
   ): Promise<string | undefined> {
     let repositorySkeletonMap: string | undefined = undefined;
 
@@ -482,6 +483,7 @@ export class Agent {
       });
 
       if (chunksToEmbed.length > 0) {
+        onStatus?.("indexing_repository");
         console.log(
           `\n\x1b[33m[REI] Indexando repositorio: Generando embeddings locales para ${chunksToEmbed.length} bloque(s) de código...` +
           `\n      Esto se procesa en tu CPU y puede tomar de 30 a 90 segundos en el primer arranque. Por favor espera...\x1b[0m\n`
@@ -558,6 +560,7 @@ export class Agent {
     const repositorySkeletonMap = await this.updateSystemContextWithRepoMap(
       session,
       userInput,
+      onStatus,
     );
     this.logger.logUserPrompt({
       mode: session.mode,

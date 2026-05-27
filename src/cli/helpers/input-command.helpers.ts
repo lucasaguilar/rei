@@ -42,6 +42,8 @@ export async function handleInputCommand(
       session.messages.push({ role: "user", content: prompt });
 
       state.busy = true;
+      state.activeStatus = "calling_model";
+      actions.startSpinner();
       actions.draw();
       try {
         const response = await agent.runTurn(session, prompt);
@@ -51,6 +53,8 @@ export async function handleInputCommand(
           `Error: ${err instanceof Error ? err.message : String(err)}`,
         );
       } finally {
+        actions.stopSpinner();
+        state.activeStatus = undefined;
         state.busy = false;
         actions.draw();
       }
