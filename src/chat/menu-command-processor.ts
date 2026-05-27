@@ -1,3 +1,5 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { ChatMessage, ChatSession, SessionMode } from "./types.js";
 import { getHelpText } from "../cli/constants/chat.constants.js";
 import {
@@ -11,6 +13,15 @@ import { startIndexingWorker } from "../context/rag/rag-indexer.js";
 import { generateRepoMap } from "../tools/repo-map-generator.js";
 import type { ModelProvider } from "../providers/model-provider.js";
 import { clearPromptCache } from "../prompts/loader.js";
+import {
+  deletePlanTodoFile,
+  initPlanTodoFile,
+  recreatePlanTodoFileFromSession,
+  savePlanToFile,
+  loadPlanFromFile,
+  STAGE_REGEX,
+  isPlanMessage,
+} from "./plan-tracker.js";
 
 export interface CommandResult {
   success: boolean;
@@ -47,18 +58,45 @@ export async function processMenuCommand(
     };
   }
 
-  if (trimmed === "/session new") {
+  const sessionNewMatch = trimmed.match(/^\/session\s+new(?:\s+(.+))?$/);
+  if (sessionNewMatch) {
+    const customName = sessionNewMatch[1]?.trim();
     const archivedName =
-      session.messages.length > 0 ? archiveCurrentSession(workspacePath) : null;
+      session.messages.length > 0 ? archiveCurrentSession(workspacePath, customName) : null;
     const newSession: ChatSession = { messages: [], mode: session.mode };
 
     saveSession(workspacePath, newSession.messages, newSession.mode);
+    deletePlanTodoFile(workspacePath);
 
     return {
       success: true,
       response: archivedName
         ? `[REI] Archived current session as ${archivedName}. Started a new ${newSession.mode} session.`
         : `[REI] Started a new ${newSession.mode} session.`,
+      newSession,
+      recordInSession: false,
+    };
+  }
+
+  const sessionArchiveMatch = trimmed.match(/^\/session\s+archive(?:\s+(.+))?$/);
+  if (sessionArchiveMatch) {
+    const customName = sessionArchiveMatch[1]?.trim();
+    if (session.messages.length === 0) {
+      return {
+        success: false,
+        response: "[REI] Current session is empty. Nothing to archive.",
+      };
+    }
+    const archivedName = archiveCurrentSession(workspacePath, customName);
+    const newSession: ChatSession = { messages: [], mode: session.mode };
+    saveSession(workspacePath, newSession.messages, newSession.mode);
+    deletePlanTodoFile(workspacePath);
+
+    return {
+      success: true,
+      response: archivedName
+        ? `[REI] Archived current session as ${archivedName}. Started a new ${newSession.mode} session.`
+        : `[REI] Failed to archive session.`,
       newSession,
       recordInSession: false,
     };
@@ -108,6 +146,7 @@ export async function processMenuCommand(
       loaded.summary,
       loaded.createdAt,
     );
+    recreatePlanTodoFileFromSession(workspacePath, loaded.messages);
 
     return {
       success: true,
@@ -140,6 +179,7 @@ export async function processMenuCommand(
       session.summary,
       session.createdAt,
     );
+    deletePlanTodoFile(workspacePath);
     return {
       success: true,
       response:
@@ -177,38 +217,111 @@ export async function processMenuCommand(
     }
   }
 
-  if (trimmed === "/runplan") {
+  if (trimmed.startsWith("/runplan")) {
+    const runPlanMatch = trimmed.match(/^\/runplan(?:\s+(?:stage|step|fase|etapa|paso)\s+(\d+))?$/i);
+    if (!runPlanMatch) {
+      return {
+        success: false,
+        response: "[RUNPLAN] Formato inválido. Usá /runplan o /runplan stage <número>.",
+      };
+    }
+
     const lastPlanMsg = [...session.messages]
       .reverse()
       .find(
         (m) =>
           m.role === "assistant" &&
           m.content &&
-          m.content.toLowerCase().includes("plan"),
+          isPlanMessage(m.content),
       );
 
-    if (!lastPlanMsg) {
+    if (!lastPlanMsg || !lastPlanMsg.content) {
       return {
         success: false,
-        response: "[RUNPLAN] No plan found in session.",
+        response: "[RUNPLAN] No se encontró ningún plan en esta sesión.",
       };
+    }
+
+    const planContent = lastPlanMsg.content;
+    let targetContent = planContent;
+    let stageTitle = "";
+
+    const stageNumStr = runPlanMatch[1];
+    const stageNum = stageNumStr ? parseInt(stageNumStr, 10) : null;
+
+    if (stageNum === null || stageNum === 1) {
+      initPlanTodoFile(workspacePath, planContent);
+    } else {
+      const todoPath = path.join(workspacePath, ".rei/current-plan-todo.md");
+      if (!fs.existsSync(todoPath)) {
+        initPlanTodoFile(workspacePath, planContent);
+      }
+    }
+
+     if (stageNum !== null) {
+      const lines = planContent.split("\n");
+
+      let startIndex = -1;
+      let headerLevel = 0;
+
+      for (let i = 0; i < lines.length; i++) {
+        const m = lines[i].match(STAGE_REGEX);
+        if (m && parseInt(m[2], 10) === stageNum) {
+          startIndex = i;
+          headerLevel = m[1] ? m[1].length : 0;
+          stageTitle = lines[i];
+          break;
+        }
+      }
+
+      if (startIndex === -1) {
+        return {
+          success: false,
+          response: `[RUNPLAN] No se encontró la etapa ${stageNum} en el plan.`,
+        };
+      }
+
+      // Find the end index of the section
+      let endIndex = lines.length;
+      for (let i = startIndex + 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (line.startsWith("#")) {
+          const m = line.match(STAGE_REGEX);
+          const headerMatch = line.match(/^#+/);
+          const matchLen = headerMatch ? headerMatch[0].length : 0;
+          // Terminate if another stage is found, or if a header of same/higher level is found
+          if (m || matchLen <= headerLevel) {
+            endIndex = i;
+            break;
+          }
+        }
+      }
+
+      targetContent = lines.slice(startIndex, endIndex).join("\n");
     }
 
     const fileRegex =
       /([\w\-/]+\.(ts|js|json|md|tsx|jsx|yml|yaml|css|scss|html|cjs|mjs))/gi;
     const files = Array.from(
-      new Set(lastPlanMsg.content!.match(fileRegex) || []),
+      new Set(targetContent.match(fileRegex) || []),
     );
 
     if (files.length === 0) {
       return {
         success: false,
-        response:
-          "[RUNPLAN] No files detected in plan. Please ensure the plan lists file names.",
+        response: stageNum
+          ? `[RUNPLAN] No se detectaron archivos a modificar en la etapa ${stageNum}.`
+          : "[RUNPLAN] No se detectaron archivos a modificar en el plan.",
       };
     }
 
-    const planPrompt = `Ejecutá el siguiente plan sobre estos archivos:\n\nPLAN:\n${lastPlanMsg.content}\n\nARCHIVOS:\n${files.join(", ")}`;
+    const planPrompt = stageNum
+      ? `[RUNPLAN STAGE ${stageNum}] Ejecutá la Etapa ${stageNum} del plan de implementación.\n\nSUB-PLAN:\n${targetContent}\n\nARCHIVOS A MODIFICAR:\n${files.join(", ")}`
+      : `Ejecutá el siguiente plan sobre estos archivos:\n\nPLAN:\n${planContent}\n\nARCHIVOS:\n${files.join(", ")}`;
+
+    const responseMsg = stageNum
+      ? `[REI] Cambiando a modo AGENT para ejecutar la etapa ${stageNum}. Archivos objetivo: ${files.join(", ")}`
+      : `[REI] Cambiando a modo AGENT para ejecutar el plan completo. Archivos objetivo: ${files.join(", ")}`;
 
     const newMode = "agent" as SessionMode;
     saveSession(
@@ -221,7 +334,7 @@ export async function processMenuCommand(
 
     return {
       success: true,
-      response: `[REI] Switching to AGENT mode to execute the plan. Target files: ${files.join(", ")}`,
+      response: responseMsg,
       newSession: { ...session, mode: newMode },
       autoExecute: { prompt: planPrompt },
     };
@@ -521,6 +634,89 @@ export async function processMenuCommand(
       response: `[REI] ${modeLabel} model changed to: '${requested}' (provider: '${targetProvider}'). Agent recreated successfully.`,
       recreateAgent: true,
     };
+  }
+
+  if (trimmed.startsWith("/saveplan")) {
+    const saveMatch = trimmed.match(/^\/saveplan\s+(\S+)$/i);
+    if (!saveMatch) {
+      return {
+        success: false,
+        response: "[REI] Formato inválido. Usá: /saveplan <nombre>",
+      };
+    }
+
+    const planName = saveMatch[1];
+    const lastPlanMsg = [...session.messages]
+      .reverse()
+      .find(
+        (m) =>
+          m.role === "assistant" &&
+          m.content &&
+          isPlanMessage(m.content),
+      );
+
+    if (!lastPlanMsg || !lastPlanMsg.content) {
+      return {
+        success: false,
+        response: "[REI] No se encontró ningún plan en esta sesión para guardar.",
+      };
+    }
+
+    try {
+      const savedPath = savePlanToFile(workspacePath, planName, lastPlanMsg.content);
+      return {
+        success: true,
+        response: `[REI] Plan completo guardado exitosamente en: ${savedPath}`,
+      };
+    } catch (err) {
+      return {
+        success: false,
+        response: `[REI] Error al guardar el plan: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
+  if (trimmed.startsWith("/loadplan")) {
+    const loadMatch = trimmed.match(/^\/loadplan\s+(\S+)$/i);
+    if (!loadMatch) {
+      return {
+        success: false,
+        response: "[REI] Formato inválido. Usá: /loadplan <nombre>",
+      };
+    }
+
+    const planName = loadMatch[1];
+    try {
+      const planContent = loadPlanFromFile(workspacePath, planName);
+      
+      // Ingest the loaded plan as a new assistant message
+      const updatedMessages = [...session.messages, {
+        role: "assistant" as const,
+        content: planContent,
+      }];
+
+      saveSession(
+        workspacePath,
+        updatedMessages,
+        session.mode,
+        session.summary,
+        session.createdAt,
+      );
+
+      // Re-initialize the plan todo file in the workspace
+      initPlanTodoFile(workspacePath, planContent);
+
+      return {
+        success: true,
+        response: `[REI] Plan '${planName}' cargado exitosamente. Se ha regenerado el checklist en .rei/current-plan-todo.md.`,
+        newSession: { ...session, messages: updatedMessages },
+      };
+    } catch (err) {
+      return {
+        success: false,
+        response: `[REI] Error al cargar el plan: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
   }
 
   if (trimmed === "/help") {

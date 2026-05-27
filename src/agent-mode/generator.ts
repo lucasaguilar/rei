@@ -37,7 +37,7 @@ export interface ExecutionResult {
   lastValidationError?: string;
 }
 
-const MAX_TURNS = 7;
+const MAX_TURNS = process.env.REI_MAX_TURNS ? parseInt(process.env.REI_MAX_TURNS, 10) : 7;
 const SEARCH_MISMATCH_HINT = "Could not find exact match for search block in";
 const MAX_AUTO_INJECTED_CALLER_FILES = 5;
 

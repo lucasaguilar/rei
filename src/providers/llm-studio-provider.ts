@@ -29,7 +29,7 @@ interface LlmStudioStreamChunk {
 }
 
 const DEFAULT_LLM_STUDIO_BASE_URL = "http://localhost:1234/v1";
-const DEFAULT_LLM_STUDIO_REQUEST_TIMEOUT_MS = 120_000;
+const DEFAULT_LLM_STUDIO_REQUEST_TIMEOUT_MS = 600_000; // 10 minutes fallback for local inference
 
 export class LlmStudioProvider implements ModelProvider {
   private readonly baseUrl: string;

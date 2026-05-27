@@ -4,18 +4,59 @@ import { spawn, execSync } from 'child_process';
 import { select, text, confirm, note, intro, isCancel, cancel } from '@clack/prompts';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { PROJECTS, PROVIDER_MODELS } from './launch-rei.config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 
 dotenv.config({ path: path.join(ROOT, '.env'), quiet: true });
 
-// PROJECTS and PROVIDER_MODELS are loaded from launch-rei.config.js (git-ignored).
-// Copy launch-rei.config.example.js to launch-rei.config.js to get started.
-
-const PROVIDERS = Object.keys(PROVIDER_MODELS);
+let PROJECTS = [];
+let PROVIDER_MODELS = {};
+let PROVIDERS = [];
 const CUSTOM = '[ enter custom model... ]';
+
+async function loadConfiguration() {
+    const configPath = path.join(__dirname, 'launch-rei.config.js');
+    if (!fs.existsSync(configPath)) {
+        const examplePath = path.join(__dirname, 'launch-rei.config.example.js');
+        if (fs.existsSync(examplePath)) {
+            try {
+                fs.copyFileSync(examplePath, configPath);
+            } catch (err) {}
+        } else {
+            try {
+                fs.writeFileSync(configPath, `
+export const PROJECTS = [];
+export const PROVIDER_MODELS = {
+    ollama: ['llama3.2', 'qwen2.5-coder:14b'],
+    openrouter: ['qwen/qwen3.6-plus', 'deepseek/deepseek-r1:free'],
+    gemini: ['gemini-2.5-flash']
+};
+                `);
+            } catch (err) {}
+        }
+    }
+
+    try {
+        const config = await import('./launch-rei.config.js');
+        PROJECTS = config.PROJECTS || [];
+        PROVIDER_MODELS = config.PROVIDER_MODELS || {};
+    } catch (err) {
+        PROJECTS = [];
+        PROVIDER_MODELS = {
+            ollama: ['llama3.2', 'qwen2.5-coder:14b'],
+            openrouter: ['qwen/qwen3.6-plus'],
+            gemini: ['gemini-2.5-flash']
+        };
+    }
+
+    const currentWorkspace = process.env.REI_WORKSPACE_PATH || process.cwd();
+    if (!PROJECTS.includes(currentWorkspace)) {
+        PROJECTS.unshift(currentWorkspace);
+    }
+
+    PROVIDERS = Object.keys(PROVIDER_MODELS);
+}
 
 const OLLAMA_PERF_VARS = [
     'OLLAMA_FLASH_ATTENTION',
@@ -292,6 +333,35 @@ async function main() {
     // ── Step 7: save + launch ──────────────────────────────────────────────
     saveLast(config);
 
+    // Persist environment variables to the project's .env file
+    try {
+        const envFilePath = path.join(projectPath, '.env');
+        let envContent = '';
+        if (fs.existsSync(envFilePath)) {
+            envContent = fs.readFileSync(envFilePath, 'utf8');
+        } else {
+            // If .env doesn't exist, load the fully-commented .env.example as a base template
+            const exampleEnvPath = path.join(ROOT, '.env.example');
+            if (fs.existsSync(exampleEnvPath)) {
+                envContent = fs.readFileSync(exampleEnvPath, 'utf8');
+            }
+        }
+
+        for (const [key, value] of Object.entries(envVars)) {
+            if (value === undefined) continue;
+            const regex = new RegExp(`^${key}=.*$`, 'm');
+            if (regex.test(envContent)) {
+                envContent = envContent.replace(regex, `${key}=${value}`);
+            } else {
+                envContent += `\n${key}=${value}`;
+            }
+        }
+        fs.writeFileSync(envFilePath, envContent.trim() + '\n', 'utf8');
+        console.log(`📝 Persisted complete configuration template to: ${envFilePath}`);
+    } catch (err) {
+        console.error('⚠️ Could not save configuration to .env:', err.message);
+    }
+
     // Show Ollama env summary so the user knows what's active before launch
     if (usesOllama) {
         note(buildOllamaSummary(envVars), 'Ollama environment');
@@ -311,6 +381,7 @@ async function main() {
         : `npm run dev -- --workspace ${projectArg} chat`;
 
     const child = spawn(cmd, {
+        cwd: ROOT,
         env: { ...process.env, ...envVars },
         stdio: 'inherit',
         shell: true,
@@ -320,4 +391,9 @@ async function main() {
     child.on('close', code => { if (code !== 0) console.log(`REI exited with code ${code}`); });
 }
 
-main();
+async function start() {
+    await loadConfiguration();
+    await main();
+}
+
+start();

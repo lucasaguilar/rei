@@ -5,7 +5,8 @@ export type TurnStatus =
   | "fetching_external_knowledge"
   | "calling_model"
   | "producing_response"
-  | "compacting_memory";
+  | "compacting_memory"
+  | "indexing_repository";
 
 export type StreamTurnOptions = {
   onStatus?: (status: TurnStatus) => void;

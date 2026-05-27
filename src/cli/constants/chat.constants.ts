@@ -39,6 +39,7 @@ export const THINKING_TEXT: Record<TurnStatus, string> = {
   calling_model: "Calling model...",
   producing_response: "Producing response...",
   compacting_memory: "Compacting memory...",
+  indexing_repository: "Indexing repository (generating local embeddings)...",
 };
 
 export const SPINNER_FRAMES = ["|", "/", "-", "\\"];
@@ -56,17 +57,16 @@ export const COMMANDS: Array<{
   { command: "/mode ask", description: "switch to ask mode" },
   { command: "/mode planning", description: "switch to planning mode" },
   { command: "/mode agent", description: "switch to agent mode" },
-  { command: "/runplan", description: "execute last planning-mode plan" },
+  { command: "/runplan [stage <num>]", description: "execute planning-mode plan (optionally by stage)" },
+  { command: "/saveplan <name>", description: "save the full plan to disk as .rei/plans/<name>.md" },
+  { command: "/loadplan <name>", description: "load a plan from disk and update active checklist" },
   { command: "/tdd", description: "toggle TDD mode (run tests in sandbox)" },
   { command: "/index", description: "regenerate repository skeleton map" },
-  { command: "/session", description: "show session info" },
+  { command: "/session", description: "show current session info" },
   { command: "/session list", description: "list archived sessions" },
-  {
-    command: "/session load",
-    description: "load an archived session",
-    requiresArgs: true,
-  },
-  { command: "/session new", description: "start a new session" },
+  { command: "/session archive [name]", description: "archive current session as <name>" },
+  { command: "/session new [name]", description: "start new, archive current as <name>" },
+  { command: "/session load <id>", description: "load an archived session by ID" },
   { command: "/compact", description: "manually compact conversation memory" },
   { command: "/provider", description: "show or switch the active LLM provider" },
   { command: "/model", description: "show or switch the active LLM model" },

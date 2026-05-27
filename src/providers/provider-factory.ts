@@ -74,14 +74,14 @@ export function createProviderForMode(
  * - All other providers: returns undefined (provider uses its own default).
  */
 export function resolveModelForMode(mode: SessionMode): string | undefined {
-  // Agent mode with a dedicated provider overrides the default MODEL_PROVIDER.
-  if (mode === "agent" && process.env.AGENT_MODEL_PROVIDER) {
-    const agentProvider = process.env.AGENT_MODEL_PROVIDER.toLowerCase().trim();
+  const primaryProvider = (process.env.MODEL_PROVIDER ?? "llmstudio").toLowerCase().trim();
+  const agentProvider = (process.env.AGENT_MODEL_PROVIDER || primaryProvider).toLowerCase().trim();
+
+  // Agent mode resolves its corresponding _AGENT or default model variable depending on active agent provider.
+  if (mode === "agent") {
     switch (agentProvider) {
       case "openrouter":
-        return (
-          process.env.OPENROUTER_MODEL_AGENT ?? process.env.OPENROUTER_MODEL
-        );
+        return process.env.OPENROUTER_MODEL_AGENT ?? process.env.OPENROUTER_MODEL;
       case "ollama":
         return process.env.OLLAMA_MODEL_AGENT ?? process.env.OLLAMA_MODEL;
       case "groq":
@@ -97,18 +97,17 @@ export function resolveModelForMode(mode: SessionMode): string | undefined {
     }
   }
 
-  // Single-provider setup: only Ollama supports per-mode model overrides.
-  const provider = (process.env.MODEL_PROVIDER ?? "").toLowerCase();
-  if (provider !== "ollama") return undefined;
-
-  switch (mode) {
-    case "agent":
-      return process.env.OLLAMA_MODEL_AGENT ?? process.env.OLLAMA_MODEL;
-    case "ask":
-      return process.env.OLLAMA_MODEL_ASK ?? process.env.OLLAMA_MODEL;
-    case "planning":
-      return process.env.OLLAMA_MODEL_PLANNING ?? process.env.OLLAMA_MODEL;
-    default:
-      return process.env.OLLAMA_MODEL;
+  // Single-provider setup: only Ollama supports specific per-mode model overrides (like OLLAMA_MODEL_ASK, OLLAMA_MODEL_PLANNING).
+  if (primaryProvider === "ollama") {
+    switch (mode) {
+      case "ask":
+        return process.env.OLLAMA_MODEL_ASK ?? process.env.OLLAMA_MODEL;
+      case "planning":
+        return process.env.OLLAMA_MODEL_PLANNING ?? process.env.OLLAMA_MODEL;
+      default:
+        return process.env.OLLAMA_MODEL;
+    }
   }
+
+  return undefined;
 }

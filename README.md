@@ -7,108 +7,227 @@
 ██║  ██║███████╗██║
 ╚═╝  ╚═╝╚══════╝╚═╝
 </pre>
-  <h1>REI (Repository-Aware AI)</h1>
+  <h1>REI — Just REI</h1>
   <p><em>A sniper-precision, local-first AI coding agent</em></p>
 </div>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-**REI** is a next-generation, compiler-aware AI Coding Agent available as a powerful CLI tool and a high-performance server for IDE integration.
-Engineered for privacy, precision, and local-first execution, REI goes far beyond text completion: it builds a repository-aware context using heuristic file selection and caller discovery before every turn, auto-discovers caller files for cascade changes, and validates proposed edits in a temporary sandbox with real project verification before you ever see them.
 
-## 🌟 Why REI? (Unique Value Proposition)
+**REI** is a next-generation, compiler-aware AI coding agent built for developers who demand absolute privacy, complete code traceability, and zero-compromise intelligence. Engineered with a unique **hybrid local-first, multi-brain, and multi-provider architecture**, REI adapts dynamically to your needs—running either 100% offline or orchestrating local speed with premium cloud models. Operating as an interactive terminal CLI and a high-performance backend server, it integrates seamlessly into your local workspace and IDE workflows (such as Continue.dev).
 
-While commercial giants like Cursor and GitHub Copilot dominate the cloud IDE space, REI takes a radically different "Sniper" approach tailored for the terminal:
+---
 
-- **100% Local & Privacy-First**: No more sending sensitive proprietary code to commercial APIs if you don't want to. REI runs locally using `Ollama` (DeepSeek, Llama 3, Qwen) or any proxy. Your codebase never leaves your firewall.
-- **Editor Agnostic & Integratable**: While it provides a native terminal experience, REI also acts as a backend server. You can integrate it into VS Code via **Continue.dev**, allowing you to use REI's repository-aware intelligence directly within your favorite IDE.
-- **Local Semantic RAG**: REI features a 100% offline Retrieval-Augmented Generation engine. Using local ONNX models via `@xenova/transformers` and AST-aware chunking, it ranks files by semantic cosine similarity and Adjacency Boosting, without ever sending your code to a cloud embedding API.
-- **Caller Graph Discovery**: When you ask REI to change a function, it automatically scans the workspace for every file that references that symbol and pre-loads them into context — so cascade change proposals cover all affected files without you listing them.
-- **Sandbox Validation Loop (Auto-Healing)**: REI validates LLM-generated edits in a temporary sandbox copy of the workspace and runs TypeScript verification (`npx tsc --noEmit --pretty false`). If the model produces broken code, REI feeds the compiler error back to the LLM and forces a correction before showing you anything.
-- **Post-Apply Compile Check**: REI can run project compile checks and report type errors.
-- **Persistent Sessions**: Conversations are automatically saved to `.rei/sessions/current.json` and resumed on next launch. Older sessions can be archived and reloaded by ID.
-- **Conversation Compaction**: When a session grows beyond 20 messages, older turns are summarized using a configurable cheaper model, keeping context manageable without losing key decisions.
-- **Absolute Transparency**: REI logs its internal flow to `.rei/logs/agent-flow.jsonl` — context search, AST extraction, patch proposal, sandbox verification, and compiler errors, structured as JSON Lines.
+## 🌟 The Core Pillars of REI
 
-## 🔌 IDE Integration (Continue.dev)
+Unlike generic, conversational coding assistants, REI acts as a **surgical developer companion** by combining offline structural understanding with advanced hybrid LLM routing.
 
-REI can be used as a custom LLM provider for the [Continue](https://www.continue.dev/) extension in VS Code or JetBrains:
+### 1. 🧠 Hybrid "Multi-Brain" Architecture (Multi-Cerebro)
+REI allows you to configure two powerful operational setups depending on your security, hardware, and intelligence requirements:
 
-1. **Install and Start the REI Server**: 
-   ```bash
-   curl -fsSL https://raw.githubusercontent.com/lucasaguilar/rei/main/install-rei-server.sh | bash
-   ~/.rei/rei-server
-   ```
-2. **Configure Continue**: Add a new model in your `config.json` pointing to the REI endpoint:
-   - **API Base**: `http://localhost:3000/chat/completions`
-   - **Model**: (Your configured model, e.g., `openrouter/nvidia/nemotron-3-super-120b-a12b:free`)
+* **100% Local Multi-Brain Setup (Fully Private & Offline):**
+  Run completely local on your own hardware using Ollama or LM Studio with zero data leakage. Route lightweight conversational turns (Ask/Planning) to fast models like `llama3.2` or `qwen2.5-coder:7b`, while delegating heavy agentic file edits to larger coding models running locally (such as `qwen2.5-coder:14b` or the outstanding **`qwen/qwen3.6-35b-a3b`**).
+* **Pro Hybrid Multi-Brain & Multi-Provider Setup (Local Speed + Cloud Power):**
+  Combine the speed of local hardware with the surgical capability of state-of-the-art cloud intelligence. Run your everyday chat and architectural planning locally and for free (using local Ollama models), and dynamically route complex XML-based agent edits to premium cloud APIs (such as **`qwen/qwen3.6-plus`** or `anthropic/claude-3.5-sonnet` via OpenRouter).
+* **Hot-Swapping:** Use dynamic chat commands (e.g. `/provider agent openrouter` and `/model agent qwen/qwen3.6-plus`) to adjust routing in real-time without restarting the session.
 
-This allows you to use REI's `/mode` commands and repository context directly from the Continue chat sidebar.
+### 2. 🌲 Surgical AST Intelligence (`ts-morph` & `web-tree-sitter`)
+REI doesn't "guess" or rely on flaky regex searches. It parses your codebase's abstract syntax tree natively:
+* **TypeScript & JavaScript (God Mode):** Uses `ts-morph` to map classes, functions, and interfaces, automatically performing **Caller Discovery** to find and load all files affected by a symbol change.
+* **Polyglot Codebases (Standard Mode):** Incorporates `web-tree-sitter` for advanced structural understanding of Python, Rust, Go, Java, and other languages.
 
-## 🎯 Target Audience
+### 3. 🧪 Sandbox Auto-Healing & Compiler-Awareness
+REI refuses to break your repository. When executing code changes in Agent Mode:
+1. **Isolated Sandbox:** REI creates a temporary directory copy of the workspace to apply edits.
+2. **Type & Compilation Checking:** Runs type verification (e.g., `npx tsc --noEmit` for TypeScript).
+3. **Optional TDD Loop:** Automatically runs the project's test suite (`npm run test`) to validate functionality.
+4. **Auto-Healing:** If the compiler or test suite reports an error, REI feeds the diagnostics back to the LLM for automatic correction, presenting the patch to you only once it compiles flawlessly.
 
-- **Privacy-Constrained Enterprises**: Fintech, Defense, Healthcare, and Cybersecurity teams that are legally blacklisted from using Copilot/Cursor due to IP leakage.
-- **Unix-Philosophy Developers**: Power users who live in tmux, Vim, and the CLI and refuse bloated GUI IDEs.
-- **Local AI Hackers**: Enthusiasts looking to connect their local LLM workflows to their existing repositories efficiently.
+### 4. ⚡ Offline Semantic RAG Engine
+REI features an ultra-fast, entirely local Retrieval-Augmented Generation pipeline:
+* **Local Embeddings:** Uses the `Xenova/all-MiniLM-L6-v2` ONNX model via `@xenova/transformers` directly in Node.js. Your code is embedded locally on CPU—never sent to cloud APIs.
+* **AST-Aware Chunking:** Chunks files by classes, functions, and interfaces rather than character counts.
+* **Incremental FS-Watching:** Uses `chokidar` to track file modifications and incrementally update the `.rei/rag-index.json` database in milliseconds.
 
-## 🌍 Supported Languages & Polyglot Architecture
+### 5. 📊 Bulletproof Data Traceability
+Every single step REI takes is logged transparently. REI outputs structured telemetry directly to `.rei/logs/agent-flow.jsonl`, detailing:
+* Semantic search scores and file ranking.
+* Which symbols and caller references were discovered.
+* The exact diffs proposed, compilation errors encountered, and sandbox auto-healing cycles.
 
-REI is designed with a graceful degradation architecture. It can operate on **any codebase today**, while providing stronger guarantees for its primary TypeScript/JavaScript workflow:
+## 📥 Installation & Scripts Setup
 
-- **👑 Tier 1: TypeScript & JavaScript (God Mode)**: Sandbox-first validation with real TypeScript verification (`npx tsc --noEmit --pretty false`), plus repository-aware context (heuristic selection and caller discovery) for safer multi-file edits.
-- **🛠 Tier 2: Python, Go, Java, Rust, PHP, etc. (Standard Mode)**: Heuristic repository context and prompt-driven edit proposals, without TypeScript-specific compile guarantees.
-- **🚀 The v2.0 Roadmap (Universal AST)**: The architecture is modular, enabling future integration of `Tree-Sitter` and language-native validators (for example `mypy`, `go build`, `cargo check`) to provide language-specific verification loops across ecosystems.
+You can install REI globally using our streamlined shell scripts or compile it manually from source.
 
-## Install
-
-The recommended way to install REI globally is using the official script:
+### 1. Automated Global Installation (via curl)
+To install the interactive CLI globally and configure a dedicated symlink launcher inside `~/.local/bin/rei`:
 
 ```bash
+# Install the CLI globally
 curl -fsSL https://raw.githubusercontent.com/lucasaguilar/rei/main/install-rei-cli.sh | bash
 ```
 
-Alternatively, you can install it via npm if you clone the repo:
+To install the backend server API for VS Code Continue.dev plugin integration, creating a launcher at `~/.rei/rei-server`:
 
+```bash
+# Install the backend server API
+curl -fsSL https://raw.githubusercontent.com/lucasaguilar/rei/main/install-rei-server.sh | bash
+```
+
+> [!NOTE]
+> These installers clone the project into `~/.rei`, install Node dependencies, compile the TypeScript code, and generate a global configuration file at `~/.rei/.env`.
+
+### 2. Local Source Installation (For Developers)
+To install using your current local working copy:
+
+```bash
+# From the root of your cloned repository
+./install-rei-cli-local.sh
+```
+
+Or manually step-by-step:
 ```bash
 git clone https://github.com/lucasaguilar/rei.git
 cd rei
+npm install
+npm run build
 npm install -g .
 ```
 
-## Commands
+---
 
-Global option:
+## 🚀 Running REI & Execution Cases
 
-- `--workspace <path>`: target workspace REI should analyze. Defaults to the current working directory.
+REI can be run in three different modes depending on your workflow:
 
-### `plan` — one-shot planning
-
-```bash
-rei plan "create a worktree helper CLI"
-```
-
-With explicit workspace:
+### 1. CLI Interactive Curses UI
+Start the full-screen terminal workspace. Highly recommended for tmux and vim power-users:
 
 ```bash
-rei --workspace /workspaces/another-repo plan "create a worktree helper CLI"
+# Launch interactive session inside current directory
+rei
+
+# Force launch the Interactive Configuration Wizard
+rei --config
 ```
 
-### `chat` — interactive session
+> [!TIP]
+> **First-Run Autoconfig:** If you run `rei` and no configuration (`.env` file) is found, REI will automatically start the **Interactive Configuration Wizard** (`launch-rei.js`). The wizard guides you step-by-step to select your workspace, choose your LLM providers and models, adjust context window sizes, and automatically generates and persists your workspace `.env` file so subsequent runs are instant and error-free!
+```
 
+### 2. One-Shot Planning Tasks
+For quick, single-command architectural designs and planning tasks:
 ```bash
-rei chat
+rei plan "Design a robust caching decorator for the API service"
+
+# Run planning on another repository
+rei --workspace /path/to/another/project plan "Add email notification support"
 ```
 
-With explicit workspace:
-
+### 3. API Server for IDE Extensions (Continue.dev)
+Start the high-performance local server to act as a backend endpoint:
 ```bash
-rei --workspace /workspaces/another-repo chat
+# Run the compiled server on port 3000
+~/.rei/rei-server
+
+# Or run in development mode from source
+npm run server:dev
 ```
 
-If only `--workspace` is provided, REI defaults to `chat`:
+---
 
-```bash
-rei --workspace /workspaces/another-repo
+## 🎮 Practical Use Case: Step-by-Step `/runplan` Cycle
+
+REI excels at executing multi-stage architectural changes. Here is a real-world walkthrough of a complete feature implementation:
+
+### 1. Planning the Feature
+Switch to Planning Mode inside the chat to brainstorm and design the implementation:
+```text
+/mode planning
+Plan the implementation of a new state store for market listing indices.
 ```
+REI analyzes the codebase structure using local RAG and AST analysis, then outputs a structured, markdown-compatible design plan divided into distinct milestones (e.g., `### Stage 1: Define Interface`, `### Stage 2: Create Store Service`, etc.).
+
+### 2. Auto-Checklist Generation
+As soon as the plan is presented, REI automatically creates an active progress tracking checklist inside your workspace directory at **`.rei/current-plan-todo.md`**:
+```markdown
+# PLAN PROGRESS
+- [ ] **Etapa 1:** Define Interface
+- [ ] **Etapa 2:** Create Store Service
+```
+
+### 3. Automated Stage Execution
+To execute the first stage of the plan, run `/runplan` followed by the target stage:
+```text
+/runplan stage 1
+```
+REI will:
+1. Transition dynamically to **Agent Mode**.
+2. Run **AST Caller Discovery** to identify all files and references affected by the new interfaces.
+3. Call your premium agent model (e.g., `qwen/qwen3.6-plus` on OpenRouter) to write/modify the exact code.
+
+### 4. Sandbox auto-healing & Compilation
+Before the code is written back to your workspace:
+* REI copies the files to an isolated **temporary sandbox**.
+* It applies the proposed changes and runs type diagnostics (`npx tsc --noEmit`).
+* If typescript compiler errors are found (e.g., a missing export, wrong type cast), REI feeds the exact compiler diagnostic block back to the LLM for **Auto-Healing**.
+* Once the edits compile with **zero type errors**, the verified code is cleanly applied to your working directory.
+
+### 5. Automated Checklist Update
+Upon successful execution, REI automatically updates your progress file (`.rei/current-plan-todo.md`):
+```markdown
+# PLAN PROGRESS
+- [x] **Etapa 1:** Define Interface
+- [ ] **Etapa 2:** Create Store Service
+```
+You can now continue to the next stage by executing `/runplan stage 2`.
+
+### 💾 6. Plan Persistence & Session Reloading (`/saveplan` & `/loadplan`)
+
+While the temporary active checklist is stored at `.rei/current-plan-todo.md` during execution, you can persist the **entire detailed technical plan** directly into your repository to share it, version control it with Git, or resume it later in a fresh chat session.
+
+#### Persisting a Plan to Disk (`/saveplan`)
+Once a solid plan is generated in your chat conversation, save it by running:
+```text
+/saveplan <name>
+```
+* This creates a permanent Markdown document at `.rei/plans/<name>.md` containing the complete detailed plan, including observations, risks, and stage details.
+* You can commit this file to Git so your team can access the exact implementation recipe.
+
+#### Loading/Resuming a Plan (`/loadplan`)
+When you start a new chat session or switch branches, you can reload the saved plan and rebuild the active tracking todo checklist:
+```text
+/loadplan <name>
+```
+* **Instant Re-indexing**: REI reads the saved Markdown file from `.rei/plans/<name>.md`, appends it into your current conversation context, and immediately rebuilds/regenerates `.rei/current-plan-todo.md` with all stages marked as pending.
+* **Granular Step Execution**: After loading the plan, execute any stage step-by-step using `/runplan stage <n>` (e.g. `/runplan stage 1`). The agent will immediately switch to **Agent Mode** and implement that stage.
+
+> [!TIP]
+> **Manual Editing Supported**: Since plans are saved as raw Markdown, you can manually open and edit the `.rei/plans/<name>.md` file inside your IDE to adjust steps or add items. Simply run `/loadplan <name>` again, and REI will dynamically synchronize the active todo checklist with your manual changes!
+
+---
+
+## 🔌 IDE Integration (Continue.dev)
+
+Configure REI as your local-first repository-aware provider inside **Continue** (VS Code / JetBrains):
+
+1. **Start the REI Server:**
+   ```bash
+   ~/.rei/rei-server
+   ```
+2. **Configure `config.json` in Continue:**
+   Add a custom model pointing to the REI endpoint:
+   ```json
+   {
+     "models": [
+       {
+         "title": "REI Hybrid",
+         "provider": "openai",
+         "model": "qwen/qwen3.6-plus",
+         "apiBase": "http://localhost:3000/chat/completions"
+       }
+     ]
+   }
+   ```
 
 ## Workspace resolution
 
@@ -135,20 +254,27 @@ The server validates every incoming request against `ALLOWED_WORKSPACES`. Reques
 
 ### Interactive commands
 
-| Command | Description |
-|---|---|
-| `/help` | Show available commands |
-| `/clear` | Clear conversation history |
-| `/exit` | End the session |
-| `/mode ask` | Switch to ask mode |
-| `/mode planning` | Switch to planning mode |
-| `/mode agent` | Switch to agent mode |
-| `/index` | Build or refresh the semantic index file (legacy/optional; runtime context currently uses heuristics) |
-| `/compact` | Manually compact conversation memory into a summary |
-| `/session` | Show current session info (created date, mode, turn count) |
-| `/session list` | List all archived sessions for this workspace |
-| `/session load <id>` | Load an archived session by ID |
-| `/session new` | Archive the current session and start a fresh one |
+REI's interactive Curses terminal interface supports slash commands to give you full control over the session state, active plan execution, LLM routing, and memory compaction:
+
+| Command | Description | Example |
+|---|---|---|
+| `/help` | Show all available commands in terminal UI. | `/help` |
+| `/clear` | Clear active conversation history (starts fresh). | `/clear` |
+| `/exit` | End the active terminal session and exit. | `/exit` |
+| `/mode <mode>` | Switch chat session mode. Supports `ask`, `planning`, or `agent`. | `/mode planning` |
+| `/runplan [stage <n>]` | Execute plan step-by-step (transitions to `agent` mode for that stage). | `/runplan stage 1` |
+| `/saveplan <name>` | Save the full detailed plan to disk as `.rei/plans/<name>.md`. | `/saveplan feat-auth` |
+| `/loadplan <name>` | Load a plan from disk and dynamically sync `.rei/current-plan-todo.md`. | `/loadplan feat-auth` |
+| `/tdd` | Toggle TDD mode (runs `npm run test` during sandbox validation of edits). | `/tdd` |
+| `/index` | Re-index the codebase and refresh the AST semantic skeleton map. | `/index` |
+| `/compact` | Manually compact conversation memory into a high-level summary. | `/compact` |
+| `/provider [agent] [name]` | Show active LLM providers or switch them dynamically on-the-fly. | `/provider openrouter` |
+| `/model [agent] [name]` | Show active LLM models or switch models dynamically. | `/model agent qwen/qwen3.6-plus` |
+| `/session` | Show active session details (creation date, active mode, turns). | `/session` |
+| `/session list` | List all archived chat sessions for the current workspace. | `/session list` |
+| `/session archive [name]` | Archive the current chat session to disk under a custom or auto name. | `/session archive auth-refactor` |
+| `/session load <id>` | Load an archived chat session by ID and restore full context. | `/session load current_2026_05_27` |
+| `/session new [name]` | Archive the current session and start a fresh session immediately. | `/session new` |
 
 ## Modes
 
@@ -160,62 +286,205 @@ REI has three response modes:
 
 The active mode can be changed during a chat session with `/mode <mode>`.
 
-## Model providers
+## ⚙️ Interactive Configuration Wizard & Model Providers
 
-Provider selection is controlled by `MODEL_PROVIDER`:
+Instead of manually setting up complex environment variables or launch commands, REI features a fully interactive **Configuration Wizard (`launch-rei.js`)** that automates the setup of your model providers and workspace credentials.
 
-- `MODEL_PROVIDER=mock`
-- `MODEL_PROVIDER=ollama`
-- `MODEL_PROVIDER=groq`
-- `MODEL_PROVIDER=gemini`
-- `MODEL_PROVIDER=openrouter`
+### 1. First-Run Auto-Configuration
+When you run the `rei` command inside any repository for the first time, REI will detect if there is a `.env` configuration file in that workspace folder.
+* **Fallback Wizard**: If no `.env` is found, REI will immediately launch the Interactive Configuration Wizard automatically.
+* **Workspace `.env` Generation**: The wizard will read the global `.env.example` template, prompt you for API keys and preferences (Ollama settings, Gemini keys, OpenRouter, etc.), and **automatically generate a custom `.env` file directly inside that active project folder**.
+* Subsequent launches of `rei` or `rei chat` inside that repository will immediately load that local configuration, making startup instant and frictionless.
 
-### Ollama setup
-
-1. Install Ollama:
-
+### 2. Re-configuration on Demand (`rei --config`)
+If you want to change your provider keys, switch models, or re-configure a workspace at any time, run:
 ```bash
-curl -fsSL https://ollama.com/install.sh | sh
+rei --config
+```
+This forces the Interactive Wizard to launch, allowing you to update your settings and cleanly overwrite the active `.env` file.
+
+### 3. How the Generated `.env` Looks (Hybrid Model Routing)
+
+When you run the Interactive Configuration Wizard, it reads the template from [`.env.example`](file:///Users/lucas/www/rei/.env.example) and generates a workspace-local `.env` file containing comprehensive comments for every single tuning parameter. 
+
+Below is the **complete `.env.example` configuration template** recommended for high-performance hybrid setups:
+
+```ini
+# ==============================================================================
+# REI (Repository-Aware AI Agent) - Environment Configuration Example
+# ==============================================================================
+# Copy this file to .env in your repository root and fill in your desired settings:
+# cp .env.example .env
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. PRIMARY ORCHESTRATION & PROVIDERS
+# ------------------------------------------------------------------------------
+
+# Main LLM provider for the chat session.
+# Supported values: mock, ollama, groq, gemini, openrouter, huggingface, llmstudio
+MODEL_PROVIDER=ollama
+
+# (Optional) Dedicated provider used ONLY for AGENT mode execution.
+# Allows using a light local provider (e.g., ollama) for fast Ask/Planning turns, 
+# while delegating heavier XML-producing actions to a premium cloud model.
+# E.g., AGENT_MODEL_PROVIDER=openrouter
+AGENT_MODEL_PROVIDER=openrouter
+
+
+# ------------------------------------------------------------------------------
+# 2. CLOUD PROVIDER CREDENTIALS & API KEYS
+# ------------------------------------------------------------------------------
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+GEMINI_API_KEY=your_gemini_api_key_here
+GROQ_API_KEY=your_groq_api_key_here
+HF_TOKEN=your_huggingface_token_here
+
+
+# ------------------------------------------------------------------------------
+# 3. CLOUD PROVIDER MODEL SELECTION
+# ------------------------------------------------------------------------------
+
+# --- OpenRouter Models ---
+# Default model for all modes using OpenRouter
+OPENROUTER_MODEL=qwen/qwen3-coder-30b-a3b-instruct
+# Specific model used only in Agent mode (optional)
+# OPENROUTER_MODEL_AGENT=qwen/qwen3.6-plus
+OPENROUTER_MODEL_AGENT=qwen/qwen3.6-plus
+
+# --- Gemini Models ---
+# Default model for all modes using Gemini
+GEMINI_MODEL=gemini-2.5-flash
+# Specific model used only in Agent mode (optional)
+# GEMINI_MODEL_AGENT=gemini-2.5-pro
+
+# --- Groq Models ---
+# Default model for all modes using Groq
+GROQ_MODEL=deepseek-r1-distill-llama-70b
+# Specific model used only in Agent mode (optional)
+# GROQ_MODEL_AGENT=deepseek-r1-distill-llama-70b
+
+
+# ------------------------------------------------------------------------------
+# 4. LOCAL PROVIDER MODEL SELECTION
+# ------------------------------------------------------------------------------
+
+# --- Ollama Configuration ---
+# Default model used as fallback for all modes using Ollama
+OLLAMA_MODEL=qwen2.5-coder:7b
+
+# Mode-specific overrides (optional). If not set, falls back to OLLAMA_MODEL.
+# Highly recommended: use the ultra-fast local model qwen/qwen3.6-35b-a3b (via Ollama / LM Studio)
+OLLAMA_MODEL_ASK=qwen/qwen3.6-35b-a3b
+OLLAMA_MODEL_PLANNING=qwen/qwen3.6-35b-a3b
+# OLLAMA_MODEL_AGENT=qwen3.6:27b-coding-nvfp4
+
+# --- LM Studio Configuration (llmstudio) ---
+# Supports qwen/qwen3.6-35b-a3b for fast offline reasoning with GPU offloading
+LLM_STUDIO_MODEL=qwen/qwen3.6-35b-a3b
+# Specific model used only in Agent mode (optional)
+# LLM_STUDIO_MODEL_AGENT=qwen/qwen3.6-35b-a3b
+
+# --- Hugging Face Inference API Models ---
+HF_MODEL=Qwen/Qwen2.5-Coder-32B-Instruct
+# Specific model used only in Agent mode (optional)
+# HF_MODEL_AGENT=Qwen/Qwen2.5-Coder-32B-Instruct
+
+
+# ------------------------------------------------------------------------------
+# 5. OLLAMA ENGINE PERFORMANCE TUNING (ADVANCED)
+# ------------------------------------------------------------------------------
+
+# Base URL to reach the Ollama API (defaults to http://127.0.0.1:11434)
+# OLLAMA_BASE_URL=http://127.0.0.1:11434
+
+# Temperature parameter for local generations.
+# 0 is strongly recommended for deterministic, structured coding/XML outputs.
+OLLAMA_TEMPERATURE=0
+
+# Total token context window (input + output).
+# Standard models: 8192 or 12288 works fine.
+# Thinking models (e.g. Qwen 3.6, DeepSeek R1): 16384 to 32768 is recommended to avoid window exhaustion.
+OLLAMA_NUM_CTX=16384
+
+# Maximum tokens predicted (generated response length).
+# For reasoning/thinking models whose reasoning traces are long, set to 4096 or higher.
+OLLAMA_NUM_PREDICT=4096
+
+# Number of CPU threads to allocate for local inference
+# OLLAMA_NUM_THREAD=8
+
+# Duration to keep models loaded in Ollama's memory (defaults to 30m)
+# OLLAMA_KEEP_ALIVE=2h
+
+# Network request timeout in milliseconds for local Ollama completions (defaults to 300000)
+# OLLAMA_REQUEST_TIMEOUT_MS=600000
+
+
+# ------------------------------------------------------------------------------
+# 6. CONTEXT REDUCTION & PERFORMANCE OPTIMIZATIONS
+# ------------------------------------------------------------------------------
+
+# Master toggle for on-demand context injection (1 = Enabled, 0 = Disabled).
+# When enabled, files are only loaded when explicitly referenced by the user (e.g. @filename),
+# keeping prompt context small, fast, and highly resource-efficient for local execution.
+REI_ON_DEMAND_FILE_CONTEXT=1
+
+# Mode-specific overrides (optional)
+REI_ON_DEMAND_FILE_CONTEXT_ASK=1
+REI_ON_DEMAND_FILE_CONTEXT_PLANNING=1
+REI_ON_DEMAND_FILE_CONTEXT_AGENT=0
+
+
+# ------------------------------------------------------------------------------
+# 7. WORKSPACE, SERVER & TOOL SETTINGS
+# ------------------------------------------------------------------------------
+
+# Default directory path to target upon starting the chat
+REI_WORKSPACE_PATH=/path/to/your/default/workspace
+
+# List of authorized directories for the server backend (comma-separated)
+# ALLOWED_WORKSPACES=/path/to/project1,/path/to/project2
+
+# Model used specifically to summarize historical messages during session compaction
+# COMPACTOR_MODEL=gemini-2.5-flash
+
+# Test-Driven Development (TDD) Mode (true/false)
+# If enabled, sandbox execution will run project test suite ('npm run test')
+# in addition to type checks to validate proposed edits before presenting them.
+REI_TDD_MODE=false
+
+# Code Modification Formatting Scheme (sr | wholefile)
+# - sr (default): Emits search-replace tags (<search> / <replace>), highly efficient for large files.
+# - wholefile: Emits the complete file replacement within the <edit> tag.
+# AGENT_EDIT_FORMAT=sr
+
+# Network request timeout in milliseconds for LM Studio completions
+LLM_STUDIO_REQUEST_TIMEOUT_MS=600000
 ```
 
-2. Start the server:
+---
 
-```bash
-ollama serve
-```
+### 🧠 Fundamental Configurations Explained
 
-3. Pull a model:
+To truly understand how REI operates and tune it for your workspace, pay close attention to these key environment switches:
 
-```bash
-ollama pull llama3.2
-```
+#### A. Multi-Brain Routing Orchestration
+* **`MODEL_PROVIDER`**: Controls the provider for conversational turns (`/mode ask` and `/mode planning`). Setting this to `ollama` or `llmstudio` routes standard chat and planning queries locally to keep them 100% free and fast.
+* **`AGENT_MODEL_PROVIDER`**: Instructs REI to route **Agent Mode** surgical code modifications to a different provider. Enforcing `AGENT_MODEL_PROVIDER=openrouter` with a premium model like `qwen/qwen3.6-plus` ensures top-tier reasoning capabilities when producing XML search-replace patches, while keeping conversational costs at zero.
 
-4. Run REI:
+#### B. Context Window Tuning for Local Reasoning Models
+* **`OLLAMA_NUM_CTX`**: Configures the context size in Ollama. For high-performance local reasoning models (like `qwen/qwen3.6-35b-a3b`), setting this to at least `16384` or `32768` is critical to prevent context truncation during deep repository scans.
+* **`OLLAMA_NUM_PREDICT`**: Controls the maximum length of generated outputs. Set this to `4096` or higher when running reasoning models, since their internal thinking chains consume substantial output tokens before emitting the final code.
 
-```bash
-MODEL_PROVIDER=ollama OLLAMA_MODEL=llama3.2 rei chat
-```
+#### C. Context Reduction & On-Demand Context Injection
+* **`REI_ON_DEMAND_FILE_CONTEXT`**: When set to `1`, REI operates in an ultra-efficient on-demand mode. Files are only loaded into the prompt context when explicitly referenced by the user (e.g., using `@filename`). This keeps conversation speeds lightning-fast.
+* **`REI_ON_DEMAND_FILE_CONTEXT_AGENT`**: Set to `0` by default. This ensures that when executing a plan in **Agent Mode**, the agent has full access to load whatever files it deems necessary to guarantee type safety and compile diagnostics, while conversation/planning remain lightweight.
 
-Optional configuration:
+#### D. Test-Driven Development Auto-Healing
+* **`REI_TDD_MODE`**: Setting this to `true` (or toggling via `/tdd` inside chat) tells REI's sandbox validation loop to execute your project's test suite (`npm run test`) in addition to standard TypeScript compilation diagnostics. Any failing test traces will be fed back to the LLM automatically, enabling REI to auto-heal logical errors before applying edits to your workspace.
 
-- `OLLAMA_BASE_URL` default: `http://127.0.0.1:11434`
-- `OLLAMA_MODEL` default: `llama3.2`
-- `OLLAMA_REQUEST_TIMEOUT_MS` default: `300000`
-- `OLLAMA_KEEP_ALIVE` default: `30m`
-- `OLLAMA_NUM_CTX` optional (example: `8192`)
-- `OLLAMA_NUM_PREDICT` optional (example: `512`)
-- `OLLAMA_NUM_THREAD` optional (example for Apple Silicon: `8`)
-
-Performance tip for local Apple Silicon runs:
-
-```bash
-MODEL_PROVIDER=ollama \
-OLLAMA_MODEL=qwen2.5-coder:7b \
-OLLAMA_KEEP_ALIVE=2h \
-OLLAMA_NUM_CTX=8192 \
-OLLAMA_NUM_PREDICT=512 \
-rei chat
-```
+REI supports the following model providers out-of-the-box: `ollama`, `openrouter`, `gemini`, `groq`, `llmstudio`, `huggingface`, and `mock`.
 
 ### Compactor model (optional)
 
@@ -226,82 +495,6 @@ COMPACTOR_MODEL=openai/gpt-4o-mini rei chat
 ```
 
 If not set, the compactor uses the same provider and model as the main session.
-
-### Gemini setup
-
-1. Create an API key in Google AI Studio.
-2. Run REI:
-
-```bash
-MODEL_PROVIDER=gemini GEMINI_API_KEY=your-key GEMINI_MODEL=gemini-2.5-flash rei chat
-```
-
-Optional configuration:
-
-- `GEMINI_API_KEY` required
-- `GEMINI_MODEL` default: `gemini-2.5-flash`
-- `GEMINI_REQUEST_TIMEOUT_MS` default: `120000`
-
-### OpenRouter setup
-
-1. Create an API key at [openrouter.ai/keys](https://openrouter.ai/keys).
-2. Run REI:
-
-```bash
-MODEL_PROVIDER=openrouter OPENROUTER_API_KEY=your-key rei chat
-```
-
-To use a specific model:
-
-```bash
-MODEL_PROVIDER=openrouter OPENROUTER_API_KEY=your-key OPENROUTER_MODEL=anthropic/claude-3.5-sonnet rei chat
-```
-
-Optional configuration:
-
-- `OPENROUTER_API_KEY` required
-- `OPENROUTER_MODEL` default: `openai/gpt-4o-mini`
-- `OPENROUTER_REQUEST_TIMEOUT_MS` default: `120000`
-
-### Multi-provider setup (different providers per mode)
-
-REI can route each session mode to a different provider and model. The typical pattern is a fast local model for ask/planning and a more capable cloud model for agent edits.
-
-Set `AGENT_MODEL_PROVIDER` to override the provider used only in agent mode. The default `MODEL_PROVIDER` continues to handle ask and planning.
-
-The agent model is resolved as `<PROVIDER>_MODEL_AGENT`, falling back to the provider's base model if the `_AGENT` variant is not set.
-
-**Example: Ollama (ask/planning) + OpenRouter (agent)**
-
-```bash
-# ask + planning: local Ollama, fast and free
-MODEL_PROVIDER=ollama
-OLLAMA_MODEL=qwen2.5-coder:14b
-OLLAMA_MODEL_ASK=qwen2.5-coder:14b
-OLLAMA_MODEL_PLANNING=qwen2.5-coder:14b
-OLLAMA_NUM_CTX=32768
-
-# agent: OpenRouter, more capable for XML edits
-AGENT_MODEL_PROVIDER=openrouter
-OPENROUTER_API_KEY=your-key
-OPENROUTER_MODEL_AGENT=google/gemma-4-31b-it
-```
-
-All providers support the `_AGENT` model suffix: `OPENROUTER_MODEL_AGENT`, `OLLAMA_MODEL_AGENT`, `GROQ_MODEL_AGENT`, `GEMINI_MODEL_AGENT`, `HF_MODEL_AGENT`.
-
-### Per-mode model overrides (Ollama single-provider)
-
-When using Ollama as the sole provider, each mode can use a different model:
-
-```bash
-MODEL_PROVIDER=ollama
-OLLAMA_MODEL=qwen2.5-coder:14b       # fallback for all modes
-OLLAMA_MODEL_ASK=gemma3:12b          # fast, conversational
-OLLAMA_MODEL_PLANNING=gemma3:12b     # fast, structured output
-OLLAMA_MODEL_AGENT=qwen3:30b-a3b     # heavier model for XML edits
-```
-
-Per-mode overrides are only supported for Ollama in single-provider mode. For all other providers, use `AGENT_MODEL_PROVIDER` to assign a dedicated agent provider.
 
 ## Terminal output
 

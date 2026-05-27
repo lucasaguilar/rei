@@ -16,6 +16,10 @@ import { buildMessagesForModel } from "../chat/message-builder.js";
 import { compactSession, needsCompaction } from "../chat/compactor.js";
 import { type ChatSession } from "../chat/types.js";
 import {
+  readPlanTodoFile,
+  markStageAsCompleted,
+} from "../chat/plan-tracker.js";
+import {
   generateRepoMap,
   generateRepoMapForFile,
 } from "../tools/repo-map-generator.js";
@@ -26,6 +30,7 @@ import {
   chunkRepoMapString,
 } from "../context/rag/map-chunker.js";
 import { getRelevantMapContext } from "../context/rag/map-retriever.js";
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 import chokidar, { type FSWatcher } from "chokidar";
@@ -44,6 +49,7 @@ import {
 import {
   extractCommandRequests,
   extractToolCalls,
+  extractFileRequests,
 } from "../agent-mode/response-handler.js";
 import {
   getWeather,
@@ -64,6 +70,14 @@ import type {
   PendingPatchAssessmentItem,
   PendingPatchAssessment,
 } from "./models/agent.types.js";
+
+function extractStageNumberFromPrompt(prompt: string): number | null {
+  const match = prompt.match(/\[RUNPLAN STAGE (\d+)\]/i);
+  if (match) {
+    return parseInt(match[1], 10);
+  }
+  return null;
+}
 
 export class Agent {
   private scanCache?: {
@@ -132,6 +146,17 @@ export class Agent {
       content: response,
       sourceMode: session.mode,
     });
+
+    if (session.mode === "agent") {
+      const stageNum = extractStageNumberFromPrompt(userInput);
+      if (stageNum !== null) {
+        const wasSuccessful = response.includes("patch(es) applied directly.") || response.includes("file(s) written.");
+        if (wasSuccessful) {
+          markStageAsCompleted(this.workspacePath, stageNum);
+        }
+      }
+    }
+
     return response;
   }
 
@@ -209,6 +234,14 @@ export class Agent {
         session.messages.push({ role: "assistant", content: outcome.response });
         options?.onStatus?.("producing_response");
         yield fullResponse;
+
+        if (result.success) {
+          const stageNum = extractStageNumberFromPrompt(userInput);
+          if (stageNum !== null) {
+            markStageAsCompleted(this.workspacePath, stageNum);
+          }
+        }
+
         return;
       }
 
@@ -266,6 +299,14 @@ export class Agent {
       session.messages.push({ role: "assistant", content: outcome.response });
       options?.onStatus?.("producing_response");
       yield outcome.response;
+
+      if (editFormat === "wholefile" && !outcome.failed) {
+        const stageNum = extractStageNumberFromPrompt(userInput);
+        if (stageNum !== null) {
+          markStageAsCompleted(this.workspacePath, stageNum);
+        }
+      }
+
       return;
     }
 
@@ -273,58 +314,62 @@ export class Agent {
       let currentMessages = [...messagesForModel];
       let hasMoreCommands = true;
       let depth = 0;
-      const maxDepth = 3;
-      let suppressYield = false;
+      const maxDepth = process.env.REI_MAX_TURNS ? parseInt(process.env.REI_MAX_TURNS, 10) : 7;
 
       while (hasMoreCommands && depth < maxDepth) {
         let streamResponse = "";
         options?.onStatus?.("producing_response");
+
+        // Collect tokens into a buffer first so we can inspect the full
+        // response before deciding what to yield. This prevents partial
+        // <call_tool> / <execute_command> XML from being printed to the
+        // terminal before the tool-call detection logic runs.
+        const tokenBuffer: string[] = [];
         for await (const token of this.provider.streamChat(currentMessages, {
           model: resolveModelForMode(session.mode),
         })) {
           streamResponse += token;
-
-          // Detect opening: not suppressed yet, but streamResponse now contains the tag
-          /*
-          if (!suppressYield && (streamResponse.length < 20 ||
-            streamResponse.includes("<call_tool") || streamResponse.includes("<execute_command")
-          )) {
-            suppressYield = true;
-          }
-          */
-
-          // Detect closing
-          /*
-          if (suppressYield && (
-            streamResponse.includes("</call_tool>") || streamResponse.includes("</execute_command>")
-          )) {
-            suppressYield = false;
-            continue;
-          }
-
-          if (!suppressYield) {
-            yield token;
-          }
-            */
-          yield token;
+          tokenBuffer.push(token);
         }
-
-        this.logger?.logInfo("RAW_MODEL_OUTPUT", { content: streamResponse });
 
         const commands = extractCommandRequests(streamResponse);
         const toolCalls = extractToolCalls(streamResponse);
-        if (commands.length > 0 || toolCalls.length > 0) {
+        const fileRequests = extractFileRequests(streamResponse);
+
+        if (commands.length > 0 || toolCalls.length > 0 || fileRequests.length > 0) {
+          // Yield the visible part of the response (strip XML tags) before
+          // the tool-result block so the user sees the prose intro, if any.
+          const visibleResponse = streamResponse
+            .replace(/<execute_command>[\s\S]*?<\/execute_command>/gi, "")
+            .replace(/<call_tool\s+name="[^"]+">[\s\S]*?<\/call_tool>/gi, "")
+            .replace(/<request_files>[\s\S]*?<\/request_files>/gi, "")
+            .trim();
+          if (visibleResponse) {
+            yield visibleResponse + "\n";
+          }
+
           depth++;
           let executionFeedback = "";
+          let userVisibleFeedback = "";
+
+          if (fileRequests.length > 0) {
+            const fileFeedback = await this.executeFileRequestsFromResponse(streamResponse);
+            executionFeedback += fileFeedback;
+            userVisibleFeedback += `\n📂 **[REI] Injected ${fileRequests.length} requested file(s) into context:**\n` +
+              fileRequests.map((f) => `- \`${f}\``).join("\n") + "\n";
+          }
           if (commands.length > 0) {
-            executionFeedback +=
-              await this.executeCommandsFromResponse(streamResponse);
+            const cmdFeedback = await this.executeCommandsFromResponse(streamResponse);
+            executionFeedback += cmdFeedback;
+            userVisibleFeedback += cmdFeedback;
           }
           if (toolCalls.length > 0) {
-            executionFeedback +=
-              await this.executeToolCallsFromResponse(streamResponse);
+            const toolFeedback = await this.executeToolCallsFromResponse(streamResponse);
+            executionFeedback += toolFeedback;
+            userVisibleFeedback += toolFeedback;
           }
-          yield executionFeedback;
+
+          yield userVisibleFeedback;
           currentMessages = [
             ...currentMessages,
             { role: "assistant", content: streamResponse },
@@ -335,6 +380,12 @@ export class Agent {
           ];
         } else {
           hasMoreCommands = false;
+
+          // No tool calls — stream was buffered, so replay tokens now for
+          // real-time output on the terminal.
+          for (const token of tokenBuffer) {
+            yield token;
+          }
 
           // Concat all assistant chunks for session storage
           const allAssistantChunks = currentMessages
@@ -348,6 +399,7 @@ export class Agent {
           const cleanAssistantContent = finalContent
             .replace(/<execute_command>[\s\S]*?<\/execute_command>/gi, "")
             .replace(/<call_tool\s+name="[^"]+">[\s\S]*?<\/call_tool>/gi, "")
+            .replace(/<request_files>[\s\S]*?<\/request_files>/gi, "")
             .trim();
 
           session.messages.push({
@@ -405,6 +457,7 @@ export class Agent {
   private async updateSystemContextWithRepoMap(
     session: ChatSession,
     userInput?: string,
+    onStatus?: StreamTurnOptions["onStatus"],
   ): Promise<string | undefined> {
     let repositorySkeletonMap: string | undefined = undefined;
 
@@ -420,6 +473,23 @@ export class Agent {
       await this.vectorStore.cleanupStaleFiles(activePaths);
 
       const chunks = await chunkRepoMap(this.workspacePath);
+      const chunksToEmbed = chunks.filter(chunk => {
+        const hash = crypto
+          .createHash("md5")
+          .update(chunk.content)
+          .digest("hex");
+        const existing = this.vectorStore.getById(chunk.metadata.id);
+        return !existing || existing.metadata.fileHash !== hash;
+      });
+
+      if (chunksToEmbed.length > 0) {
+        onStatus?.("indexing_repository");
+        console.log(
+          `\n\x1b[33m[REI] Indexando repositorio: Generando embeddings locales para ${chunksToEmbed.length} bloque(s) de código...` +
+          `\n      Esto se procesa en tu CPU y puede tomar de 30 a 90 segundos en el primer arranque. Por favor espera...\x1b[0m\n`
+        );
+      }
+
       for (const chunk of chunks) {
         const hash = crypto
           .createHash("md5")
@@ -458,26 +528,24 @@ export class Agent {
       repositorySkeletonMap = undefined;
     }
 
-    // Rebuild system message only when it doesn't exist yet or mode changed.
-    // Keeping it stable across turns preserves the Ollama KV cache prefix.
-    const needsRebuild =
-      session.messages.length === 0 ||
-      session.messages[0].role !== "system" ||
-      !session.messages[0].content.includes(`Active mode: ${session.mode}`);
+    // Rebuild system message on every turn or when mode changes, to keep the active plan progress checklist in sync.
+    const baseSystemContent = buildSystemMessage(
+      session.mode,
+      this.workspacePath,
+    );
+    let systemContent = baseSystemContent;
+    const todoContent = readPlanTodoFile(this.workspacePath);
+    if (todoContent) {
+      systemContent += `\n\n### Active Plan Progress:\n${todoContent}`;
+    }
 
-    if (needsRebuild) {
-      const systemContent = buildSystemMessage(
-        session.mode,
-        this.workspacePath,
-      );
-      if (
-        session.messages.length > 0 &&
-        session.messages[0].role === "system"
-      ) {
-        session.messages[0] = { role: "system", content: systemContent };
-      } else {
-        session.messages.unshift({ role: "system", content: systemContent });
-      }
+    if (
+      session.messages.length > 0 &&
+      session.messages[0].role === "system"
+    ) {
+      session.messages[0].content = systemContent;
+    } else {
+      session.messages.unshift({ role: "system", content: systemContent });
     }
 
     return repositorySkeletonMap;
@@ -492,6 +560,7 @@ export class Agent {
     const repositorySkeletonMap = await this.updateSystemContextWithRepoMap(
       session,
       userInput,
+      onStatus,
     );
     this.logger.logUserPrompt({
       mode: session.mode,
@@ -569,6 +638,26 @@ export class Agent {
     });
   }
 
+  /** Reads the contents of any <request_files> tags found in a response and returns formatted feedback. */
+  private async executeFileRequestsFromResponse(response: string): Promise<string> {
+    const fileRequests = extractFileRequests(response);
+    if (fileRequests.length === 0) return "";
+
+    let feedback = "\n\n---\n**Requested Files Context:**\n";
+    for (const f of fileRequests) {
+      this.logger.logInfo(`Non-agent requested file: ${f}`);
+      const absPath = path.join(this.workspacePath, f);
+      try {
+        const content = await fs.readFile(absPath, "utf-8");
+        feedback += `\n### File: ${f}\n\`\`\`\n${content}\n\`\`\`\n`;
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        feedback += `\n### File: ${f}\n(Could not read file: ${errorMsg})\n`;
+      }
+    }
+    return feedback;
+  }
+
   /** Executes any <execute_command> tags found in a response and returns formatted feedback. */
   private async executeCommandsFromResponse(response: string): Promise<string> {
     const commands = extractCommandRequests(response);
@@ -626,7 +715,7 @@ export class Agent {
     let currentMessages = [...messagesForModel];
     let hasMoreCommands = true;
     let depth = 0;
-    const maxDepth = 3;
+    const maxDepth = process.env.REI_MAX_TURNS ? parseInt(process.env.REI_MAX_TURNS, 10) : 7;
     let lastResponse = "";
 
     while (hasMoreCommands && depth < maxDepth) {
@@ -661,9 +750,14 @@ export class Agent {
 
       const commands = extractCommandRequests(lastResponse);
       const toolCalls = extractToolCalls(lastResponse);
-      if (commands.length > 0 || toolCalls.length > 0) {
+      const fileRequests = extractFileRequests(lastResponse);
+      if (commands.length > 0 || toolCalls.length > 0 || fileRequests.length > 0) {
         depth++;
         let executionFeedback = "";
+        if (fileRequests.length > 0) {
+          executionFeedback +=
+            await this.executeFileRequestsFromResponse(lastResponse);
+        }
         if (commands.length > 0) {
           executionFeedback +=
             await this.executeCommandsFromResponse(lastResponse);
@@ -690,6 +784,7 @@ export class Agent {
     return finalContent
       .replace(/<execute_command>[\s\S]*?<\/execute_command>/gi, "")
       .replace(/<call_tool\s+name="[^"]+">[\s\S]*?<\/call_tool>/gi, "")
+      .replace(/<request_files>[\s\S]*?<\/request_files>/gi, "")
       .trim();
   }
 

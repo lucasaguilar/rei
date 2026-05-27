@@ -46,15 +46,60 @@ load_env_file() {
 	done < "$env_file"
 }
 
+# Ver si se pasó el flag --config o --help
+want_config=0
+want_help=0
+for arg in "$@"; do
+	if [ "$arg" = "--config" ]; then
+		want_config=1
+	elif [ "$arg" = "--help" ] || [ "$arg" = "-h" ] || [ "$arg" = "help" ]; then
+		want_help=1
+	fi
+done
+
+if [ "$want_help" -eq 1 ]; then
+	echo "██████╗ ███████╗██╗"
+	echo "██╔══██╗██╔════╝██║"
+	echo "██████╔╝█████╗  ██║"
+	echo "██╔══██╗██╔══╝  ██║"
+	echo "██║  ██║███████╗██║"
+	echo "╚═╝  ╚═╝╚══════╝╚═╝"
+	echo "REI — Just REI (Sniper-Precision Coding Agent)"
+	echo ""
+	echo "Usage:"
+	echo "  rei                         Start the interactive terminal CLI (chat/ask mode)"
+	echo "  rei chat                    Start the interactive terminal CLI (chat/ask mode)"
+	echo "  rei plan \"<task>\"           Run a one-shot planning task"
+	echo ""
+	echo "Configuration:"
+	echo "  rei --config                Launch the interactive configuration wizard"
+	echo ""
+	echo "Global Options:"
+	echo "  --workspace <path>          Target project directory (defaults to current directory)"
+	echo "  --help, -h                  Show this help text"
+	exit 0
+fi
+
+# Ver si existen archivos .env
+env_exists=0
 if [ -f .env ]; then
+	env_exists=1
 	load_env_file .env
 elif [ -f "$HOME/.rei/.env" ]; then
+	env_exists=1
 	load_env_file "$HOME/.rei/.env"
 fi
+
 # Forzar TMPDIR local para evitar problemas de permisos
 export TMPDIR="$HOME/.tmp"
 mkdir -p "$TMPDIR"
-REI_WORKSPACE_PATH="${REI_WORKSPACE_PATH:-"$(pwd)"}" node "$HOME/.rei/bin/rei.js" chat "$@"
+
+if [ "$want_config" -eq 1 ] || [ "$env_exists" -eq 0 ]; then
+	echo "🔄 Starting interactive configuration wizard..."
+	node "$HOME/.rei/scripts/launch-rei.js"
+else
+	REI_WORKSPACE_PATH="${REI_WORKSPACE_PATH:-"$(pwd)"}" node "$HOME/.rei/bin/rei.js" chat "$@"
+fi
 EOF
 chmod +x "$BIN_DIR/rei"
 echo "✅ REI CLI instalado. Ejecuta 'rei' en cualquier carpeta."
