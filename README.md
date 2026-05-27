@@ -7,108 +7,204 @@
 ██║  ██║███████╗██║
 ╚═╝  ╚═╝╚══════╝╚═╝
 </pre>
-  <h1>REI (Repository-Aware AI)</h1>
+  <h1>REI — Just REI</h1>
   <p><em>A sniper-precision, local-first AI coding agent</em></p>
 </div>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-**REI** is a next-generation, compiler-aware AI Coding Agent available as a powerful CLI tool and a high-performance server for IDE integration.
-Engineered for privacy, precision, and local-first execution, REI goes far beyond text completion: it builds a repository-aware context using heuristic file selection and caller discovery before every turn, auto-discovers caller files for cascade changes, and validates proposed edits in a temporary sandbox with real project verification before you ever see them.
 
-## 🌟 Why REI? (Unique Value Proposition)
+**REI** is a next-generation, compiler-aware AI coding agent built for developers who demand absolute privacy, complete code traceability, and zero-compromise intelligence. Engineered with a unique **hybrid local-first, multi-brain, and multi-provider architecture**, REI adapts dynamically to your needs—running either 100% offline or orchestrating local speed with premium cloud models. Operating as an interactive terminal CLI and a high-performance backend server, it integrates seamlessly into your local workspace and IDE workflows (such as Continue.dev).
 
-While commercial giants like Cursor and GitHub Copilot dominate the cloud IDE space, REI takes a radically different "Sniper" approach tailored for the terminal:
+---
 
-- **100% Local & Privacy-First**: No more sending sensitive proprietary code to commercial APIs if you don't want to. REI runs locally using `Ollama` (DeepSeek, Llama 3, Qwen) or any proxy. Your codebase never leaves your firewall.
-- **Editor Agnostic & Integratable**: While it provides a native terminal experience, REI also acts as a backend server. You can integrate it into VS Code via **Continue.dev**, allowing you to use REI's repository-aware intelligence directly within your favorite IDE.
-- **Local Semantic RAG**: REI features a 100% offline Retrieval-Augmented Generation engine. Using local ONNX models via `@xenova/transformers` and AST-aware chunking, it ranks files by semantic cosine similarity and Adjacency Boosting, without ever sending your code to a cloud embedding API.
-- **Caller Graph Discovery**: When you ask REI to change a function, it automatically scans the workspace for every file that references that symbol and pre-loads them into context — so cascade change proposals cover all affected files without you listing them.
-- **Sandbox Validation Loop (Auto-Healing)**: REI validates LLM-generated edits in a temporary sandbox copy of the workspace and runs TypeScript verification (`npx tsc --noEmit --pretty false`). If the model produces broken code, REI feeds the compiler error back to the LLM and forces a correction before showing you anything.
-- **Post-Apply Compile Check**: REI can run project compile checks and report type errors.
-- **Persistent Sessions**: Conversations are automatically saved to `.rei/sessions/current.json` and resumed on next launch. Older sessions can be archived and reloaded by ID.
-- **Conversation Compaction**: When a session grows beyond 20 messages, older turns are summarized using a configurable cheaper model, keeping context manageable without losing key decisions.
-- **Absolute Transparency**: REI logs its internal flow to `.rei/logs/agent-flow.jsonl` — context search, AST extraction, patch proposal, sandbox verification, and compiler errors, structured as JSON Lines.
+## 🌟 The Core Pillars of REI
 
-## 🔌 IDE Integration (Continue.dev)
+Unlike generic, conversational coding assistants, REI acts as a **surgical developer companion** by combining offline structural understanding with advanced hybrid LLM routing.
 
-REI can be used as a custom LLM provider for the [Continue](https://www.continue.dev/) extension in VS Code or JetBrains:
+### 1. 🧠 Hybrid "Multi-Brain" Architecture (Multi-Cerebro)
+REI allows you to configure two powerful operational setups depending on your security, hardware, and intelligence requirements:
 
-1. **Install and Start the REI Server**: 
-   ```bash
-   curl -fsSL https://raw.githubusercontent.com/lucasaguilar/rei/main/install-rei-server.sh | bash
-   ~/.rei/rei-server
-   ```
-2. **Configure Continue**: Add a new model in your `config.json` pointing to the REI endpoint:
-   - **API Base**: `http://localhost:3000/chat/completions`
-   - **Model**: (Your configured model, e.g., `openrouter/nvidia/nemotron-3-super-120b-a12b:free`)
+* **100% Local Multi-Brain Setup (Fully Private & Offline):**
+  Run completely local on your own hardware using Ollama or LM Studio with zero data leakage. Route lightweight conversational turns (Ask/Planning) to fast models like `llama3.2` or `qwen2.5-coder:7b`, while delegating heavy agentic file edits to larger coding models running locally (such as `qwen2.5-coder:14b` or the outstanding **`qwen/qwen3.6-35b-a3b`**).
+* **Pro Hybrid Multi-Brain & Multi-Provider Setup (Local Speed + Cloud Power):**
+  Combine the speed of local hardware with the surgical capability of state-of-the-art cloud intelligence. Run your everyday chat and architectural planning locally and for free (using local Ollama models), and dynamically route complex XML-based agent edits to premium cloud APIs (such as **`qwen/qwen3.6-plus`** or `anthropic/claude-3.5-sonnet` via OpenRouter).
+* **Hot-Swapping:** Use dynamic chat commands (e.g. `/provider agent openrouter` and `/model agent qwen/qwen3.6-plus`) to adjust routing in real-time without restarting the session.
 
-This allows you to use REI's `/mode` commands and repository context directly from the Continue chat sidebar.
+### 2. 🌲 Surgical AST Intelligence (`ts-morph` & `web-tree-sitter`)
+REI doesn't "guess" or rely on flaky regex searches. It parses your codebase's abstract syntax tree natively:
+* **TypeScript & JavaScript (God Mode):** Uses `ts-morph` to map classes, functions, and interfaces, automatically performing **Caller Discovery** to find and load all files affected by a symbol change.
+* **Polyglot Codebases (Standard Mode):** Incorporates `web-tree-sitter` for advanced structural understanding of Python, Rust, Go, Java, and other languages.
 
-## 🎯 Target Audience
+### 3. 🧪 Sandbox Auto-Healing & Compiler-Awareness
+REI refuses to break your repository. When executing code changes in Agent Mode:
+1. **Isolated Sandbox:** REI creates a temporary directory copy of the workspace to apply edits.
+2. **Type & Compilation Checking:** Runs type verification (e.g., `npx tsc --noEmit` for TypeScript).
+3. **Optional TDD Loop:** Automatically runs the project's test suite (`npm run test`) to validate functionality.
+4. **Auto-Healing:** If the compiler or test suite reports an error, REI feeds the diagnostics back to the LLM for automatic correction, presenting the patch to you only once it compiles flawlessly.
 
-- **Privacy-Constrained Enterprises**: Fintech, Defense, Healthcare, and Cybersecurity teams that are legally blacklisted from using Copilot/Cursor due to IP leakage.
-- **Unix-Philosophy Developers**: Power users who live in tmux, Vim, and the CLI and refuse bloated GUI IDEs.
-- **Local AI Hackers**: Enthusiasts looking to connect their local LLM workflows to their existing repositories efficiently.
+### 4. ⚡ Offline Semantic RAG Engine
+REI features an ultra-fast, entirely local Retrieval-Augmented Generation pipeline:
+* **Local Embeddings:** Uses the `Xenova/all-MiniLM-L6-v2` ONNX model via `@xenova/transformers` directly in Node.js. Your code is embedded locally on CPU—never sent to cloud APIs.
+* **AST-Aware Chunking:** Chunks files by classes, functions, and interfaces rather than character counts.
+* **Incremental FS-Watching:** Uses `chokidar` to track file modifications and incrementally update the `.rei/rag-index.json` database in milliseconds.
 
-## 🌍 Supported Languages & Polyglot Architecture
+### 5. 📊 Bulletproof Data Traceability
+Every single step REI takes is logged transparently. REI outputs structured telemetry directly to `.rei/logs/agent-flow.jsonl`, detailing:
+* Semantic search scores and file ranking.
+* Which symbols and caller references were discovered.
+* The exact diffs proposed, compilation errors encountered, and sandbox auto-healing cycles.
 
-REI is designed with a graceful degradation architecture. It can operate on **any codebase today**, while providing stronger guarantees for its primary TypeScript/JavaScript workflow:
+## 📥 Installation & Scripts Setup
 
-- **👑 Tier 1: TypeScript & JavaScript (God Mode)**: Sandbox-first validation with real TypeScript verification (`npx tsc --noEmit --pretty false`), plus repository-aware context (heuristic selection and caller discovery) for safer multi-file edits.
-- **🛠 Tier 2: Python, Go, Java, Rust, PHP, etc. (Standard Mode)**: Heuristic repository context and prompt-driven edit proposals, without TypeScript-specific compile guarantees.
-- **🚀 The v2.0 Roadmap (Universal AST)**: The architecture is modular, enabling future integration of `Tree-Sitter` and language-native validators (for example `mypy`, `go build`, `cargo check`) to provide language-specific verification loops across ecosystems.
+You can install REI globally using our streamlined shell scripts or compile it manually from source.
 
-## Install
-
-The recommended way to install REI globally is using the official script:
+### 1. Automated Global Installation (via curl)
+To install the interactive CLI globally and configure a dedicated symlink launcher inside `~/.local/bin/rei`:
 
 ```bash
+# Install the CLI globally
 curl -fsSL https://raw.githubusercontent.com/lucasaguilar/rei/main/install-rei-cli.sh | bash
 ```
 
-Alternatively, you can install it via npm if you clone the repo:
+To install the backend server API for VS Code Continue.dev plugin integration, creating a launcher at `~/.rei/rei-server`:
 
+```bash
+# Install the backend server API
+curl -fsSL https://raw.githubusercontent.com/lucasaguilar/rei/main/install-rei-server.sh | bash
+```
+
+> [!NOTE]
+> These installers clone the project into `~/.rei`, install Node dependencies, compile the TypeScript code, and generate a global configuration file at `~/.rei/.env`.
+
+### 2. Local Source Installation (For Developers)
+To install using your current local working copy:
+
+```bash
+# From the root of your cloned repository
+./install-rei-cli-local.sh
+```
+
+Or manually step-by-step:
 ```bash
 git clone https://github.com/lucasaguilar/rei.git
 cd rei
+npm install
+npm run build
 npm install -g .
 ```
 
-## Commands
+---
 
-Global option:
+## 🚀 Running REI & Execution Cases
 
-- `--workspace <path>`: target workspace REI should analyze. Defaults to the current working directory.
+REI can be run in three different modes depending on your workflow:
 
-### `plan` — one-shot planning
-
-```bash
-rei plan "create a worktree helper CLI"
-```
-
-With explicit workspace:
+### 1. CLI Interactive Curses UI
+Start the full-screen terminal workspace. Highly recommended for tmux and vim power-users:
 
 ```bash
-rei --workspace /workspaces/another-repo plan "create a worktree helper CLI"
+# Launch interactive session inside current directory
+rei
+
+# Force launch the Interactive Configuration Wizard
+rei --config
 ```
 
-### `chat` — interactive session
+> [!TIP]
+> **First-Run Autoconfig:** If you run `rei` and no configuration (`.env` file) is found, REI will automatically start the **Interactive Configuration Wizard** (`launch-rei.js`). The wizard guides you step-by-step to select your workspace, choose your LLM providers and models, adjust context window sizes, and automatically generates and persists your workspace `.env` file so subsequent runs are instant and error-free!
+```
 
+### 2. One-Shot Planning Tasks
+For quick, single-command architectural designs and planning tasks:
 ```bash
-rei chat
+rei plan "Design a robust caching decorator for the API service"
+
+# Run planning on another repository
+rei --workspace /path/to/another/project plan "Add email notification support"
 ```
 
-With explicit workspace:
-
+### 3. API Server for IDE Extensions (Continue.dev)
+Start the high-performance local server to act as a backend endpoint:
 ```bash
-rei --workspace /workspaces/another-repo chat
+# Run the compiled server on port 3000
+~/.rei/rei-server
+
+# Or run in development mode from source
+npm run server:dev
 ```
 
-If only `--workspace` is provided, REI defaults to `chat`:
+---
 
-```bash
-rei --workspace /workspaces/another-repo
+## 🎮 Practical Use Case: Step-by-Step `/runplan` Cycle
+
+REI excels at executing multi-stage architectural changes. Here is a real-world walkthrough of a complete feature implementation:
+
+### 1. Planning the Feature
+Switch to Planning Mode inside the chat to brainstorm and design the implementation:
+```text
+/mode planning
+Plan the implementation of a new state store for market listing indices.
 ```
+REI analyzes the codebase structure using local RAG and AST analysis, then outputs a structured, markdown-compatible design plan divided into distinct milestones (e.g., `### Stage 1: Define Interface`, `### Stage 2: Create Store Service`, etc.).
+
+### 2. Auto-Checklist Generation
+As soon as the plan is presented, REI automatically creates an active progress tracking checklist inside your workspace directory at **`.rei/current-plan-todo.md`**:
+```markdown
+# PLAN PROGRESS
+- [ ] **Etapa 1:** Define Interface
+- [ ] **Etapa 2:** Create Store Service
+```
+
+### 3. Automated Stage Execution
+To execute the first stage of the plan, run `/runplan` followed by the target stage:
+```text
+/runplan stage 1
+```
+REI will:
+1. Transition dynamically to **Agent Mode**.
+2. Run **AST Caller Discovery** to identify all files and references affected by the new interfaces.
+3. Call your premium agent model (e.g., `qwen/qwen3.6-plus` on OpenRouter) to write/modify the exact code.
+
+### 4. Sandbox auto-healing & Compilation
+Before the code is written back to your workspace:
+* REI copies the files to an isolated **temporary sandbox**.
+* It applies the proposed changes and runs type diagnostics (`npx tsc --noEmit`).
+* If typescript compiler errors are found (e.g., a missing export, wrong type cast), REI feeds the exact compiler diagnostic block back to the LLM for **Auto-Healing**.
+* Once the edits compile with **zero type errors**, the verified code is cleanly applied to your working directory.
+
+### 5. Automated Checklist Update
+Upon successful execution, REI automatically updates your progress file (`.rei/current-plan-todo.md`):
+```markdown
+# PLAN PROGRESS
+- [x] **Etapa 1:** Define Interface
+- [ ] **Etapa 2:** Create Store Service
+```
+You can now continue to the next stage by executing `/runplan stage 2`.
+
+---
+
+## 🔌 IDE Integration (Continue.dev)
+
+Configure REI as your local-first repository-aware provider inside **Continue** (VS Code / JetBrains):
+
+1. **Start the REI Server:**
+   ```bash
+   ~/.rei/rei-server
+   ```
+2. **Configure `config.json` in Continue:**
+   Add a custom model pointing to the REI endpoint:
+   ```json
+   {
+     "models": [
+       {
+         "title": "REI Hybrid",
+         "provider": "openai",
+         "model": "qwen/qwen3.6-plus",
+         "apiBase": "http://localhost:3000/chat/completions"
+       }
+     ]
+   }
+   ```
 
 ## Workspace resolution
 

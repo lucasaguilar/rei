@@ -284,8 +284,10 @@ export async function processMenuCommand(
         const line = lines[i];
         if (line.startsWith("#")) {
           const m = line.match(stageRegex);
+          const headerMatch = line.match(/^#+/);
+          const matchLen = headerMatch ? headerMatch[0].length : 0;
           // Terminate if another stage is found, or if a header of same/higher level is found
-          if (m || line.match(/^#+/)[0].length <= headerLevel) {
+          if (m || matchLen <= headerLevel) {
             endIndex = i;
             break;
           }
