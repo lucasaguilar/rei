@@ -181,6 +181,29 @@ Upon successful execution, REI automatically updates your progress file (`.rei/c
 ```
 You can now continue to the next stage by executing `/runplan stage 2`.
 
+### 💾 6. Plan Persistence & Session Reloading (`/saveplan` & `/loadplan`)
+
+While the temporary active checklist is stored at `.rei/current-plan-todo.md` during execution, you can persist the **entire detailed technical plan** directly into your repository to share it, version control it with Git, or resume it later in a fresh chat session.
+
+#### Persisting a Plan to Disk (`/saveplan`)
+Once a solid plan is generated in your chat conversation, save it by running:
+```text
+/saveplan <name>
+```
+* This creates a permanent Markdown document at `.rei/plans/<name>.md` containing the complete detailed plan, including observations, risks, and stage details.
+* You can commit this file to Git so your team can access the exact implementation recipe.
+
+#### Loading/Resuming a Plan (`/loadplan`)
+When you start a new chat session or switch branches, you can reload the saved plan and rebuild the active tracking todo checklist:
+```text
+/loadplan <name>
+```
+* **Instant Re-indexing**: REI reads the saved Markdown file from `.rei/plans/<name>.md`, appends it into your current conversation context, and immediately rebuilds/regenerates `.rei/current-plan-todo.md` with all stages marked as pending.
+* **Granular Step Execution**: After loading the plan, execute any stage step-by-step using `/runplan stage <n>` (e.g. `/runplan stage 1`). The agent will immediately switch to **Agent Mode** and implement that stage.
+
+> [!TIP]
+> **Manual Editing Supported**: Since plans are saved as raw Markdown, you can manually open and edit the `.rei/plans/<name>.md` file inside your IDE to adjust steps or add items. Simply run `/loadplan <name>` again, and REI will dynamically synchronize the active todo checklist with your manual changes!
+
 ---
 
 ## 🔌 IDE Integration (Continue.dev)
@@ -231,20 +254,27 @@ The server validates every incoming request against `ALLOWED_WORKSPACES`. Reques
 
 ### Interactive commands
 
-| Command | Description |
-|---|---|
-| `/help` | Show available commands |
-| `/clear` | Clear conversation history |
-| `/exit` | End the session |
-| `/mode ask` | Switch to ask mode |
-| `/mode planning` | Switch to planning mode |
-| `/mode agent` | Switch to agent mode |
-| `/index` | Build or refresh the semantic index file (legacy/optional; runtime context currently uses heuristics) |
-| `/compact` | Manually compact conversation memory into a summary |
-| `/session` | Show current session info (created date, mode, turn count) |
-| `/session list` | List all archived sessions for this workspace |
-| `/session load <id>` | Load an archived session by ID |
-| `/session new` | Archive the current session and start a fresh one |
+REI's interactive Curses terminal interface supports slash commands to give you full control over the session state, active plan execution, LLM routing, and memory compaction:
+
+| Command | Description | Example |
+|---|---|---|
+| `/help` | Show all available commands in terminal UI. | `/help` |
+| `/clear` | Clear active conversation history (starts fresh). | `/clear` |
+| `/exit` | End the active terminal session and exit. | `/exit` |
+| `/mode <mode>` | Switch chat session mode. Supports `ask`, `planning`, or `agent`. | `/mode planning` |
+| `/runplan [stage <n>]` | Execute plan step-by-step (transitions to `agent` mode for that stage). | `/runplan stage 1` |
+| `/saveplan <name>` | Save the full detailed plan to disk as `.rei/plans/<name>.md`. | `/saveplan feat-auth` |
+| `/loadplan <name>` | Load a plan from disk and dynamically sync `.rei/current-plan-todo.md`. | `/loadplan feat-auth` |
+| `/tdd` | Toggle TDD mode (runs `npm run test` during sandbox validation of edits). | `/tdd` |
+| `/index` | Re-index the codebase and refresh the AST semantic skeleton map. | `/index` |
+| `/compact` | Manually compact conversation memory into a high-level summary. | `/compact` |
+| `/provider [agent] [name]` | Show active LLM providers or switch them dynamically on-the-fly. | `/provider openrouter` |
+| `/model [agent] [name]` | Show active LLM models or switch models dynamically. | `/model agent qwen/qwen3.6-plus` |
+| `/session` | Show active session details (creation date, active mode, turns). | `/session` |
+| `/session list` | List all archived chat sessions for the current workspace. | `/session list` |
+| `/session archive [name]` | Archive the current chat session to disk under a custom or auto name. | `/session archive auth-refactor` |
+| `/session load <id>` | Load an archived chat session by ID and restore full context. | `/session load current_2026_05_27` |
+| `/session new [name]` | Archive the current session and start a fresh session immediately. | `/session new` |
 
 ## Modes
 
@@ -256,62 +286,44 @@ REI has three response modes:
 
 The active mode can be changed during a chat session with `/mode <mode>`.
 
-## Model providers
+## ⚙️ Interactive Configuration Wizard & Model Providers
 
-Provider selection is controlled by `MODEL_PROVIDER`:
+Instead of manually setting up complex environment variables or launch commands, REI features a fully interactive **Configuration Wizard (`launch-rei.js`)** that automates the setup of your model providers and workspace credentials.
 
-- `MODEL_PROVIDER=mock`
-- `MODEL_PROVIDER=ollama`
-- `MODEL_PROVIDER=groq`
-- `MODEL_PROVIDER=gemini`
-- `MODEL_PROVIDER=openrouter`
+### 1. First-Run Auto-Configuration
+When you run the `rei` command inside any repository for the first time, REI will detect if there is a `.env` configuration file in that workspace folder.
+* **Fallback Wizard**: If no `.env` is found, REI will immediately launch the Interactive Configuration Wizard automatically.
+* **Workspace `.env` Generation**: The wizard will read the global `.env.example` template, prompt you for API keys and preferences (Ollama settings, Gemini keys, OpenRouter, etc.), and **automatically generate a custom `.env` file directly inside that active project folder**.
+* Subsequent launches of `rei` or `rei chat` inside that repository will immediately load that local configuration, making startup instant and frictionless.
 
-### Ollama setup
-
-1. Install Ollama:
-
+### 2. Re-configuration on Demand (`rei --config`)
+If you want to change your provider keys, switch models, or re-configure a workspace at any time, run:
 ```bash
-curl -fsSL https://ollama.com/install.sh | sh
+rei --config
+```
+This forces the Interactive Wizard to launch, allowing you to update your settings and cleanly overwrite the active `.env` file.
+
+### 3. How the Generated `.env` Looks (Hybrid Model Routing)
+The generated `.env` file leverages REI's **Multi-Cerebro (Hybrid Local/Cloud Model Routing)** architecture, allowing you to route each conversational mode to a different model for maximum efficiency:
+
+```ini
+# --- Primary Model Provider (conversational Q&A / Planning) ---
+# Routes conversational Ask and Planning to a fast, free local model
+# Recommended local options: qwen2.5-coder:7b, gemma2:9b, or the highly recommended qwen/qwen3.6-35b-a3b (via Ollama / LM Studio)
+MODEL_PROVIDER=ollama
+OLLAMA_MODEL=qwen2.5-coder:7b
+OLLAMA_MODEL_ASK=qwen/qwen3.6-35b-a3b
+OLLAMA_MODEL_PLANNING=qwen/qwen3.6-35b-a3b
+OLLAMA_NUM_CTX=32768
+
+# --- Dedicated Agent Provider (complex file editing & execution) ---
+# Routes surgical XML-patch editing tasks to a premium high-reasoning cloud model
+AGENT_MODEL_PROVIDER=openrouter
+OPENROUTER_API_KEY=your-api-key-here
+OPENROUTER_MODEL_AGENT=qwen/qwen3.6-plus
 ```
 
-2. Start the server:
-
-```bash
-ollama serve
-```
-
-3. Pull a model:
-
-```bash
-ollama pull llama3.2
-```
-
-4. Run REI:
-
-```bash
-MODEL_PROVIDER=ollama OLLAMA_MODEL=llama3.2 rei chat
-```
-
-Optional configuration:
-
-- `OLLAMA_BASE_URL` default: `http://127.0.0.1:11434`
-- `OLLAMA_MODEL` default: `llama3.2`
-- `OLLAMA_REQUEST_TIMEOUT_MS` default: `300000`
-- `OLLAMA_KEEP_ALIVE` default: `30m`
-- `OLLAMA_NUM_CTX` optional (example: `8192`)
-- `OLLAMA_NUM_PREDICT` optional (example: `512`)
-- `OLLAMA_NUM_THREAD` optional (example for Apple Silicon: `8`)
-
-Performance tip for local Apple Silicon runs:
-
-```bash
-MODEL_PROVIDER=ollama \
-OLLAMA_MODEL=qwen2.5-coder:7b \
-OLLAMA_KEEP_ALIVE=2h \
-OLLAMA_NUM_CTX=8192 \
-OLLAMA_NUM_PREDICT=512 \
-rei chat
-```
+REI supports the following providers out-of-the-box: `ollama`, `openrouter`, `gemini`, `groq`, `llmstudio`, `huggingface`, and `mock`.
 
 ### Compactor model (optional)
 
@@ -322,82 +334,6 @@ COMPACTOR_MODEL=openai/gpt-4o-mini rei chat
 ```
 
 If not set, the compactor uses the same provider and model as the main session.
-
-### Gemini setup
-
-1. Create an API key in Google AI Studio.
-2. Run REI:
-
-```bash
-MODEL_PROVIDER=gemini GEMINI_API_KEY=your-key GEMINI_MODEL=gemini-2.5-flash rei chat
-```
-
-Optional configuration:
-
-- `GEMINI_API_KEY` required
-- `GEMINI_MODEL` default: `gemini-2.5-flash`
-- `GEMINI_REQUEST_TIMEOUT_MS` default: `120000`
-
-### OpenRouter setup
-
-1. Create an API key at [openrouter.ai/keys](https://openrouter.ai/keys).
-2. Run REI:
-
-```bash
-MODEL_PROVIDER=openrouter OPENROUTER_API_KEY=your-key rei chat
-```
-
-To use a specific model:
-
-```bash
-MODEL_PROVIDER=openrouter OPENROUTER_API_KEY=your-key OPENROUTER_MODEL=anthropic/claude-3.5-sonnet rei chat
-```
-
-Optional configuration:
-
-- `OPENROUTER_API_KEY` required
-- `OPENROUTER_MODEL` default: `openai/gpt-4o-mini`
-- `OPENROUTER_REQUEST_TIMEOUT_MS` default: `120000`
-
-### Multi-provider setup (different providers per mode)
-
-REI can route each session mode to a different provider and model. The typical pattern is a fast local model for ask/planning and a more capable cloud model for agent edits.
-
-Set `AGENT_MODEL_PROVIDER` to override the provider used only in agent mode. The default `MODEL_PROVIDER` continues to handle ask and planning.
-
-The agent model is resolved as `<PROVIDER>_MODEL_AGENT`, falling back to the provider's base model if the `_AGENT` variant is not set.
-
-**Example: Ollama (ask/planning) + OpenRouter (agent)**
-
-```bash
-# ask + planning: local Ollama, fast and free
-MODEL_PROVIDER=ollama
-OLLAMA_MODEL=qwen2.5-coder:14b
-OLLAMA_MODEL_ASK=qwen2.5-coder:14b
-OLLAMA_MODEL_PLANNING=qwen2.5-coder:14b
-OLLAMA_NUM_CTX=32768
-
-# agent: OpenRouter, more capable for XML edits
-AGENT_MODEL_PROVIDER=openrouter
-OPENROUTER_API_KEY=your-key
-OPENROUTER_MODEL_AGENT=google/gemma-4-31b-it
-```
-
-All providers support the `_AGENT` model suffix: `OPENROUTER_MODEL_AGENT`, `OLLAMA_MODEL_AGENT`, `GROQ_MODEL_AGENT`, `GEMINI_MODEL_AGENT`, `HF_MODEL_AGENT`.
-
-### Per-mode model overrides (Ollama single-provider)
-
-When using Ollama as the sole provider, each mode can use a different model:
-
-```bash
-MODEL_PROVIDER=ollama
-OLLAMA_MODEL=qwen2.5-coder:14b       # fallback for all modes
-OLLAMA_MODEL_ASK=gemma3:12b          # fast, conversational
-OLLAMA_MODEL_PLANNING=gemma3:12b     # fast, structured output
-OLLAMA_MODEL_AGENT=qwen3:30b-a3b     # heavier model for XML edits
-```
-
-Per-mode overrides are only supported for Ollama in single-provider mode. For all other providers, use `AGENT_MODEL_PROVIDER` to assign a dedicated agent provider.
 
 ## Terminal output
 

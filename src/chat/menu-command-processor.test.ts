@@ -338,4 +338,69 @@ Modify [app.ts](file:///Users/lucas/www/rei/app.ts)
       expect(readPlanTodoFile(tmpWorkspace)).toContain("Etapa 1: Fix bug");
     }
   });
+
+  it("creates and parses stages from flexible plan formats (lists and bullets)", async () => {
+    const flexiblePlanText = `
+- [ ] **Etapa 1:** Limpiar app.html (eliminar datos corruptos/binarios)
+  - [ ] **1. Subtarea** (this should not match)
+1. **Etapa 2:** Verificar que DashboardComponent se renderice
+  - [ ] **2. Subtarea** (this should not match)
+- Stage 3: Verificar imports de Material
+### 📦 Fase 4: Capa de Datos (Services + Mock)
+- [ ] **5. Crear DollarService** (this should not match)
+    `;
+
+    initPlanTodoFile(tmpWorkspace, flexiblePlanText);
+    const todoContent = readPlanTodoFile(tmpWorkspace);
+    expect(todoContent).not.toBeNull();
+    expect(todoContent).toContain("- [ ] **Etapa 1:** Limpiar app.html (eliminar datos corruptos/binarios)");
+    expect(todoContent).toContain("- [ ] **Etapa 2:** Verificar que DashboardComponent se renderice");
+    expect(todoContent).toContain("- [ ] **Etapa 3:** Verificar imports de Material");
+    expect(todoContent).toContain("- [ ] **Etapa 4:** Capa de Datos (Services + Mock)");
+    expect(todoContent).not.toContain("Subtarea");
+    expect(todoContent).not.toContain("DollarService");
+  });
+
+  it("handles /saveplan and /loadplan commands", async () => {
+    const planText = `
+### 📦 Fase 1: Capa de Datos (Services + Mock)
+We need to edit auth.ts.
+- Modify [auth.ts](file:///Users/lucas/www/rei/auth.ts)
+    `;
+
+    const session: ChatSession = {
+      mode: "planning",
+      messages: [
+        { role: "assistant", content: planText }
+      ]
+    };
+
+    // 1. Run "/saveplan my-cool-plan"
+    const saveResult = await processMenuCommand("/saveplan my-cool-plan", session, tmpWorkspace, provider);
+    expect(saveResult.success).toBe(true);
+    expect(saveResult.response).toContain("Plan completo guardado exitosamente");
+
+    // 2. Load the plan into a new session
+    const emptySession: ChatSession = {
+      mode: "planning",
+      messages: []
+    };
+    const loadResult = await processMenuCommand("/loadplan my-cool-plan", emptySession, tmpWorkspace, provider);
+    expect(loadResult.success).toBe(true);
+    expect(loadResult.response).toContain("Plan 'my-cool-plan' cargado exitosamente");
+    expect(loadResult.newSession?.messages.length).toBe(1);
+    expect(loadResult.newSession?.messages[0].content).toBe(planText);
+
+    // Verify .rei/current-plan-todo.md was generated
+    const todoContent = readPlanTodoFile(tmpWorkspace);
+    expect(todoContent).not.toBeNull();
+    expect(todoContent).toContain("- [ ] **Etapa 1:** Capa de Datos (Services + Mock)");
+
+    // 3. Test `/runplan stage 1` on loaded plan
+    const runResult = await processMenuCommand("/runplan stage 1", loadResult.newSession!, tmpWorkspace, provider);
+    expect(runResult.success).toBe(true);
+    expect(runResult.autoExecute?.prompt).toContain("[RUNPLAN STAGE 1]");
+    expect(runResult.autoExecute?.prompt).toContain("auth.ts");
+  });
 });
+

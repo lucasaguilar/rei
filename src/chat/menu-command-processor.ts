@@ -17,6 +17,10 @@ import {
   deletePlanTodoFile,
   initPlanTodoFile,
   recreatePlanTodoFileFromSession,
+  savePlanToFile,
+  loadPlanFromFile,
+  STAGE_REGEX,
+  isPlanMessage,
 } from "./plan-tracker.js";
 
 export interface CommandResult {
@@ -228,7 +232,7 @@ export async function processMenuCommand(
         (m) =>
           m.role === "assistant" &&
           m.content &&
-          m.content.toLowerCase().includes("plan"),
+          isPlanMessage(m.content),
       );
 
     if (!lastPlanMsg || !lastPlanMsg.content) {
@@ -254,18 +258,17 @@ export async function processMenuCommand(
       }
     }
 
-    if (stageNum !== null) {
+     if (stageNum !== null) {
       const lines = planContent.split("\n");
-      const stageRegex = /^(#+)\s*(?:(?:fase|etapa|paso|stage|step)\s+)?0*(\d+)\b(.*)$/i;
 
       let startIndex = -1;
       let headerLevel = 0;
 
       for (let i = 0; i < lines.length; i++) {
-        const m = lines[i].match(stageRegex);
+        const m = lines[i].match(STAGE_REGEX);
         if (m && parseInt(m[2], 10) === stageNum) {
           startIndex = i;
-          headerLevel = m[1].length;
+          headerLevel = m[1] ? m[1].length : 0;
           stageTitle = lines[i];
           break;
         }
@@ -283,7 +286,7 @@ export async function processMenuCommand(
       for (let i = startIndex + 1; i < lines.length; i++) {
         const line = lines[i];
         if (line.startsWith("#")) {
-          const m = line.match(stageRegex);
+          const m = line.match(STAGE_REGEX);
           const headerMatch = line.match(/^#+/);
           const matchLen = headerMatch ? headerMatch[0].length : 0;
           // Terminate if another stage is found, or if a header of same/higher level is found
@@ -631,6 +634,89 @@ export async function processMenuCommand(
       response: `[REI] ${modeLabel} model changed to: '${requested}' (provider: '${targetProvider}'). Agent recreated successfully.`,
       recreateAgent: true,
     };
+  }
+
+  if (trimmed.startsWith("/saveplan")) {
+    const saveMatch = trimmed.match(/^\/saveplan\s+(\S+)$/i);
+    if (!saveMatch) {
+      return {
+        success: false,
+        response: "[REI] Formato inválido. Usá: /saveplan <nombre>",
+      };
+    }
+
+    const planName = saveMatch[1];
+    const lastPlanMsg = [...session.messages]
+      .reverse()
+      .find(
+        (m) =>
+          m.role === "assistant" &&
+          m.content &&
+          isPlanMessage(m.content),
+      );
+
+    if (!lastPlanMsg || !lastPlanMsg.content) {
+      return {
+        success: false,
+        response: "[REI] No se encontró ningún plan en esta sesión para guardar.",
+      };
+    }
+
+    try {
+      const savedPath = savePlanToFile(workspacePath, planName, lastPlanMsg.content);
+      return {
+        success: true,
+        response: `[REI] Plan completo guardado exitosamente en: ${savedPath}`,
+      };
+    } catch (err) {
+      return {
+        success: false,
+        response: `[REI] Error al guardar el plan: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
+  if (trimmed.startsWith("/loadplan")) {
+    const loadMatch = trimmed.match(/^\/loadplan\s+(\S+)$/i);
+    if (!loadMatch) {
+      return {
+        success: false,
+        response: "[REI] Formato inválido. Usá: /loadplan <nombre>",
+      };
+    }
+
+    const planName = loadMatch[1];
+    try {
+      const planContent = loadPlanFromFile(workspacePath, planName);
+      
+      // Ingest the loaded plan as a new assistant message
+      const updatedMessages = [...session.messages, {
+        role: "assistant" as const,
+        content: planContent,
+      }];
+
+      saveSession(
+        workspacePath,
+        updatedMessages,
+        session.mode,
+        session.summary,
+        session.createdAt,
+      );
+
+      // Re-initialize the plan todo file in the workspace
+      initPlanTodoFile(workspacePath, planContent);
+
+      return {
+        success: true,
+        response: `[REI] Plan '${planName}' cargado exitosamente. Se ha regenerado el checklist en .rei/current-plan-todo.md.`,
+        newSession: { ...session, messages: updatedMessages },
+      };
+    } catch (err) {
+      return {
+        success: false,
+        response: `[REI] Error al cargar el plan: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
   }
 
   if (trimmed === "/help") {

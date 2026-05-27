@@ -58,6 +58,8 @@ export const COMMANDS: Array<{
   { command: "/mode planning", description: "switch to planning mode" },
   { command: "/mode agent", description: "switch to agent mode" },
   { command: "/runplan [stage <num>]", description: "execute planning-mode plan (optionally by stage)" },
+  { command: "/saveplan <name>", description: "save the full plan to disk as .rei/plans/<name>.md" },
+  { command: "/loadplan <name>", description: "load a plan from disk and update active checklist" },
   { command: "/tdd", description: "toggle TDD mode (run tests in sandbox)" },
   { command: "/index", description: "regenerate repository skeleton map" },
   { command: "/session", description: "show current session info" },

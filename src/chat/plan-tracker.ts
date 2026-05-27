@@ -37,13 +37,19 @@ export function readPlanTodoFile(workspacePath: string): string | null {
   return null;
 }
 
+export const STAGE_REGEX = /^(?:(#+)\s*(?:\*\*)?[^\w\d]*(?:(?:fase|etapa|paso|stage|step)\s+)?|(?:\d+\.\s*)\s*(?:\*\*)?[^\w\d]*(?:(?:fase|etapa|paso|stage|step)\s+)?|-\s*(?:\[\s*\]\s*)?(?:\*\*)?[^\w\d]*(?:fase|etapa|paso|stage|step)\s+)(?:\*\*)?0*(\d+)\b(.*)$/i;
+
+export function isPlanMessage(content: string): boolean {
+  const lines = content.split('\n');
+  return lines.some(line => STAGE_REGEX.test(line));
+}
+
 /**
  * Initializes the current-plan-todo.md checklist from raw plan content.
  */
 export function initPlanTodoFile(workspacePath: string, planContent: string): void {
   const lines = planContent.split('\n');
   const todoLines: string[] = [];
-  const stageRegex = /^(#+)\s*(?:(?:fase|etapa|paso|stage|step)\s+)?0*(\d+)\b(.*)$/i;
 
   todoLines.push('# PLAN PROGRESS');
   todoLines.push('');
@@ -53,10 +59,10 @@ export function initPlanTodoFile(workspacePath: string, planContent: string): vo
 
   let parsedCount = 0;
   for (const line of lines) {
-    const match = line.match(stageRegex);
+    const match = line.match(STAGE_REGEX);
     if (match) {
       const num = parseInt(match[2], 10);
-      const desc = match[3].replace(/^[\s.:-]+/, '').trim();
+      const desc = match[3].replace(/^[\s.:\-*]+/, '').trim();
       todoLines.push(`- [ ] **Etapa ${num}:** ${desc || 'Sin descripción'}`);
       parsedCount++;
     }
@@ -75,6 +81,49 @@ export function initPlanTodoFile(workspacePath: string, planContent: string): vo
     console.error('[PLAN TRACKER] Error creating plan todo file:', err);
   }
 }
+
+/**
+ * Saves the full plan content to .rei/plans/<name>.md in the workspace.
+ */
+export function savePlanToFile(workspacePath: string, planName: string, planContent: string): string {
+  // Sanitize the planName to prevent path traversal
+  const sanitized = planName.replace(/[^a-zA-Z0-9_\-]/g, '_');
+  const plansDir = path.join(workspacePath, '.rei', 'plans');
+  const filePath = path.join(plansDir, `${sanitized}.md`);
+
+  try {
+    fs.mkdirSync(plansDir, { recursive: true });
+    fs.writeFileSync(filePath, planContent, 'utf8');
+    return filePath;
+  } catch (err) {
+    throw new Error(`Failed to save plan to disk: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * Loads the full plan content from .rei/plans/<name>.md in the workspace.
+ */
+export function loadPlanFromFile(workspacePath: string, planName: string): string {
+  // Sanitize the planName
+  const sanitized = planName.replace(/[^a-zA-Z0-9_\-]/g, '_');
+  
+  // Try to find it as a direct file or inside .rei/plans/
+  let filePath = path.join(workspacePath, '.rei', 'plans', `${sanitized}.md`);
+  if (!fs.existsSync(filePath)) {
+    // If not found in .rei/plans/, maybe they specified a path or filename directly in workspace
+    filePath = path.resolve(workspacePath, planName);
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`Plan file not found: '${planName}'`);
+    }
+  }
+
+  try {
+    return fs.readFileSync(filePath, 'utf8');
+  } catch (err) {
+    throw new Error(`Failed to read plan from disk: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 
 /**
  * Marks a specific stage number as completed (- [x]) in the checklist.
