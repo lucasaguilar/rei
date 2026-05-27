@@ -56,7 +56,7 @@ export const COMMANDS: Array<{
   { command: "/mode ask", description: "switch to ask mode" },
   { command: "/mode planning", description: "switch to planning mode" },
   { command: "/mode agent", description: "switch to agent mode" },
-  { command: "/runplan", description: "execute last planning-mode plan" },
+  { command: "/runplan [stage <num>]", description: "execute planning-mode plan (optionally by stage)" },
   { command: "/tdd", description: "toggle TDD mode (run tests in sandbox)" },
   { command: "/index", description: "regenerate repository skeleton map" },
   { command: "/session", description: "show current session info" },

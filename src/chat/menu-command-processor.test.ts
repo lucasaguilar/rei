@@ -4,6 +4,13 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { processMenuCommand } from "./menu-command-processor.js";
 import { listSessions, loadCurrentSession, saveSession } from "./session-store.js";
+import {
+  readPlanTodoFile,
+  markStageAsCompleted,
+  deletePlanTodoFile,
+  initPlanTodoFile,
+} from "./plan-tracker.js";
+import * as fsSync from "node:fs";
 import type { ChatSession } from "./types.js";
 import type { ModelProvider } from "../providers/model-provider.js";
 
@@ -221,5 +228,114 @@ describe("menu-command-processor /provider and /model commands", () => {
     expect(setResult.success).toBe(true);
     expect(setResult.recreateAgent).toBe(true);
     expect(process.env.OPENROUTER_MODEL_AGENT).toBe("google/gemini-2.5-pro");
+  });
+});
+
+describe("menu-command-processor /runplan and plan-tracker lifecycle", () => {
+  let tmpWorkspace: string;
+  const provider = {} as ModelProvider;
+
+  beforeEach(async () => {
+    tmpWorkspace = await fs.mkdtemp(path.join(os.tmpdir(), "rei-runplan-test-"));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpWorkspace, { recursive: true, force: true });
+  });
+
+  it("creates and parses stages from a plan with /runplan stage <num>", async () => {
+    const planText = `
+# Implementation Plan
+
+## Proposed Changes
+
+### Stage 1: Setup auth module
+We need to edit auth.ts.
+- Modify [auth.ts](file:///Users/lucas/www/rei/auth.ts)
+
+### Stage 2: Integrate routes
+We need to edit router.ts.
+- Modify [router.ts](file:///Users/lucas/www/rei/router.ts)
+
+## Verification
+Done.
+    `;
+
+    const session: ChatSession = {
+      mode: "planning",
+      messages: [
+        { role: "assistant", content: planText }
+      ]
+    };
+
+    // 1. Run "/runplan stage 1"
+    const result1 = await processMenuCommand("/runplan stage 1", session, tmpWorkspace, provider);
+    expect(result1.success).toBe(true);
+    expect(result1.response).toContain("etapa 1");
+    expect(result1.autoExecute?.prompt).toContain("[RUNPLAN STAGE 1]");
+    expect(result1.autoExecute?.prompt).toContain("auth.ts");
+    expect(result1.autoExecute?.prompt).not.toContain("router.ts");
+
+    // Verify .rei/current-plan-todo.md exists
+    const todoContent = readPlanTodoFile(tmpWorkspace);
+    expect(todoContent).not.toBeNull();
+    expect(todoContent).toContain("- [ ] **Etapa 1:** Setup auth module");
+    expect(todoContent).toContain("- [ ] **Etapa 2:** Integrate routes");
+
+    // 2. Mark stage 1 completed
+    markStageAsCompleted(tmpWorkspace, 1);
+    const todoContent2 = readPlanTodoFile(tmpWorkspace);
+    expect(todoContent2).toContain("- [x] **Etapa 1:** Setup auth module");
+    expect(todoContent2).toContain("- [ ] **Etapa 2:** Integrate routes");
+
+    // 3. Run "/runplan stage 2"
+    const result2 = await processMenuCommand("/runplan stage 2", session, tmpWorkspace, provider);
+    expect(result2.success).toBe(true);
+    expect(result2.response).toContain("etapa 2");
+    expect(result2.autoExecute?.prompt).toContain("[RUNPLAN STAGE 2]");
+    expect(result2.autoExecute?.prompt).toContain("router.ts");
+    expect(result2.autoExecute?.prompt).not.toContain("auth.ts");
+
+    // 4. Test Lifecycle - new session deletes the file
+    await processMenuCommand("/session new", session, tmpWorkspace, provider);
+    expect(readPlanTodoFile(tmpWorkspace)).toBeNull();
+  });
+
+  it("handles lifecycle of plan todo file on session load and clear", async () => {
+    const planText = `
+# Implementation Plan
+### Stage 1: Fix bug
+Modify [app.ts](file:///Users/lucas/www/rei/app.ts)
+    `;
+
+    const session: ChatSession = {
+      mode: "planning",
+      messages: [
+        { role: "assistant", content: planText }
+      ]
+    };
+
+    // Initialize todo file
+    initPlanTodoFile(tmpWorkspace, planText);
+    expect(readPlanTodoFile(tmpWorkspace)).not.toBeNull();
+
+    // 1. Clear session deletes the file
+    await processMenuCommand("/clear", session, tmpWorkspace, provider);
+    expect(readPlanTodoFile(tmpWorkspace)).toBeNull();
+
+    // Save session containing plan to mock session-store
+    saveSession(tmpWorkspace, session.messages, session.mode, session.summary, "2026-05-26T20:59:58Z");
+    
+    // We loaded it via session load
+    // Mock the session list entry and load
+    const activeSessions = listSessions(tmpWorkspace);
+    if (activeSessions.length > 0) {
+      const sessionId = activeSessions[0].id;
+      const loadRes = await processMenuCommand(`/session load ${sessionId}`, { mode: "planning", messages: [] }, tmpWorkspace, provider);
+      expect(loadRes.success).toBe(true);
+      // Recreates the todo file!
+      expect(readPlanTodoFile(tmpWorkspace)).not.toBeNull();
+      expect(readPlanTodoFile(tmpWorkspace)).toContain("Etapa 1: Fix bug");
+    }
   });
 });

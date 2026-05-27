@@ -1,3 +1,5 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { ChatMessage, ChatSession, SessionMode } from "./types.js";
 import { getHelpText } from "../cli/constants/chat.constants.js";
 import {
@@ -11,6 +13,11 @@ import { startIndexingWorker } from "../context/rag/rag-indexer.js";
 import { generateRepoMap } from "../tools/repo-map-generator.js";
 import type { ModelProvider } from "../providers/model-provider.js";
 import { clearPromptCache } from "../prompts/loader.js";
+import {
+  deletePlanTodoFile,
+  initPlanTodoFile,
+  recreatePlanTodoFileFromSession,
+} from "./plan-tracker.js";
 
 export interface CommandResult {
   success: boolean;
@@ -55,6 +62,7 @@ export async function processMenuCommand(
     const newSession: ChatSession = { messages: [], mode: session.mode };
 
     saveSession(workspacePath, newSession.messages, newSession.mode);
+    deletePlanTodoFile(workspacePath);
 
     return {
       success: true,
@@ -78,6 +86,7 @@ export async function processMenuCommand(
     const archivedName = archiveCurrentSession(workspacePath, customName);
     const newSession: ChatSession = { messages: [], mode: session.mode };
     saveSession(workspacePath, newSession.messages, newSession.mode);
+    deletePlanTodoFile(workspacePath);
 
     return {
       success: true,
@@ -133,6 +142,7 @@ export async function processMenuCommand(
       loaded.summary,
       loaded.createdAt,
     );
+    recreatePlanTodoFileFromSession(workspacePath, loaded.messages);
 
     return {
       success: true,
@@ -165,6 +175,7 @@ export async function processMenuCommand(
       session.summary,
       session.createdAt,
     );
+    deletePlanTodoFile(workspacePath);
     return {
       success: true,
       response:
@@ -202,7 +213,15 @@ export async function processMenuCommand(
     }
   }
 
-  if (trimmed === "/runplan") {
+  if (trimmed.startsWith("/runplan")) {
+    const runPlanMatch = trimmed.match(/^\/runplan(?:\s+(?:stage|step|fase|etapa|paso)\s+(\d+))?$/i);
+    if (!runPlanMatch) {
+      return {
+        success: false,
+        response: "[RUNPLAN] Formato inválido. Usá /runplan o /runplan stage <número>.",
+      };
+    }
+
     const lastPlanMsg = [...session.messages]
       .reverse()
       .find(
@@ -212,28 +231,92 @@ export async function processMenuCommand(
           m.content.toLowerCase().includes("plan"),
       );
 
-    if (!lastPlanMsg) {
+    if (!lastPlanMsg || !lastPlanMsg.content) {
       return {
         success: false,
-        response: "[RUNPLAN] No plan found in session.",
+        response: "[RUNPLAN] No se encontró ningún plan en esta sesión.",
       };
+    }
+
+    const planContent = lastPlanMsg.content;
+    let targetContent = planContent;
+    let stageTitle = "";
+
+    const stageNumStr = runPlanMatch[1];
+    const stageNum = stageNumStr ? parseInt(stageNumStr, 10) : null;
+
+    if (stageNum === null || stageNum === 1) {
+      initPlanTodoFile(workspacePath, planContent);
+    } else {
+      const todoPath = path.join(workspacePath, ".rei/current-plan-todo.md");
+      if (!fs.existsSync(todoPath)) {
+        initPlanTodoFile(workspacePath, planContent);
+      }
+    }
+
+    if (stageNum !== null) {
+      const lines = planContent.split("\n");
+      const stageRegex = /^(#+)\s*(?:(?:fase|etapa|paso|stage|step)\s+)?0*(\d+)\b(.*)$/i;
+
+      let startIndex = -1;
+      let headerLevel = 0;
+
+      for (let i = 0; i < lines.length; i++) {
+        const m = lines[i].match(stageRegex);
+        if (m && parseInt(m[2], 10) === stageNum) {
+          startIndex = i;
+          headerLevel = m[1].length;
+          stageTitle = lines[i];
+          break;
+        }
+      }
+
+      if (startIndex === -1) {
+        return {
+          success: false,
+          response: `[RUNPLAN] No se encontró la etapa ${stageNum} en el plan.`,
+        };
+      }
+
+      // Find the end index of the section
+      let endIndex = lines.length;
+      for (let i = startIndex + 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (line.startsWith("#")) {
+          const m = line.match(stageRegex);
+          // Terminate if another stage is found, or if a header of same/higher level is found
+          if (m || line.match(/^#+/)[0].length <= headerLevel) {
+            endIndex = i;
+            break;
+          }
+        }
+      }
+
+      targetContent = lines.slice(startIndex, endIndex).join("\n");
     }
 
     const fileRegex =
       /([\w\-/]+\.(ts|js|json|md|tsx|jsx|yml|yaml|css|scss|html|cjs|mjs))/gi;
     const files = Array.from(
-      new Set(lastPlanMsg.content!.match(fileRegex) || []),
+      new Set(targetContent.match(fileRegex) || []),
     );
 
     if (files.length === 0) {
       return {
         success: false,
-        response:
-          "[RUNPLAN] No files detected in plan. Please ensure the plan lists file names.",
+        response: stageNum
+          ? `[RUNPLAN] No se detectaron archivos a modificar en la etapa ${stageNum}.`
+          : "[RUNPLAN] No se detectaron archivos a modificar en el plan.",
       };
     }
 
-    const planPrompt = `Ejecutá el siguiente plan sobre estos archivos:\n\nPLAN:\n${lastPlanMsg.content}\n\nARCHIVOS:\n${files.join(", ")}`;
+    const planPrompt = stageNum
+      ? `[RUNPLAN STAGE ${stageNum}] Ejecutá la Etapa ${stageNum} del plan de implementación.\n\nSUB-PLAN:\n${targetContent}\n\nARCHIVOS A MODIFICAR:\n${files.join(", ")}`
+      : `Ejecutá el siguiente plan sobre estos archivos:\n\nPLAN:\n${planContent}\n\nARCHIVOS:\n${files.join(", ")}`;
+
+    const responseMsg = stageNum
+      ? `[REI] Cambiando a modo AGENT para ejecutar la etapa ${stageNum}. Archivos objetivo: ${files.join(", ")}`
+      : `[REI] Cambiando a modo AGENT para ejecutar el plan completo. Archivos objetivo: ${files.join(", ")}`;
 
     const newMode = "agent" as SessionMode;
     saveSession(
@@ -246,7 +329,7 @@ export async function processMenuCommand(
 
     return {
       success: true,
-      response: `[REI] Switching to AGENT mode to execute the plan. Target files: ${files.join(", ")}`,
+      response: responseMsg,
       newSession: { ...session, mode: newMode },
       autoExecute: { prompt: planPrompt },
     };

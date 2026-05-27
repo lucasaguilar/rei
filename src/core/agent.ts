@@ -16,6 +16,10 @@ import { buildMessagesForModel } from "../chat/message-builder.js";
 import { compactSession, needsCompaction } from "../chat/compactor.js";
 import { type ChatSession } from "../chat/types.js";
 import {
+  readPlanTodoFile,
+  markStageAsCompleted,
+} from "../chat/plan-tracker.js";
+import {
   generateRepoMap,
   generateRepoMapForFile,
 } from "../tools/repo-map-generator.js";
@@ -66,6 +70,14 @@ import type {
   PendingPatchAssessmentItem,
   PendingPatchAssessment,
 } from "./models/agent.types.js";
+
+function extractStageNumberFromPrompt(prompt: string): number | null {
+  const match = prompt.match(/\[RUNPLAN STAGE (\d+)\]/i);
+  if (match) {
+    return parseInt(match[1], 10);
+  }
+  return null;
+}
 
 export class Agent {
   private scanCache?: {
@@ -134,6 +146,17 @@ export class Agent {
       content: response,
       sourceMode: session.mode,
     });
+
+    if (session.mode === "agent") {
+      const stageNum = extractStageNumberFromPrompt(userInput);
+      if (stageNum !== null) {
+        const wasSuccessful = response.includes("patch(es) applied directly.") || response.includes("file(s) written.");
+        if (wasSuccessful) {
+          markStageAsCompleted(this.workspacePath, stageNum);
+        }
+      }
+    }
+
     return response;
   }
 
@@ -211,6 +234,14 @@ export class Agent {
         session.messages.push({ role: "assistant", content: outcome.response });
         options?.onStatus?.("producing_response");
         yield fullResponse;
+
+        if (result.success) {
+          const stageNum = extractStageNumberFromPrompt(userInput);
+          if (stageNum !== null) {
+            markStageAsCompleted(this.workspacePath, stageNum);
+          }
+        }
+
         return;
       }
 
@@ -268,6 +299,14 @@ export class Agent {
       session.messages.push({ role: "assistant", content: outcome.response });
       options?.onStatus?.("producing_response");
       yield outcome.response;
+
+      if (editFormat === "wholefile" && !outcome.failed) {
+        const stageNum = extractStageNumberFromPrompt(userInput);
+        if (stageNum !== null) {
+          markStageAsCompleted(this.workspacePath, stageNum);
+        }
+      }
+
       return;
     }
 
@@ -433,6 +472,22 @@ export class Agent {
       await this.vectorStore.cleanupStaleFiles(activePaths);
 
       const chunks = await chunkRepoMap(this.workspacePath);
+      const chunksToEmbed = chunks.filter(chunk => {
+        const hash = crypto
+          .createHash("md5")
+          .update(chunk.content)
+          .digest("hex");
+        const existing = this.vectorStore.getById(chunk.metadata.id);
+        return !existing || existing.metadata.fileHash !== hash;
+      });
+
+      if (chunksToEmbed.length > 0) {
+        console.log(
+          `\n\x1b[33m[REI] Indexando repositorio: Generando embeddings locales para ${chunksToEmbed.length} bloque(s) de código...` +
+          `\n      Esto se procesa en tu CPU y puede tomar de 30 a 90 segundos en el primer arranque. Por favor espera...\x1b[0m\n`
+        );
+      }
+
       for (const chunk of chunks) {
         const hash = crypto
           .createHash("md5")
@@ -471,26 +526,24 @@ export class Agent {
       repositorySkeletonMap = undefined;
     }
 
-    // Rebuild system message only when it doesn't exist yet or mode changed.
-    // Keeping it stable across turns preserves the Ollama KV cache prefix.
-    const needsRebuild =
-      session.messages.length === 0 ||
-      session.messages[0].role !== "system" ||
-      !session.messages[0].content.includes(`Active mode: ${session.mode}`);
+    // Rebuild system message on every turn or when mode changes, to keep the active plan progress checklist in sync.
+    const baseSystemContent = buildSystemMessage(
+      session.mode,
+      this.workspacePath,
+    );
+    let systemContent = baseSystemContent;
+    const todoContent = readPlanTodoFile(this.workspacePath);
+    if (todoContent) {
+      systemContent += `\n\n### Active Plan Progress:\n${todoContent}`;
+    }
 
-    if (needsRebuild) {
-      const systemContent = buildSystemMessage(
-        session.mode,
-        this.workspacePath,
-      );
-      if (
-        session.messages.length > 0 &&
-        session.messages[0].role === "system"
-      ) {
-        session.messages[0] = { role: "system", content: systemContent };
-      } else {
-        session.messages.unshift({ role: "system", content: systemContent });
-      }
+    if (
+      session.messages.length > 0 &&
+      session.messages[0].role === "system"
+    ) {
+      session.messages[0].content = systemContent;
+    } else {
+      session.messages.unshift({ role: "system", content: systemContent });
     }
 
     return repositorySkeletonMap;
