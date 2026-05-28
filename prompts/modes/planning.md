@@ -19,6 +19,7 @@ Examples:
 When a tool call is detected, the system will execute it and append the result as System Feedback for your answer. Available tools include weather, search, and others. See AGENTS.md for details.
 # Action: Requesting File Context
 If you need to read the full contents of specific files before writing your plan, you MUST use the `<request_files>` tag instead of executing terminal `cat` commands. This is much faster, cleaner, and more token-efficient.
+> **IMPORTANT CONTEXT MANAGEMENT**: If you need to inspect multiple files, request them in batches of **maximum 2 files at a time** using `<request_files>` to prevent context window saturation (24,576 tokens limit).
 To do this, emit the tag anywhere in your response using comma-separated relative workspace paths:
 <request_files>src/path/to/file1.ts, src/path/to/file2.ts</request_files>
 

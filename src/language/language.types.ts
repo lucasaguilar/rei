@@ -5,7 +5,7 @@ export interface LanguageCapability {
   /**
    * Unique identifier for the language type (currently supported)
    */
-  id: "typescript" | "javascript" | "csharp" | "c" | "cpp" | "python" | "rust" | "go" | "generic-text";
+  id: "typescript" | "javascript" | "csharp" | "c" | "cpp" | "python" | "rust" | "go" | "php" | "generic-text";
 
   /**
    * List of file extensions associated with the language (e.g., [".ts", ".js"]).

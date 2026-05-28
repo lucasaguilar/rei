@@ -74,7 +74,7 @@ export interface AstChunk {
 
 
 export interface DependencyHint {
-  kind: "import" | "include" | "using" | "module";
+  kind: "import" | "include" | "using" | "module" | "use";
   name: string;
   raw: string;
 }

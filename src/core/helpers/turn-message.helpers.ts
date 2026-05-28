@@ -135,3 +135,22 @@ export function looksLikeAgentJson(raw: string): boolean {
     /"actions"\s*:/.test(trimmed)
   );
 }
+
+export function extractStageNumberFromPrompt(prompt: string): number | null {
+  const match = prompt.match(/\[RUNPLAN STAGE (\d+)\]/i);
+  if (match) {
+    return parseInt(match[1], 10);
+  }
+  return null;
+}
+
+/**
+ * Strips all execution XML action tags (<execute_command>, <call_tool>, <request_files>) from a response string.
+ */
+export function stripActionTags(text: string): string {
+  return text
+    .replace(/<execute_command>[\s\S]*?<\/execute_command>/gi, "")
+    .replace(/<call_tool\s+name="[^"]+">[\s\S]*?<\/call_tool>/gi, "")
+    .replace(/<request_files>[\s\S]*?<\/request_files>/gi, "")
+    .trim();
+}

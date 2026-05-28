@@ -25,6 +25,7 @@ function languageIdFromExtension(ext: string): string {
     case ".py": return "python";
     case ".rs": return "rust";
     case ".go": return "go";
+    case ".php": return "php";
     default: return ext.replace(".", "");
   }
 }

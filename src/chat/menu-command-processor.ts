@@ -13,6 +13,7 @@ import { startIndexingWorker } from "../context/rag/rag-indexer.js";
 import { generateRepoMap } from "../tools/repo-map-generator.js";
 import type { ModelProvider } from "../providers/model-provider.js";
 import { clearPromptCache } from "../prompts/loader.js";
+import { buildFileMatcherRegex } from "../language/language-capabilities.js";
 import {
   deletePlanTodoFile,
   initPlanTodoFile,
@@ -222,7 +223,7 @@ export async function processMenuCommand(
     if (!runPlanMatch) {
       return {
         success: false,
-        response: "[RUNPLAN] Formato inválido. Usá /runplan o /runplan stage <número>.",
+        response: "[RUNPLAN] Invalid format. Use /runplan or /runplan stage <number>.",
       };
     }
 
@@ -238,7 +239,7 @@ export async function processMenuCommand(
     if (!lastPlanMsg || !lastPlanMsg.content) {
       return {
         success: false,
-        response: "[RUNPLAN] No se encontró ningún plan en esta sesión.",
+        response: "[RUNPLAN] No plan was found in this session.",
       };
     }
 
@@ -277,7 +278,7 @@ export async function processMenuCommand(
       if (startIndex === -1) {
         return {
           success: false,
-          response: `[RUNPLAN] No se encontró la etapa ${stageNum} en el plan.`,
+          response: `[RUNPLAN] Stage ${stageNum} was not found in the plan.`,
         };
       }
 
@@ -300,8 +301,7 @@ export async function processMenuCommand(
       targetContent = lines.slice(startIndex, endIndex).join("\n");
     }
 
-    const fileRegex =
-      /([\w\-/]+\.(ts|js|json|md|tsx|jsx|yml|yaml|css|scss|html|cjs|mjs))/gi;
+     const fileRegex = buildFileMatcherRegex();
     const files = Array.from(
       new Set(targetContent.match(fileRegex) || []),
     );
@@ -310,18 +310,18 @@ export async function processMenuCommand(
       return {
         success: false,
         response: stageNum
-          ? `[RUNPLAN] No se detectaron archivos a modificar en la etapa ${stageNum}.`
-          : "[RUNPLAN] No se detectaron archivos a modificar en el plan.",
+          ? `[RUNPLAN] No target files detected to modify in stage ${stageNum}.`
+          : "[RUNPLAN] No target files detected to modify in the plan.",
       };
     }
 
     const planPrompt = stageNum
-      ? `[RUNPLAN STAGE ${stageNum}] Ejecutá la Etapa ${stageNum} del plan de implementación.\n\nSUB-PLAN:\n${targetContent}\n\nARCHIVOS A MODIFICAR:\n${files.join(", ")}`
-      : `Ejecutá el siguiente plan sobre estos archivos:\n\nPLAN:\n${planContent}\n\nARCHIVOS:\n${files.join(", ")}`;
+      ? `[RUNPLAN STAGE ${stageNum}] Execute Stage ${stageNum} of the implementation plan.\n\nSUB-PLAN:\n${targetContent}\n\nFILES TO MODIFY:\n${files.join(", ")}`
+      : `Execute the following plan over these files:\n\nPLAN:\n${planContent}\n\nFILES:\n${files.join(", ")}`;
 
     const responseMsg = stageNum
-      ? `[REI] Cambiando a modo AGENT para ejecutar la etapa ${stageNum}. Archivos objetivo: ${files.join(", ")}`
-      : `[REI] Cambiando a modo AGENT para ejecutar el plan completo. Archivos objetivo: ${files.join(", ")}`;
+      ? `[REI] Switching to AGENT mode to execute stage ${stageNum}. Target files: ${files.join(", ")}`
+      : `[REI] Switching to AGENT mode to execute the entire plan. Target files: ${files.join(", ")}`;
 
     const newMode = "agent" as SessionMode;
     saveSession(
@@ -641,7 +641,7 @@ export async function processMenuCommand(
     if (!saveMatch) {
       return {
         success: false,
-        response: "[REI] Formato inválido. Usá: /saveplan <nombre>",
+        response: "[REI] Invalid format. Use: /saveplan <name>",
       };
     }
 
@@ -658,7 +658,7 @@ export async function processMenuCommand(
     if (!lastPlanMsg || !lastPlanMsg.content) {
       return {
         success: false,
-        response: "[REI] No se encontró ningún plan en esta sesión para guardar.",
+        response: "[REI] No plan was found in this session to save.",
       };
     }
 
@@ -666,12 +666,12 @@ export async function processMenuCommand(
       const savedPath = savePlanToFile(workspacePath, planName, lastPlanMsg.content);
       return {
         success: true,
-        response: `[REI] Plan completo guardado exitosamente en: ${savedPath}`,
+        response: `[REI] Full plan saved successfully to: ${savedPath}`,
       };
     } catch (err) {
       return {
         success: false,
-        response: `[REI] Error al guardar el plan: ${err instanceof Error ? err.message : String(err)}`,
+        response: `[REI] Error saving plan: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
   }
@@ -681,7 +681,7 @@ export async function processMenuCommand(
     if (!loadMatch) {
       return {
         success: false,
-        response: "[REI] Formato inválido. Usá: /loadplan <nombre>",
+        response: "[REI] Invalid format. Use: /loadplan <name>",
       };
     }
 
@@ -708,13 +708,13 @@ export async function processMenuCommand(
 
       return {
         success: true,
-        response: `[REI] Plan '${planName}' cargado exitosamente. Se ha regenerado el checklist en .rei/current-plan-todo.md.`,
+        response: `[REI] Plan '${planName}' loaded successfully. Re-generated active checklist in .rei/current-plan-todo.md.`,
         newSession: { ...session, messages: updatedMessages },
       };
     } catch (err) {
       return {
         success: false,
-        response: `[REI] Error al cargar el plan: ${err instanceof Error ? err.message : String(err)}`,
+        response: `[REI] Error loading plan: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
   }

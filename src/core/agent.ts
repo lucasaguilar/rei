@@ -19,65 +19,41 @@ import {
   readPlanTodoFile,
   markStageAsCompleted,
 } from "../chat/plan-tracker.js";
-import {
-  generateRepoMap,
-  generateRepoMapForFile,
-} from "../tools/repo-map-generator.js";
 import { VectorStore } from "../context/rag/vector-store.js";
-import { generateEmbedding } from "../context/rag/embedder.js";
-import {
-  chunkRepoMap,
-  chunkRepoMapString,
-} from "../context/rag/map-chunker.js";
 import { getRelevantMapContext } from "../context/rag/map-retriever.js";
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
-import * as crypto from "node:crypto";
-import chokidar, { type FSWatcher } from "chokidar";
+import type { FSWatcher } from "chokidar";
 import {
   scanWorkspace,
   type FileMeta,
 } from "../workspace/workspace-scanner.js";
-import {
-  applySREditBatchFS,
-  type BatchPatchApplyResult,
-} from "../tools/patch-applier.js";
-import {
-  executeCommand,
-  limitCommandOutput,
-} from "../tools/command-executor.js";
+import { applySREditBatchFS } from "../tools/patch-applier.js";
 import {
   extractCommandRequests,
   extractToolCalls,
   extractFileRequests,
 } from "../agent-mode/response-handler.js";
-import {
-  getWeather,
-  formatWeatherOutput,
-  type WeatherResult,
-} from "../tools/weather-tool.js";
-import { searchWeb } from "../tools/search-tool.js";
-import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
 import { KnowledgeOrchestrator } from "../knowledge/orchestrator.js";
 import { AgentLogger } from "./logger.js";
 import { SCAN_CACHE_TTL_MS } from "./constants/agent.constants.js";
 import {
   buildTurnUserMessage,
   looksLikeAgentJson,
+  extractStageNumberFromPrompt,
+  stripActionTags,
 } from "./helpers/turn-message.helpers.js";
-import type {
-  StreamTurnOptions,
-  PendingPatchAssessmentItem,
-  PendingPatchAssessment,
-} from "./models/agent.types.js";
-
-function extractStageNumberFromPrompt(prompt: string): number | null {
-  const match = prompt.match(/\[RUNPLAN STAGE (\d+)\]/i);
-  if (match) {
-    return parseInt(match[1], 10);
-  }
-  return null;
-}
+import type { StreamTurnOptions } from "./models/agent.types.js";
+import {
+  executeFileRequestsFromResponse,
+  executeCommandsFromResponse,
+  executeToolCallsFromResponse,
+  executeAgentToolsAndCommands,
+  formatBatchPatchResult,
+  executeAndFormatTurnActions,
+} from "./helpers/action-executor.js";
+import {
+  ensureRepoMapIndexed,
+  initWatcher,
+} from "./helpers/repo-map-indexer.js";
 
 export class Agent {
   private scanCache?: {
@@ -106,15 +82,6 @@ export class Agent {
 
   async run(prompt: string): Promise<string> {
     return this.provider.complete(prompt);
-  }
-
-  async assessPendingPatchesSafety(): Promise<PendingPatchAssessment> {
-    // No hay más pending patches; solo retorna vacío para compatibilidad.
-    return {
-      workspaceQualityOk: true,
-      workspaceQualityStderr: "",
-      items: [],
-    };
   }
 
   async runTurn(session: ChatSession, userInput: string): Promise<string> {
@@ -150,7 +117,9 @@ export class Agent {
     if (session.mode === "agent") {
       const stageNum = extractStageNumberFromPrompt(userInput);
       if (stageNum !== null) {
-        const wasSuccessful = response.includes("patch(es) applied directly.") || response.includes("file(s) written.");
+        const wasSuccessful =
+          response.includes("patch(es) applied directly.") ||
+          response.includes("file(s) written.");
         if (wasSuccessful) {
           markStageAsCompleted(this.workspacePath, stageNum);
         }
@@ -188,23 +157,51 @@ export class Agent {
     if (session.mode === "agent") {
       const editFormat = getAgentEditFormat();
       const agentProvider = createProviderForMode("agent", this.provider);
-      const outcome =
+      const chunksQueue: string[] = [];
+      let resolver: (() => void) | null = null;
+      let done = false;
+
+      const onChunk = (chunk: { type: "thinking" | "status"; content: string }) => {
+        chunksQueue.push(chunk.content);
+        resolver?.();
+      };
+
+      const turnPromise = (
         editFormat === "wholefile"
-          ? await executeAgentTurnWholefile({
+          ? executeAgentTurnWholefile({
               provider: agentProvider,
               messagesForModel,
               workspacePath: this.workspacePath,
               logger: this.logger,
               modelOverride: resolveModelForMode("agent"),
+              onChunk,
             })
-          : await executeAgentTurn({
+          : executeAgentTurn({
               provider: agentProvider,
               messagesForModel,
               workspacePath: this.workspacePath,
               scannedFiles: this.getWorkspaceFiles(),
               logger: this.logger,
               modelOverride: resolveModelForMode("agent"),
-            });
+              onChunk,
+            })
+      ).finally(() => {
+        done = true;
+        resolver?.();
+      });
+
+      // Stream thoughts and action statuses to the user in real-time
+      while (!done || chunksQueue.length > 0) {
+        if (chunksQueue.length > 0) {
+          yield chunksQueue.shift()!;
+        } else {
+          await new Promise<void>((resolve) => {
+            resolver = resolve;
+          });
+        }
+      }
+
+      const outcome = await turnPromise;
 
       // Si hay parches válidos, aplicarlos directamente
       if (
@@ -215,21 +212,7 @@ export class Agent {
           outcome.validProposedPatches,
           this.workspacePath,
         );
-        const msg = result.success
-          ? `\n\n---\n[32m[1m${result.results.length} patch(es) applied directly.\u001b[0m` +
-            result.results
-              .map(
-                (r) =>
-                  `\n- ${r.file}: ${r.applied ? "applied" : r.skipped ? "skipped" : "failed"}`,
-              )
-              .join("")
-          : `\n\n---\n[31m[1mSome patches failed to apply.\u001b[0m` +
-            result.results
-              .map(
-                (r) =>
-                  `\n- ${r.file}: ${r.applied ? "applied" : r.skipped ? "skipped" : "failed"}`,
-              )
-              .join("");
+        const msg = formatBatchPatchResult(result);
         const fullResponse = outcome.response + msg;
         session.messages.push({ role: "assistant", content: outcome.response });
         options?.onStatus?.("producing_response");
@@ -246,44 +229,14 @@ export class Agent {
       }
 
       // Interceptación de herramientas y comandos antes de finalizar el turno
-      const toolCalls = extractToolCalls(outcome.response);
-      const commands = extractCommandRequests(outcome.response);
+      const feedback = await executeAgentToolsAndCommands(
+        outcome.response,
+        this.workspacePath,
+        this.provider,
+        this.logger,
+      );
 
-      if (toolCalls.length > 0 || commands.length > 0) {
-        let feedback = "\n\n--- Execution Results ---\n";
-
-        // 1. Procesar Tool Calls
-        for (const call of toolCalls) {
-          this.logger.logInfo(`Calling tool: ${call.name}`, {
-            args: call.args,
-          });
-          try {
-            if (call.name === "weather") {
-              const weatherRes = await getWeather(call.args.location as string);
-              feedback += `\n### 🌤️ Weather: ${call.args.location}\n${formatWeatherOutput(weatherRes)}\n`;
-            } else if (call.name === "search") {
-              const searchRes = await searchWeb(
-                call.args.query as string,
-                this.provider,
-              );
-              feedback += `\n### 🔍 Search Results: ${call.args.query}\n${searchRes}\n`;
-            } else {
-              throw new Error(`Tool "${call.name}" is not implemented.`);
-            }
-          } catch (err) {
-            const errorMsg = err instanceof Error ? err.message : String(err);
-            feedback += `\n[TOOL] ${call.name}(${JSON.stringify(call.args)}) -> ERROR: ${errorMsg}\n`;
-          }
-        }
-
-        // 2. Procesar Commands (si existen)
-        for (const cmd of commands) {
-          this.logger.logInfo(`Executing command: ${cmd}`);
-          const result = await executeCommand(cmd, this.workspacePath);
-          this.logger.logCommandExecution(cmd, result);
-          feedback += `\n[COMMAND] ${cmd} (Exit: ${result.exitCode})\nStdout: ${result.stdout || "none"}\nStderr: ${result.stderr || "none"}\n`;
-        }
-
+      if (feedback) {
         // Mostrar feedback al usuario final, no solo al modelo
         const userVisibleResponse = outcome.response + feedback;
         session.messages.push({
@@ -314,7 +267,9 @@ export class Agent {
       let currentMessages = [...messagesForModel];
       let hasMoreCommands = true;
       let depth = 0;
-      const maxDepth = process.env.REI_MAX_TURNS ? parseInt(process.env.REI_MAX_TURNS, 10) : 7;
+      const maxDepth = process.env.REI_MAX_TURNS
+        ? parseInt(process.env.REI_MAX_TURNS, 10)
+        : 7;
 
       while (hasMoreCommands && depth < maxDepth) {
         let streamResponse = "";
@@ -336,38 +291,25 @@ export class Agent {
         const toolCalls = extractToolCalls(streamResponse);
         const fileRequests = extractFileRequests(streamResponse);
 
-        if (commands.length > 0 || toolCalls.length > 0 || fileRequests.length > 0) {
+        if (
+          commands.length > 0 ||
+          toolCalls.length > 0 ||
+          fileRequests.length > 0
+        ) {
           // Yield the visible part of the response (strip XML tags) before
           // the tool-result block so the user sees the prose intro, if any.
-          const visibleResponse = streamResponse
-            .replace(/<execute_command>[\s\S]*?<\/execute_command>/gi, "")
-            .replace(/<call_tool\s+name="[^"]+">[\s\S]*?<\/call_tool>/gi, "")
-            .replace(/<request_files>[\s\S]*?<\/request_files>/gi, "")
-            .trim();
+          const visibleResponse = stripActionTags(streamResponse);
           if (visibleResponse) {
             yield visibleResponse + "\n";
           }
 
           depth++;
-          let executionFeedback = "";
-          let userVisibleFeedback = "";
-
-          if (fileRequests.length > 0) {
-            const fileFeedback = await this.executeFileRequestsFromResponse(streamResponse);
-            executionFeedback += fileFeedback;
-            userVisibleFeedback += `\n📂 **[REI] Injected ${fileRequests.length} requested file(s) into context:**\n` +
-              fileRequests.map((f) => `- \`${f}\``).join("\n") + "\n";
-          }
-          if (commands.length > 0) {
-            const cmdFeedback = await this.executeCommandsFromResponse(streamResponse);
-            executionFeedback += cmdFeedback;
-            userVisibleFeedback += cmdFeedback;
-          }
-          if (toolCalls.length > 0) {
-            const toolFeedback = await this.executeToolCallsFromResponse(streamResponse);
-            executionFeedback += toolFeedback;
-            userVisibleFeedback += toolFeedback;
-          }
+          const { executionFeedback, userVisibleFeedback } = await executeAndFormatTurnActions({
+            response: streamResponse,
+            workspacePath: this.workspacePath,
+            provider: this.provider,
+            logger: this.logger,
+          });
 
           yield userVisibleFeedback;
           currentMessages = [
@@ -396,11 +338,7 @@ export class Agent {
           allAssistantChunks.push(streamResponse);
 
           const finalContent = allAssistantChunks.join("\n\n");
-          const cleanAssistantContent = finalContent
-            .replace(/<execute_command>[\s\S]*?<\/execute_command>/gi, "")
-            .replace(/<call_tool\s+name="[^"]+">[\s\S]*?<\/call_tool>/gi, "")
-            .replace(/<request_files>[\s\S]*?<\/request_files>/gi, "")
-            .trim();
+          const cleanAssistantContent = stripActionTags(finalContent);
 
           session.messages.push({
             role: "assistant",
@@ -463,55 +401,13 @@ export class Agent {
 
     // 1. Asegurar que el mapa esté generado e indexado en el VectorStore
     if (!this.repoMapCache) {
-      this.repoMapCache = await generateRepoMap(this.workspacePath);
-
-      await this.vectorStore.load();
-
-      // Limpiar registros fantasma (archivos borrados mientras REI estaba apagado)
-      const currentFiles = scanWorkspace(this.workspacePath);
-      const activePaths = new Set(currentFiles.map((f) => f.path));
-      await this.vectorStore.cleanupStaleFiles(activePaths);
-
-      const chunks = await chunkRepoMap(this.workspacePath);
-      const chunksToEmbed = chunks.filter(chunk => {
-        const hash = crypto
-          .createHash("md5")
-          .update(chunk.content)
-          .digest("hex");
-        const existing = this.vectorStore.getById(chunk.metadata.id);
-        return !existing || existing.metadata.fileHash !== hash;
+      this.repoMapCache = await ensureRepoMapIndexed({
+        workspacePath: this.workspacePath,
+        vectorStore: this.vectorStore,
+        logger: this.logger,
+        onStatus,
       });
 
-      if (chunksToEmbed.length > 0) {
-        onStatus?.("indexing_repository");
-        console.log(
-          `\n\x1b[33m[REI] Indexando repositorio: Generando embeddings locales para ${chunksToEmbed.length} bloque(s) de código...` +
-          `\n      Esto se procesa en tu CPU y puede tomar de 30 a 90 segundos en el primer arranque. Por favor espera...\x1b[0m\n`
-        );
-      }
-
-      for (const chunk of chunks) {
-        const hash = crypto
-          .createHash("md5")
-          .update(chunk.content)
-          .digest("hex");
-        const existing = this.vectorStore.getById(chunk.metadata.id);
-
-        if (existing && existing.metadata.fileHash === hash) {
-          continue; // Saltar cálculo pesado, el contenido no cambió
-        }
-
-        const vector = await generateEmbedding(chunk.content);
-        this.vectorStore.upsert(
-          {
-            ...chunk.metadata,
-            content: chunk.content,
-            fileHash: hash,
-          },
-          vector,
-        );
-      }
-      await this.vectorStore.save();
       this.initWatcher();
     }
 
@@ -539,10 +435,7 @@ export class Agent {
       systemContent += `\n\n### Active Plan Progress:\n${todoContent}`;
     }
 
-    if (
-      session.messages.length > 0 &&
-      session.messages[0].role === "system"
-    ) {
+    if (session.messages.length > 0 && session.messages[0].role === "system") {
       session.messages[0].content = systemContent;
     } else {
       session.messages.unshift({ role: "system", content: systemContent });
@@ -638,76 +531,6 @@ export class Agent {
     });
   }
 
-  /** Reads the contents of any <request_files> tags found in a response and returns formatted feedback. */
-  private async executeFileRequestsFromResponse(response: string): Promise<string> {
-    const fileRequests = extractFileRequests(response);
-    if (fileRequests.length === 0) return "";
-
-    let feedback = "\n\n---\n**Requested Files Context:**\n";
-    for (const f of fileRequests) {
-      this.logger.logInfo(`Non-agent requested file: ${f}`);
-      const absPath = path.join(this.workspacePath, f);
-      try {
-        const content = await fs.readFile(absPath, "utf-8");
-        feedback += `\n### File: ${f}\n\`\`\`\n${content}\n\`\`\`\n`;
-      } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        feedback += `\n### File: ${f}\n(Could not read file: ${errorMsg})\n`;
-      }
-    }
-    return feedback;
-  }
-
-  /** Executes any <execute_command> tags found in a response and returns formatted feedback. */
-  private async executeCommandsFromResponse(response: string): Promise<string> {
-    const commands = extractCommandRequests(response);
-    if (commands.length === 0) return "";
-
-    let feedback = "\n\n---\n**Command Results:**\n```\n";
-    for (const cmd of commands) {
-      this.logger.logInfo(`Executing command: ${cmd}`);
-      const result = await executeCommand(cmd, this.workspacePath);
-      this.logger.logCommandExecution(cmd, result);
-      const output = limitCommandOutput(
-        [result.stdout, result.stderr].filter(Boolean).join("\n").trim(),
-      );
-      feedback += `$ ${cmd}\n${output || "(no output)"} [exit: ${result.exitCode}]\n\n`;
-    }
-    feedback += "```";
-    return feedback;
-  }
-
-  /** Executes any <call_tool> tags found in a response and returns formatted feedback. */
-  private async executeToolCallsFromResponse(
-    response: string,
-  ): Promise<string> {
-    const toolCalls = extractToolCalls(response);
-    if (toolCalls.length === 0) return "";
-
-    let feedback = "\n\n---\n**Tool Call Results:**\n";
-    for (const call of toolCalls) {
-      this.logger.logInfo(`Calling tool: ${call.name}`, { args: call.args });
-      try {
-        if (call.name === "weather") {
-          const weatherRes = await getWeather(call.args.location as string);
-          feedback += `\n### 🌤️ Weather: ${call.args.location}\n${formatWeatherOutput(weatherRes)}\n`;
-        } else if (call.name === "search") {
-          const searchRes = await searchWeb(
-            call.args.query as string,
-            this.provider,
-          );
-          feedback += `\n### 🔍 Search Results: ${call.args.query}\n${searchRes}\n`;
-        } else {
-          throw new Error(`Tool "${call.name}" is not implemented.`);
-        }
-      } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        feedback += `\n[TOOL] ${call.name}(${JSON.stringify(call.args)}) -> ERROR: ${errorMsg}\n`;
-      }
-    }
-    return feedback;
-  }
-
   private async generateNonAgentAssistantResponse(
     mode: ChatSession["mode"],
     messagesForModel: ChatSession["messages"],
@@ -715,7 +538,9 @@ export class Agent {
     let currentMessages = [...messagesForModel];
     let hasMoreCommands = true;
     let depth = 0;
-    const maxDepth = process.env.REI_MAX_TURNS ? parseInt(process.env.REI_MAX_TURNS, 10) : 7;
+    const maxDepth = process.env.REI_MAX_TURNS
+      ? parseInt(process.env.REI_MAX_TURNS, 10)
+      : 7;
     let lastResponse = "";
 
     while (hasMoreCommands && depth < maxDepth) {
@@ -751,20 +576,33 @@ export class Agent {
       const commands = extractCommandRequests(lastResponse);
       const toolCalls = extractToolCalls(lastResponse);
       const fileRequests = extractFileRequests(lastResponse);
-      if (commands.length > 0 || toolCalls.length > 0 || fileRequests.length > 0) {
+      if (
+        commands.length > 0 ||
+        toolCalls.length > 0 ||
+        fileRequests.length > 0
+      ) {
         depth++;
         let executionFeedback = "";
         if (fileRequests.length > 0) {
-          executionFeedback +=
-            await this.executeFileRequestsFromResponse(lastResponse);
+          executionFeedback += await executeFileRequestsFromResponse(
+            lastResponse,
+            this.workspacePath,
+            this.logger,
+          );
         }
         if (commands.length > 0) {
-          executionFeedback +=
-            await this.executeCommandsFromResponse(lastResponse);
+          executionFeedback += await executeCommandsFromResponse(
+            lastResponse,
+            this.workspacePath,
+            this.logger,
+          );
         }
         if (toolCalls.length > 0) {
-          executionFeedback +=
-            await this.executeToolCallsFromResponse(lastResponse);
+          executionFeedback += await executeToolCallsFromResponse(
+            lastResponse,
+            this.provider,
+            this.logger,
+          );
         }
         currentMessages.push({
           role: "user",
@@ -781,11 +619,7 @@ export class Agent {
       .map((m) => m.content);
 
     const finalContent = allAssistantChunks.join("\n\n");
-    return finalContent
-      .replace(/<execute_command>[\s\S]*?<\/execute_command>/gi, "")
-      .replace(/<call_tool\s+name="[^"]+">[\s\S]*?<\/call_tool>/gi, "")
-      .replace(/<request_files>[\s\S]*?<\/request_files>/gi, "")
-      .trim();
+    return stripActionTags(finalContent);
   }
 
   private async generateAgentAssistantResponse(
@@ -820,178 +654,27 @@ export class Agent {
         outcome.validProposedPatches,
         this.workspacePath,
       );
-      if (result.success) {
-        return (
-          outcome.response +
-          `\n\n---\n[32m[1m${result.results.length} patch(es) applied directly.[0m` +
-          result.results
-            .map(
-              (r) =>
-                `\n- ${r.file}: ${r.applied ? "applied" : r.skipped ? "skipped" : "failed"}`,
-            )
-            .join("")
-        );
-      } else {
-        return (
-          outcome.response +
-          `\n\n---\n[31m[1mSome patches failed to apply.[0m` +
-          result.results
-            .map(
-              (r) =>
-                `\n- ${r.file}: ${r.applied ? "applied" : r.skipped ? "skipped" : "failed"}`,
-            )
-            .join("")
-        );
-      }
+      const msg = formatBatchPatchResult(result);
+      return outcome.response + msg;
     }
-    const toolCalls = extractToolCalls(outcome.response);
-    const commands = extractCommandRequests(outcome.response);
-
-    if (toolCalls.length > 0 || commands.length > 0) {
-      let feedback = "\n\n--- Execution Results ---\n";
-
-      for (const call of toolCalls) {
-        this.logger.logInfo(`Calling tool: ${call.name}`, { args: call.args });
-        try {
-          if (call.name === "weather") {
-            const weatherRes = await getWeather(call.args.location as string);
-            feedback += `\n### 🌤️ Weather: ${call.args.location}\n${formatWeatherOutput(weatherRes)}\n`;
-          } else if (call.name === "search") {
-            const searchRes = await searchWeb(
-              call.args.query as string,
-              this.provider,
-            );
-            feedback += `\n### 🔍 Search Results: ${call.args.query}\n${searchRes}\n`;
-          } else {
-            throw new Error(`Tool "${call.name}" is not implemented.`);
-          }
-        } catch (err) {
-          const errorMsg = err instanceof Error ? err.message : String(err);
-          feedback += `\n[TOOL] ${call.name}(${JSON.stringify(call.args)}) -> ERROR: ${errorMsg}\n`;
-        }
-      }
-
-      for (const cmd of commands) {
-        this.logger.logInfo(`Executing command: ${cmd}`);
-        const result = await executeCommand(cmd, this.workspacePath);
-        this.logger.logCommandExecution(cmd, result);
-        feedback += `\n[COMMAND] ${cmd} (Exit: ${result.exitCode})\nStdout: ${result.stdout || "none"}\nStderr: ${result.stderr || "none"}\n`;
-      }
-      return outcome.response + feedback;
-    }
-    return outcome.response;
-  }
-
-  private buildStuckMessage(
-    lastError: string | undefined,
-    patches: AgentSREdit[],
-  ): string {
-    const patchCount = patches.length;
-    const errorSection = lastError
-      ? `\n**Last validation error:**\n\`\`\`\n${lastError}\n\`\`\``
-      : "";
-
-    return [
-      `⚠️ The agent couldn't fully validate the proposed changes after multiple attempts.`,
-      errorSection,
-      ``,
-      patchCount > 0
-        ? `The **${patchCount} proposed patch(es)** have been queued anyway. Choose your next action:`
-        : `No patches were produced. Choose your next action:`,
-      ``,
-      `  • \`/confirm --force\`  — apply the patches without TS validation (dangerous, use with care)`,
-      `  • \`/discard\`          — reject all patches and start over`,
-      `  • **Type a hint**     — describe the fix and the agent will retry with your guidance`,
-    ].join("\n");
+    const feedback = await executeAgentToolsAndCommands(
+      outcome.response,
+      this.workspacePath,
+      this.provider,
+      this.logger,
+    );
+    return outcome.response + feedback;
   }
 
   private initWatcher(): void {
     if (this.watcher) return;
-
-    this.logger.logInfo(
-      "Initializing file watcher for incremental AST updates",
-    );
-    this.watcher = chokidar.watch(
-      [
-        "**/*.ts",
-        "**/*.js",
-        "**/*.tsx",
-        "**/*.jsx",
-        "**/*.html",
-        "**/*.css",
-        "**/*.scss",
-        "**/*.py",
-        "**/*.c",
-        "**/*.h",
-        "**/*.cpp",
-        "**/*.hpp",
-        "**/*.cc",
-        "**/*.cxx",
-        "**/*.cs",
-        "**/*.rs",
-        "**/*.go",
-      ],
-      {
-        cwd: this.workspacePath,
-        ignored: [
-          "**/node_modules/**",
-          "**/dist/**",
-          ".rei/**",
-          "**/.rei/**",
-          "**/.git/**",
-          "**/bin/**",
-          "**/obj/**",
-        ],
-        persistent: true,
-        ignoreInitial: true,
+    this.watcher = initWatcher({
+      workspacePath: this.workspacePath,
+      vectorStore: this.vectorStore,
+      logger: this.logger,
+      clearScanCache: () => {
+        this.scanCache = undefined;
       },
-    );
-
-    const handleChange = async (filePath: string) => {
-      this.scanCache = undefined;
-      const absPath = path.join(this.workspacePath, filePath);
-      const relFilePath = filePath.replace(/\\/g, "/");
-
-      this.vectorStore.deleteByFilePath(relFilePath);
-
-      const newMapString = await generateRepoMapForFile(
-        this.workspacePath,
-        absPath,
-      );
-      if (newMapString) {
-        const chunks = chunkRepoMapString(newMapString);
-        for (const chunk of chunks) {
-          const hash = crypto
-            .createHash("md5")
-            .update(chunk.content)
-            .digest("hex");
-          const existing = this.vectorStore.getById(chunk.metadata.id);
-          if (existing && existing.metadata.fileHash === hash) continue;
-
-          const vector = await generateEmbedding(chunk.content);
-          this.vectorStore.upsert(
-            {
-              ...chunk.metadata,
-              content: chunk.content,
-              fileHash: hash,
-            },
-            vector,
-          );
-        }
-      }
-
-      await this.vectorStore.save();
-    };
-
-    const handleUnlink = async (filePath: string) => {
-      this.scanCache = undefined;
-      const relFilePath = filePath.replace(/\\/g, "/");
-      this.vectorStore.deleteByFilePath(relFilePath);
-      await this.vectorStore.save();
-    };
-
-    this.watcher.on("change", handleChange);
-    this.watcher.on("add", handleChange);
-    this.watcher.on("unlink", handleUnlink);
+    });
   }
 }

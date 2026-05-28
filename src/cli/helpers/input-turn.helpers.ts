@@ -4,6 +4,7 @@ import type { InputHandlerContext } from "../models/input-handler.types.js";
 import { saveSession } from "../../chat/session-store.js";
 import { extractSREdits } from "../../agent-mode/response-handler.js";
 import { formatCodeDiff } from "../markdown-renderer.js";
+import { estimateMessagesTokens } from "../../chat/helpers/token-estimator.js";
 
 /**
  * Resolves the active model label and maps it to its corresponding brand icon or emoji
@@ -97,6 +98,15 @@ export async function handleInputTurn(
   actions.pushTranscript("");
   actions.draw();
 
+  const estimatedTokens = estimateMessagesTokens(session.messages);
+  if (estimatedTokens > 20000) {
+    actions.pushTranscript(
+      `\x1b[33m⚠️  [REI] Advertencia: La sesión acumulada supera los 20,000 tokens (aprox. ${estimatedTokens} tokens). ` +
+      `Si notas lentitud o errores de contexto, considera usar /session new.\x1b[0m`
+    );
+    actions.pushTranscript("");
+  }
+
   state.busy = true;
   state.activeStatus = "building_context";
   state.spinnerIndex = 0;
@@ -147,7 +157,11 @@ export async function handleInputTurn(
 
       if (liveStart > 0) {
         if (!isNowInside && !wasInside) {
-          actions.streamText(token);
+          if (token.startsWith("\n\x1b[33m") || token.includes("[REI]")) {
+            actions.streamText(token);
+          } else {
+            actions.streamText(`\x1b[3;90m${token}\x1b[0m`);
+          }
         }
       }
     }
@@ -167,14 +181,16 @@ export async function handleInputTurn(
 
     if (liveStart > 0) {
       actions.streamText("\n");
-      actions.pushTranscript(`\x1b[1;32mREI: \x1b[0m${renderMarkdown(finalContent)}`, false);
+      const rendered = renderMarkdown(finalContent);
+      actions.pushTranscript(`\x1b[1;32mREI: \x1b[0m\x1b[3;90m${rendered}\x1b[0m`, false);
     }
 
     if (liveStart < 0) {
       actions.pushTranscript("");
       actions.pushTranscript(`\x1b[1;36mYou: ${trimmed}\x1b[0m`);
       actions.pushTranscript("");
-      actions.pushTranscript(`\x1b[1;32mREI: \x1b[0m${renderMarkdown(finalContent)}`);
+      const rendered = renderMarkdown(finalContent);
+      actions.pushTranscript(`\x1b[1;32mREI: \x1b[0m\x1b[3;90m${rendered}\x1b[0m`);
     }
 
     // Si hubo edits, los añadimos formateados al final
