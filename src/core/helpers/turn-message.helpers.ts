@@ -145,10 +145,13 @@ export function extractStageNumberFromPrompt(prompt: string): number | null {
 }
 
 /**
- * Strips all execution XML action tags (<execute_command>, <call_tool>, <request_files>) from a response string.
+ * Strips all execution XML action tags (<execute_command>, <call_tool>, <request_files>)
+ * and model reasoning blocks (<think>) from a response string so they are never
+ * persisted into session history and re-sent to the LLM as wasted context tokens.
  */
 export function stripActionTags(text: string): string {
   return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")  // strip model reasoning — never send back
     .replace(/<execute_command>[\s\S]*?<\/execute_command>/gi, "")
     .replace(/<call_tool\s+name="[^"]+">[\s\S]*?<\/call_tool>/gi, "")
     .replace(/<request_files>[\s\S]*?<\/request_files>/gi, "")

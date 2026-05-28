@@ -171,6 +171,7 @@ export async function handleInputTurn(
     // Procesar el buffer final: extraer edits y formatear
     const edits = extractSREdits(buffer);
     let finalContent = buffer
+      .replace(/<think>[\s\S]*?<\/think>/gi, "")  // strip thinking blocks before markdown render
       .replace(/<edit[\s\S]*?<\/edit>/gi, "")
       .replace(/<wholefile[\s\S]*?<\/wholefile>/gi, "")
       .replace(/<create[\s\S]*?<\/create>/gi, "")
