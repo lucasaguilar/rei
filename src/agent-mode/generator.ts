@@ -6,224 +6,29 @@ import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
 import {
   extractFileRequests,
   extractSREdits,
-  extractCreateFileRequests,
   extractWholeFileEdits,
   extractCommandRequests,
   formatSREditsForLog,
 } from "./response-handler.js";
 import { executeCommand, limitCommandOutput } from "../tools/command-executor.js";
-import {
-  applyVirtualBatch,
-  formatVirtualBatchResult,
-} from "../tools/compile-check-factory.js";
-import { applyFileEdits } from "../tools/search-replace.js";
-import { findSymbolCallers, rankCallerFiles } from "../context/caller-graph.js";
-import * as fs from "fs/promises";
-import * as path from "path";
-import {
-  applyCreateFileBatchFS,
-  applyWholeFileBatchFS,
-} from "../tools/patch-applier.js";
+import { applyWholeFileBatchFS } from "../tools/patch-applier.js";
 import {
   resolveVerifyCommand,
   runVerifyCommand,
 } from "../tools/compile-check-core.js";
 
-export interface ExecutionResult {
-  response: string;
-  validProposedPatches: AgentSREdit[];
-  failed?: boolean;
-  failedProposedPatches?: AgentSREdit[];
-  lastValidationError?: string;
-}
+// Helper imports
+import { findAdditionalCallerFiles } from "./helpers/contract-helper.js";
+import {
+  buildFileContextMessage,
+  finalizeOutcome,
+  handleCreateFileBlocks,
+  validateProposedPatches,
+  stripAllActionTags,
+  type ExecutionResult,
+} from "./helpers/patch-helpers.js";
 
 const MAX_TURNS = process.env.REI_MAX_TURNS ? parseInt(process.env.REI_MAX_TURNS, 10) : 7;
-const SEARCH_MISMATCH_HINT = "Could not find exact match for search block in";
-const MAX_AUTO_INJECTED_CALLER_FILES = 5;
-
-/**
- * Builds a system message injecting the contents of requested files.
- */
-async function buildFileContextMessage(
-  workspacePath: string,
-  files: string[],
-): Promise<string> {
-  const fileContents = [];
-  for (const f of files) {
-    const absPath = path.join(workspacePath, f);
-    try {
-      const content = await fs.readFile(absPath, "utf-8");
-      fileContents.push(`--- File: ${f} ---\n\`\`\`\n${content}\n\`\`\``);
-    } catch {
-      fileContents.push(
-        `--- File: ${f} ---\n(Could not read file, it may not exist)`,
-      );
-    }
-  }
-  return "\n" + fileContents.join("\n\n");
-}
-
-function isSearchMismatchOnly(applyErrors: string[]): boolean {
-  return (
-    applyErrors.length > 0 &&
-    applyErrors.every((error) => error.includes(SEARCH_MISMATCH_HINT))
-  );
-}
-
-function extractPublicContractSignatures(block: string): Map<string, string> {
-  const signatures = new Map<string, string>();
-  const lines = block.split("\n");
-
-  for (const line of lines) {
-    const normalized = line.trim();
-    if (!normalized) continue;
-
-    const publicMethod = normalized.match(
-      /^public\s+(?:static\s+)?(?:async\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*\([^)]*\)/,
-    );
-    if (publicMethod) {
-      signatures.set(publicMethod[1], normalized.replace(/\s+/g, " "));
-      continue;
-    }
-
-    const exportedFunction = normalized.match(
-      /^export\s+(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\([^)]*\)/,
-    );
-    if (exportedFunction) {
-      signatures.set(exportedFunction[1], normalized.replace(/\s+/g, " "));
-    }
-  }
-
-  return signatures;
-}
-
-function detectContractChangeSymbols(edits: AgentSREdit[]): string[] {
-  const changedSymbols = new Set<string>();
-
-  for (const edit of edits) {
-    const before = extractPublicContractSignatures(edit.search);
-    const after = extractPublicContractSignatures(edit.replace);
-
-    for (const [symbol, beforeSig] of before) {
-      const afterSig = after.get(symbol);
-      if (!afterSig || afterSig !== beforeSig) {
-        changedSymbols.add(symbol);
-      }
-    }
-
-    for (const symbol of after.keys()) {
-      if (!before.has(symbol)) {
-        changedSymbols.add(symbol);
-      }
-    }
-  }
-
-  return [...changedSymbols];
-}
-
-function findAdditionalCallerFiles(params: {
-  workspacePath: string;
-  scannedFiles: FileMeta[];
-  edits: AgentSREdit[];
-  alreadyInjectedFiles: Set<string>;
-}): { callerFiles: string[]; changedSymbols: string[] } {
-  const { workspacePath, scannedFiles, edits, alreadyInjectedFiles } = params;
-  const changedSymbols = detectContractChangeSymbols(edits);
-  if (changedSymbols.length === 0) {
-    return { callerFiles: [], changedSymbols };
-  }
-
-  const editedFiles = new Set(edits.map((edit) => edit.file));
-  const refs = findSymbolCallers({
-    workspacePath,
-    symbolNames: changedSymbols,
-    scannedFiles,
-    maxResults: 40,
-  });
-
-  const callerFiles = rankCallerFiles(refs)
-    .filter(
-      (filePath) =>
-        !editedFiles.has(filePath) && !alreadyInjectedFiles.has(filePath),
-    )
-    .slice(0, MAX_AUTO_INJECTED_CALLER_FILES);
-
-  return { callerFiles, changedSymbols };
-}
-
-async function buildPerEditMismatchDetails(
-  workspacePath: string,
-  edits: AgentSREdit[],
-): Promise<string[]> {
-  const details: string[] = [];
-  const byFile = new Map<string, AgentSREdit[]>();
-
-  for (const edit of edits) {
-    const list = byFile.get(edit.file) ?? [];
-    list.push(edit);
-    byFile.set(edit.file, list);
-  }
-
-  for (const [file, fileEdits] of byFile) {
-    const absPath = path.join(workspacePath, file);
-    let text: string;
-    try {
-      text = await fs.readFile(absPath, "utf-8");
-    } catch {
-      details.push(`- ${file}: file not found in workspace.`);
-      continue;
-    }
-
-    for (let idx = 0; idx < fileEdits.length; idx += 1) {
-      const edit = fileEdits[idx];
-      const res = applyFileEdits(text, [edit]);
-      if (!res.success) {
-        const preview = edit.search
-          .split("\n")
-          .slice(0, 2)
-          .join(" ")
-          .slice(0, 140);
-        // Incluir el searchPreview directamente en el mensaje de feedback
-        details.push(
-          `- ${file} edit #${idx + 1}: search block mismatch. Search preview: "${preview}"`,
-        );
-      } else if (res.newContent) {
-        text = res.newContent;
-      }
-    }
-  }
-
-  return details;
-}
-
-function finalizeOutcome(
-  logger: AgentLogger,
-  outcome: ExecutionResult,
-  generatedPatchCount: number,
-  appliedPatchCount: number,
-): ExecutionResult {
-  const validCount = outcome.validProposedPatches.length;
-  const failedCount = outcome.failedProposedPatches?.length ?? 0;
-  const rejectedCount = Math.max(0, generatedPatchCount - validCount);
-  const sandboxVerified = !outcome.failed && validCount > 0;
-
-  logger.logPatchOutcome({
-    validCount,
-    rejectedCount,
-    sandboxVerified,
-    confirmableCount: validCount,
-  });
-  logger.logPatchQuality({
-    ideaDetected: generatedPatchCount > 0,
-    patchGenerated: generatedPatchCount > 0,
-    patchApplicable: validCount > 0 || failedCount > 0,
-    patchCompilable: sandboxVerified,
-    generatedPatchCount,
-    appliedPatchCount,
-  });
-
-  return outcome;
-}
 
 export async function executeAgentTurn(params: {
   provider: ModelProvider;
@@ -272,9 +77,7 @@ export async function executeAgentTurn(params: {
 
     if (rawResponse.trim()) {
       if (loopCount === 1) {
-        firstTurnExplanation = rawResponse
-          .replace(/<(edit|create|request_files|execute_command|call_tool|wholefile)\b[\s\S]*?<\/\1>/gi, "")
-          .trim();
+        firstTurnExplanation = stripAllActionTags(rawResponse);
       }
     } else {
       logger.logInfo("Model returned empty response", { loopCount });
@@ -301,32 +104,21 @@ export async function executeAgentTurn(params: {
     }
 
     // 1a. Handle <create> blocks (file creation requests)
-    const createFileRequests = extractCreateFileRequests(rawResponse);
-    if (createFileRequests.length > 0) {
-      const createResults = await applyCreateFileBatchFS(
-        createFileRequests,
-        workspacePath,
-      );
-      logger.logInfo("File creation results", { createResults });
+    const createFeedback = await handleCreateFileBlocks({
+      rawResponse,
+      workspacePath,
+      logger,
+    });
 
-      // Si hubo errores de creación, alimentar feedback al modelo y continuar el loop
-      const failedCreates = createResults.results.filter((r) => !r.applied);
-      if (failedCreates.length > 0) {
-        const feedback =
-          "Some <create> blocks failed:\n" +
-          failedCreates
-            .map((r) => `- ${r.file}: ${r.validationErrors.join("; ")}`)
-            .join("\n");
-        logger.logInfo("File creation feedback", { feedback });
-        currentMessages.push({ role: "assistant", content: rawResponse });
-        currentMessages.push({
-          role: "user",
-          content:
-            feedback +
-            "\nPlease fix these issues and reply with corrected <create> blocks or continue with the next step.",
-        });
-        continue;
-      }
+    if (createFeedback) {
+      currentMessages.push({ role: "assistant", content: rawResponse });
+      currentMessages.push({
+        role: "user",
+        content:
+          createFeedback +
+          "\nPlease fix these issues and reply with corrected <create> blocks or continue with the next step.",
+      });
+      continue;
     }
 
     // 2. Did the model request more files?
@@ -392,68 +184,21 @@ export async function executeAgentTurn(params: {
         continue;
       }
 
-      const valResult = await applyVirtualBatch(workspacePath, edits);
+      const valResult = await validateProposedPatches({
+        workspacePath,
+        edits,
+        loopCount,
+        logger,
+      });
 
       if (!valResult.success) {
-        const files = [...new Set(edits.map((edit) => edit.file))];
-        const errorKind =
-          valResult.applyErrors.length > 0 && valResult.diagnostics.length > 0
-            ? "mixed"
-            : valResult.applyErrors.length > 0
-              ? "apply"
-              : "compile";
-        logger.logSRValidationFailed({
-          turnLoop: loopCount,
-          errorKind,
-          editCount: edits.length,
-          files,
-          applyErrors: [
-            ...valResult.applyErrors,
-            ...(valResult.verifyStderr
-              ? [
-                  `verifyCommand=${valResult.verifyCommand}`,
-                  ...valResult.verifyStderr.split("\n").slice(0, 5),
-                ]
-              : []),
-          ],
-          diagnostics: valResult.diagnostics.map((d) => ({
-            filePath: d.filePath,
-            line: d.line,
-            column: d.column,
-            code: d.code,
-            message: d.message,
-          })),
-        });
-
-        // Agregar resumen estructurado al log de información
-        logger.logInfo("Validation failed summary", {
-          errorKind,
-          filesAffected: files,
-          diagnosticsCount: valResult.diagnostics.length,
-          applyErrorCount: valResult.applyErrors.length,
-        });
-
-        let feedback = formatVirtualBatchResult(workspacePath, valResult);
-        const mismatchOnly = isSearchMismatchOnly(valResult.applyErrors);
+        lastValidationError = valResult.feedback || "Validation failed";
+        const mismatchOnly = valResult.mismatchOnly;
         consecutiveSearchMismatchFailures = mismatchOnly
           ? consecutiveSearchMismatchFailures + 1
           : 0;
 
-        if (mismatchOnly) {
-          const details = await buildPerEditMismatchDetails(
-            workspacePath,
-            edits,
-          );
-          if (details.length > 0) {
-            feedback +=
-              "\n\nDetailed search mismatch report:\n" + details.join("\n");
-          }
-        }
-
-        lastValidationError = feedback;
-
         if (loopCount < MAX_TURNS) {
-          // Feed the errors back to the model for an auto-fix
           logger.logInfo(
             `Virtual validation failed. Feeding back errors (Turn ${loopCount}/${MAX_TURNS}).`,
           );
@@ -471,7 +216,7 @@ export async function executeAgentTurn(params: {
             currentMessages.push({
               role: "user",
               content:
-                `${feedback}\n\n` +
+                `${valResult.feedback}\n\n` +
                 `The previous <search> blocks did not match exact file content. ` +
                 `Here are the full files to patch accurately:\n${contextMessage}\n` +
                 `Please reply with corrected <edit> tags.`,
@@ -481,12 +226,11 @@ export async function executeAgentTurn(params: {
 
           currentMessages.push({
             role: "user",
-            content: `${feedback}\nPlease fix these issues and reply with corrected <edit> tags.`,
+            content: `${valResult.feedback}\nPlease fix these issues and reply with corrected <edit> tags.`,
           });
           continue;
         }
 
-        // MAX_TURNS exhausted — return failed outcome with last known patches
         logger.logInfo(
           `Max turns reached. Returning failed outcome with ${lastEdits.length} partial patches.`,
         );
@@ -504,7 +248,6 @@ export async function executeAgentTurn(params: {
         );
       }
 
-      // Success — return the valid edits
       return finalizeOutcome(
         logger,
         {
@@ -586,12 +329,6 @@ export async function executeAgentTurn(params: {
   );
 }
 
-/**
- * Simplified agent executor for the "wholefile" edit format.
- * Handles <wholefile>, <execute_command>, and <request_files> tags.
- * No search/replace matching required — works reliably with models ≤14b.
- * Files are written directly inside this executor; agent.ts must NOT re-apply.
- */
 export async function executeAgentTurnWholefile(params: {
   provider: ModelProvider;
   messagesForModel: ChatSession["messages"];
@@ -624,9 +361,7 @@ export async function executeAgentTurnWholefile(params: {
 
     if (rawResponse.trim()) {
       if (loopCount === 1) {
-        firstTurnExplanation = rawResponse
-          .replace(/<(edit|create|request_files|execute_command|call_tool|wholefile)\b[\s\S]*?<\/\1>/gi, "")
-          .trim();
+        firstTurnExplanation = stripAllActionTags(rawResponse);
       }
     } else {
       if (loopCount < MAX_TURNS) {
@@ -719,10 +454,6 @@ export async function executeAgentTurnWholefile(params: {
       }
 
       // 5. Post-apply validation — always uses the project's full verify command.
-      //    Angular (ng build): runs once and reports to the user — no auto-retry
-      //    because ng build is slow (30-120s). The user can ask for a follow-up fix.
-      //    TypeScript/C# (tsc / dotnet build): fast enough to auto-retry in the loop.
-      //    Skip if REI_WHOLEFILE_SKIP_VALIDATE=true for speed.
       const skipValidate = process.env.REI_WHOLEFILE_SKIP_VALIDATE === "true";
       if (!skipValidate) {
         const verifyCmd = resolveVerifyCommand(workspacePath);
@@ -763,8 +494,6 @@ export async function executeAgentTurnWholefile(params: {
         }
       }
 
-      // validProposedPatches is intentionally empty — files are already written.
-      // Returning non-empty patches would cause agent.ts to re-apply via applySREditBatchFS.
       return finalizeOutcome(
         logger,
         { response: getFinalResponse(rawResponse + summary), validProposedPatches: [] },
@@ -837,12 +566,3 @@ export async function executeAgentTurnWholefile(params: {
   );
 }
 
-export function prepareAgentContext(): any {}
-
-export function buildAgentFinalResponse(answer: string): any {
-  // Same as above.
-  return {
-    response: answer,
-    validProposedPatches: [],
-  };
-}
