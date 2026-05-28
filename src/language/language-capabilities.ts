@@ -83,6 +83,15 @@ const LANGUAGE_CAPABILITIES: readonly LanguageCapability[] = [
     supportsAstDependencyExtraction: true,
     supportsSemanticValidation: false,
   },
+  {
+    id: "php",
+    extensions: [".php"],
+    preferredSourceFile: true,
+    supportsAstIndexing: true,
+    supportsCallerDiscovery: false,
+    supportsAstDependencyExtraction: true,
+    supportsSemanticValidation: false,
+  },
 ];
 
 const DEFAULT_LANGUAGE_CAPABILITY: LanguageCapability = {
@@ -146,3 +155,35 @@ export function supportsSemanticValidationPath(filePath: string): boolean {
   return getLanguageCapabilityForExtension(path.extname(filePath))
     .supportsSemanticValidation;
 }
+
+/**
+ * Returns a list of all file extensions supported by REI, both source and configuration files.
+ */
+export function getAllSupportedExtensions(): string[] {
+  const exts = new Set<string>();
+  
+  // Add extensions from the language registry
+  for (const capability of LANGUAGE_CAPABILITIES) {
+    for (const extension of capability.extensions) {
+      exts.add(extension.replace(/^\./, ""));
+    }
+  }
+
+  // Common configuration and documentation files
+  const commonConfigExts = ["json", "md", "yml", "yaml", "css", "scss", "html", "sh", "txt", "xml", "config", "props", "csproj", "sln", "toml"];
+  for (const ext of commonConfigExts) {
+    exts.add(ext);
+  }
+
+  return Array.from(exts);
+}
+
+/**
+ * Builds a universal regular expression matching any supported file path with its extension.
+ */
+export function buildFileMatcherRegex(): RegExp {
+  const extensions = getAllSupportedExtensions();
+  const escapedExtensions = extensions.map(ext => ext.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  return new RegExp(`([\\w\\-/]+\\.(?:${escapedExtensions}))`, "gi");
+}
+

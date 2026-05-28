@@ -39,6 +39,7 @@ const LANGUAGE_GRAMMAR_MAP: Record<string, string> = {
   "python": grammarPath("python"),
   "rust": grammarPath("rust"),
   "go": grammarPath("go"),
+  "php": grammarPath("php"),
 };
 
 // Container types: emit a structural summary chunk (member list) and recurse to find leaves.
@@ -51,6 +52,7 @@ const CONTAINER_NODE_TYPES: Record<string, string[]> = {
   "python": ["class_definition"],
   "rust": ["struct_item", "enum_item", "trait_item"],
   "go": ["type_declaration", "struct_type", "interface_type"],
+  "php": ["class_declaration", "interface_declaration", "trait_declaration"],
 };
 
 // Leaf types: emit full source text and stop recursing (no further nesting expected).
@@ -62,6 +64,7 @@ const LEAF_NODE_TYPES: Record<string, string[]> = {
   "python": ["function_definition", "assignment"],
   "rust": ["function_item", "function_signature_item", "field_declaration", "enum_variant"],
   "go": ["function_declaration", "method_declaration", "field_declaration", "method_spec"],
+  "php": ["function_definition", "method_declaration", "property_element"],
 };
 
 const grammarCache: Record<string, Language> = {};
@@ -271,6 +274,13 @@ export class TreeSitterAstProvider implements AstProvider {
       let match: RegExpExecArray | null;
       while ((match = usingRegex.exec(file.content))) {
         dependencies.push({ kind: "using", name: match[1], raw: match[0] });
+      }
+    } else if (languageId === "php") {
+      // use Namespace\... or require_once ...
+      const useRegex = /use\s+([\w\\_]+)/g;
+      let match: RegExpExecArray | null;
+      while ((match = useRegex.exec(file.content))) {
+        dependencies.push({ kind: "use", name: match[1], raw: match[0] });
       }
     }
     return dependencies;

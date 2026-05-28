@@ -271,7 +271,7 @@ Done.
     // 1. Run "/runplan stage 1"
     const result1 = await processMenuCommand("/runplan stage 1", session, tmpWorkspace, provider);
     expect(result1.success).toBe(true);
-    expect(result1.response).toContain("etapa 1");
+    expect(result1.response).toContain("stage 1");
     expect(result1.autoExecute?.prompt).toContain("[RUNPLAN STAGE 1]");
     expect(result1.autoExecute?.prompt).toContain("auth.ts");
     expect(result1.autoExecute?.prompt).not.toContain("router.ts");
@@ -291,7 +291,7 @@ Done.
     // 3. Run "/runplan stage 2"
     const result2 = await processMenuCommand("/runplan stage 2", session, tmpWorkspace, provider);
     expect(result2.success).toBe(true);
-    expect(result2.response).toContain("etapa 2");
+    expect(result2.response).toContain("stage 2");
     expect(result2.autoExecute?.prompt).toContain("[RUNPLAN STAGE 2]");
     expect(result2.autoExecute?.prompt).toContain("router.ts");
     expect(result2.autoExecute?.prompt).not.toContain("auth.ts");
@@ -378,7 +378,7 @@ We need to edit auth.ts.
     // 1. Run "/saveplan my-cool-plan"
     const saveResult = await processMenuCommand("/saveplan my-cool-plan", session, tmpWorkspace, provider);
     expect(saveResult.success).toBe(true);
-    expect(saveResult.response).toContain("Plan completo guardado exitosamente");
+    expect(saveResult.response).toContain("Full plan saved successfully");
 
     // 2. Load the plan into a new session
     const emptySession: ChatSession = {
@@ -387,7 +387,7 @@ We need to edit auth.ts.
     };
     const loadResult = await processMenuCommand("/loadplan my-cool-plan", emptySession, tmpWorkspace, provider);
     expect(loadResult.success).toBe(true);
-    expect(loadResult.response).toContain("Plan 'my-cool-plan' cargado exitosamente");
+    expect(loadResult.response).toContain("Plan 'my-cool-plan' loaded successfully");
     expect(loadResult.newSession?.messages.length).toBe(1);
     expect(loadResult.newSession?.messages[0].content).toBe(planText);
 
@@ -401,6 +401,33 @@ We need to edit auth.ts.
     expect(runResult.success).toBe(true);
     expect(runResult.autoExecute?.prompt).toContain("[RUNPLAN STAGE 1]");
     expect(runResult.autoExecute?.prompt).toContain("auth.ts");
+  });
+
+  it("dynamically parses files from polyglot plans (C#, Python, Rust, Go, PHP)", async () => {
+    const polyglotPlanText = `
+### Stage 1: Implement Backend Logic
+We need to edit several files across languages.
+- Modify [Program.cs](file:///Users/lucas/www/rei/Program.cs)
+- Modify [app.py](file:///Users/lucas/www/rei/app.py)
+- Modify [main.rs](file:///Users/lucas/www/rei/main.rs)
+- Modify [handler.go](file:///Users/lucas/www/rei/handler.go)
+- Modify [index.php](file:///Users/lucas/www/rei/index.php)
+    `;
+
+    const session: ChatSession = {
+      mode: "planning",
+      messages: [
+        { role: "assistant", content: polyglotPlanText }
+      ]
+    };
+
+    const result = await processMenuCommand("/runplan stage 1", session, tmpWorkspace, provider);
+    expect(result.success).toBe(true);
+    expect(result.autoExecute?.prompt).toContain("Program.cs");
+    expect(result.autoExecute?.prompt).toContain("app.py");
+    expect(result.autoExecute?.prompt).toContain("main.rs");
+    expect(result.autoExecute?.prompt).toContain("handler.go");
+    expect(result.autoExecute?.prompt).toContain("index.php");
   });
 });
 
