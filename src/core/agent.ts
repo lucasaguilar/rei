@@ -157,23 +157,51 @@ export class Agent {
     if (session.mode === "agent") {
       const editFormat = getAgentEditFormat();
       const agentProvider = createProviderForMode("agent", this.provider);
-      const outcome =
+      const chunksQueue: string[] = [];
+      let resolver: (() => void) | null = null;
+      let done = false;
+
+      const onChunk = (chunk: { type: "thinking" | "status"; content: string }) => {
+        chunksQueue.push(chunk.content);
+        resolver?.();
+      };
+
+      const turnPromise = (
         editFormat === "wholefile"
-          ? await executeAgentTurnWholefile({
+          ? executeAgentTurnWholefile({
               provider: agentProvider,
               messagesForModel,
               workspacePath: this.workspacePath,
               logger: this.logger,
               modelOverride: resolveModelForMode("agent"),
+              onChunk,
             })
-          : await executeAgentTurn({
+          : executeAgentTurn({
               provider: agentProvider,
               messagesForModel,
               workspacePath: this.workspacePath,
               scannedFiles: this.getWorkspaceFiles(),
               logger: this.logger,
               modelOverride: resolveModelForMode("agent"),
-            });
+              onChunk,
+            })
+      ).finally(() => {
+        done = true;
+        resolver?.();
+      });
+
+      // Stream thoughts and action statuses to the user in real-time
+      while (!done || chunksQueue.length > 0) {
+        if (chunksQueue.length > 0) {
+          yield chunksQueue.shift()!;
+        } else {
+          await new Promise<void>((resolve) => {
+            resolver = resolve;
+          });
+        }
+      }
+
+      const outcome = await turnPromise;
 
       // Si hay parches válidos, aplicarlos directamente
       if (

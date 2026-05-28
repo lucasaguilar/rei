@@ -2,6 +2,7 @@ import { lightweightCompress } from "./helpers/chat.helpers.js";
 import { compressSkeletonMap } from "./helpers/compression.js";
 import type { AgentEditFormat } from "../prompts/prompt-builder.js";
 import type { ChatMessage, SessionMode } from "./types.js";
+import { estimateTokens } from "./helpers/token-estimator.js";
 
 function isEnrichedTurnMessage(content: string): boolean {
   return content.includes("Task:") && content.includes("Repository summary:");
@@ -112,21 +113,42 @@ export function buildMessagesForModel(
     },
   );
 
-  // Keep only the tail of the conversation to control prompt size.
-  const maxNonSystemMessages = MAX_NON_SYSTEM_MESSAGES[mode];
-  const trimmed = normalizedNonSystemMessages.slice(-maxNonSystemMessages);
+  // Keep only the tail of the conversation under our token budget (18,000 tokens)
+  const MAX_TOKEN_BUDGET = 18000;
+  let accumulatedTokens = 0;
+  const budgetedMessages: ChatMessage[] = [];
+
+  // We always want to keep the latest message (which is the current user prompt)
+  if (normalizedNonSystemMessages.length > 0) {
+    const latestMsg = normalizedNonSystemMessages[normalizedNonSystemMessages.length - 1];
+    budgetedMessages.unshift(latestMsg);
+    accumulatedTokens += estimateTokens(latestMsg.content);
+
+    // Going backwards from the second-to-last message
+    for (let i = normalizedNonSystemMessages.length - 2; i >= 0; i--) {
+      const msg = normalizedNonSystemMessages[i];
+      const tokens = estimateTokens(msg.content);
+      if (accumulatedTokens + tokens > MAX_TOKEN_BUDGET) {
+        break; // Stop including older history to fit context window
+      }
+      budgetedMessages.unshift(msg);
+      accumulatedTokens += tokens;
+    }
+  }
+
+  const finalNonSystem = budgetedMessages.length > 0 ? budgetedMessages : normalizedNonSystemMessages;
 
   // In agent mode, compact old assistant messages that have no XML action tags.
   // These come from ask/planning turns and contain "Direct Answer" / prose format
   // which causes small models to pattern-match to the wrong output format.
   const modeNormalized =
     mode === "agent"
-      ? trimmed.map((message) =>
+      ? finalNonSystem.map((message) =>
           isNonAgentAssistantMessage(message)
             ? { ...message, content: "[Previous response — different mode]" }
             : message,
         )
-      : trimmed;
+      : finalNonSystem;
 
   // Aider-style system_reminder: append a format reminder to the LAST user message
   // in agent mode. Small models have recency bias — instructions near the generation
@@ -136,7 +158,25 @@ export function buildMessagesForModel(
       ? appendAgentReminder(modeNormalized, editFormat)
       : modeNormalized;
 
-  return systemMessage ? [systemMessage, ...withReminder] : withReminder;
+  // Enforce strict role alternation and ensure conversation starts with 'user'
+  const alternating: ChatMessage[] = [];
+  for (const msg of withReminder) {
+    if (alternating.length === 0) {
+      if (msg.role === "assistant") {
+        alternating.push({ role: "user", content: "Initialize conversation." });
+      }
+      alternating.push({ ...msg });
+    } else {
+      const last = alternating[alternating.length - 1];
+      if (last.role === msg.role) {
+        last.content += "\n\n" + msg.content;
+      } else {
+        alternating.push({ ...msg });
+      }
+    }
+  }
+
+  return systemMessage ? [systemMessage, ...alternating] : alternating;
 }
 
 const AGENT_REMINDER_BY_FORMAT: Record<AgentEditFormat, string> = {

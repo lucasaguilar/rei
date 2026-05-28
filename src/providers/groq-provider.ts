@@ -20,7 +20,10 @@ interface GroqChatResponse {
 
 interface GroqStreamChunk {
   choices?: Array<{
-    delta?: { content?: string };
+    delta?: {
+      content?: string;
+      reasoning_content?: string;
+    };
     finish_reason?: string | null;
   }>;
   error?: {
@@ -113,6 +116,7 @@ export class GroqProvider implements ModelProvider {
 
     const decoder = new TextDecoder();
     let buffer = "";
+    let inThinking = false;
 
     for await (const chunk of response.body) {
       buffer += decoder.decode(chunk, { stream: true });
@@ -124,7 +128,12 @@ export class GroqProvider implements ModelProvider {
 
         if (line.startsWith("data: ")) {
           const payload = line.slice(6).trim();
-          if (payload === "[DONE]") return;
+          if (payload === "[DONE]") {
+            if (inThinking) {
+              yield "</think>";
+            }
+            return;
+          }
           try {
             const data = JSON.parse(payload) as GroqStreamChunk;
             if (data.error) {
@@ -132,8 +141,20 @@ export class GroqProvider implements ModelProvider {
                 `Groq stream error: ${data.error.message ?? JSON.stringify(data.error)}`,
               );
             }
-            const content = data.choices?.[0]?.delta?.content;
-            if (content) {
+            const delta = data.choices?.[0]?.delta;
+            const content = delta?.content || "";
+            const reasoning = delta?.reasoning_content || "";
+            if (reasoning) {
+              if (!inThinking) {
+                yield "<think>";
+                inThinking = true;
+              }
+              yield reasoning;
+            } else if (content) {
+              if (inThinking) {
+                yield "</think>";
+                inThinking = false;
+              }
               yield content;
             }
           } catch (err) {
@@ -157,8 +178,20 @@ export class GroqProvider implements ModelProvider {
               `Groq stream error: ${data.error.message ?? JSON.stringify(data.error)}`,
             );
           }
-          const content = data.choices?.[0]?.delta?.content;
-          if (content) {
+          const delta = data.choices?.[0]?.delta;
+          const content = delta?.content || "";
+          const reasoning = delta?.reasoning_content || "";
+          if (reasoning) {
+            if (!inThinking) {
+              yield "<think>";
+              inThinking = true;
+            }
+            yield reasoning;
+          } else if (content) {
+            if (inThinking) {
+              yield "</think>";
+              inThinking = false;
+            }
             yield content;
           }
         } catch (err) {
@@ -167,6 +200,10 @@ export class GroqProvider implements ModelProvider {
           }
         }
       }
+    }
+
+    if (inThinking) {
+      yield "</think>";
     }
   }
 

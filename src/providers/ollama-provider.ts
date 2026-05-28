@@ -118,6 +118,7 @@ export class OllamaProvider implements ModelProvider {
 
     const decoder = new TextDecoder();
     let buffer = "";
+    let inThinking = false;
 
     for await (const chunk of response.body) {
       buffer += decoder.decode(chunk, { stream: true });
@@ -132,10 +133,19 @@ export class OllamaProvider implements ModelProvider {
           if (data.error) {
             throw new Error(`Ollama error: ${data.error}`);
           }
-          // Skip thinking-only chunks (Ollama 0.6+ thinking models):
-          // during reasoning phase, message.thinking has content but message.content is empty.
-          const content = data.message?.content;
-          if (content) {
+          const content = data.message?.content || "";
+          const thinking = data.message?.thinking || "";
+          if (thinking) {
+            if (!inThinking) {
+              yield "<think>";
+              inThinking = true;
+            }
+            yield thinking;
+          } else if (content) {
+            if (inThinking) {
+              yield "</think>";
+              inThinking = false;
+            }
             yield content;
           }
         }
@@ -150,10 +160,25 @@ export class OllamaProvider implements ModelProvider {
       if (data.error) {
         throw new Error(`Ollama error: ${data.error}`);
       }
-      const content = data.message?.content;
-      if (content) {
+      const content = data.message?.content || "";
+      const thinking = data.message?.thinking || "";
+      if (thinking) {
+        if (!inThinking) {
+          yield "<think>";
+          inThinking = true;
+        }
+        yield thinking;
+      } else if (content) {
+        if (inThinking) {
+          yield "</think>";
+          inThinking = false;
+        }
         yield content;
       }
+    }
+
+    if (inThinking) {
+      yield "</think>";
     }
   }
 

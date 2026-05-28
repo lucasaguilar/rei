@@ -20,7 +20,10 @@ interface LlmStudioChatResponse {
 
 interface LlmStudioStreamChunk {
   choices?: Array<{
-    delta?: { content?: string };
+    delta?: {
+      content?: string;
+      reasoning_content?: string;
+    };
     finish_reason?: string | null;
   }>;
   error?: {
@@ -110,6 +113,7 @@ export class LlmStudioProvider implements ModelProvider {
 
     const decoder = new TextDecoder();
     let buffer = "";
+    let inThinking = false;
 
     for await (const chunk of response.body) {
       buffer += decoder.decode(chunk, { stream: true });
@@ -121,7 +125,12 @@ export class LlmStudioProvider implements ModelProvider {
 
         if (line.startsWith("data: ")) {
           const payload = line.slice(6).trim();
-          if (payload === "[DONE]") return;
+          if (payload === "[DONE]") {
+            if (inThinking) {
+              yield "</think>";
+            }
+            return;
+          }
           try {
             const data = JSON.parse(payload) as LlmStudioStreamChunk;
             if (data.error) {
@@ -129,8 +138,20 @@ export class LlmStudioProvider implements ModelProvider {
                 `LLM Studio stream error: ${data.error.message ?? JSON.stringify(data.error)}`,
               );
             }
-            const content = data.choices?.[0]?.delta?.content;
-            if (content) {
+            const delta = data.choices?.[0]?.delta;
+            const content = delta?.content || "";
+            const reasoning = delta?.reasoning_content || "";
+            if (reasoning) {
+              if (!inThinking) {
+                yield "<think>";
+                inThinking = true;
+              }
+              yield reasoning;
+            } else if (content) {
+              if (inThinking) {
+                yield "</think>";
+                inThinking = false;
+              }
               yield content;
             }
           } catch (err) {
@@ -154,8 +175,20 @@ export class LlmStudioProvider implements ModelProvider {
               `LLM Studio stream error: ${data.error.message ?? JSON.stringify(data.error)}`,
             );
           }
-          const content = data.choices?.[0]?.delta?.content;
-          if (content) {
+          const delta = data.choices?.[0]?.delta;
+          const content = delta?.content || "";
+          const reasoning = delta?.reasoning_content || "";
+          if (reasoning) {
+            if (!inThinking) {
+              yield "<think>";
+              inThinking = true;
+            }
+            yield reasoning;
+          } else if (content) {
+            if (inThinking) {
+              yield "</think>";
+              inThinking = false;
+            }
             yield content;
           }
         } catch (err) {
@@ -164,6 +197,10 @@ export class LlmStudioProvider implements ModelProvider {
           }
         }
       }
+    }
+
+    if (inThinking) {
+      yield "</think>";
     }
   }
 
@@ -176,18 +213,20 @@ export class LlmStudioProvider implements ModelProvider {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
 
+    const requestBody = {
+      model: modelOverride ?? this.model,
+      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+      stream,
+      temperature: 0,
+    };
+
     return fetch(`${this.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${this.apiKey}`,
       },
-      body: JSON.stringify({
-        model: modelOverride ?? this.model,
-        messages: messages.map((m) => ({ role: m.role, content: m.content })),
-        stream,
-        temperature: 0,
-      }),
+      body: JSON.stringify(requestBody),
       signal: controller.signal,
     }).finally(() => clearTimeout(timeout));
   }

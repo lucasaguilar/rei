@@ -27,6 +27,7 @@ import {
   stripAllActionTags,
   type ExecutionResult,
 } from "./helpers/patch-helpers.js";
+import { streamTurnWithInterception } from "./helpers/token-streamer.js";
 
 const MAX_TURNS = process.env.REI_MAX_TURNS ? parseInt(process.env.REI_MAX_TURNS, 10) : 7;
 
@@ -37,6 +38,7 @@ export async function executeAgentTurn(params: {
   scannedFiles: FileMeta[];
   logger: AgentLogger;
   modelOverride?: string;
+  onChunk?: (event: { type: "thinking" | "status"; content: string }) => void;
 }): Promise<ExecutionResult> {
   const {
     provider,
@@ -45,6 +47,7 @@ export async function executeAgentTurn(params: {
     scannedFiles,
     logger,
     modelOverride,
+    onChunk,
   } = params;
 
   let currentMessages = [...messagesForModel];
@@ -69,8 +72,11 @@ export async function executeAgentTurn(params: {
     loopCount++;
 
     // 1. Ask the LLM
-    const rawResponse = await provider.completeChat(currentMessages, {
+    const rawResponse = await streamTurnWithInterception({
+      provider,
+      messages: currentMessages,
       model: modelOverride,
+      onChunk,
     });
     lastRawResponse = rawResponse;
     logger.logInfo("Raw LLM Response", { rawResponse });
@@ -335,8 +341,9 @@ export async function executeAgentTurnWholefile(params: {
   workspacePath: string;
   logger: AgentLogger;
   modelOverride?: string;
+  onChunk?: (event: { type: "thinking" | "status"; content: string }) => void;
 }): Promise<ExecutionResult> {
-  const { provider, messagesForModel, workspacePath, logger, modelOverride } =
+  const { provider, messagesForModel, workspacePath, logger, modelOverride, onChunk } =
     params;
   let currentMessages = [...messagesForModel];
   let loopCount = 0;
@@ -353,8 +360,11 @@ export async function executeAgentTurnWholefile(params: {
   while (loopCount < MAX_TURNS) {
     loopCount++;
 
-    const rawResponse = await provider.completeChat(currentMessages, {
+    const rawResponse = await streamTurnWithInterception({
+      provider,
+      messages: currentMessages,
       model: modelOverride,
+      onChunk,
     });
     lastRawResponse = rawResponse;
     logger.logInfo("Raw LLM Response (wholefile mode)", { rawResponse });

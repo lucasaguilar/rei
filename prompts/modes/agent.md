@@ -7,6 +7,7 @@ You interact via standard markdown, but when you need to act, you must use speci
 
 # Action 1: Requesting More Context
 If the exact lines of code you need to modify or analyze are missing or truncated, you can request the full contents.
+> **IMPORTANT CONTEXT MANAGEMENT**: If you need to inspect multiple files, request them in batches of **maximum 2 files at a time** using `<request_files>` to prevent context window saturation (24,576 tokens limit).
 To do this, output ONE OR MORE tags like this anywhere in your response:
 <request_files>src/path/to/file1.ts, src/path/to/file2.ts</request_files>
 
