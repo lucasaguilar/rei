@@ -6,7 +6,8 @@ export type TurnStatus =
   | "calling_model"
   | "producing_response"
   | "compacting_memory"
-  | "indexing_repository";
+  | "indexing_repository"
+  | "checking_hardware";
 
 export type StreamTurnOptions = {
   onStatus?: (status: TurnStatus) => void;

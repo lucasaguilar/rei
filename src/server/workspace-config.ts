@@ -1,3 +1,5 @@
+import path from "path";
+
 // Configuración de workspaces permitidos para el servidor
 // Esto evita que cualquier directorio sea accedido por razones de seguridad
 // Leemos de variables de entorno para no hardcodear rutas personales
@@ -13,9 +15,20 @@ function getAllowedWorkspaces(): Set<string> {
 
 export const ALLOWED_WORKSPACES = getAllowedWorkspaces();
 
-// Función para validar si un workspace es permitido
+// Función para validar si un workspace es permitido (incluye subdirectorios recursivos)
 export function isWorkspaceAllowed(workspacePath: string): boolean {
-  return ALLOWED_WORKSPACES.has(workspacePath);
+  const target = path.resolve(workspacePath);
+  
+  for (const allowed of ALLOWED_WORKSPACES) {
+    const allowedResolved = path.resolve(allowed);
+    const relative = path.relative(allowedResolved, target);
+    
+    // Si coincide exactamente o es un subdirectorio (no empieza con '..' ni es absoluto)
+    if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // Función para obtener el workspace por defecto
@@ -25,3 +38,4 @@ export function getDefaultWorkspace(): string {
   }
   return process.cwd();
 }
+

@@ -11,6 +11,7 @@ import {
   extractCommandRequests,
   formatSREditsForLog,
 } from "./response-handler.js";
+import { isDegenerate, buildCommandSignature } from "./helpers/loop-guard.js";
 import { executeCommand, limitCommandOutput } from "../tools/command-executor.js";
 import { applyWholeFileBatchFS } from "../tools/patch-applier.js";
 import {
@@ -34,6 +35,51 @@ const MAX_TURNS = process.env.REI_MAX_TURNS ? parseInt(process.env.REI_MAX_TURNS
 
 /** Max consecutive truncation continuations before giving up. */
 const MAX_TRUNCATION_CONTINUATIONS = 3;
+
+/**
+ * Builds a human-readable failure report when the agent loop exhausts MAX_TURNS
+ * without producing valid edits. Explains what happened and gives actionable suggestions.
+ */
+function buildMaxTurnsFailureMessage(params: {
+  loopCount: number;
+  firstTurnExplanation: string;
+  lastValidationError: string;
+  failedEdits: AgentSREdit[];
+}): string {
+  const { loopCount, firstTurnExplanation, lastValidationError, failedEdits } = params;
+
+  const lines: string[] = [
+    `⚠️ REI could not complete the task after ${loopCount} attempts.`,
+    "",
+  ];
+
+  if (firstTurnExplanation) {
+    lines.push("**What was planned:**");
+    lines.push(firstTurnExplanation);
+    lines.push("");
+  }
+
+  if (lastValidationError) {
+    lines.push("**Why it failed:**");
+    lines.push(lastValidationError);
+    lines.push("");
+  }
+
+  if (failedEdits.length > 0) {
+    const files = [...new Set(failedEdits.map((e) => e.file))];
+    lines.push(`**Files involved:** ${files.join(", ")}`);
+    lines.push("");
+  }
+
+  lines.push("**What to try next:**");
+  lines.push("- Ask REI to re-read the files first: *\"Read [file] and retry\"*");
+  lines.push("- Switch to wholefile mode: set `AGENT_EDIT_FORMAT=wholefile` in your .env");
+  if (loopCount >= MAX_TURNS) {
+    lines.push(`- Increase the turn limit: set \`REI_MAX_TURNS=${MAX_TURNS + 3}\` in your .env`);
+  }
+
+  return lines.join("\n");
+}
 
 /** Injected when the model's previous response was cut off by the token limit. */
 const TRUNCATION_CONTINUATION =
@@ -69,6 +115,7 @@ export async function executeAgentTurn(params: {
   let lastEdits: AgentSREdit[] = [];
   let lastValidationError = "";
   let consecutiveSearchMismatchFailures = 0;
+  let lastCmdSignature = "";
   const autoInjectedCallerFiles = new Set<string>();
   let firstTurnExplanation = "";
 
@@ -119,6 +166,23 @@ export async function executeAgentTurn(params: {
 
     lastRawResponse = rawResponse;
     logger.logInfo("Raw LLM Response", { rawResponse });
+
+    // ── Degenerate response detection ──────────────────────────────────
+    if (isDegenerate(rawResponse)) {
+      logger.logInfo("[loop-guard] Degenerate response detected in agent loop");
+      return finalizeOutcome(
+        logger,
+        {
+          response:
+            "⚠️ REI detectó una respuesta degenerada (el modelo entró en un loop de generación de texto). " +
+            "Esto suele ocurrir cuando el contexto está saturado o el modelo está confundido. " +
+            "Intentá: /session new, reducir el contexto, subir OLLAMA_NUM_CTX, o usar un modelo diferente.",
+          validProposedPatches: [],
+        },
+        0,
+        0,
+      );
+    }
 
     if (rawResponse.trim()) {
       if (loopCount === 1) {
@@ -282,7 +346,12 @@ export async function executeAgentTurn(params: {
         return finalizeOutcome(
           logger,
           {
-            response: getFinalResponse(lastRawResponse),
+            response: buildMaxTurnsFailureMessage({
+              loopCount,
+              firstTurnExplanation,
+              lastValidationError,
+              failedEdits: lastEdits,
+            }),
             validProposedPatches: [],
             failed: true,
             failedProposedPatches: lastEdits,
@@ -307,6 +376,25 @@ export async function executeAgentTurn(params: {
     // 3b. Did the model request commands?
     const commands = extractCommandRequests(rawResponse);
     if (commands.length > 0) {
+      // Command loop detection: break if the same commands repeat across iterations
+      const cmdSignature = buildCommandSignature(commands, [], []);
+      if (cmdSignature && cmdSignature === lastCmdSignature) {
+        logger.logInfo("[loop-guard] Repeated command signature detected, breaking agent loop", { cmdSignature });
+        return finalizeOutcome(
+          logger,
+          {
+            response:
+              getFinalResponse(rawResponse) +
+              "\n\n⚠️ REI detectó un loop de comandos — el modelo está repitiendo los mismos comandos. " +
+              "Cortando la ejecución. Probá pedirle que explique el error en lugar de ejecutar.",
+            validProposedPatches: [],
+          },
+          0,
+          0,
+        );
+      }
+      lastCmdSignature = cmdSignature;
+
       let commandFeedback = "";
       for (const cmd of commands) {
         logger.logInfo(`Executing command: ${cmd}`);
@@ -355,19 +443,20 @@ export async function executeAgentTurn(params: {
     );
   }
 
-  // Loop exhausted without any edits (e.g. only file requests)
+  // Loop exhausted without any edits (e.g. only file requests, model never produced patches)
   return finalizeOutcome(
     logger,
     {
-      response: getFinalResponse(
-        lastRawResponse ||
-        "Agent loop exceeded maximum turns without producing edits."
-      ),
+      response: buildMaxTurnsFailureMessage({
+        loopCount,
+        firstTurnExplanation,
+        lastValidationError: lastValidationError || "No edits were produced within the turn limit.",
+        failedEdits: lastEdits,
+      }),
       validProposedPatches: [],
       failed: true,
       failedProposedPatches: lastEdits,
-      lastValidationError:
-        lastValidationError || "No edits were produced within the turn limit.",
+      lastValidationError: lastValidationError || "No edits were produced within the turn limit.",
     },
     lastEdits.length,
     0,
@@ -633,7 +722,12 @@ export async function executeAgentTurnWholefile(params: {
   return finalizeOutcome(
     logger,
     {
-      response: getFinalResponse(lastRawResponse || "Agent loop exceeded maximum turns."),
+      response: buildMaxTurnsFailureMessage({
+        loopCount,
+        firstTurnExplanation,
+        lastValidationError: "The agent loop exhausted all turns without writing files.",
+        failedEdits: [],
+      }),
       validProposedPatches: [],
       failed: true,
     },

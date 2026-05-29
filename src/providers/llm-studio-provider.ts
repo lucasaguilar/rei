@@ -39,12 +39,36 @@ interface LlmStudioStreamChunk {
 
 const DEFAULT_LLM_STUDIO_BASE_URL = "http://localhost:1234/v1";
 const DEFAULT_LLM_STUDIO_REQUEST_TIMEOUT_MS = 600_000; // 10 minutes fallback for local inference
+// Hard cap on output tokens. Without this, a reasoning model that enters a
+// degenerate loop will keep generating until the request timeout (10 min).
+// 8192 is generous for normal responses but stops runaway "thinking forever".
+const DEFAULT_LLM_STUDIO_MAX_TOKENS = 8192;
+// Greedy decoding (temperature 0) is the most common cause of repetition loops
+// ("I will write the response... I will write the response..."). LM Studio's own
+// chat UI uses a non-zero default (~0.6), which is why it doesn't loop. Match that.
+// Override with LLM_STUDIO_TEMPERATURE=0 if you need fully deterministic output.
+const DEFAULT_LLM_STUDIO_TEMPERATURE = 0.6;
+// Optional second anti-loop lever. Left UNSET by default so LM Studio uses its own
+// configured repeat_penalty (the one that already works in its chat UI). Only sent
+// to the API when LLM_STUDIO_REPEAT_PENALTY is explicitly provided.
+//
+// OpenAI-standard repetition penalties. Unlike temperature (random noise), these
+// directly lower the probability of tokens that ALREADY appeared, which is the
+// correct lever against structured cyclic repetition ("I will check X. I will
+// check Y. I will check X. I will check Y..."). LM Studio supports both.
+const DEFAULT_LLM_STUDIO_FREQUENCY_PENALTY = 0.3;
+const DEFAULT_LLM_STUDIO_PRESENCE_PENALTY = 0.3;
 
 export class LlmStudioProvider implements ModelProvider {
   private readonly baseUrl: string;
   private readonly apiKey: string;
   private readonly model: string;
   private readonly requestTimeoutMs: number;
+  private readonly maxTokens: number;
+  private readonly temperature: number;
+  private readonly repeatPenalty?: number;
+  private readonly frequencyPenalty: number;
+  private readonly presencePenalty: number;
 
   constructor(params?: { baseUrl?: string; apiKey?: string; model?: string }) {
     this.baseUrl = normalizeBaseUrl(
@@ -55,6 +79,29 @@ export class LlmStudioProvider implements ModelProvider {
     this.requestTimeoutMs = parseRequestTimeoutMs(
       process.env.LLM_STUDIO_REQUEST_TIMEOUT_MS,
       DEFAULT_LLM_STUDIO_REQUEST_TIMEOUT_MS,
+    );
+    this.maxTokens = parseMaxTokens(
+      process.env.LLM_STUDIO_MAX_TOKENS,
+      DEFAULT_LLM_STUDIO_MAX_TOKENS,
+    );
+    this.temperature = parseFloatEnv(
+      process.env.LLM_STUDIO_TEMPERATURE,
+      DEFAULT_LLM_STUDIO_TEMPERATURE,
+      { min: 0, max: 2 },
+    );
+    // Only set when explicitly provided — otherwise we let LM Studio use its own default.
+    this.repeatPenalty = process.env.LLM_STUDIO_REPEAT_PENALTY
+      ? parseFloatEnv(process.env.LLM_STUDIO_REPEAT_PENALTY, 1.1, { min: 1, max: 2 })
+      : undefined;
+    this.frequencyPenalty = parseFloatEnv(
+      process.env.LLM_STUDIO_FREQUENCY_PENALTY,
+      DEFAULT_LLM_STUDIO_FREQUENCY_PENALTY,
+      { min: 0, max: 2 },
+    );
+    this.presencePenalty = parseFloatEnv(
+      process.env.LLM_STUDIO_PRESENCE_PENALTY,
+      DEFAULT_LLM_STUDIO_PRESENCE_PENALTY,
+      { min: 0, max: 2 },
     );
   }
 
@@ -247,12 +294,19 @@ export class LlmStudioProvider implements ModelProvider {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
 
-    const requestBody = {
+    const requestBody: Record<string, unknown> = {
       model: modelOverride ?? this.model,
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
       stream,
-      temperature: 0,
+      temperature: this.temperature,          // non-zero to avoid greedy repetition loops
+      max_tokens: this.maxTokens,             // hard cap — prevents runaway generation
+      frequency_penalty: this.frequencyPenalty, // penalize repeated tokens (anti-cycle)
+      presence_penalty: this.presencePenalty,   // penalize already-seen tokens (anti-cycle)
     };
+    // Only override LM Studio's own repeat_penalty when explicitly configured.
+    if (this.repeatPenalty !== undefined) {
+      requestBody.repeat_penalty = this.repeatPenalty;
+    }
 
     return fetch(`${this.baseUrl}/chat/completions`, {
       method: "POST",
@@ -288,4 +342,27 @@ function parseRequestTimeoutMs(
     return fallback;
   }
   return Math.floor(parsed);
+}
+
+function parseMaxTokens(value: string | undefined, fallback: number): number {
+  if (!value) return fallback;
+  const parsed = Number(value);
+  // Reject non-numeric / non-positive values; 0 or negative would break the request.
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return fallback;
+  }
+  return Math.floor(parsed);
+}
+
+function parseFloatEnv(
+  value: string | undefined,
+  fallback: number,
+  bounds: { min: number; max: number },
+): number {
+  if (value === undefined || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < bounds.min || parsed > bounds.max) {
+    return fallback;
+  }
+  return parsed;
 }

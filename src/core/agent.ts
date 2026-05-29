@@ -56,9 +56,15 @@ import {
   ensureRepoMapIndexed,
   initWatcher,
 } from "./helpers/repo-map-indexer.js";
+import { isDegenerate, buildCommandSignature } from "../agent-mode/helpers/loop-guard.js";
 import { stripAllActionTags } from "../agent-mode/helpers/patch-helpers.js";
 import { calculateContextBudget } from "../context/context-budget.js";
 import { estimateTokens } from "../chat/helpers/token-estimator.js";
+import {
+  checkHardware,
+  isOllamaProvider,
+  resolveModelNameForHardwareCheck,
+} from "./hardware-monitor.js";
 
 export class Agent {
   private scanCache?: {
@@ -74,6 +80,8 @@ export class Agent {
   public readonly provider: ModelProvider;
   private readonly workspacePath: string;
   private correlationId: string;
+  /** Hardware warnings collected during prepareSessionForTurn — emitted at stream start. */
+  private pendingHardwareWarnings: string[] = [];
 
   constructor(provider: ModelProvider, workspacePath: string = process.cwd()) {
     this.provider = provider;
@@ -158,6 +166,12 @@ export class Agent {
       enrichedUserMessage,
     );
     options?.onStatus?.("calling_model");
+
+    // Emit any pending hardware warnings before the model response starts
+    for (const warning of this.pendingHardwareWarnings) {
+      yield warning;
+    }
+    this.pendingHardwareWarnings = [];
 
     if (session.mode === "agent") {
       const editFormat = getAgentEditFormat();
@@ -289,6 +303,7 @@ export class Agent {
       let hasMoreCommands = true;
       let depth = 0;
       let truncationCount = 0;
+      let lastCmdSignature = "";
       const maxDepth = process.env.REI_MAX_TURNS
         ? parseInt(process.env.REI_MAX_TURNS, 10)
         : 7;
@@ -375,6 +390,16 @@ export class Agent {
           streamResponse = streamResponse + contResponse;
         }
 
+        // ── Degenerate response detection ──────────────────────────────
+        if (isDegenerate(streamResponse)) {
+          this.logger.logInfo("[loop-guard] Degenerate response detected, breaking loop");
+          yield `\n\x1b[31m⚠️  [REI] Respuesta degenerada detectada (texto repetitivo). ` +
+            `El modelo entró en un loop de generación. ` +
+            `Intentá: /session new, reducir el contexto, o subir OLLAMA_NUM_CTX.\x1b[0m\n`;
+          hasMoreCommands = false;
+          break;
+        }
+
         const commands = extractCommandRequests(streamResponse);
         const toolCalls = extractToolCalls(streamResponse);
         const fileRequests = extractFileRequests(streamResponse);
@@ -384,6 +409,17 @@ export class Agent {
           toolCalls.length > 0 ||
           fileRequests.length > 0
         ) {
+          // ── Command loop detection ────────────────────────────────────
+          const cmdSignature = buildCommandSignature(commands, toolCalls, fileRequests);
+          if (cmdSignature && cmdSignature === lastCmdSignature) {
+            this.logger.logInfo("[loop-guard] Repeated command signature detected, breaking loop", { cmdSignature });
+            yield `\n\x1b[31m⚠️  [REI] Loop detectado: el modelo está repitiendo los mismos comandos/tools. ` +
+              `Cortando para evitar ejecución infinita.\x1b[0m\n`;
+            hasMoreCommands = false;
+            break;
+          }
+          lastCmdSignature = cmdSignature;
+
           depth++;
           const { executionFeedback, userVisibleFeedback } = await executeAndFormatTurnActions({
             response: streamResponse,
@@ -421,6 +457,24 @@ export class Agent {
             sourceMode: session.mode,
           });
         }
+      }
+
+      // ── maxDepth exhausted: save what we have and warn ──────────────
+      if (depth >= maxDepth) {
+        this.logger.logInfo(`[loop-guard] ask/planning loop exhausted ${maxDepth} iterations`);
+        const lastAssistantMsgs = currentMessages
+          .slice(messagesForModel.length)
+          .filter((m) => m.role === "assistant")
+          .map((m) => m.content);
+        if (lastAssistantMsgs.length > 0) {
+          session.messages.push({
+            role: "assistant",
+            content: lastAssistantMsgs.join("\n\n"),
+            sourceMode: session.mode,
+          });
+        }
+        yield `\n\x1b[33m⚠️  [REI] Límite de ${maxDepth} iteraciones alcanzado. ` +
+          `Seteá REI_MAX_TURNS=${maxDepth + 3} en tu .env para más iteraciones.\x1b[0m\n`;
       }
     } else {
       const response = await this.generateNonAgentAssistantResponse(
@@ -531,6 +585,22 @@ export class Agent {
     userInput: string,
     onStatus?: StreamTurnOptions["onStatus"],
   ): Promise<string> {
+    // Hardware check runs concurrently with context building (non-blocking)
+    // TEMPORARY: disabled for debugging — re-enable after testing
+    // if (isOllamaProvider(session.mode)) {
+    //   onStatus?.("checking_hardware");
+    //   const hwStatus = await checkHardware({
+    //     ollamaBaseUrl: process.env.OLLAMA_BASE_URL,
+    //     targetModel: resolveModelNameForHardwareCheck(session.mode),
+    //   });
+    //   this.pendingHardwareWarnings = hwStatus.warnings;
+    //   if (hwStatus.warnings.length > 0) {
+    //     this.logger.logInfo("[hardware] Warnings detected", { warnings: hwStatus.warnings });
+    //   }
+    // } else {
+      this.pendingHardwareWarnings = [];
+    // }
+
     onStatus?.("building_context");
     const repositorySkeletonMap = await this.updateSystemContextWithRepoMap(
       session,
