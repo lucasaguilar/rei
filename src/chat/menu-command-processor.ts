@@ -191,12 +191,35 @@ export async function processMenuCommand(
   }
 
   if (trimmed === "/compact") {
+    const nonSystem = session.messages.filter((m) => m.role !== "system");
+    if (nonSystem.length < 2) {
+      return {
+        success: false,
+        response: "[REI] Session is too short to compact (nothing to summarize).",
+      };
+    }
+
+    const compactorModel = process.env.COMPACTOR_MODEL;
+
+    // Warn if model name looks like OpenRouter format but provider is Ollama
+    const providerName = (process.env.MODEL_PROVIDER ?? "").toLowerCase();
+    const modelWarning =
+      compactorModel && providerName === "ollama" && compactorModel.includes("/")
+        ? `\n⚠️  COMPACTOR_MODEL="${compactorModel}" looks like OpenRouter format. ` +
+          `For Ollama use the local name (e.g. qwen3:4b). ` +
+          `Run \`ollama pull qwen3:4b\` and set COMPACTOR_MODEL=qwen3:4b.`
+        : "";
+
     try {
+      const beforeCount = nonSystem.length;
       const compactedMessages = await compactSession({
         messages: session.messages,
-        provider: provider,
-        modelOverride: process.env.COMPACTOR_MODEL,
+        provider,
+        modelOverride: compactorModel,
+        force: true, // manual /compact always bypasses the auto-threshold
       });
+      const afterCount = compactedMessages.filter((m) => m.role !== "system").length;
+
       saveSession(
         workspacePath,
         compactedMessages,
@@ -204,16 +227,29 @@ export async function processMenuCommand(
         session.summary,
         session.createdAt,
       );
+
+      const modelLabel = compactorModel ? ` (model: ${compactorModel})` : "";
       return {
         success: true,
         response:
-          "[REI] Session compacted successfully. Older messages were summarized to optimize memory while preserving key technical decisions.",
+          `[REI] Session compacted${modelLabel}. ` +
+          `${beforeCount} → ${afterCount} messages. ` +
+          `Older turns were summarized to preserve context window.` +
+          modelWarning,
         newSession: { ...session, messages: compactedMessages },
       };
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const hint =
+        compactorModel && errMsg.toLowerCase().includes("not found")
+          ? `\nHint: model "${compactorModel}" was not found. ` +
+            (providerName === "ollama"
+              ? `Run \`ollama pull ${compactorModel}\` or fix COMPACTOR_MODEL in your .env.`
+              : `Check COMPACTOR_MODEL in your .env.`)
+          : "";
       return {
         success: false,
-        response: `Error compacting session: ${err instanceof Error ? err.message : String(err)}`,
+        response: `[REI] Error compacting session: ${errMsg}${hint}`,
       };
     }
   }

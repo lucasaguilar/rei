@@ -224,7 +224,14 @@ export async function executeAgentTurnWithTools(params: {
   return finalizeOutcome(
     logger,
     {
-      response: firstTurnExplanation || "Agent loop exceeded maximum turns without producing edits.",
+      response: [
+        `⚠️ REI could not complete the task after ${loopCount} attempts.`,
+        "",
+        ...(firstTurnExplanation ? ["**What was planned:**", firstTurnExplanation, ""] : []),
+        "**What to try next:**",
+        "- Ask REI to re-read the files first: *\"Read [file] and retry\"*",
+        `- Increase the turn limit: set \`REI_MAX_TURNS=${MAX_TURNS + 3}\` in your .env`,
+      ].join("\n"),
       validProposedPatches: [],
       failed: true,
     },

@@ -17,18 +17,26 @@ Format the summary as a single "assistant" message content.`;
 /**
  * Summarizes the conversation using a cheaper model if configured.
  * Replaces older messages with a summary, keeping the most recent turns verbatim.
+ *
+ * @param force - When true, bypasses the COMPACT_THRESHOLD check (used for manual /compact).
  */
 export async function compactSession(params: {
   messages: ChatMessage[];
   provider: ModelProvider;
   modelOverride?: string;
+  force?: boolean;
 }): Promise<ChatMessage[]> {
-  const { messages, provider, modelOverride } = params;
+  const { messages, provider, modelOverride, force } = params;
 
   const systemMessage = messages.length > 0 && messages[0].role === "system" ? messages[0] : undefined;
   const nonSystem = systemMessage ? messages.slice(1) : messages;
 
-  if (nonSystem.length <= COMPACT_THRESHOLD) {
+  if (!force && nonSystem.length <= COMPACT_THRESHOLD) {
+    return messages;
+  }
+
+  // Nothing to summarize when the session is empty or has only 1 message
+  if (nonSystem.length < 2) {
     return messages;
   }
 

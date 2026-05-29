@@ -40,6 +40,7 @@ export const THINKING_TEXT: Record<TurnStatus, string> = {
   producing_response: "Producing response...",
   compacting_memory: "Compacting memory...",
   indexing_repository: "Indexing repository (generating local embeddings)...",
+  checking_hardware: "Checking hardware resources...",
 };
 
 export const SPINNER_FRAMES = ["|", "/", "-", "\\"];

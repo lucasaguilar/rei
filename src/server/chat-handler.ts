@@ -25,8 +25,9 @@ export class ChatHandler {
     if (!promptTrimmed) throw new Error("No prompt provided.");
 
     // Validar workspace antes de continuar
+
     if (!isWorkspaceAllowed(this.workspacePath)) {
-      throw new Error("Workspace not allowed");
+      throw new Error(`Workspace not allowed, ${this.workspacePath}`);
     }
 
     // 1. Recuperar la sesión actual del workspace para mantener el flow de REI
@@ -89,8 +90,24 @@ export class ChatHandler {
     });
 
     for await (const chunk of stream) {
-      fullResponse += chunk;
-      onChunk(chunk);
+      // Strip internal CLI type prefixes before sending to external clients:
+      // \x10 = thinking content (dim italic in CLI) — discard from server output
+      // \x11 = response text — strip prefix, send clean text
+      // raw status/ANSI strings — strip ANSI codes and send as plain text
+      if (chunk.startsWith("\x10")) {
+        // Thinking content: skip — don't expose model reasoning to API consumers
+        fullResponse += chunk.slice(1);
+        continue;
+      }
+
+      const clean = chunk.startsWith("\x11")
+        ? chunk.slice(1) // text: strip prefix
+        : chunk.replace(/\x1b\[[0-9;]*m/g, "").replace(/\x1b\[[^m]*m/g, ""); // status: strip ANSI
+
+      if (clean) {
+        fullResponse += clean;
+        onChunk(clean);
+      }
     }
 
     // streamTurn already pushes user + assistant messages to session.messages

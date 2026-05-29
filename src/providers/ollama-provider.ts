@@ -232,10 +232,9 @@ export class OllamaProvider implements ModelProvider {
         messages,
         stream,
         keep_alive: this.keepAlive,
-        options: {
-          temperature: 0, // Low temperature for more deterministic JSON output
-          ...this.ollamaOptions,
-        },
+        // temperature + repetition penalties live inside ollamaOptions now.
+        // A non-zero temperature + penalties prevent greedy-decoding repetition loops.
+        options: this.ollamaOptions,
       }),
     };
 
@@ -281,9 +280,17 @@ interface OllamaRequestOptions {
   num_predict?: number;
   num_thread?: number;
   temperature?: number;
+  frequency_penalty?: number;
+  presence_penalty?: number;
+  repeat_penalty?: number;
 }
 
 const DEFAULT_OLLAMA_NUM_PREDICT = 16384; // Generous default to prevent empty responses
+// Match the LM Studio provider: non-zero temperature + repetition penalties to stop
+// cyclic repetition loops ("I will check X. I will check Y. I will check X...").
+const DEFAULT_OLLAMA_TEMPERATURE = 0.6;
+const DEFAULT_OLLAMA_FREQUENCY_PENALTY = 0.3;
+const DEFAULT_OLLAMA_PRESENCE_PENALTY = 0.3;
 
 function parseOllamaLine(line: string): OllamaChatResponse {
   try {
@@ -389,18 +396,39 @@ function parseRequestTimeoutMs(
 }
 
 function buildOllamaRequestOptions(): OllamaRequestOptions {
-  return {
+  const options: OllamaRequestOptions = {
     num_ctx: parseOptionalPositiveInteger(process.env.OLLAMA_NUM_CTX),
     num_predict: parseOptionalPositiveInteger(
       process.env.OLLAMA_NUM_PREDICT,
       DEFAULT_OLLAMA_NUM_PREDICT,
     ),
     num_thread: parseOptionalPositiveInteger(process.env.OLLAMA_NUM_THREAD),
-    temperature: parseOptionalPositiveInteger(
+    // Float-aware (the old integer parser floored 0.6 → 0, forcing greedy decoding).
+    temperature: parseOptionalFloat(
       process.env.OLLAMA_TEMPERATURE,
-      0,
+      DEFAULT_OLLAMA_TEMPERATURE,
+      { min: 0, max: 2 },
+    ),
+    frequency_penalty: parseOptionalFloat(
+      process.env.OLLAMA_FREQUENCY_PENALTY,
+      DEFAULT_OLLAMA_FREQUENCY_PENALTY,
+      { min: 0, max: 2 },
+    ),
+    presence_penalty: parseOptionalFloat(
+      process.env.OLLAMA_PRESENCE_PENALTY,
+      DEFAULT_OLLAMA_PRESENCE_PENALTY,
+      { min: 0, max: 2 },
     ),
   };
+  // Opt-in only — otherwise Ollama uses its own repeat_penalty default (1.1).
+  if (process.env.OLLAMA_REPEAT_PENALTY) {
+    options.repeat_penalty = parseOptionalFloat(
+      process.env.OLLAMA_REPEAT_PENALTY,
+      1.1,
+      { min: 1, max: 2 },
+    );
+  }
+  return options;
 }
 
 function parseOptionalPositiveInteger(
@@ -413,4 +441,17 @@ function parseOptionalPositiveInteger(
     return fallback;
   }
   return Math.floor(parsed);
+}
+
+function parseOptionalFloat(
+  value: string | undefined,
+  fallback: number,
+  bounds: { min: number; max: number },
+): number {
+  if (value === undefined || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < bounds.min || parsed > bounds.max) {
+    return fallback;
+  }
+  return parsed;
 }
