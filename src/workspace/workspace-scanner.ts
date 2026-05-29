@@ -45,7 +45,7 @@ const IGNORED_EXTENSIONS = new Set([
   ".dylib",
 ]);
 
-const MAX_FILES = 200;
+const MAX_FILES = 2000;
 
 function shouldIgnoreDirectory(dirName: string): boolean {
   return dirName.startsWith(".") || IGNORED_DIRS.has(dirName);

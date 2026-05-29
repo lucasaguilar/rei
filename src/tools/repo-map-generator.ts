@@ -59,7 +59,7 @@ export async function generateRepoMap(workspacePath: string): Promise<string> {
     /\.(spec|test)\.(ts|js|tsx|jsx)$/.test(f),
   );
   const polyglotFiles = files.filter((f) =>
-    /\.(py|c|h|cpp|hpp|cc|cxx|cs|rs|go)$/.test(f),
+    /\.(py|c|h|cpp|hpp|cc|cxx|cs|rs|go|php)$/.test(f),
   );
 
   // Procesar archivos TS/JS con ts-morph
@@ -136,7 +136,7 @@ export async function generateRepoMap(workspacePath: string): Promise<string> {
     );
   }
 
-  // POLYGLOT (C, C++, C#, Python, Rust, Go) — AstProviderFactory / Tree-sitter
+  // POLYGLOT (C, C++, C#, Python, Rust, Go, PHP) — AstProviderFactory / Tree-sitter
   for (const file of polyglotFiles) {
     const relPath = path.relative(workspacePath, file).replace(/\\/g, "/");
     try {

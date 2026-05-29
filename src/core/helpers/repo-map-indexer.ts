@@ -100,6 +100,7 @@ export function initWatcher(params: {
       "**/*.css",
       "**/*.scss",
       "**/*.py",
+      "**/*.php",
       "**/*.c",
       "**/*.h",
       "**/*.cpp",

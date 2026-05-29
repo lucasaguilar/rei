@@ -15,6 +15,7 @@ const DEFAULT_EXTENSIONS = [
   ".scss",
   // Polyglot (Tree-sitter supported)
   ".py",
+  ".php",
   ".c",
   ".h",
   ".cpp",
