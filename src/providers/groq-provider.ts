@@ -1,5 +1,11 @@
 import type { ChatMessage } from "../chat/types.js";
-import type { ModelProvider, CompletionOptions } from "./model-provider.js";
+import type {
+  ModelProvider,
+  CompletionOptions,
+  ToolDefinition,
+  ChatCompletionWithTools,
+} from "./model-provider.js";
+import { openaiCompleteChatWithTools } from "./openai-tool-caller.js";
 
 interface GroqChatChoice {
   message?: {
@@ -141,7 +147,12 @@ export class GroqProvider implements ModelProvider {
                 `Groq stream error: ${data.error.message ?? JSON.stringify(data.error)}`,
               );
             }
-            const delta = data.choices?.[0]?.delta;
+            const choice = data.choices?.[0];
+            const delta = choice?.delta;
+            const finishReason = choice?.finish_reason;
+            if (finishReason) {
+              options?.onFinish?.(finishReason);
+            }
             const content = delta?.content || "";
             const reasoning = delta?.reasoning_content || "";
             if (reasoning) {
@@ -178,7 +189,12 @@ export class GroqProvider implements ModelProvider {
               `Groq stream error: ${data.error.message ?? JSON.stringify(data.error)}`,
             );
           }
-          const delta = data.choices?.[0]?.delta;
+          const choice = data.choices?.[0];
+          const delta = choice?.delta;
+          const finishReason = choice?.finish_reason;
+          if (finishReason) {
+            options?.onFinish?.(finishReason);
+          }
           const content = delta?.content || "";
           const reasoning = delta?.reasoning_content || "";
           if (reasoning) {
@@ -205,6 +221,22 @@ export class GroqProvider implements ModelProvider {
     if (inThinking) {
       yield "</think>";
     }
+  }
+
+  async completeChatWithTools(
+    messages: ChatMessage[],
+    tools: ToolDefinition[],
+    options?: CompletionOptions,
+  ): Promise<ChatCompletionWithTools> {
+    return openaiCompleteChatWithTools({
+      baseUrl: GROQ_API_BASE_URL,
+      headers: { Authorization: `Bearer ${this.apiKey}` },
+      model: this.model,
+      messages,
+      tools,
+      timeoutMs: this.requestTimeoutMs,
+      options,
+    });
   }
 
   private fetchChat(params: {

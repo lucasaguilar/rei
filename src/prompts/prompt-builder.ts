@@ -30,6 +30,7 @@ function buildProjectRules(workspacePath?: string): string {
 export function buildSystemMessage(
   mode: SessionMode,
   workspacePath?: string,
+  useToolCalling = false,
 ): string {
   const projectRules = buildProjectRules(workspacePath);
 
@@ -48,13 +49,18 @@ export function buildSystemMessage(
   ];
 
   if (mode === "agent") {
-    const fmt = getAgentEditFormat();
-    if (fmt === "wholefile") {
-      sections.push(loadPrompt("modes/agent-wholefile"), "");
-      sections.push(loadPrompt("formats/agent-format-wholefile"));
+    if (useToolCalling) {
+      sections.push(loadPrompt("modes/agent-tools"), "");
+      sections.push(loadPrompt("formats/agent-format-tools"));
     } else {
-      sections.push(loadPrompt("modes/agent"), "");
-      sections.push(loadPrompt("formats/agent-format"));
+      const fmt = getAgentEditFormat();
+      if (fmt === "wholefile") {
+        sections.push(loadPrompt("modes/agent-wholefile"), "");
+        sections.push(loadPrompt("formats/agent-format-wholefile"));
+      } else {
+        sections.push(loadPrompt("modes/agent"), "");
+        sections.push(loadPrompt("formats/agent-format"));
+      }
     }
   } else {
     sections.push(loadPrompt(`modes/${mode}`), "");

@@ -155,21 +155,24 @@ export async function handleInputTurn(
       }
 
       if (isThinking) {
-        // Show thinking content dim + italic; don't accumulate in buffer
+        // Skip whitespace-only thinking tokens (model emits \n at init, creates blank lines)
+        if (!cleanToken.trim()) continue;
         if (!liveContentShown) {
           actions.stopSpinner();
           state.activeStatus = undefined;
           liveContentShown = true;
         }
-        actions.streamText(`\x1b[3;2m${cleanToken}\x1b[0m`);
+        // Collapse 3+ consecutive newlines to 2 to avoid excessive blank lines in thinking
+        const normalized = cleanToken.replace(/\n{3,}/g, "\n\n");
+        actions.streamText(`\x1b[3;2m${normalized}\x1b[0m`);
       } else {
         // text (\x11) or raw status/agent-response token: accumulate in buffer
         const wasInside = isInsideXmlBlock(buffer);
         buffer += cleanToken;
         const isNowInside = isInsideXmlBlock(buffer);
 
-        if (!isText && !isNowInside && !wasInside) {
-          // status / agent raw response: show live (already styled or plain)
+        if (!isText && !isNowInside && !wasInside && cleanToken.trim()) {
+          // status / agent raw response: show live — skip whitespace-only tokens
           if (!liveContentShown) {
             actions.stopSpinner();
             state.activeStatus = undefined;
@@ -196,14 +199,12 @@ export async function handleInputTurn(
       .replace(/<call_tool[\s\S]*?<\/call_tool>/gi, "")
       .trim();
 
-    // Add spacing after any live-streamed thinking/status content
-    if (liveContentShown) {
-      actions.streamText("\n\n");
-    }
-
-    // Render and display the final response — no \x1b[3;90m wrapper so markdown colors show
+    // One newline separator after live thinking/status content, only when there's a rendered response to follow
     const rendered = renderMarkdown(finalContent);
     if (rendered.trim()) {
+      if (liveContentShown) {
+        actions.streamText("\n");
+      }
       actions.pushTranscript(`\x1b[1;32mREI: \x1b[0m${rendered}`);
     }
 

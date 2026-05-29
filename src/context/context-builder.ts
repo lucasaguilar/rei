@@ -31,6 +31,7 @@ import {
   MIN_RAG_SCORE_FOR_FILE_PREVIEW,
   isOnDemandFileContextEnabled,
 } from "./constants/context-builder.constants.js";
+import { trimContextToBudget } from "./context-budget.js";
 
 export type RagNodeSnippet = {
   filePath: string;
@@ -55,6 +56,8 @@ export type TurnContext = {
   ragNodeSnippets?: RagNodeSnippet[];
   /** Files that reference the symbols mentioned in the user prompt (for cascade changes) */
   callerFiles?: Array<{ path: string; symbols: string[]; preview: string }>;
+  /** True when context was trimmed to fit the token budget. */
+  budgetTrimmed?: boolean;
 };
 
 export async function buildTurnContext(params: {
@@ -66,6 +69,9 @@ export async function buildTurnContext(params: {
   onStatus?: (
     status: import("../core/models/agent.types.js").TurnStatus,
   ) => void;
+  /** Token budget for the dynamic context portion. When provided, the context
+   *  is progressively trimmed so it fits within the available window. */
+  tokenBudget?: number;
 }): Promise<TurnContext> {
   const { workspacePath, userInput, mode, scannedFiles } = params;
 
@@ -236,7 +242,7 @@ export async function buildTurnContext(params: {
     ),
   ]);
 
-  return {
+  const raw: TurnContext = {
     workspacePath,
     repoSummary,
     relevantFiles,
@@ -245,4 +251,11 @@ export async function buildTurnContext(params: {
     ragNodeSnippets,
     callerFiles: callerFiles.length > 0 ? callerFiles : undefined,
   };
+
+  if (params.tokenBudget !== undefined) {
+    const { context, trimmed } = trimContextToBudget(raw, params.tokenBudget);
+    return { ...context, budgetTrimmed: trimmed };
+  }
+
+  return raw;
 }

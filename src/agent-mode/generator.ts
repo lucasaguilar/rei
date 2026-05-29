@@ -32,6 +32,15 @@ import { streamTurnWithInterception } from "./helpers/token-streamer.js";
 
 const MAX_TURNS = process.env.REI_MAX_TURNS ? parseInt(process.env.REI_MAX_TURNS, 10) : 7;
 
+/** Max consecutive truncation continuations before giving up. */
+const MAX_TRUNCATION_CONTINUATIONS = 3;
+
+/** Injected when the model's previous response was cut off by the token limit. */
+const TRUNCATION_CONTINUATION =
+  "Your previous response was cut off by the output token limit. " +
+  "Continue EXACTLY from where you left off — do NOT repeat, summarize, or restart. " +
+  "Just continue the text as one uninterrupted response.";
+
 export async function executeAgentTurn(params: {
   provider: ModelProvider;
   messagesForModel: ChatSession["messages"];
@@ -53,6 +62,7 @@ export async function executeAgentTurn(params: {
 
   let currentMessages = [...messagesForModel];
   let loopCount = 0;
+  let truncationCount = 0;
 
   // Track last known state for failure recovery
   let lastRawResponse = "";
@@ -72,13 +82,41 @@ export async function executeAgentTurn(params: {
   while (loopCount < MAX_TURNS) {
     loopCount++;
 
-    // 1. Ask the LLM
-    const rawResponse = await streamTurnWithInterception({
+    // 1. Ask the LLM — accumulate continuations if truncated
+    let finishReason = "stop";
+    let rawResponse = await streamTurnWithInterception({
       provider,
       messages: currentMessages,
       model: modelOverride,
       onChunk,
+      onFinish: (r) => { finishReason = r; },
     });
+
+    // Auto-continue if truncated (model hit output token limit)
+    while (
+      finishReason === "length" &&
+      truncationCount < MAX_TRUNCATION_CONTINUATIONS
+    ) {
+      truncationCount++;
+      logger.logInfo(`[truncation] Response cut off (attempt ${truncationCount}/${MAX_TRUNCATION_CONTINUATIONS}), continuing...`);
+      currentMessages = [
+        ...currentMessages,
+        { role: "assistant", content: stripThinkingBlock(rawResponse) },
+        { role: "user", content: TRUNCATION_CONTINUATION },
+      ];
+      finishReason = "stop";
+      const continuation = await streamTurnWithInterception({
+        provider,
+        messages: currentMessages,
+        model: modelOverride,
+        onChunk,
+        onFinish: (r) => { finishReason = r; },
+      });
+      rawResponse = rawResponse + continuation;
+      // Remove the continuation messages we injected (keep history clean)
+      currentMessages = currentMessages.slice(0, currentMessages.length - 2);
+    }
+
     lastRawResponse = rawResponse;
     logger.logInfo("Raw LLM Response", { rawResponse });
 
@@ -348,6 +386,7 @@ export async function executeAgentTurnWholefile(params: {
     params;
   let currentMessages = [...messagesForModel];
   let loopCount = 0;
+  let truncationCount = 0;
   let lastRawResponse = "";
   let firstTurnExplanation = "";
 
@@ -361,12 +400,38 @@ export async function executeAgentTurnWholefile(params: {
   while (loopCount < MAX_TURNS) {
     loopCount++;
 
-    const rawResponse = await streamTurnWithInterception({
+    let finishReason = "stop";
+    let rawResponse = await streamTurnWithInterception({
       provider,
       messages: currentMessages,
       model: modelOverride,
       onChunk,
+      onFinish: (r) => { finishReason = r; },
     });
+
+    while (
+      finishReason === "length" &&
+      truncationCount < MAX_TRUNCATION_CONTINUATIONS
+    ) {
+      truncationCount++;
+      logger.logInfo(`[truncation] Response cut off (attempt ${truncationCount}/${MAX_TRUNCATION_CONTINUATIONS}), continuing...`);
+      currentMessages = [
+        ...currentMessages,
+        { role: "assistant", content: stripThinkingBlock(rawResponse) },
+        { role: "user", content: TRUNCATION_CONTINUATION },
+      ];
+      finishReason = "stop";
+      const continuation = await streamTurnWithInterception({
+        provider,
+        messages: currentMessages,
+        model: modelOverride,
+        onChunk,
+        onFinish: (r) => { finishReason = r; },
+      });
+      rawResponse = rawResponse + continuation;
+      currentMessages = currentMessages.slice(0, currentMessages.length - 2);
+    }
+
     lastRawResponse = rawResponse;
     logger.logInfo("Raw LLM Response (wholefile mode)", { rawResponse });
 

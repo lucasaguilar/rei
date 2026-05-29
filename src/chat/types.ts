@@ -1,8 +1,16 @@
-export type MessageRole = "system" | "user" | "assistant";
+import type { ToolCall } from "../providers/model-provider.js";
+
+export type MessageRole = "system" | "user" | "assistant" | "tool";
 
 export interface ChatMessage {
   role: MessageRole;
   content: string;
+  /** Structured tool calls emitted by the assistant (function calling). */
+  tool_calls?: ToolCall[];
+  /** ID matching the tool call this result belongs to (role: "tool"). */
+  tool_call_id?: string;
+  /** Tool name for role: "tool" messages. */
+  name?: string;
   /** The session mode that produced this message. Used to preserve planning
    *  responses in agent-mode context (they contain implementation plans). */
   sourceMode?: SessionMode;
