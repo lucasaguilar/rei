@@ -11,6 +11,7 @@ import {
   buildSystemMessage,
   getAgentEditFormat,
 } from "../prompts/prompt-builder.js";
+import { streamTurnWithInterception } from "../agent-mode/helpers/token-streamer.js";
 import { buildTurnContext } from "../context/context-builder.js";
 import { buildMessagesForModel } from "../chat/message-builder.js";
 import { compactSession, needsCompaction } from "../chat/compactor.js";
@@ -39,7 +40,7 @@ import {
   buildTurnUserMessage,
   looksLikeAgentJson,
   extractStageNumberFromPrompt,
-  stripActionTags,
+  stripThinkingBlock,
 } from "./helpers/turn-message.helpers.js";
 import type { StreamTurnOptions } from "./models/agent.types.js";
 import {
@@ -110,7 +111,7 @@ export class Agent {
     );
     session.messages.push({
       role: "assistant",
-      content: response,
+      content: stripThinkingBlock(response),
       sourceMode: session.mode,
     });
 
@@ -161,8 +162,12 @@ export class Agent {
       let resolver: (() => void) | null = null;
       let done = false;
 
-      const onChunk = (chunk: { type: "thinking" | "status"; content: string }) => {
-        chunksQueue.push(chunk.content);
+      const onChunk = (chunk: { type: "thinking" | "text" | "status"; content: string }) => {
+        // \x10 = thinking (dim italic live), \x11 = text (buffered, rendered at end), status = raw
+        const encoded = chunk.type === "thinking" ? `\x10${chunk.content}`
+          : chunk.type === "text" ? `\x11${chunk.content}`
+          : chunk.content;
+        chunksQueue.push(encoded);
         resolver?.();
       };
 
@@ -214,7 +219,7 @@ export class Agent {
         );
         const msg = formatBatchPatchResult(result);
         const fullResponse = outcome.response + msg;
-        session.messages.push({ role: "assistant", content: outcome.response });
+        session.messages.push({ role: "assistant", content: stripThinkingBlock(outcome.response) });
         options?.onStatus?.("producing_response");
         yield fullResponse;
 
@@ -241,7 +246,7 @@ export class Agent {
         const userVisibleResponse = outcome.response + feedback;
         session.messages.push({
           role: "assistant",
-          content: userVisibleResponse,
+          content: stripThinkingBlock(userVisibleResponse),
         });
         options?.onStatus?.("producing_response");
         yield userVisibleResponse;
@@ -249,7 +254,7 @@ export class Agent {
       }
 
       // Si no hay parches ni comandos, solo responde
-      session.messages.push({ role: "assistant", content: outcome.response });
+      session.messages.push({ role: "assistant", content: stripThinkingBlock(outcome.response) });
       options?.onStatus?.("producing_response");
       yield outcome.response;
 
@@ -272,20 +277,42 @@ export class Agent {
         : 7;
 
       while (hasMoreCommands && depth < maxDepth) {
-        let streamResponse = "";
         options?.onStatus?.("producing_response");
 
-        // Collect tokens into a buffer first so we can inspect the full
-        // response before deciding what to yield. This prevents partial
-        // <call_tool> / <execute_command> XML from being printed to the
-        // terminal before the tool-call detection logic runs.
-        const tokenBuffer: string[] = [];
-        for await (const token of this.provider.streamChat(currentMessages, {
+        const chunksQueue: string[] = [];
+        let resolver: (() => void) | null = null;
+        let done = false;
+
+        const onChunk = (chunk: { type: "thinking" | "text" | "status"; content: string }) => {
+          const encoded = chunk.type === "thinking" ? `\x10${chunk.content}`
+            : chunk.type === "text" ? `\x11${chunk.content}`
+            : chunk.content;
+          chunksQueue.push(encoded);
+          resolver?.();
+        };
+
+        const turnPromise = streamTurnWithInterception({
+          provider: this.provider,
+          messages: currentMessages,
           model: resolveModelForMode(session.mode),
-        })) {
-          streamResponse += token;
-          tokenBuffer.push(token);
+          onChunk,
+        }).finally(() => {
+          done = true;
+          resolver?.();
+        });
+
+        // Stream thoughts and action statuses to the user in real-time
+        while (!done || chunksQueue.length > 0) {
+          if (chunksQueue.length > 0) {
+            yield chunksQueue.shift()!;
+          } else {
+            await new Promise<void>((resolve) => {
+              resolver = resolve;
+            });
+          }
         }
+
+        const streamResponse = await turnPromise;
 
         const commands = extractCommandRequests(streamResponse);
         const toolCalls = extractToolCalls(streamResponse);
@@ -296,13 +323,6 @@ export class Agent {
           toolCalls.length > 0 ||
           fileRequests.length > 0
         ) {
-          // Yield the visible part of the response (strip XML tags) before
-          // the tool-result block so the user sees the prose intro, if any.
-          const visibleResponse = stripActionTags(streamResponse);
-          if (visibleResponse) {
-            yield visibleResponse + "\n";
-          }
-
           depth++;
           const { executionFeedback, userVisibleFeedback } = await executeAndFormatTurnActions({
             response: streamResponse,
@@ -314,7 +334,7 @@ export class Agent {
           yield userVisibleFeedback;
           currentMessages = [
             ...currentMessages,
-            { role: "assistant", content: streamResponse },
+            { role: "assistant", content: stripThinkingBlock(streamResponse) },
             {
               role: "user",
               content: `System: Execution results:\n${executionFeedback}\n\nNow continue your process or provide your complete answer using these results.`,
@@ -322,12 +342,6 @@ export class Agent {
           ];
         } else {
           hasMoreCommands = false;
-
-          // No tool calls — stream was buffered, so replay tokens now for
-          // real-time output on the terminal.
-          for (const token of tokenBuffer) {
-            yield token;
-          }
 
           // Concat all assistant chunks for session storage
           const allAssistantChunks = currentMessages
@@ -338,7 +352,7 @@ export class Agent {
           allAssistantChunks.push(streamResponse);
 
           const finalContent = allAssistantChunks.join("\n\n");
-          const cleanAssistantContent = stripActionTags(finalContent);
+          const cleanAssistantContent = stripThinkingBlock(finalContent);
 
           session.messages.push({
             role: "assistant",
@@ -571,7 +585,7 @@ export class Agent {
         lastResponse = raw;
       }
 
-      currentMessages.push({ role: "assistant", content: lastResponse });
+      currentMessages.push({ role: "assistant", content: stripThinkingBlock(lastResponse) });
 
       const commands = extractCommandRequests(lastResponse);
       const toolCalls = extractToolCalls(lastResponse);
@@ -619,7 +633,7 @@ export class Agent {
       .map((m) => m.content);
 
     const finalContent = allAssistantChunks.join("\n\n");
-    return stripActionTags(finalContent);
+    return stripThinkingBlock(finalContent);
   }
 
   private async generateAgentAssistantResponse(

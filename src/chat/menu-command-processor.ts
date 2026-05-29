@@ -402,14 +402,24 @@ export async function processMenuCommand(
   }
 
   if (trimmed === "/index") {
-    // 1. Generate and persist the AST Skeleton Map (errors are logged, not swallowed)
-    generateRepoMap(workspacePath).catch((err) =>
-      console.error("[/index] Repo map error:", err),
-    );
+    // 1. Generate and persist the AST Skeleton Map — show progress via console
+    console.log("\n\x1b[33m[REI] Generando skeleton map AST...\x1b[0m");
+    generateRepoMap(workspacePath)
+      .then(() => {
+        console.log("\x1b[32m[REI] ✓ Skeleton map AST generado correctamente.\x1b[0m\n");
+      })
+      .catch((err) =>
+        console.error("[/index] Repo map error:", err),
+      );
 
-    // 2. Start the RAG vector indexing
+    // 2. Start the RAG vector indexing with progress feedback
     startIndexingWorker(workspacePath, {
-      onDone: () => {},
+      onProgress: (indexed, total) => {
+        console.log(`\x1b[33m[REI] RAG indexing... ${indexed}/${total} archivos\x1b[0m`);
+      },
+      onDone: (message) => {
+        console.log(`\x1b[32m[REI] ✓ ${message}\x1b[0m\n`);
+      },
     });
     return {
       success: true,

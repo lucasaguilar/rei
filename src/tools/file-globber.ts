@@ -1,34 +1,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-
-const DEFAULT_EXTENSIONS = [
-  // TypeScript / JavaScript
-  ".ts",
-  ".js",
-  ".tsx",
-  ".jsx",
-  ".spec.ts",
-  ".test.ts",
-  // Web
-  ".html",
-  ".css",
-  ".scss",
-  // Polyglot (Tree-sitter supported)
-  ".py",
-  ".c",
-  ".h",
-  ".cpp",
-  ".hpp",
-  ".cc",
-  ".cxx",
-  ".cs",
-  ".rs",
-  ".go",
-];
+import { getSourceFileExtensions } from "../language/language-capabilities.js";
 
 export function listRelevantFiles(
   rootDir: string,
-  exts: string[] = DEFAULT_EXTENSIONS,
+  exts: string[] = getSourceFileExtensions(),
 ): string[] {
   const results: string[] = [];
   function walk(dir: string) {

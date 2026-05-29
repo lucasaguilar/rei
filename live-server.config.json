@@ -1,6 +1,0 @@
-{
-  "port": 8080,
-  "root": "./",
-  "open": true,
-  "watch": ["src", "docs", "prompts", "tools/log-viewer/index.html"]
-}

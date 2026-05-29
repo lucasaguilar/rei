@@ -3,6 +3,7 @@ import type { ModelProvider } from "../providers/model-provider.js";
 import type { FileMeta } from "../workspace/workspace-scanner.js";
 import type { AgentLogger } from "../core/logger.js";
 import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
+import { stripThinkingBlock } from "../core/helpers/turn-message.helpers.js";
 import {
   extractFileRequests,
   extractSREdits,
@@ -38,7 +39,7 @@ export async function executeAgentTurn(params: {
   scannedFiles: FileMeta[];
   logger: AgentLogger;
   modelOverride?: string;
-  onChunk?: (event: { type: "thinking" | "status"; content: string }) => void;
+  onChunk?: (event: { type: "thinking" | "text" | "status"; content: string }) => void;
 }): Promise<ExecutionResult> {
   const {
     provider,
@@ -88,7 +89,7 @@ export async function executeAgentTurn(params: {
     } else {
       logger.logInfo("Model returned empty response", { loopCount });
       if (loopCount < MAX_TURNS) {
-        currentMessages.push({ role: "assistant", content: rawResponse });
+        currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
         currentMessages.push({
           role: "user",
           content:
@@ -117,7 +118,7 @@ export async function executeAgentTurn(params: {
     });
 
     if (createFeedback) {
-      currentMessages.push({ role: "assistant", content: rawResponse });
+      currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
       currentMessages.push({
         role: "user",
         content:
@@ -136,7 +137,7 @@ export async function executeAgentTurn(params: {
         fileRequests,
       );
 
-      currentMessages.push({ role: "assistant", content: rawResponse });
+      currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
       currentMessages.push({
         role: "user",
         content: `Here are the requested files:\n${contextMessage}\nPlease continue your task.`,
@@ -178,7 +179,7 @@ export async function executeAgentTurn(params: {
           callerFiles,
         );
 
-        currentMessages.push({ role: "assistant", content: rawResponse });
+        currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
         currentMessages.push({
           role: "user",
           content:
@@ -208,7 +209,7 @@ export async function executeAgentTurn(params: {
           logger.logInfo(
             `Virtual validation failed. Feeding back errors (Turn ${loopCount}/${MAX_TURNS}).`,
           );
-          currentMessages.push({ role: "assistant", content: rawResponse });
+          currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
 
           if (consecutiveSearchMismatchFailures >= 2) {
             const requestedFiles = [...new Set(edits.map((edit) => edit.file))];
@@ -281,7 +282,7 @@ export async function executeAgentTurn(params: {
       }
 
       if (loopCount < MAX_TURNS) {
-        currentMessages.push({ role: "assistant", content: rawResponse });
+        currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
         currentMessages.push({
           role: "user",
           content: `Command execution results:\n${commandFeedback}\nPlease continue with the task.`,
@@ -341,7 +342,7 @@ export async function executeAgentTurnWholefile(params: {
   workspacePath: string;
   logger: AgentLogger;
   modelOverride?: string;
-  onChunk?: (event: { type: "thinking" | "status"; content: string }) => void;
+  onChunk?: (event: { type: "thinking" | "text" | "status"; content: string }) => void;
 }): Promise<ExecutionResult> {
   const { provider, messagesForModel, workspacePath, logger, modelOverride, onChunk } =
     params;
@@ -375,7 +376,7 @@ export async function executeAgentTurnWholefile(params: {
       }
     } else {
       if (loopCount < MAX_TURNS) {
-        currentMessages.push({ role: "assistant", content: rawResponse });
+        currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
         currentMessages.push({
           role: "user",
           content:
@@ -399,7 +400,7 @@ export async function executeAgentTurnWholefile(params: {
         workspacePath,
         fileRequests,
       );
-      currentMessages.push({ role: "assistant", content: rawResponse });
+      currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
       currentMessages.push({
         role: "user",
         content: `Here are the requested files:\n${contextMessage}\nPlease continue your task.`,
@@ -428,7 +429,7 @@ export async function executeAgentTurnWholefile(params: {
             .map((r) => `- ${r.file}: ${r.validationErrors.join("; ")}`)
             .join("\n");
         if (loopCount < MAX_TURNS) {
-          currentMessages.push({ role: "assistant", content: rawResponse });
+          currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
           currentMessages.push({
             role: "user",
             content: feedback + "\nPlease retry.",
@@ -486,7 +487,7 @@ export async function executeAgentTurnWholefile(params: {
           });
 
           if (!isAngularProject && loopCount < MAX_TURNS) {
-            currentMessages.push({ role: "assistant", content: rawResponse });
+            currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
             currentMessages.push({
               role: "user",
               content:
@@ -527,7 +528,7 @@ export async function executeAgentTurnWholefile(params: {
       }
 
       if (loopCount < MAX_TURNS) {
-        currentMessages.push({ role: "assistant", content: rawResponse });
+        currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
         currentMessages.push({
           role: "user",
           content: `Command execution results:\n${commandFeedback}\nPlease continue with the task.`,
