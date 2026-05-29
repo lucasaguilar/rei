@@ -115,8 +115,12 @@ export async function handleInputTurn(
 
   try {
     let lastStatus: TurnStatus | undefined;
+    // buffer accumulates non-thinking content (text + status/raw agent yields)
     let buffer = "";
-    let liveStart = -1;
+    // total output chars including thinking (for tok/s metrics)
+    let totalOutputChars = 0;
+    // track whether any thinking or status content was shown live
+    let liveContentShown = false;
     let firstTokenTime = -1;
     let callingModelTime = -1;
     let chunkCount = 0;
@@ -130,8 +134,6 @@ export async function handleInputTurn(
         lastStatus = status;
         state.activeStatus = status;
         state.busy = true;
-
-        // Force immediate UI refresh so short phases still become visible.
         actions.draw();
 
         if (status === "calling_model" && callingModelTime < 0) {
@@ -139,39 +141,53 @@ export async function handleInputTurn(
         }
       },
     })) {
-      if (firstTokenTime < 0 && token.trim()) {
+      // Decode type prefix: \x10 = thinking (show dim italic), \x11 = text (buffer silently)
+      const isThinking = token.startsWith("\x10");
+      const isText = token.startsWith("\x11");
+      const cleanToken = (isThinking || isText) ? token.slice(1) : token;
+
+      chunkCount++;
+      totalOutputChars += cleanToken.length;
+
+      // Track first visible token for timing
+      if (firstTokenTime < 0 && cleanToken.trim()) {
         firstTokenTime = Date.now();
-        if (liveStart < 0) {
-          // Stop spinner REDRAWS to prevent interleaving with streaming output,
-          // but keep state.busy = true so input stays blocked until stream ends.
+      }
+
+      if (isThinking) {
+        // Show thinking content dim + italic; don't accumulate in buffer
+        if (!liveContentShown) {
           actions.stopSpinner();
           state.activeStatus = undefined;
-          liveStart = 1;
-          actions.streamText(`\x1b[1;32mREI: \x1b[0m`);
+          liveContentShown = true;
         }
-      }
-      chunkCount++;
-      const wasInside = isInsideXmlBlock(buffer);
-      buffer += token;
-      const isNowInside = isInsideXmlBlock(buffer);
+        actions.streamText(`\x1b[3;2m${cleanToken}\x1b[0m`);
+      } else {
+        // text (\x11) or raw status/agent-response token: accumulate in buffer
+        const wasInside = isInsideXmlBlock(buffer);
+        buffer += cleanToken;
+        const isNowInside = isInsideXmlBlock(buffer);
 
-      if (liveStart > 0) {
-        if (!isNowInside && !wasInside) {
-          if (token.startsWith("\n\x1b[33m") || token.includes("[REI]")) {
-            actions.streamText(token);
-          } else {
-            actions.streamText(`\x1b[3;90m${token}\x1b[0m`);
+        if (!isText && !isNowInside && !wasInside) {
+          // status / agent raw response: show live (already styled or plain)
+          if (!liveContentShown) {
+            actions.stopSpinner();
+            state.activeStatus = undefined;
+            liveContentShown = true;
           }
+          actions.streamText(cleanToken);
         }
+        // \x11 text tokens: silently buffered, rendered as markdown after stream ends
       }
     }
 
     const endTime = Date.now();
 
-    // Procesar el buffer final: extraer edits y formatear
+    // Strip ANSI codes and XML action tags to get clean markdown for rendering
     const edits = extractSREdits(buffer);
-    let finalContent = buffer
-      .replace(/<think>[\s\S]*?<\/think>/gi, "")  // strip thinking blocks before markdown render
+    const finalContent = buffer
+      .replace(/\x1b\[[0-9;]*m/g, "")            // strip ANSI (e.g. from patch result)
+      .replace(/<think>[\s\S]*?<\/think>/gi, "")  // safety strip
       .replace(/<edit[\s\S]*?<\/edit>/gi, "")
       .replace(/<wholefile[\s\S]*?<\/wholefile>/gi, "")
       .replace(/<create[\s\S]*?<\/create>/gi, "")
@@ -180,26 +196,23 @@ export async function handleInputTurn(
       .replace(/<call_tool[\s\S]*?<\/call_tool>/gi, "")
       .trim();
 
-    if (liveStart > 0) {
-      actions.streamText("\n");
-      const rendered = renderMarkdown(finalContent);
-      actions.pushTranscript(`\x1b[1;32mREI: \x1b[0m\x1b[3;90m${rendered}\x1b[0m`, false);
+    // Add spacing after any live-streamed thinking/status content
+    if (liveContentShown) {
+      actions.streamText("\n\n");
     }
 
-    if (liveStart < 0) {
-      actions.pushTranscript("");
-      actions.pushTranscript(`\x1b[1;36mYou: ${trimmed}\x1b[0m`);
-      actions.pushTranscript("");
-      const rendered = renderMarkdown(finalContent);
-      actions.pushTranscript(`\x1b[1;32mREI: \x1b[0m\x1b[3;90m${rendered}\x1b[0m`);
+    // Render and display the final response — no \x1b[3;90m wrapper so markdown colors show
+    const rendered = renderMarkdown(finalContent);
+    if (rendered.trim()) {
+      actions.pushTranscript(`\x1b[1;32mREI: \x1b[0m${rendered}`);
     }
 
-    // Si hubo edits, los añadimos formateados al final
+    // Display formatted S&R diffs (ANSI diff, already styled by formatCodeDiff)
     if (edits.length > 0) {
-      actions.pushTranscript("\n### Cambios propuestos:");
+      actions.pushTranscript(`\n\x1b[1;33mCambios propuestos:\x1b[0m`);
       for (const edit of edits) {
         actions.pushTranscript(
-          `\n**Archivo:** ${edit.file}\n${formatCodeDiff(edit.search, edit.replace)}`,
+          `\x1b[1mArchivo:\x1b[0m ${edit.file}\n${formatCodeDiff(edit.search, edit.replace)}`,
         );
       }
     }
@@ -219,7 +232,7 @@ export async function handleInputTurn(
     const inputChars = inputMsgs.reduce((acc, m) => acc + m.content.length, 0);
     const sentTokens = Math.round(inputChars / 4);
 
-    const recTokens = Math.max(1, Math.round(buffer.length / 4));
+    const recTokens = Math.max(1, Math.round(totalOutputChars / 4));
 
     const streamSpeedValue = recTokens / (generationMs / 1000);
     const averageSpeedValue = recTokens / (totalMs / 1000);

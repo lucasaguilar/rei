@@ -151,9 +151,18 @@ export function extractStageNumberFromPrompt(prompt: string): number | null {
  */
 export function stripActionTags(text: string): string {
   return text
-    .replace(/<think>[\s\S]*?<\/think>/gi, "")  // strip model reasoning — never send back
-    .replace(/<execute_command>[\s\S]*?<\/execute_command>/gi, "")
-    .replace(/<call_tool\s+name="[^"]+">[\s\S]*?<\/call_tool>/gi, "")
-    .replace(/<request_files>[\s\S]*?<\/request_files>/gi, "")
+    .replace(/<think>[\s\S]*?(<\/think>|$)/gi, "")  // strip model reasoning — never send back
+    .replace(/<execute_command>[\s\S]*?(<\/execute_command>|$)/gi, "")
+    .replace(/<call_tool\s+name="[^"]+">[\s\S]*?(<\/call_tool>|$)/gi, "")
+    .replace(/<request_files>[\s\S]*?(<\/request_files>|$)/gi, "")
     .trim();
 }
+
+/**
+ * Strips ONLY the model reasoning blocks (<think>) from a response string,
+ * preserving all action/XML tags so the agent/planning modes maintain their full context.
+ */
+export function stripThinkingBlock(text: string): string {
+  return text.replace(/<think>[\s\S]*?(<\/think>|$)/gi, "").trim();
+}
+
