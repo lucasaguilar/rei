@@ -1,5 +1,11 @@
 import type { ChatMessage } from "../chat/types.js";
-import type { ModelProvider, CompletionOptions } from "./model-provider.js";
+import type {
+  ModelProvider,
+  CompletionOptions,
+  ToolDefinition,
+  ChatCompletionWithTools,
+} from "./model-provider.js";
+import { openaiCompleteChatWithTools } from "./openai-tool-caller.js";
 
 interface OllamaChatResponse {
   message?: {
@@ -9,6 +15,7 @@ interface OllamaChatResponse {
   };
   error?: string;
   done?: boolean;
+  done_reason?: string; // "stop" | "length" | "abort"
 }
 
 const OLLAMA_FETCH_MAX_RETRIES = 1;
@@ -91,6 +98,7 @@ export class OllamaProvider implements ModelProvider {
       );
     }
 
+    options?.onFinish?.(data.done_reason ?? "stop");
     return content;
   }
 
@@ -135,6 +143,9 @@ export class OllamaProvider implements ModelProvider {
           }
           const content = data.message?.content || "";
           const thinking = data.message?.thinking || "";
+          if (data.done) {
+            options?.onFinish?.(data.done_reason ?? "stop");
+          }
           if (thinking) {
             if (!inThinking) {
               yield "<think>";
@@ -160,6 +171,9 @@ export class OllamaProvider implements ModelProvider {
       if (data.error) {
         throw new Error(`Ollama error: ${data.error}`);
       }
+      if (data.done) {
+        options?.onFinish?.(data.done_reason ?? "stop");
+      }
       const content = data.message?.content || "";
       const thinking = data.message?.thinking || "";
       if (thinking) {
@@ -180,6 +194,22 @@ export class OllamaProvider implements ModelProvider {
     if (inThinking) {
       yield "</think>";
     }
+  }
+
+  async completeChatWithTools(
+    messages: ChatMessage[],
+    tools: ToolDefinition[],
+    options?: CompletionOptions,
+  ): Promise<ChatCompletionWithTools> {
+    return openaiCompleteChatWithTools({
+      baseUrl: this.baseUrl,
+      headers: {},
+      model: options?.model ?? this.model,
+      messages,
+      tools,
+      timeoutMs: this.requestTimeoutMs,
+      options,
+    });
   }
 
   private async fetchChat(params: {

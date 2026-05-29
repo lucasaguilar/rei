@@ -13,11 +13,12 @@ export async function streamTurnWithInterception(params: {
   messages: ChatMessage[];
   model?: string;
   onChunk?: (event: { type: "thinking" | "text" | "status"; content: string }) => void;
+  onFinish?: (reason: string) => void;
 }): Promise<string> {
-  const { provider, messages, model, onChunk } = params;
+  const { provider, messages, model, onChunk, onFinish } = params;
 
   if (!provider.streamChat) {
-    const fullResponse = await provider.completeChat(messages, { model });
+    const fullResponse = await provider.completeChat(messages, { model, onFinish });
     // Fallback: strip think wrapper (keep content) and action blocks, emit as text
     const prose = fullResponse
       .replace(/<think>([\s\S]*?)(<\/think>|$)/gi, "$1")
@@ -42,7 +43,7 @@ export async function streamTurnWithInterception(params: {
     if (content) onChunk?.({ type: insideThink ? "thinking" : "text", content });
   };
 
-  const stream = provider.streamChat(messages, { model });
+  const stream = provider.streamChat(messages, { model, onFinish });
   for await (const token of stream) {
     accumulated += token;
 

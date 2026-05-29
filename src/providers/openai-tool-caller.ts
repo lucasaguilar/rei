@@ -1,0 +1,119 @@
+import type { ChatMessage } from "../chat/types.js";
+import type {
+  ToolDefinition,
+  ToolCall,
+  ChatCompletionWithTools,
+  CompletionOptions,
+} from "./model-provider.js";
+
+interface OpenAIToolCallResponse {
+  choices?: Array<{
+    message?: {
+      content?: string | null;
+      tool_calls?: Array<{
+        id?: string;
+        type?: string;
+        function?: { name?: string; arguments?: string };
+      }>;
+    };
+    finish_reason?: string;
+  }>;
+  error?: { message?: string };
+}
+
+/**
+ * Converts a ChatMessage to the OpenAI API wire format.
+ * Handles the tool and assistant-with-tool_calls special cases.
+ */
+function toApiMessage(msg: ChatMessage): Record<string, unknown> {
+  if (msg.role === "tool") {
+    return {
+      role: "tool",
+      content: msg.content,
+      tool_call_id: msg.tool_call_id ?? "",
+      ...(msg.name ? { name: msg.name } : {}),
+    };
+  }
+  if (msg.role === "assistant" && msg.tool_calls?.length) {
+    return {
+      role: "assistant",
+      content: msg.content || null,
+      tool_calls: msg.tool_calls,
+    };
+  }
+  return { role: msg.role, content: msg.content };
+}
+
+/**
+ * Shared completeChatWithTools implementation for OpenAI-compatible APIs.
+ * Used by Ollama, OpenRouter, LLM Studio, and Groq providers.
+ */
+export async function openaiCompleteChatWithTools(params: {
+  baseUrl: string;
+  headers: Record<string, string>;
+  model: string;
+  messages: ChatMessage[];
+  tools: ToolDefinition[];
+  timeoutMs: number;
+  options?: CompletionOptions;
+}): Promise<ChatCompletionWithTools> {
+  const { baseUrl, headers, model, messages, tools, timeoutMs, options } = params;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify({
+      model: options?.model ?? model,
+      messages: messages.map(toApiMessage),
+      tools,
+      tool_choice: "auto",
+      temperature: 0,
+      stream: false,
+    }),
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timeout));
+
+  if (!response.ok) {
+    const details = await response.text().catch(() => "");
+    throw new Error(
+      `Tool calling request failed (${response.status} ${response.statusText})${details ? `: ${details.trim()}` : ""}`,
+    );
+  }
+
+  const data = (await response.json()) as OpenAIToolCallResponse;
+  if (data.error) {
+    throw new Error(`Tool calling error: ${data.error.message ?? JSON.stringify(data.error)}`);
+  }
+
+  const choice = data.choices?.[0];
+  const msg = choice?.message;
+
+  const content =
+    typeof msg?.content === "string" ? msg.content :
+    Array.isArray(msg?.content)
+      ? (msg.content as Array<{ type?: string; text?: string }>)
+          .filter((p) => p.type === "text")
+          .map((p) => p.text ?? "")
+          .join("")
+      : "";
+
+  const toolCalls: ToolCall[] = (msg?.tool_calls ?? [])
+    .filter((tc) => tc.id && tc.function?.name)
+    .map((tc) => ({
+      id: tc.id!,
+      type: "function" as const,
+      function: {
+        name: tc.function!.name!,
+        arguments: tc.function!.arguments ?? "{}",
+      },
+    }));
+
+  return {
+    content,
+    toolCalls,
+    finishReason: choice?.finish_reason ?? (toolCalls.length > 0 ? "tool_calls" : "stop"),
+  };
+}

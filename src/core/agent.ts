@@ -7,6 +7,7 @@ import {
   executeAgentTurn,
   executeAgentTurnWholefile,
 } from "../agent-mode/generator.js";
+import { executeAgentTurnWithTools } from "../agent-mode/generator-tools.js";
 import {
   buildSystemMessage,
   getAgentEditFormat,
@@ -55,6 +56,9 @@ import {
   ensureRepoMapIndexed,
   initWatcher,
 } from "./helpers/repo-map-indexer.js";
+import { stripAllActionTags } from "../agent-mode/helpers/patch-helpers.js";
+import { calculateContextBudget } from "../context/context-budget.js";
+import { estimateTokens } from "../chat/helpers/token-estimator.js";
 
 export class Agent {
   private scanCache?: {
@@ -172,24 +176,32 @@ export class Agent {
       };
 
       const turnPromise = (
-        editFormat === "wholefile"
-          ? executeAgentTurnWholefile({
+        agentProvider.completeChatWithTools
+          ? executeAgentTurnWithTools({
               provider: agentProvider,
               messagesForModel,
               workspacePath: this.workspacePath,
               logger: this.logger,
               modelOverride: resolveModelForMode("agent"),
-              onChunk,
             })
-          : executeAgentTurn({
-              provider: agentProvider,
-              messagesForModel,
-              workspacePath: this.workspacePath,
-              scannedFiles: this.getWorkspaceFiles(),
-              logger: this.logger,
-              modelOverride: resolveModelForMode("agent"),
-              onChunk,
-            })
+          : editFormat === "wholefile"
+            ? executeAgentTurnWholefile({
+                provider: agentProvider,
+                messagesForModel,
+                workspacePath: this.workspacePath,
+                logger: this.logger,
+                modelOverride: resolveModelForMode("agent"),
+                onChunk,
+              })
+            : executeAgentTurn({
+                provider: agentProvider,
+                messagesForModel,
+                workspacePath: this.workspacePath,
+                scannedFiles: this.getWorkspaceFiles(),
+                logger: this.logger,
+                modelOverride: resolveModelForMode("agent"),
+                onChunk,
+              })
       ).finally(() => {
         done = true;
         resolver?.();
@@ -218,10 +230,13 @@ export class Agent {
           this.workspacePath,
         );
         const msg = formatBatchPatchResult(result);
-        const fullResponse = outcome.response + msg;
         session.messages.push({ role: "assistant", content: stripThinkingBlock(outcome.response) });
         options?.onStatus?.("producing_response");
-        yield fullResponse;
+        // Yield clean explanation as rendered text, then patch result as live status.
+        // msg starts with \n\n---\n — strip leading whitespace so spacing is controlled by the CLI.
+        const explanation = stripAllActionTags(stripThinkingBlock(outcome.response));
+        if (explanation) yield `\x11${explanation}`;
+        yield msg.trimStart();
 
         if (result.success) {
           const stageNum = extractStageNumberFromPrompt(userInput);
@@ -242,21 +257,22 @@ export class Agent {
       );
 
       if (feedback) {
-        // Mostrar feedback al usuario final, no solo al modelo
-        const userVisibleResponse = outcome.response + feedback;
+        const cleanExplanation = stripAllActionTags(stripThinkingBlock(outcome.response));
         session.messages.push({
           role: "assistant",
-          content: stripThinkingBlock(userVisibleResponse),
+          content: stripThinkingBlock(outcome.response + feedback),
         });
         options?.onStatus?.("producing_response");
-        yield userVisibleResponse;
+        if (cleanExplanation) yield `\x11${cleanExplanation}`;
+        yield feedback.trimStart();
         return;
       }
 
       // Si no hay parches ni comandos, solo responde
       session.messages.push({ role: "assistant", content: stripThinkingBlock(outcome.response) });
       options?.onStatus?.("producing_response");
-      yield outcome.response;
+      // Plain text response — yield as text for markdown rendering
+      yield `\x11${stripThinkingBlock(outcome.response)}`;
 
       if (editFormat === "wholefile" && !outcome.failed) {
         const stageNum = extractStageNumberFromPrompt(userInput);
@@ -272,6 +288,7 @@ export class Agent {
       let currentMessages = [...messagesForModel];
       let hasMoreCommands = true;
       let depth = 0;
+      let truncationCount = 0;
       const maxDepth = process.env.REI_MAX_TURNS
         ? parseInt(process.env.REI_MAX_TURNS, 10)
         : 7;
@@ -282,6 +299,7 @@ export class Agent {
         const chunksQueue: string[] = [];
         let resolver: (() => void) | null = null;
         let done = false;
+        let finishReason = "stop";
 
         const onChunk = (chunk: { type: "thinking" | "text" | "status"; content: string }) => {
           const encoded = chunk.type === "thinking" ? `\x10${chunk.content}`
@@ -296,6 +314,7 @@ export class Agent {
           messages: currentMessages,
           model: resolveModelForMode(session.mode),
           onChunk,
+          onFinish: (r) => { finishReason = r; },
         }).finally(() => {
           done = true;
           resolver?.();
@@ -312,7 +331,49 @@ export class Agent {
           }
         }
 
-        const streamResponse = await turnPromise;
+        let streamResponse = await turnPromise;
+
+        // Auto-continue if truncated
+        while (finishReason === "length" && truncationCount < 3) {
+          truncationCount++;
+          this.logger.logInfo(`[truncation] ask/planning response cut off (${truncationCount}/3), continuing...`);
+          const contMessages = [
+            ...currentMessages,
+            { role: "assistant" as const, content: stripThinkingBlock(streamResponse) },
+            { role: "user" as const, content: "Your previous response was cut off by the output token limit. Continue EXACTLY from where you left off — do NOT repeat, summarize, or restart." },
+          ];
+          const contChunksQueue: string[] = [];
+          let contResolver: (() => void) | null = null;
+          let contDone = false;
+          finishReason = "stop";
+
+          const contOnChunk = (chunk: { type: "thinking" | "text" | "status"; content: string }) => {
+            const encoded = chunk.type === "thinking" ? `\x10${chunk.content}`
+              : chunk.type === "text" ? `\x11${chunk.content}`
+              : chunk.content;
+            contChunksQueue.push(encoded);
+            contResolver?.();
+          };
+
+          const contPromise = streamTurnWithInterception({
+            provider: this.provider,
+            messages: contMessages,
+            model: resolveModelForMode(session.mode),
+            onChunk: contOnChunk,
+            onFinish: (r) => { finishReason = r; },
+          }).finally(() => { contDone = true; contResolver?.(); });
+
+          while (!contDone || contChunksQueue.length > 0) {
+            if (contChunksQueue.length > 0) {
+              yield contChunksQueue.shift()!;
+            } else {
+              await new Promise<void>((resolve) => { contResolver = resolve; });
+            }
+          }
+
+          const contResponse = await contPromise;
+          streamResponse = streamResponse + contResponse;
+        }
 
         const commands = extractCommandRequests(streamResponse);
         const toolCalls = extractToolCalls(streamResponse);
@@ -406,6 +467,12 @@ export class Agent {
     return this.generateAgentAssistantResponse(messagesForModel);
   }
 
+  /** Whether the active agent provider supports structured tool calling. */
+  private get useToolCalling(): boolean {
+    const agentProvider = createProviderForMode("agent", this.provider);
+    return typeof agentProvider.completeChatWithTools === "function";
+  }
+
   private async updateSystemContextWithRepoMap(
     session: ChatSession,
     userInput?: string,
@@ -442,6 +509,7 @@ export class Agent {
     const baseSystemContent = buildSystemMessage(
       session.mode,
       this.workspacePath,
+      session.mode === "agent" ? this.useToolCalling : false,
     );
     let systemContent = baseSystemContent;
     const todoContent = readPlanTodoFile(this.workspacePath);
@@ -474,6 +542,26 @@ export class Agent {
       prompt: userInput,
     });
 
+    // Calculate token budget so context-builder can trim if the window is tight.
+    // REI_CONTEXT_WINDOW / OLLAMA_NUM_CTX = total context window size (0 = unknown → no trimming).
+    const numCtx = parseInt(
+      process.env.REI_CONTEXT_WINDOW ?? process.env.OLLAMA_NUM_CTX ?? "0",
+      10,
+    );
+    const responseReserve = parseInt(
+      process.env.OLLAMA_NUM_PREDICT ?? process.env.REI_RESPONSE_RESERVE ?? "16384",
+      10,
+    );
+    const systemMessage = session.messages.find((m) => m.role === "system");
+    const historyMessages = session.messages.filter((m) => m.role !== "system");
+    const tokenBudget = calculateContextBudget({
+      numCtx,
+      systemPrompt: systemMessage?.content ?? "",
+      history: historyMessages,
+      userInput,
+      responseReserve,
+    });
+
     const context = await buildTurnContext({
       workspacePath: this.workspacePath,
       scannedFiles: this.getWorkspaceFiles(),
@@ -481,7 +569,16 @@ export class Agent {
       mode: session.mode,
       knowledgeOrchestrator: this.knowledgeOrchestrator,
       onStatus,
+      tokenBudget,
     });
+
+    if (context.budgetTrimmed) {
+      this.logger.logInfo("[context-budget] Context trimmed to fit token window", {
+        numCtx,
+        responseReserve,
+        tokenBudget,
+      });
+    }
 
     if (context.ragResults && context.ragResults.length > 0) {
       this.logger.logContextSearch(
@@ -639,8 +736,26 @@ export class Agent {
   private async generateAgentAssistantResponse(
     messagesForModel: ChatSession["messages"],
   ): Promise<string> {
-    const editFormat = getAgentEditFormat();
     const agentProvider = createProviderForMode("agent", this.provider);
+
+    // Use structured tool calling when the provider supports it
+    if (agentProvider.completeChatWithTools) {
+      const outcome = await executeAgentTurnWithTools({
+        provider: agentProvider,
+        messagesForModel,
+        workspacePath: this.workspacePath,
+        logger: this.logger,
+        modelOverride: resolveModelForMode("agent"),
+      });
+      if (outcome.validProposedPatches?.length) {
+        const result = await applySREditBatchFS(outcome.validProposedPatches, this.workspacePath);
+        const msg = formatBatchPatchResult(result);
+        return outcome.response + msg;
+      }
+      return outcome.response;
+    }
+
+    const editFormat = getAgentEditFormat();
     const outcome =
       editFormat === "wholefile"
         ? await executeAgentTurnWholefile({
@@ -669,7 +784,8 @@ export class Agent {
         this.workspacePath,
       );
       const msg = formatBatchPatchResult(result);
-      return outcome.response + msg;
+      const explanation = stripAllActionTags(stripThinkingBlock(outcome.response));
+      return (explanation ? explanation + "\n\n" : "") + msg;
     }
     const feedback = await executeAgentToolsAndCommands(
       outcome.response,
@@ -677,7 +793,8 @@ export class Agent {
       this.provider,
       this.logger,
     );
-    return outcome.response + feedback;
+    const explanation = stripAllActionTags(stripThinkingBlock(outcome.response));
+    return explanation + (feedback ? "\n\n" + feedback : "");
   }
 
   private initWatcher(): void {

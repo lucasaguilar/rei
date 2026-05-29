@@ -1,12 +1,18 @@
 import type { ChatMessage } from "../chat/types.js";
-import type { ModelProvider, CompletionOptions } from "./model-provider.js";
+import type {
+  ModelProvider,
+  CompletionOptions,
+  ToolDefinition,
+  ChatCompletionWithTools,
+} from "./model-provider.js";
+import { openaiCompleteChatWithTools } from "./openai-tool-caller.js";
 
 interface LlmStudioChatChoice {
   message?: {
     role?: string;
     content?: string | null;
   };
-  finish_reason?: string;
+  finish_reason?: string; // "stop" | "length" | ...
 }
 
 interface LlmStudioChatResponse {
@@ -24,7 +30,7 @@ interface LlmStudioStreamChunk {
       content?: string;
       reasoning_content?: string;
     };
-    finish_reason?: string | null;
+    finish_reason?: string | null; // "stop" | "length" | null (null during stream)
   }>;
   error?: {
     message?: string;
@@ -80,13 +86,15 @@ export class LlmStudioProvider implements ModelProvider {
       );
     }
 
-    const content = data.choices?.[0]?.message?.content;
+    const choice = data.choices?.[0];
+    const content = choice?.message?.content;
     if (typeof content !== "string") {
       throw new Error(
         `LLM Studio response missing message content (got ${typeof content})`,
       );
     }
 
+    options?.onFinish?.(choice?.finish_reason ?? "stop");
     return content;
   }
 
@@ -138,7 +146,12 @@ export class LlmStudioProvider implements ModelProvider {
                 `LLM Studio stream error: ${data.error.message ?? JSON.stringify(data.error)}`,
               );
             }
-            const delta = data.choices?.[0]?.delta;
+            const choice = data.choices?.[0];
+            const delta = choice?.delta;
+            const finishReason = choice?.finish_reason;
+            if (finishReason) {
+              options?.onFinish?.(finishReason);
+            }
             const content = delta?.content || "";
             const reasoning = delta?.reasoning_content || "";
             if (reasoning) {
@@ -175,7 +188,12 @@ export class LlmStudioProvider implements ModelProvider {
               `LLM Studio stream error: ${data.error.message ?? JSON.stringify(data.error)}`,
             );
           }
-          const delta = data.choices?.[0]?.delta;
+          const choice = data.choices?.[0];
+          const delta = choice?.delta;
+          const finishReason = choice?.finish_reason;
+          if (finishReason) {
+            options?.onFinish?.(finishReason);
+          }
           const content = delta?.content || "";
           const reasoning = delta?.reasoning_content || "";
           if (reasoning) {
@@ -202,6 +220,22 @@ export class LlmStudioProvider implements ModelProvider {
     if (inThinking) {
       yield "</think>";
     }
+  }
+
+  async completeChatWithTools(
+    messages: ChatMessage[],
+    tools: ToolDefinition[],
+    options?: CompletionOptions,
+  ): Promise<ChatCompletionWithTools> {
+    return openaiCompleteChatWithTools({
+      baseUrl: this.baseUrl,
+      headers: { Authorization: `Bearer ${this.apiKey}` },
+      model: this.model,
+      messages,
+      tools,
+      timeoutMs: this.requestTimeoutMs,
+      options,
+    });
   }
 
   private fetchChat(params: {
