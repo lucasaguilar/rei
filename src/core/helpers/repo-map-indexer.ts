@@ -12,6 +12,7 @@ import {
   chunkRepoMapString,
 } from "../../context/rag/map-chunker.js";
 import { scanWorkspace } from "../../workspace/workspace-scanner.js";
+import { getWatcherGlobs } from "../../language/language-capabilities.js";
 import type { AgentLogger } from "../logger.js";
 
 /**
@@ -91,26 +92,7 @@ export function initWatcher(params: {
 
   logger.logInfo("Initializing file watcher for incremental AST updates");
   const watcher = chokidar.watch(
-    [
-      "**/*.ts",
-      "**/*.js",
-      "**/*.tsx",
-      "**/*.jsx",
-      "**/*.html",
-      "**/*.css",
-      "**/*.scss",
-      "**/*.py",
-      "**/*.php",
-      "**/*.c",
-      "**/*.h",
-      "**/*.cpp",
-      "**/*.hpp",
-      "**/*.cc",
-      "**/*.cxx",
-      "**/*.cs",
-      "**/*.rs",
-      "**/*.go",
-    ],
+    getWatcherGlobs(),
     {
       cwd: workspacePath,
       ignored: [

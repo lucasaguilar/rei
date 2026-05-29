@@ -23,12 +23,13 @@ const LANGUAGE_CAPABILITIES: readonly LanguageCapability[] = [
   {
     id: "javascript",
     extensions: [".mjs", ".cjs"],
-    preferredSourceFile: true,
+    preferredSourceFile: false,  // transpiled/config variants — not primary source files
     supportsAstIndexing: false,
     supportsCallerDiscovery: false,
     supportsAstDependencyExtraction: false,
     supportsSemanticValidation: false,
   },
+
   {
     id: "csharp",
     extensions: [".cs"],
@@ -185,5 +186,47 @@ export function buildFileMatcherRegex(): RegExp {
   const extensions = getAllSupportedExtensions();
   const escapedExtensions = extensions.map(ext => ext.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
   return new RegExp(`([\\w\\-/]+\\.(?:${escapedExtensions}))`, "gi");
+}
+
+/**
+ * Returns file extensions (with leading dot) suitable for repo map / RAG indexing:
+ * preferred source files (TS, JS, PHP, Python, etc.) plus web markup and styles.
+ * Single source of truth consumed by file-globber.ts, repo-map-generator.ts, and
+ * the chokidar watcher in repo-map-indexer.ts.
+ */
+export function getSourceFileExtensions(): string[] {
+  const sourceExts: string[] = [];
+  for (const capability of LANGUAGE_CAPABILITIES) {
+    if (capability.preferredSourceFile) {
+      for (const ext of capability.extensions) {
+        sourceExts.push(ext);
+      }
+    }
+  }
+  // Web markup and styles (not in LANGUAGE_CAPABILITIES but always indexed)
+  const webExts = [".html", ".css", ".scss"];
+  for (const ext of webExts) {
+    if (!sourceExts.includes(ext)) sourceExts.push(ext);
+  }
+  return sourceExts;
+}
+
+/**
+ * Returns chokidar-compatible glob patterns for all source file extensions.
+ * Used by the FS watcher in repo-map-indexer.ts.
+ */
+export function getWatcherGlobs(): string[] {
+  return getSourceFileExtensions().map(ext => `**/*${ext}`);
+}
+
+/**
+ * Returns file extensions (with leading dot) for polyglot languages — i.e.,
+ * source files that are NOT TypeScript / JavaScript and are processed by Tree-sitter.
+ * Used by repo-map-generator.ts to separate the polyglot pipeline from ts-morph.
+ */
+export function getPolyglotExtensions(): string[] {
+  return LANGUAGE_CAPABILITIES
+    .filter(cap => cap.preferredSourceFile && cap.supportsAstIndexing && cap.id !== "typescript" && cap.id !== "javascript")
+    .flatMap(cap => cap.extensions);
 }
 

@@ -1,30 +1,38 @@
 #!/bin/bash
-# Instalador para REI Server (API)
+# Global installer for REI Server (API mode)
 set -e
+
 INSTALL_DIR="$HOME/.rei"
+BIN_DIR="$HOME/.local/bin"
+
 mkdir -p "$INSTALL_DIR"
-echo "📁 Instalando REI Server en $INSTALL_DIR"
-# Clonar el repo oficial de REI
+mkdir -p "$BIN_DIR"
+
+echo "📁 Installing REI Server into $INSTALL_DIR with symlink in $BIN_DIR"
+
+# Clone the official REI repository
 if [ ! -d "$INSTALL_DIR/.git" ]; then
-	git clone https://github.com/lucasaguilar/rei.git "$INSTALL_DIR"
+  git clone https://github.com/lucasaguilar/rei.git "$INSTALL_DIR"
 else
-	echo "Repositorio ya clonado en $INSTALL_DIR, actualizando..."
-	cd "$INSTALL_DIR"
-	git pull
+  echo "Repository already cloned at $INSTALL_DIR, updating..."
+  cd "$INSTALL_DIR"
+  git pull
 fi
+
 cd "$INSTALL_DIR"
 npm install
 npm run build
-# Crear .env global de ejemplo si no existe
+
+# Create global .env example only if missing
 if [ ! -f "$INSTALL_DIR/.env" ]; then
-	cat > "$INSTALL_DIR/.env" << EENV
-# API Keys (completa según tu proveedor)
+  cat > "$INSTALL_DIR/.env" << EENV
+# API Keys (fill based on your provider)
 OPENROUTER_API_KEY=
 GEMINI_API_KEY=
 GROQ_API_KEY=
 HF_TOKEN=
 
-# Configuración de REI
+# REI configuration
 REI_WORKSPACE_PATH=
 MODEL_PROVIDER=openrouter
 OPENROUTER_MODEL=qwen/qwen3-coder-30b-a3b-instruct
@@ -32,19 +40,22 @@ ALLOWED_WORKSPACES=
 EENV
 fi
 
-# Crear script ejecutable rei-server en $INSTALL_DIR
-cat > "$INSTALL_DIR/rei-server" << 'EOF'
+# Create global 'rei-server' launcher script in ~/.local/bin
+cat > "$BIN_DIR/rei-server" << 'EOF'
 #!/bin/bash
-# Cargar .env local o global
+# Load local .env first, fallback to global ~/.rei/.env
 if [ -f .env ]; then
-	export $(grep -v '^#' .env | xargs)
+  export $(grep -v '^#' .env | xargs)
 elif [ -f "$HOME/.rei/.env" ]; then
-	export $(grep -v '^#' "$HOME/.rei/.env" | xargs)
+  export $(grep -v '^#' "$HOME/.rei/.env" | xargs)
 fi
-# Forzar TMPDIR local para evitar problemas de permisos
+
+# Force local TMPDIR to avoid permission issues
 export TMPDIR="$HOME/.tmp"
 mkdir -p "$TMPDIR"
+
 REI_WORKSPACE_PATH="${REI_WORKSPACE_PATH:-"$(pwd)"}" node "$HOME/.rei/dist/server.js" "$@"
 EOF
-chmod +x "$INSTALL_DIR/rei-server"
-echo "✅ REI Server instalado. Ejecuta: $INSTALL_DIR/rei-server"
+
+chmod +x "$BIN_DIR/rei-server"
+echo "✅ REI Server installed. Run 'rei-server' in any folder."

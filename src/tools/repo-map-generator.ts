@@ -12,7 +12,7 @@ import { listRelevantFiles } from "./file-globber.js";
 import { AstProviderFactory } from "../context/ast-providers/ast-provider-factory.js";
 import type { SourceFileLike, AstChunk } from "../context/ast-providers/ast-provider.js";
 import { HeuristicAstProvider } from "../context/ast-providers/heuristic-ast-provider.js";
-import { getLanguageCapabilityForExtension } from "../language/language-capabilities.js";
+import { getLanguageCapabilityForExtension, getPolyglotExtensions } from "../language/language-capabilities.js";
 
 // Detect entry points from package.json
 function getEntryPointFiles(workspacePath: string): Set<string> {
@@ -58,9 +58,8 @@ export async function generateRepoMap(workspacePath: string): Promise<string> {
   const testFiles = files.filter((f) =>
     /\.(spec|test)\.(ts|js|tsx|jsx)$/.test(f),
   );
-  const polyglotFiles = files.filter((f) =>
-    /\.(py|c|h|cpp|hpp|cc|cxx|cs|rs|go|php)$/.test(f),
-  );
+  const polyglotExts = new Set(getPolyglotExtensions());
+  const polyglotFiles = files.filter((f) => polyglotExts.has(path.extname(f).toLowerCase()));
 
   // Procesar archivos TS/JS con ts-morph
   const project = new Project({

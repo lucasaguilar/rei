@@ -62,7 +62,7 @@ load_env_file() {
   done < "$env_file"
 }
 
-# Ver si se pasó el flag --config o --help
+# Check if --config or --help flags were passed
 want_config=0
 want_help=0
 for arg in "$@"; do
@@ -96,7 +96,7 @@ if [ "$want_help" -eq 1 ]; then
   exit 0
 fi
 
-# Ver si existen archivos .env
+# Check if .env files exist
 env_exists=0
 if [ -f .env ]; then
   env_exists=1

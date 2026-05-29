@@ -1,7 +1,7 @@
 
 import * as path from "path";
 import * as fs from "fs";
-import { supportsAstDependencyExtractionPath } from "../language/language-capabilities.js";
+import { supportsAstDependencyExtractionPath, getLanguageCapabilityForExtension } from "../language/language-capabilities.js";
 import { AstProviderFactory } from "./ast-providers/ast-provider-factory.js";
 import { SourceFileLike, AstChunk, DependencyHint } from "./ast-providers/ast-provider.js";
 import { HeuristicAstProvider } from "./ast-providers/heuristic-ast-provider.js";
@@ -14,20 +14,10 @@ export interface AstContextResult {
 
 /**
  * Maps a file extension to the languageId understood by AstProviderFactory.
+ * Delegates to language-capabilities.ts — single source of truth.
  */
 function languageIdFromExtension(ext: string): string {
-  switch (ext.toLowerCase()) {
-    case ".ts": case ".tsx": return "typescript";
-    case ".js": case ".jsx": case ".mjs": case ".cjs": return "javascript";
-    case ".cs": return "csharp";
-    case ".c": case ".h": return "c";
-    case ".cpp": case ".hpp": case ".cc": case ".cxx": return "cpp";
-    case ".py": return "python";
-    case ".rs": return "rust";
-    case ".go": return "go";
-    case ".php": return "php";
-    default: return ext.replace(".", "");
-  }
+  return getLanguageCapabilityForExtension(ext).id;
 }
 
 export async function extractAstDependencies(
