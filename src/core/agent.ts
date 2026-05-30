@@ -328,6 +328,7 @@ export class Agent {
           provider: this.provider,
           messages: currentMessages,
           model: resolveModelForMode(session.mode),
+          mode: session.mode,
           onChunk,
           onFinish: (r) => { finishReason = r; },
         }).finally(() => {
@@ -374,6 +375,7 @@ export class Agent {
             provider: this.provider,
             messages: contMessages,
             model: resolveModelForMode(session.mode),
+            mode: session.mode,
             onChunk: contOnChunk,
             onFinish: (r) => { finishReason = r; },
           }).finally(() => { contDone = true; contResolver?.(); });
