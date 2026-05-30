@@ -101,8 +101,8 @@ export async function handleInputTurn(
   const estimatedTokens = estimateMessagesTokens(session.messages);
   if (estimatedTokens > 20000) {
     actions.pushTranscript(
-      `\x1b[33m⚠️  [REI] Advertencia: La sesión acumulada supera los 20,000 tokens (aprox. ${estimatedTokens} tokens). ` +
-      `Si notas lentitud o errores de contexto, considera usar /session new.\x1b[0m`
+      `\x1b[33m⚠️  [REI] Warning: The accumulated session exceeds 20,000 tokens (approximately ${estimatedTokens} tokens). ` +
+      `If you notice slowdowns or context-related errors, consider using /session new.\x1b[0m`
     );
     actions.pushTranscript("");
   }
