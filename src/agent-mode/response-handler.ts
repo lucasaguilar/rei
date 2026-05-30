@@ -138,10 +138,19 @@ function normalizeCommandContent(raw: string): string {
 
   content = content.trim();
 
-  // Strip leading and trailing single backticks (e.g. `some command`)
-  if (content.startsWith("`") && content.endsWith("`")) {
-    content = content.slice(1, -1).trim();
+  // Strip leading and trailing single backticks (e.g. `some command`, `git status, git status`)
+  // Be aggressive: stripea backticks del inicio Y final, aunque no haya en ambos lados.
+  // Esto previene el error "Security Error: Command '`' is not in the allow-list"
+  // que ocurre cuando el modelo emite `git status (backtick solo al inicio).
+  while (content.startsWith("`") || content.endsWith("`")) {
+    if (content.startsWith("`")) {
+      content = content.slice(1);
+    }
+    if (content.endsWith("`")) {
+      content = content.slice(0, -1);
+    }
   }
+  content = content.trim();
 
   return content;
 }
@@ -160,22 +169,28 @@ export function extractCommandRequests(response: string): string[] {
  * Extrae llamadas a herramientas con el patrón XML <call_tool name="name">args</call_tool>
  * Ejemplo: <call_tool name="weather">London</call_tool> o <call_tool name="weather">{"location": "London"}</call_tool>
  */
-export function extractToolCalls(response: string): Array<{ name: string; args: Record<string, unknown> }> {
-  const matches = [...response.matchAll(/<call_tool\s+name="([^"]+)">([\s\S]*?)<\/call_tool>/gi)];
-  
+export function extractToolCalls(
+  response: string,
+): Array<{ name: string; args: Record<string, unknown> }> {
+  const matches = [
+    ...response.matchAll(
+      /<call_tool\s+name="([^"]+)">([\s\S]*?)<\/call_tool>/gi,
+    ),
+  ];
+
   return matches.map((match) => {
     const name = match[1].trim();
     const argsStr = match[2].trim();
     let args: Record<string, unknown> = {};
 
     try {
-      if (argsStr.startsWith('{')) {
+      if (argsStr.startsWith("{")) {
         args = JSON.parse(argsStr) as Record<string, unknown>;
       } else {
-        const cleanArg = argsStr.replace(/^["']|["']$/g, '');
-        if (name === 'weather') {
+        const cleanArg = argsStr.replace(/^["']|["']$/g, "");
+        if (name === "weather") {
           args = { location: cleanArg };
-        } else if (name === 'search') {
+        } else if (name === "search") {
           args = { query: cleanArg };
         } else {
           args = { input: cleanArg };
