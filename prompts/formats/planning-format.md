@@ -17,3 +17,11 @@ When generating the plan, you MUST structure every stage as an H3 level markdown
 Under each stage header, include the detailed checklist of actions to be executed.
 Do NOT use plain bold text or bullet items for stage headers. Always use H3 level headers starting with `#` to ensure proper parsing.
 
+### CRITICAL: File path requirements under each stage
+Under each stage header, you MUST explicitly list the file paths that need to be modified or created for that stage. Use a line like:
+
+```
+Files to modify: src/some/file.ts, src/other/file.ts
+```
+
+Include the full relative paths with extensions (e.g. `.ts`, `.py`, `.go`, `.cs`). This is required because the `/runplan` command uses these paths to determine which workspace files to load into the agent's context for execution. If you omit file paths under a stage, `/runplan` will be unable to execute that stage.
