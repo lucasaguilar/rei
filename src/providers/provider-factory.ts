@@ -7,6 +7,7 @@ import { OllamaProvider } from "./ollama-provider.js";
 import { GroqProvider } from "./groq-provider.js";
 import { OpenRouterProvider } from "./openrouter-provider.js";
 import { HuggingFaceProvider } from "./huggingface-provider.js";
+import { withDegenerateGuard } from "./degenerate-guard.js";
 
 export type ProviderName =
   | "mock"
@@ -23,27 +24,37 @@ export function createModelProvider(providerNameArg?: string): ModelProvider {
     process.env.MODEL_PROVIDER ??
     "mock"
   ).toLowerCase();
+  let provider: ModelProvider;
 
   switch (providerName) {
     case "mock":
-      return new MockProvider();
+      provider = new MockProvider();
+      break;
     case "ollama":
-      return new OllamaProvider();
+      provider = new OllamaProvider();
+      break;
     case "groq":
-      return new GroqProvider();
+      provider = new GroqProvider();
+      break;
     case "gemini":
-      return new GeminiProvider();
+      provider = new GeminiProvider();
+      break;
     case "openrouter":
-      return new OpenRouterProvider();
+      provider = new OpenRouterProvider();
+      break;
     case "huggingface":
-      return new HuggingFaceProvider();
+      provider = new HuggingFaceProvider();
+      break;
     case "llmstudio":
-      return new LlmStudioProvider();
+      provider = new LlmStudioProvider();
+      break;
     default:
       throw new Error(
         `Unknown MODEL_PROVIDER: ${providerNameArg ?? process.env.MODEL_PROVIDER}. Expected one of: mock, ollama, groq, gemini, openrouter, huggingface, llmstudio`,
       );
   }
+
+  return withDegenerateGuard(provider);
 }
 
 /**
