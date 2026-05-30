@@ -38,11 +38,11 @@ describe("token-streamer streamTurnWithInterception", () => {
 
     // Check filtered chunks: should contain only prose and one status chunk
     expect(yieldedChunks).toEqual([
-      { type: "thinking", content: "Here is " },
-      { type: "thinking", content: "the plan.\n" },
+      { type: "text", content: "Here is " },
+      { type: "text", content: "the plan.\n" },
       { type: "status", content: "\n\x1b[33m🛠️  [REI] Proposing Search & Replace edits...\x1b[0m\n" },
-      { type: "thinking", content: "\n" },
-      { type: "thinking", content: "Let me know." },
+      { type: "text", content: "\n" },
+      { type: "text", content: "Let me know." },
     ]);
   });
 
@@ -66,7 +66,7 @@ describe("token-streamer streamTurnWithInterception", () => {
 
     // Fallback splits prose
     expect(yieldedChunks).toEqual([
-      { type: "thinking", content: "I will update it.\n\nDone." },
+      { type: "text", content: "I will update it.\n\nDone." },
     ]);
   });
 });

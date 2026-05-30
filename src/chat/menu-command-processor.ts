@@ -255,7 +255,9 @@ export async function processMenuCommand(
   }
 
   if (trimmed.startsWith("/runplan")) {
-    const runPlanMatch = trimmed.match(/^\/runplan(?:\s+(?:stage|step|fase|etapa|paso)\s+(\d+))?$/i);
+    // Filter optional placeholder: [stage <num>]
+    const normTrimmed = trimmed.replace(/\s+\[stage\s+<num>\]$/i, "");
+    const runPlanMatch = normTrimmed.match(/^\/runplan(?:\s+(?:stage)\s+(\d+))?$/i);
     if (!runPlanMatch) {
       return {
         success: false,
@@ -343,11 +345,29 @@ export async function processMenuCommand(
     );
 
     if (files.length === 0) {
+      // No target files — action-only stage (e.g. "run npm install")
+      const planPrompt = stageNum
+        ? `[RUNPLAN STAGE ${stageNum}] Execute Stage ${stageNum} of the implementation plan.\n\nSUB-PLAN:\n${targetContent}`
+        : `Execute the following plan:\n\nPLAN:\n${planContent}`;
+
+      const responseMsg = stageNum
+        ? `[REI] Switching to AGENT mode to execute stage ${stageNum}. No target files detected (action-only stage).`
+        : `[REI] Switching to AGENT mode to execute the entire plan. No target files detected.`;
+
+      const newMode = "agent" as SessionMode;
+      saveSession(
+        workspacePath,
+        session.messages,
+        newMode,
+        session.summary,
+        session.createdAt,
+      );
+
       return {
-        success: false,
-        response: stageNum
-          ? `[RUNPLAN] No target files detected to modify in stage ${stageNum}.`
-          : "[RUNPLAN] No target files detected to modify in the plan.",
+        success: true,
+        response: responseMsg,
+        newSession: { ...session, mode: newMode },
+        autoExecute: { prompt: planPrompt },
       };
     }
 

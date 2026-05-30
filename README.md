@@ -27,7 +27,7 @@ REI allows you to configure two powerful operational setups depending on your se
 * **100% Local Multi-Brain Setup (Fully Private & Offline):**
   Run completely local on your own hardware using Ollama or LM Studio with zero data leakage. Route lightweight conversational turns (Ask/Planning) to fast models like `llama3.2` or `qwen2.5-coder:7b`, while delegating heavy agentic file edits to larger coding models running locally (such as `qwen2.5-coder:14b` or the outstanding **`qwen/qwen3.6-35b-a3b`**).
 * **Pro Hybrid Multi-Brain & Multi-Provider Setup (Local Speed + Cloud Power):**
-  Combine the speed of local hardware with the surgical capability of state-of-the-art cloud intelligence. Run your everyday chat and architectural planning locally and for free (using local Ollama models), and dynamically route complex XML-based agent edits to premium cloud APIs (such as **`qwen/qwen3.6-plus`** or `anthropic/claude-3.5-sonnet` via OpenRouter).
+  Combine the speed of local hardware with the surgical capability of state-of-the-art cloud intelligence. Run your everyday chat and architectural planning locally and for free (using local Ollama models), and dynamically route complex XML-based agent edits to premium cloud APIs (such as **`qwen/qwen3.6-plus`** or `anthropic/claude-3.5-sonnet` via [OpenRouter](https://openrouter.ai/)).
 * **Hot-Swapping:** Use dynamic chat commands (e.g. `/provider agent openrouter` and `/model agent qwen/qwen3.6-plus`) to adjust routing in real-time without restarting the session.
 
 ### 2. 🌲 Surgical AST Intelligence (`ts-morph` & `web-tree-sitter`)
@@ -65,6 +65,9 @@ To install the interactive CLI globally and configure a dedicated symlink launch
 # Install the CLI globally
 curl -fsSL https://raw.githubusercontent.com/lucasaguilar/rei/main/install-rei-cli.sh | bash
 ```
+
+> [!NOTE]
+> Make sure `$HOME/.bashrc` contains: `export PATH="$HOME/.local/bin:$PATH"`
 
 To install the backend server API for VS Code Continue.dev plugin integration, creating a launcher at `~/.rei/rei-server`:
 
@@ -112,7 +115,6 @@ rei --config
 
 > [!TIP]
 > **First-Run Autoconfig:** If you run `rei` and no configuration (`.env` file) is found, REI will automatically start the **Interactive Configuration Wizard** (`launch-rei.js`). The wizard guides you step-by-step to select your workspace, choose your LLM providers and models, adjust context window sizes, and automatically generates and persists your workspace `.env` file so subsequent runs are instant and error-free!
-```
 
 ### 2. One-Shot Planning Tasks
 For quick, single-command architectural designs and planning tasks:
@@ -151,8 +153,8 @@ REI analyzes the codebase structure using local RAG and AST analysis, then outpu
 As soon as the plan is presented, REI automatically creates an active progress tracking checklist inside your workspace directory at **`.rei/current-plan-todo.md`**:
 ```markdown
 # PLAN PROGRESS
-- [ ] **Etapa 1:** Define Interface
-- [ ] **Etapa 2:** Create Store Service
+- [ ] **Stage 1:** Define Interface
+- [ ] **Stage 2:** Create Store Service
 ```
 
 ### 3. Automated Stage Execution
@@ -176,8 +178,8 @@ Before the code is written back to your workspace:
 Upon successful execution, REI automatically updates your progress file (`.rei/current-plan-todo.md`):
 ```markdown
 # PLAN PROGRESS
-- [x] **Etapa 1:** Define Interface
-- [ ] **Etapa 2:** Create Store Service
+- [x] **Stage 1:** Define Interface
+- [ ] **Stage 2:** Create Store Service
 ```
 You can now continue to the next stage by executing `/runplan stage 2`.
 

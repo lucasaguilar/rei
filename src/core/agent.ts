@@ -393,9 +393,9 @@ export class Agent {
         // ── Degenerate response detection ──────────────────────────────
         if (isDegenerate(streamResponse)) {
           this.logger.logInfo("[loop-guard] Degenerate response detected, breaking loop");
-          yield `\n\x1b[31m⚠️  [REI] Respuesta degenerada detectada (texto repetitivo). ` +
-            `El modelo entró en un loop de generación. ` +
-            `Intentá: /session new, reducir el contexto, o subir OLLAMA_NUM_CTX.\x1b[0m\n`;
+          yield `\n\x1b[31m⚠️  [REI] Degenerate response detected (repetitive text). ` +
+            `The model entered a generation loop. ` +
+            `Try: /session new, reducing the context, or increasing OLLAMA_NUM_CTX.\x1b[0m\n`;
           hasMoreCommands = false;
           break;
         }
@@ -413,8 +413,8 @@ export class Agent {
           const cmdSignature = buildCommandSignature(commands, toolCalls, fileRequests);
           if (cmdSignature && cmdSignature === lastCmdSignature) {
             this.logger.logInfo("[loop-guard] Repeated command signature detected, breaking loop", { cmdSignature });
-            yield `\n\x1b[31m⚠️  [REI] Loop detectado: el modelo está repitiendo los mismos comandos/tools. ` +
-              `Cortando para evitar ejecución infinita.\x1b[0m\n`;
+            yield `\n\x1b[31m⚠️  [REI] Loop detected: the model is repeating the same commands/tools. ` +
+              `Stopping execution to prevent an infinite loop.\x1b[0m\n`;
             hasMoreCommands = false;
             break;
           }
@@ -473,8 +473,8 @@ export class Agent {
             sourceMode: session.mode,
           });
         }
-        yield `\n\x1b[33m⚠️  [REI] Límite de ${maxDepth} iteraciones alcanzado. ` +
-          `Seteá REI_MAX_TURNS=${maxDepth + 3} en tu .env para más iteraciones.\x1b[0m\n`;
+        yield `\n\x1b[33m⚠️  [REI] Maximum iteration limit of ${maxDepth} reached. ` +
+          `Set REI_MAX_TURNS=${maxDepth + 3} in your .env to allow more iterations.\x1b[0m\n`;
       }
     } else {
       const response = await this.generateNonAgentAssistantResponse(

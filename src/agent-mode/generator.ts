@@ -174,9 +174,9 @@ export async function executeAgentTurn(params: {
         logger,
         {
           response:
-            "⚠️ REI detectó una respuesta degenerada (el modelo entró en un loop de generación de texto). " +
-            "Esto suele ocurrir cuando el contexto está saturado o el modelo está confundido. " +
-            "Intentá: /session new, reducir el contexto, subir OLLAMA_NUM_CTX, o usar un modelo diferente.",
+            "⚠️ REI detected a degenerate response (the model entered a text generation loop). " +
+            "This usually happens when the context is saturated or the model is confused. " +
+            "Try: /session new, reducing the context, increasing OLLAMA_NUM_CTX, or using a different model.",
           validProposedPatches: [],
         },
         0,
@@ -385,9 +385,9 @@ export async function executeAgentTurn(params: {
           {
             response:
               getFinalResponse(rawResponse) +
-              "\n\n⚠️ REI detectó un loop de comandos — el modelo está repitiendo los mismos comandos. " +
-              "Cortando la ejecución. Probá pedirle que explique el error en lugar de ejecutar.",
-            validProposedPatches: [],
+              "\n\n⚠️ REI detected a command loop — the model is repeating the same commands. " +
+              "Stopping execution. Try asking it to explain the error instead of executing commands.",
+                validProposedPatches: [],
           },
           0,
           0,
