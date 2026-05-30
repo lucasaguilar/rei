@@ -255,7 +255,9 @@ export async function processMenuCommand(
   }
 
   if (trimmed.startsWith("/runplan")) {
-    const runPlanMatch = trimmed.match(/^\/runplan(?:\s+(?:stage|step|fase|etapa|paso)\s+(\d+))?$/i);
+    // Filter optional placeholder: [stage <num>]
+    const normTrimmed = trimmed.replace(/\s+\[stage\s+<num>\]$/i, "");
+    const runPlanMatch = normTrimmed.match(/^\/runplan(?:\s+(?:stage)\s+(\d+))?$/i);
     if (!runPlanMatch) {
       return {
         success: false,
