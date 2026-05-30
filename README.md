@@ -112,7 +112,6 @@ rei --config
 
 > [!TIP]
 > **First-Run Autoconfig:** If you run `rei` and no configuration (`.env` file) is found, REI will automatically start the **Interactive Configuration Wizard** (`launch-rei.js`). The wizard guides you step-by-step to select your workspace, choose your LLM providers and models, adjust context window sizes, and automatically generates and persists your workspace `.env` file so subsequent runs are instant and error-free!
-```
 
 ### 2. One-Shot Planning Tasks
 For quick, single-command architectural designs and planning tasks:
