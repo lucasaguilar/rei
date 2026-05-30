@@ -279,14 +279,14 @@ Done.
     // Verify .rei/current-plan-todo.md exists
     const todoContent = readPlanTodoFile(tmpWorkspace);
     expect(todoContent).not.toBeNull();
-    expect(todoContent).toContain("- [ ] **Etapa 1:** Setup auth module");
-    expect(todoContent).toContain("- [ ] **Etapa 2:** Integrate routes");
+    expect(todoContent).toContain("- [ ] **Stage 1:** Setup auth module");
+    expect(todoContent).toContain("- [ ] **Stage 2:** Integrate routes");
 
     // 2. Mark stage 1 completed
     markStageAsCompleted(tmpWorkspace, 1);
     const todoContent2 = readPlanTodoFile(tmpWorkspace);
-    expect(todoContent2).toContain("- [x] **Etapa 1:** Setup auth module");
-    expect(todoContent2).toContain("- [ ] **Etapa 2:** Integrate routes");
+    expect(todoContent2).toContain("- [x] **Stage 1:** Setup auth module");
+    expect(todoContent2).toContain("- [ ] **Stage 2:** Integrate routes");
 
     // 3. Run "/runplan stage 2"
     const result2 = await processMenuCommand("/runplan stage 2", session, tmpWorkspace, provider);
@@ -335,35 +335,35 @@ Modify [app.ts](file:///Users/lucas/www/rei/app.ts)
       expect(loadRes.success).toBe(true);
       // Recreates the todo file!
       expect(readPlanTodoFile(tmpWorkspace)).not.toBeNull();
-      expect(readPlanTodoFile(tmpWorkspace)).toContain("Etapa 1: Fix bug");
+      expect(readPlanTodoFile(tmpWorkspace)).toContain("Stage 1: Fix bug");
     }
   });
 
   it("creates and parses stages from flexible plan formats (lists and bullets)", async () => {
     const flexiblePlanText = `
-- [ ] **Etapa 1:** Limpiar app.html (eliminar datos corruptos/binarios)
+- [ ] **Stage 1:** Limpiar app.html (eliminar datos corruptos/binarios)
   - [ ] **1. Subtarea** (this should not match)
-1. **Etapa 2:** Verificar que DashboardComponent se renderice
+1. **Stage 2:** Verificar que DashboardComponent se renderice
   - [ ] **2. Subtarea** (this should not match)
 - Stage 3: Verificar imports de Material
-### 📦 Fase 4: Capa de Datos (Services + Mock)
+### 📦 Stage 4: Capa de Datos (Services + Mock)
 - [ ] **5. Crear DollarService** (this should not match)
     `;
 
     initPlanTodoFile(tmpWorkspace, flexiblePlanText);
     const todoContent = readPlanTodoFile(tmpWorkspace);
     expect(todoContent).not.toBeNull();
-    expect(todoContent).toContain("- [ ] **Etapa 1:** Limpiar app.html (eliminar datos corruptos/binarios)");
-    expect(todoContent).toContain("- [ ] **Etapa 2:** Verificar que DashboardComponent se renderice");
-    expect(todoContent).toContain("- [ ] **Etapa 3:** Verificar imports de Material");
-    expect(todoContent).toContain("- [ ] **Etapa 4:** Capa de Datos (Services + Mock)");
+    expect(todoContent).toContain("- [ ] **Stage 1:** Limpiar app.html (eliminar datos corruptos/binarios)");
+    expect(todoContent).toContain("- [ ] **Stage 2:** Verificar que DashboardComponent se renderice");
+    expect(todoContent).toContain("- [ ] **Stage 3:** Verificar imports de Material");
+    expect(todoContent).toContain("- [ ] **Stage 4:** Capa de Datos (Services + Mock)");
     expect(todoContent).not.toContain("Subtarea");
     expect(todoContent).not.toContain("DollarService");
   });
 
   it("handles /saveplan and /loadplan commands", async () => {
     const planText = `
-### 📦 Fase 1: Capa de Datos (Services + Mock)
+### 📦 Stage 1: Capa de Datos (Services + Mock)
 We need to edit auth.ts.
 - Modify [auth.ts](file:///Users/lucas/www/rei/auth.ts)
     `;
@@ -394,7 +394,7 @@ We need to edit auth.ts.
     // Verify .rei/current-plan-todo.md was generated
     const todoContent = readPlanTodoFile(tmpWorkspace);
     expect(todoContent).not.toBeNull();
-    expect(todoContent).toContain("- [ ] **Etapa 1:** Capa de Datos (Services + Mock)");
+    expect(todoContent).toContain("- [ ] **Stage 1:** Capa de Datos (Services + Mock)");
 
     // 3. Test `/runplan stage 1` on loaded plan
     const runResult = await processMenuCommand("/runplan stage 1", loadResult.newSession!, tmpWorkspace, provider);

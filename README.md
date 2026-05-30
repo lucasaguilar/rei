@@ -153,8 +153,8 @@ REI analyzes the codebase structure using local RAG and AST analysis, then outpu
 As soon as the plan is presented, REI automatically creates an active progress tracking checklist inside your workspace directory at **`.rei/current-plan-todo.md`**:
 ```markdown
 # PLAN PROGRESS
-- [ ] **Etapa 1:** Define Interface
-- [ ] **Etapa 2:** Create Store Service
+- [ ] **Stage 1:** Define Interface
+- [ ] **Stage 2:** Create Store Service
 ```
 
 ### 3. Automated Stage Execution
@@ -178,8 +178,8 @@ Before the code is written back to your workspace:
 Upon successful execution, REI automatically updates your progress file (`.rei/current-plan-todo.md`):
 ```markdown
 # PLAN PROGRESS
-- [x] **Etapa 1:** Define Interface
-- [ ] **Etapa 2:** Create Store Service
+- [x] **Stage 1:** Define Interface
+- [ ] **Stage 2:** Create Store Service
 ```
 You can now continue to the next stage by executing `/runplan stage 2`.
 

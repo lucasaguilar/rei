@@ -37,7 +37,7 @@ export function readPlanTodoFile(workspacePath: string): string | null {
   return null;
 }
 
-export const STAGE_REGEX = /^(?:(#+)\s*(?:\*\*)?[^\w\d]*(?:(?:fase|etapa|paso|stage|step)\s+)?|(?:\d+\.\s*)\s*(?:\*\*)?[^\w\d]*(?:(?:fase|etapa|paso|stage|step)\s+)?|-\s*(?:\[\s*\]\s*)?(?:\*\*)?[^\w\d]*(?:fase|etapa|paso|stage|step)\s+)(?:\*\*)?0*(\d+)\b(.*)$/i;
+export const STAGE_REGEX = /^(?:(#+)\s*(?:\*\*)?[^\w\d]*(?:stage\s+)?|(?:\d+\.\s*)\s*(?:\*\*)?[^\w\d]*(?:stage\s+)?|-\s*(?:\[\s*\]\s*)?(?:\*\*)?[^\w\d]*(?:stage\s+))(?:\*\*)?0*(\d+)\b(.*)$/i;
 
 export function isPlanMessage(content: string): boolean {
   const lines = content.split('\n');
@@ -53,8 +53,8 @@ export function initPlanTodoFile(workspacePath: string, planContent: string): vo
 
   todoLines.push('# PLAN PROGRESS');
   todoLines.push('');
-  todoLines.push('Este archivo hace un seguimiento del progreso actual del plan de implementación.');
-  todoLines.push('Puedes marcar o desmarcar las casillas manualmente. REI las actualizará automáticamente al completar cada etapa.');
+  todoLines.push('This file tracks the current implementation plan progress.');
+  todoLines.push('You can check or uncheck the boxes manually. REI will automatically update upon completing each stage.');
   todoLines.push('');
 
   let parsedCount = 0;
@@ -63,14 +63,14 @@ export function initPlanTodoFile(workspacePath: string, planContent: string): vo
     if (match) {
       const num = parseInt(match[2], 10);
       const desc = match[3].replace(/^[\s.:\-*]+/, '').trim();
-      todoLines.push(`- [ ] **Etapa ${num}:** ${desc || 'Sin descripción'}`);
+      todoLines.push(`- [ ] **Stage ${num}:** ${desc || 'No description'}`);
       parsedCount++;
     }
   }
 
   // If no structured stages were parsed, create a generic task representing the plan
   if (parsedCount === 0) {
-    todoLines.push('- [ ] **Plan General**');
+    todoLines.push('- [ ] **General Plan**');
   }
 
   const filePath = getPlanTodoPath(workspacePath);
@@ -135,7 +135,7 @@ export function markStageAsCompleted(workspacePath: string, stageNumber: number)
 
     const content = fs.readFileSync(filePath, 'utf8');
     const lines = content.split('\n');
-    const targetRegex = new RegExp(`^-\\s*\\[\\s*\\]\\s*\\*\\*Etapa\\s*${stageNumber}\\b`, 'i');
+    const targetRegex = new RegExp(`^-\\s*\\[\\s*\\]\\s*\\*\\*Stage\\s*${stageNumber}\\b`, 'i');
 
     let modified = false;
     for (let i = 0; i < lines.length; i++) {
@@ -186,8 +186,8 @@ export function recreatePlanTodoFileFromSession(
   const subsequent = messages.slice(planIdx + 1);
   for (const msg of subsequent) {
     if (msg.role === 'user' && msg.content) {
-      // Look for "/runplan stage X" or "/runplan step X" or "/runplan fase X"
-      const match = msg.content.match(/\/runplan\s+(?:stage|step|fase|etapa|paso)\s+(\d+)/i);
+      // Look for "/runplan stage X"
+      const match = msg.content.match(/\/runplan\s+(?:stage)\s+(\d+)/i);
       if (match) {
         const stageNum = parseInt(match[1], 10);
         // Let's assume that if the user moved past it (or we have successful outcomes in assistant),
