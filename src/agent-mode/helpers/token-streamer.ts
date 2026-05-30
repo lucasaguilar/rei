@@ -12,10 +12,11 @@ export async function streamTurnWithInterception(params: {
   provider: ModelProvider;
   messages: ChatMessage[];
   model?: string;
+  mode?: string;
   onChunk?: (event: { type: "thinking" | "text" | "status"; content: string }) => void;
   onFinish?: (reason: string) => void;
 }): Promise<string> {
-  const { provider, messages, model, onChunk, onFinish } = params;
+  const { provider, messages, model, mode, onChunk, onFinish } = params;
 
   if (!provider.streamChat) {
     const fullResponse = await provider.completeChat(messages, { model, onFinish });
@@ -75,11 +76,16 @@ export async function streamTurnWithInterception(params: {
             const tagName = match[1].toLowerCase();
             if (INTERCEPT_TAGS.includes(tagName)) {
               openTag = tagName;
+              // Only emit action status messages in agent mode — in ask/planning the model
+              // sometimes emits <edit> tags by mistake; showing the status confuses the user.
               let statusMsg = "";
-              if (tagName === "edit")          statusMsg = "\n\x1b[33m🛠️  [REI] Proposing Search & Replace edits...\x1b[0m\n";
-              else if (tagName === "create")   statusMsg = "\n\x1b[33m📂  [REI] Creating new files...\x1b[0m\n";
-              else if (tagName === "wholefile")statusMsg = "\n\x1b[33m📝  [REI] Rewriting workspace files...\x1b[0m\n";
-              else if (tagName === "request_files")    statusMsg = "\n\x1b[33m🔍  [REI] Requesting additional codebase files...\x1b[0m\n";
+              if (mode === "agent") {
+                if (tagName === "edit")          statusMsg = "\n\x1b[33m🛠️  [REI] Proposing Search & Replace edits...\x1b[0m\n";
+                else if (tagName === "create")   statusMsg = "\n\x1b[33m📂  [REI] Creating new files...\x1b[0m\n";
+                else if (tagName === "wholefile")statusMsg = "\n\x1b[33m📝  [REI] Rewriting workspace files...\x1b[0m\n";
+              }
+              // request_files, execute_command, call_tool are valid in any mode
+              if (tagName === "request_files")   statusMsg = "\n\x1b[33m🔍  [REI] Requesting additional codebase files...\x1b[0m\n";
               else if (tagName === "execute_command")  statusMsg = "\n\x1b[33m💻  [REI] Running project command...\x1b[0m\n";
               else if (tagName === "call_tool")        statusMsg = "\n\x1b[33m🔧  [REI] Invoking system tool...\x1b[0m\n";
               onChunk?.({ type: "status", content: statusMsg });

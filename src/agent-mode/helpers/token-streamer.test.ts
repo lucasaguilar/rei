@@ -28,6 +28,7 @@ describe("token-streamer streamTurnWithInterception", () => {
     const result = await streamTurnWithInterception({
       provider: mockProvider,
       messages: [],
+      mode: "agent",
       onChunk: (event) => {
         yieldedChunks.push(event);
       },
