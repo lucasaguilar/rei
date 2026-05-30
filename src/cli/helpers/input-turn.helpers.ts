@@ -14,30 +14,61 @@ import { estimateMessagesTokens } from "../../chat/helpers/token-estimator.js";
 function resolveActiveModelLabel(mode?: string): string {
   const isAgentMode = mode === "agent";
   const agentProvider = process.env.AGENT_MODEL_PROVIDER?.trim().toLowerCase();
-  
-  const provider = (isAgentMode && agentProvider)
-    ? agentProvider
-    : (process.env.MODEL_PROVIDER ?? "").trim().toLowerCase();
+
+  const provider =
+    isAgentMode && agentProvider
+      ? agentProvider
+      : (process.env.MODEL_PROVIDER ?? "").trim().toLowerCase();
 
   const getModelName = (prov: string): string => {
     switch (prov) {
       case "ollama":
         if (isAgentMode) {
-          return process.env.OLLAMA_MODEL_AGENT?.trim() || process.env.OLLAMA_MODEL?.trim() || "default";
+          return (
+            process.env.OLLAMA_MODEL_AGENT?.trim() ||
+            process.env.OLLAMA_MODEL?.trim() ||
+            "default"
+          );
         }
         const modeKey = mode ? `OLLAMA_MODEL_${mode.toUpperCase()}` : undefined;
         const modeSpecific = modeKey ? process.env[modeKey]?.trim() : undefined;
         return (modeSpecific ?? process.env.OLLAMA_MODEL?.trim()) || "default";
       case "openrouter":
-        return (isAgentMode ? process.env.OPENROUTER_MODEL_AGENT : undefined)?.trim() || process.env.OPENROUTER_MODEL?.trim() || "default";
+        return (
+          (isAgentMode
+            ? process.env.OPENROUTER_MODEL_AGENT
+            : undefined
+          )?.trim() ||
+          process.env.OPENROUTER_MODEL?.trim() ||
+          "default"
+        );
       case "groq":
-        return (isAgentMode ? process.env.GROQ_MODEL_AGENT : undefined)?.trim() || process.env.GROQ_MODEL?.trim() || "default";
+        return (
+          (isAgentMode ? process.env.GROQ_MODEL_AGENT : undefined)?.trim() ||
+          process.env.GROQ_MODEL?.trim() ||
+          "default"
+        );
       case "gemini":
-        return (isAgentMode ? process.env.GEMINI_MODEL_AGENT : undefined)?.trim() || process.env.GEMINI_MODEL?.trim() || "default";
+        return (
+          (isAgentMode ? process.env.GEMINI_MODEL_AGENT : undefined)?.trim() ||
+          process.env.GEMINI_MODEL?.trim() ||
+          "default"
+        );
       case "huggingface":
-        return (isAgentMode ? process.env.HF_MODEL_AGENT : undefined)?.trim() || process.env.HF_MODEL?.trim() || "default";
+        return (
+          (isAgentMode ? process.env.HF_MODEL_AGENT : undefined)?.trim() ||
+          process.env.HF_MODEL?.trim() ||
+          "default"
+        );
       case "llmstudio":
-        return (isAgentMode ? process.env.LLM_STUDIO_MODEL_AGENT : undefined)?.trim() || process.env.LLM_STUDIO_MODEL?.trim() || "default";
+        return (
+          (isAgentMode
+            ? process.env.LLM_STUDIO_MODEL_AGENT
+            : undefined
+          )?.trim() ||
+          process.env.LLM_STUDIO_MODEL?.trim() ||
+          "default"
+        );
       default:
         return "default";
     }
@@ -75,7 +106,14 @@ function resolveActiveModelLabel(mode?: string): string {
 }
 
 function isInsideXmlBlock(text: string): boolean {
-  const tags = ["edit", "wholefile", "create", "request_files", "execute_command", "call_tool"];
+  const tags = [
+    "edit",
+    "wholefile",
+    "create",
+    "request_files",
+    "execute_command",
+    "call_tool",
+  ];
   for (const tag of tags) {
     const lastOpen = text.lastIndexOf(`<${tag}`);
     const lastClose = text.lastIndexOf(`</${tag}>`);
@@ -102,7 +140,7 @@ export async function handleInputTurn(
   if (estimatedTokens > 20000) {
     actions.pushTranscript(
       `\x1b[33m⚠️  [REI] Warning: The accumulated session exceeds 20,000 tokens (approximately ${estimatedTokens} tokens). ` +
-      `If you notice slowdowns or context-related errors, consider using /session new.\x1b[0m`
+        `If you notice slowdowns or context-related errors, consider using /session new.\x1b[0m`,
     );
     actions.pushTranscript("");
   }
@@ -144,7 +182,7 @@ export async function handleInputTurn(
       // Decode type prefix: \x10 = thinking (show dim italic), \x11 = text (buffer silently)
       const isThinking = token.startsWith("\x10");
       const isText = token.startsWith("\x11");
-      const cleanToken = (isThinking || isText) ? token.slice(1) : token;
+      const cleanToken = isThinking || isText ? token.slice(1) : token;
 
       chunkCount++;
       totalOutputChars += cleanToken.length;
@@ -189,8 +227,8 @@ export async function handleInputTurn(
     // Strip ANSI codes and XML action tags to get clean markdown for rendering
     const edits = extractSREdits(buffer);
     const finalContent = buffer
-      .replace(/\x1b\[[0-9;]*m/g, "")            // strip ANSI (e.g. from patch result)
-      .replace(/<think>[\s\S]*?<\/think>/gi, "")  // safety strip
+      .replace(/\x1b\[[0-9;]*m/g, "") // strip ANSI (e.g. from patch result)
+      .replace(/<think>[\s\S]*?<\/think>/gi, "") // safety strip
       .replace(/<edit[\s\S]*?<\/edit>/gi, "")
       .replace(/<wholefile[\s\S]*?<\/wholefile>/gi, "")
       .replace(/<create[\s\S]*?<\/create>/gi, "")
@@ -209,7 +247,7 @@ export async function handleInputTurn(
     }
 
     // Display formatted S&R diffs (ANSI diff, already styled by formatCodeDiff)
-    if (edits.length > 0) {
+    if (edits.length > 0 && session.mode === "agent") {
       actions.pushTranscript(`\n\x1b[1;33mCambios propuestos:\x1b[0m`);
       for (const edit of edits) {
         actions.pushTranscript(
