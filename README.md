@@ -66,6 +66,9 @@ To install the interactive CLI globally and configure a dedicated symlink launch
 curl -fsSL https://raw.githubusercontent.com/lucasaguilar/rei/main/install-rei-cli.sh | bash
 ```
 
+> [!NOTE]
+> Make sure `$HOME/.bashrc` contains: `export PATH="$HOME/.local/bin:$PATH"`
+
 To install the backend server API for VS Code Continue.dev plugin integration, creating a launcher at `~/.rei/rei-server`:
 
 ```bash
