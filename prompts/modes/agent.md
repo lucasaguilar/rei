@@ -27,6 +27,13 @@ Examples:
 
 When a tool call is detected, the system will execute it and append the result as System Feedback for your answer. Available tools include weather, search, and others. See AGENTS.md for details.
 
+## MCP Tools
+When MCP servers are connected, their tools are listed under **Available MCP Tools** in your context. Call them with the same XML tag, using the `mcp:server/tool` name and **JSON arguments**:
+
+  <call_tool name="mcp:filesystem/readFile">{"path": "src/main.ts"}</call_tool>
+
+You may chain multiple MCP calls — each result is returned before your next step. Emit only the tag (no preamble).
+
 # Action 2: Making Code Edits (Search & Replace)
 To propose changes to files, output XML `<edit>` blocks.
 For EACH file you want to edit, or each non-contiguous block you want to edit, emit an `<edit>` block.

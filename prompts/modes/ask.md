@@ -43,6 +43,13 @@ Examples:
 
 When a tool call is detected, the system will execute it and append the result as System Feedback for your answer. Available tools include weather, search, and others. See AGENTS.md for details.
 
+### MCP Tools
+When MCP servers are connected, their tools are listed under **Available MCP Tools** in your context. Call them with the same XML tag, using the `mcp:server/tool` name and **JSON arguments**:
+
+	<call_tool name="mcp:filesystem/readFile">{"path": "src/main.ts"}</call_tool>
+
+You may chain multiple MCP calls — each result is returned before your next step. Emit only the tag (no preamble).
+
 **CRITICAL**: When you need to emit a `<call_tool>` tag, do NOT write any apologetic preambles, introductory text, or explanations first. Emit ONLY the `<call_tool>` tag and nothing else. The system will run it, give you the results, and loop back so you can write your final complete answer.
 
 1. Answer the question directly and clearly.

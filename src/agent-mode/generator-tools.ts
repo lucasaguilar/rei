@@ -9,7 +9,8 @@ import type { ChatMessage } from "../chat/types.js";
 import type { ModelProvider } from "../providers/model-provider.js";
 import type { AgentLogger } from "../core/logger.js";
 import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
-import { AGENT_TOOLS } from "../contracts/tool-definitions.js";
+import type { McpRegistry } from "../tools/mcp/mcp-registry.js";
+import { AGENT_TOOLS, mcpToolsToDefinitions } from "../contracts/tool-definitions.js";
 import { executeCommand, limitCommandOutput } from "../tools/command-executor.js";
 import {
   buildFileContextMessage,
@@ -35,12 +36,17 @@ export async function executeAgentTurnWithTools(params: {
   workspacePath: string;
   logger: AgentLogger;
   modelOverride?: string;
+  /** Connected MCP registry. When provided, MCP tools are merged into the tool list. */
+  mcpRegistry?: McpRegistry;
 }): Promise<ExecutionResult> {
-  const { provider, messagesForModel, workspacePath, logger, modelOverride } = params;
+  const { provider, messagesForModel, workspacePath, logger, modelOverride, mcpRegistry } = params;
 
   if (!provider.completeChatWithTools) {
     throw new Error("executeAgentTurnWithTools: provider does not support completeChatWithTools");
   }
+
+  const mcpDefinitions = mcpRegistry ? mcpToolsToDefinitions(mcpRegistry.getAvailableTools()) : [];
+  const allTools = [...AGENT_TOOLS, ...mcpDefinitions];
 
   let currentMessages: ChatMessage[] = [...messagesForModel];
   let loopCount = 0;
@@ -53,7 +59,7 @@ export async function executeAgentTurnWithTools(params: {
 
     const result = await provider.completeChatWithTools(
       currentMessages,
-      AGENT_TOOLS,
+      allTools,
       { model: modelOverride },
     );
 
@@ -186,9 +192,18 @@ export async function executeAgentTurnWithTools(params: {
             break;
           }
 
-          default:
-            toolResult = `ERROR: Unknown tool "${call.function.name}"`;
-            hasToolFailure = true;
+          default: {
+            if (call.function.name.startsWith("mcp:") && mcpRegistry) {
+              // Strip the "mcp:" namespace prefix added by mcpToolsToDefinitions before
+              // dispatching — the registry key is "serverName/toolName" not "mcp:...".
+              const qualifiedName = call.function.name.slice(4);
+              logger.logInfo(`[tools] mcp: ${qualifiedName}`);
+              toolResult = await mcpRegistry.dispatch(qualifiedName, args);
+            } else {
+              toolResult = `ERROR: Unknown tool "${call.function.name}"`;
+              hasToolFailure = true;
+            }
+          }
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

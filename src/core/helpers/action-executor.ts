@@ -14,6 +14,48 @@ import { searchWeb } from "../../tools/search-tool.js";
 import type { AgentLogger } from "../logger.js";
 import type { ModelProvider } from "../../providers/model-provider.js";
 import type { BatchPatchApplyResult } from "../../tools/patch-applier.js";
+import type { McpRegistry } from "../../tools/mcp/mcp-registry.js";
+
+/**
+ * Dispatches a single XML <call_tool> invocation and returns a formatted
+ * markdown feedback chunk (with a leading newline). Handles its own errors so
+ * callers can simply concatenate the result.
+ *
+ * Recognises the built-in fire-and-forget tools (weather, search) and any
+ * MCP tool addressed as "mcp:server/tool". The "mcp:" prefix mirrors the
+ * structured tool-calling path; it is stripped before McpRegistry.dispatch
+ * because the registry key is "server/tool".
+ */
+async function dispatchXmlToolCall(
+  call: { name: string; args: Record<string, unknown> },
+  provider: ModelProvider,
+  logger: AgentLogger,
+  mcpRegistry?: McpRegistry,
+): Promise<string> {
+  logger.logInfo(`Calling tool: ${call.name}`, { args: call.args });
+  try {
+    if (call.name === "weather") {
+      const weatherRes = await getWeather(call.args.location as string);
+      return `\n### 🌤️ Weather: ${call.args.location}\n${formatWeatherOutput(weatherRes)}\n`;
+    }
+    if (call.name === "search") {
+      const searchRes = await searchWeb(call.args.query as string, provider);
+      return `\n### 🔍 Search Results: ${call.args.query}\n${searchRes}\n`;
+    }
+    if (call.name.startsWith("mcp:") && mcpRegistry) {
+      // Strip the "mcp:" namespace prefix before dispatching — the registry
+      // key is "server/tool", not "mcp:server/tool" (same as the structured path).
+      const qualified = call.name.slice(4);
+      logger.logInfo(`[tools] mcp: ${qualified}`);
+      const result = await mcpRegistry.dispatch(qualified, call.args);
+      return `\n### 🔌 MCP: ${qualified}\n${result}\n`;
+    }
+    throw new Error(`Tool "${call.name}" is not implemented.`);
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    return `\n[TOOL] ${call.name}(${JSON.stringify(call.args)}) -> ERROR: ${errorMsg}\n`;
+  }
+}
 
 /**
  * Reads the contents of any <request_files> tags found in a response and returns formatted feedback.
@@ -73,30 +115,14 @@ export async function executeToolCallsFromResponse(
   response: string,
   provider: ModelProvider,
   logger: AgentLogger,
+  mcpRegistry?: McpRegistry,
 ): Promise<string> {
   const toolCalls = extractToolCalls(response);
   if (toolCalls.length === 0) return "";
 
   let feedback = "\n\n---\n**Tool Call Results:**\n";
   for (const call of toolCalls) {
-    logger.logInfo(`Calling tool: ${call.name}`, { args: call.args });
-    try {
-      if (call.name === "weather") {
-        const weatherRes = await getWeather(call.args.location as string);
-        feedback += `\n### 🌤️ Weather: ${call.args.location}\n${formatWeatherOutput(weatherRes)}\n`;
-      } else if (call.name === "search") {
-        const searchRes = await searchWeb(
-          call.args.query as string,
-          provider,
-        );
-        feedback += `\n### 🔍 Search Results: ${call.args.query}\n${searchRes}\n`;
-      } else {
-        throw new Error(`Tool "${call.name}" is not implemented.`);
-      }
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      feedback += `\n[TOOL] ${call.name}(${JSON.stringify(call.args)}) -> ERROR: ${errorMsg}\n`;
-    }
+    feedback += await dispatchXmlToolCall(call, provider, logger, mcpRegistry);
   }
   return feedback;
 }
@@ -109,6 +135,7 @@ export async function executeAgentToolsAndCommands(
   workspacePath: string,
   provider: ModelProvider,
   logger: AgentLogger,
+  mcpRegistry?: McpRegistry,
 ): Promise<string> {
   const toolCalls = extractToolCalls(response);
   const commands = extractCommandRequests(response);
@@ -120,24 +147,7 @@ export async function executeAgentToolsAndCommands(
   let feedback = "\n\n--- Execution Results ---\n";
 
   for (const call of toolCalls) {
-    logger.logInfo(`Calling tool: ${call.name}`, { args: call.args });
-    try {
-      if (call.name === "weather") {
-        const weatherRes = await getWeather(call.args.location as string);
-        feedback += `\n### 🌤️ Weather: ${call.args.location}\n${formatWeatherOutput(weatherRes)}\n`;
-      } else if (call.name === "search") {
-        const searchRes = await searchWeb(
-          call.args.query as string,
-          provider,
-        );
-        feedback += `\n### 🔍 Search Results: ${call.args.query}\n${searchRes}\n`;
-      } else {
-        throw new Error(`Tool "${call.name}" is not implemented.`);
-      }
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      feedback += `\n[TOOL] ${call.name}(${JSON.stringify(call.args)}) -> ERROR: ${errorMsg}\n`;
-    }
+    feedback += await dispatchXmlToolCall(call, provider, logger, mcpRegistry);
   }
 
   for (const cmd of commands) {
@@ -176,8 +186,9 @@ export async function executeAndFormatTurnActions(params: {
   workspacePath: string;
   provider: ModelProvider;
   logger: AgentLogger;
+  mcpRegistry?: McpRegistry;
 }): Promise<{ executionFeedback: string; userVisibleFeedback: string }> {
-  const { response, workspacePath, provider, logger } = params;
+  const { response, workspacePath, provider, logger, mcpRegistry } = params;
   const fileRequests = extractFileRequests(response);
   const commands = extractCommandRequests(response);
   const toolCalls = extractToolCalls(response);
@@ -213,6 +224,7 @@ export async function executeAndFormatTurnActions(params: {
       response,
       provider,
       logger,
+      mcpRegistry,
     );
     executionFeedback += toolFeedback;
     userVisibleFeedback += toolFeedback;

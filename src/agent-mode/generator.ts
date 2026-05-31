@@ -9,8 +9,11 @@ import {
   extractSREdits,
   extractWholeFileEdits,
   extractCommandRequests,
+  extractToolCalls,
   formatSREditsForLog,
 } from "./response-handler.js";
+import { executeToolCallsFromResponse } from "../core/helpers/action-executor.js";
+import type { McpRegistry } from "../tools/mcp/mcp-registry.js";
 import { isDegenerate, buildCommandSignature } from "./helpers/loop-guard.js";
 import { executeCommand, limitCommandOutput } from "../tools/command-executor.js";
 import { applyWholeFileBatchFS } from "../tools/patch-applier.js";
@@ -95,6 +98,11 @@ export async function executeAgentTurn(params: {
   logger: AgentLogger;
   modelOverride?: string;
   onChunk?: (event: { type: "thinking" | "text" | "status"; content: string }) => void;
+  /** Connected MCP registry — required for MCP <call_tool> dispatch. */
+  mcpRegistry?: McpRegistry;
+  /** Set of tool names (from ToolDefinition.modelFeedback === true) whose results
+   *  must be fed back to the model. Everything else is fire-and-forget. */
+  modelFeedbackTools?: Set<string>;
 }): Promise<ExecutionResult> {
   const {
     provider,
@@ -104,6 +112,8 @@ export async function executeAgentTurn(params: {
     logger,
     modelOverride,
     onChunk,
+    mcpRegistry,
+    modelFeedbackTools,
   } = params;
 
   let currentMessages = [...messagesForModel];
@@ -427,6 +437,35 @@ export async function executeAgentTurn(params: {
       );
     }
 
+    // 3c. <call_tool> — dispatch and selectively re-feed model-feedback tools (e.g. MCP).
+    // Fire-and-forget tools (weather, search) are executed but NOT re-fed to the model.
+    const toolCalls = extractToolCalls(rawResponse);
+    if (toolCalls.length > 0) {
+      const hasFeedbackCall = toolCalls.some(
+        (c) => modelFeedbackTools?.has(c.name) || c.name.startsWith("mcp:"),
+      );
+      const toolFeedback = await executeToolCallsFromResponse(rawResponse, provider, logger, mcpRegistry);
+
+      if (hasFeedbackCall && loopCount < MAX_TURNS) {
+        currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
+        currentMessages.push({
+          role: "user",
+          content: `Tool call results:\n${toolFeedback}\nPlease continue with the task.`,
+        });
+        continue;
+      }
+      // Fire-and-forget only, or at max turns: append result to response and return.
+      return finalizeOutcome(
+        logger,
+        {
+          response: getFinalResponse(stripAllActionTags(rawResponse) + toolFeedback),
+          validProposedPatches: [],
+        },
+        0,
+        0,
+      );
+    }
+
     // 4. Simple text response — no edits, no file requests
     logger.logNoEditsReason("model_returned_text_only", {
       loopCount,
@@ -470,8 +509,13 @@ export async function executeAgentTurnWholefile(params: {
   logger: AgentLogger;
   modelOverride?: string;
   onChunk?: (event: { type: "thinking" | "text" | "status"; content: string }) => void;
+  /** Connected MCP registry — required for MCP <call_tool> dispatch. */
+  mcpRegistry?: McpRegistry;
+  /** Set of tool names (from ToolDefinition.modelFeedback === true) whose results
+   *  must be fed back to the model. Everything else is fire-and-forget. */
+  modelFeedbackTools?: Set<string>;
 }): Promise<ExecutionResult> {
-  const { provider, messagesForModel, workspacePath, logger, modelOverride, onChunk } =
+  const { provider, messagesForModel, workspacePath, logger, modelOverride, onChunk, mcpRegistry, modelFeedbackTools } =
     params;
   let currentMessages = [...messagesForModel];
   let loopCount = 0;
@@ -699,6 +743,34 @@ export async function executeAgentTurnWholefile(params: {
               "\n\n--- Command Execution Results ---\n" +
               commandFeedback
             ),
+          validProposedPatches: [],
+        },
+        0,
+        0,
+      );
+    }
+
+    // 5b. <call_tool> — dispatch and selectively re-feed model-feedback tools (e.g. MCP).
+    // Fire-and-forget tools (weather, search) are executed but NOT re-fed to the model.
+    const toolCalls = extractToolCalls(rawResponse);
+    if (toolCalls.length > 0) {
+      const hasFeedbackCall = toolCalls.some(
+        (c) => modelFeedbackTools?.has(c.name) || c.name.startsWith("mcp:"),
+      );
+      const toolFeedback = await executeToolCallsFromResponse(rawResponse, provider, logger, mcpRegistry);
+
+      if (hasFeedbackCall && loopCount < MAX_TURNS) {
+        currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
+        currentMessages.push({
+          role: "user",
+          content: `Tool call results:\n${toolFeedback}\nPlease continue with the task.`,
+        });
+        continue;
+      }
+      return finalizeOutcome(
+        logger,
+        {
+          response: getFinalResponse(stripAllActionTags(rawResponse) + toolFeedback),
           validProposedPatches: [],
         },
         0,

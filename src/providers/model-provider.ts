@@ -28,6 +28,13 @@ export interface ToolDefinition {
       required: string[];
     };
   };
+  /**
+   * When true, the tool result must be fed back to the model so it can act on
+   * it (e.g. MCP tools that chain multiple calls before producing an edit).
+   * When false or absent, the result is shown to the user only (fire-and-forget,
+   * e.g. weather, web search).
+   */
+  modelFeedback?: boolean;
 }
 
 export interface ToolCall {

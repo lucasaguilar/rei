@@ -28,28 +28,43 @@ export async function runCli(args: string[]): Promise<void> {
   const provider = createModelProvider();
   const agent = new Agent(provider, workspacePath);
 
-  if (command === "plan") {
-    const task = rest.join(" ");
-    if (!task) {
-      console.error(
-        'Usage: rei [--workspace <path>] plan "<task description>"',
-      );
-      process.exit(1);
+  // Connect configured MCP servers before handling any command so their tools
+  // are available in every mode. Best-effort: per-server failures are already
+  // swallowed by the registry, and a bad config must not block startup.
+  try {
+    await agent.connectMcp();
+  } catch (error) {
+    console.error(
+      `⚠️  MCP startup failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  try {
+    if (command === "plan") {
+      const task = rest.join(" ");
+      if (!task) {
+        console.error(
+          'Usage: rei [--workspace <path>] plan "<task description>"',
+        );
+        process.exit(1);
+      }
+      const result = await planningSkill(agent, task);
+      console.log(result);
+      return;
     }
-    const result = await planningSkill(agent, task);
-    console.log(result);
-    return;
-  }
 
-  if (command === "chat") {
-    const autoIndex = !parsed.noAutoIndex;
-    await runChat(agent, workspacePath, autoIndex);
-    return;
-  }
+    if (command === "chat") {
+      const autoIndex = !parsed.noAutoIndex;
+      await runChat(agent, workspacePath, autoIndex);
+      return;
+    }
 
-  console.error(`Unknown command: ${command}`);
-  console.error("Available commands: plan, chat");
-  process.exit(1);
+    console.error(`Unknown command: ${command}`);
+    console.error("Available commands: plan, chat");
+    process.exit(1);
+  } finally {
+    await agent.disposeMcp();
+  }
 }
 
 function parseCliArgs(args: string[]): {

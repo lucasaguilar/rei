@@ -8,6 +8,7 @@ import {
   executeAgentTurnWholefile,
 } from "../agent-mode/generator.js";
 import { executeAgentTurnWithTools } from "../agent-mode/generator-tools.js";
+import { formatMcpToolsForPrompt, mcpToolsToDefinitions, modelFeedbackToolNames } from "../contracts/tool-definitions.js";
 import {
   buildSystemMessage,
   getAgentEditFormat,
@@ -65,6 +66,7 @@ import {
   isOllamaProvider,
   resolveModelNameForHardwareCheck,
 } from "./hardware-monitor.js";
+import { McpRegistry } from "../tools/mcp/mcp-registry.js";
 
 export class Agent {
   private scanCache?: {
@@ -82,6 +84,8 @@ export class Agent {
   private correlationId: string;
   /** Hardware warnings collected during prepareSessionForTurn — emitted at stream start. */
   private pendingHardwareWarnings: string[] = [];
+  /** Registry of connected MCP servers — populated lazily via connectMcp(). */
+  public readonly mcpRegistry: McpRegistry;
 
   constructor(provider: ModelProvider, workspacePath: string = process.cwd()) {
     this.provider = provider;
@@ -89,8 +93,19 @@ export class Agent {
     this.knowledgeOrchestrator = new KnowledgeOrchestrator(this.provider);
     this.logger = new AgentLogger(workspacePath);
     this.vectorStore = new VectorStore(workspacePath);
+    this.mcpRegistry = McpRegistry.forWorkspace(workspacePath);
     this.correlationId =
       Date.now().toString(36) + Math.random().toString(36).substring(2, 7);
+  }
+
+  /** Connect to all MCP servers defined in rei.config.json. */
+  async connectMcp(): Promise<void> {
+    await this.mcpRegistry.connect();
+  }
+
+  /** Disconnect all MCP servers and release their resources. */
+  async disposeMcp(): Promise<void> {
+    await this.mcpRegistry.dispose();
   }
 
   async run(prompt: string): Promise<string> {
@@ -197,6 +212,7 @@ export class Agent {
               workspacePath: this.workspacePath,
               logger: this.logger,
               modelOverride: resolveModelForMode("agent"),
+              mcpRegistry: this.mcpRegistry,
             })
           : editFormat === "wholefile"
             ? executeAgentTurnWholefile({
@@ -206,6 +222,8 @@ export class Agent {
                 logger: this.logger,
                 modelOverride: resolveModelForMode("agent"),
                 onChunk,
+                mcpRegistry: this.mcpRegistry,
+                modelFeedbackTools: modelFeedbackToolNames(mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools())),
               })
             : executeAgentTurn({
                 provider: agentProvider,
@@ -215,6 +233,8 @@ export class Agent {
                 logger: this.logger,
                 modelOverride: resolveModelForMode("agent"),
                 onChunk,
+                mcpRegistry: this.mcpRegistry,
+                modelFeedbackTools: modelFeedbackToolNames(mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools())),
               })
       ).finally(() => {
         done = true;
@@ -268,6 +288,7 @@ export class Agent {
         this.workspacePath,
         this.provider,
         this.logger,
+        this.mcpRegistry,
       );
 
       if (feedback) {
@@ -307,6 +328,9 @@ export class Agent {
       const maxDepth = process.env.REI_MAX_TURNS
         ? parseInt(process.env.REI_MAX_TURNS, 10)
         : 7;
+      // Pre-compute which tool names require their result fed back to the model
+      // (MCP tools). Fire-and-forget tools (weather, search) are NOT in this set.
+      const feedbackTools = modelFeedbackToolNames(mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools()));
 
       while (hasMoreCommands && depth < maxDepth) {
         options?.onStatus?.("producing_response");
@@ -428,17 +452,37 @@ export class Agent {
             workspacePath: this.workspacePath,
             provider: this.provider,
             logger: this.logger,
+            mcpRegistry: this.mcpRegistry,
           });
 
           yield userVisibleFeedback;
-          currentMessages = [
-            ...currentMessages,
-            { role: "assistant", content: stripThinkingBlock(streamResponse) },
-            {
-              role: "user",
-              content: `System: Execution results:\n${executionFeedback}\n\nNow continue your process or provide your complete answer using these results.`,
-            },
-          ];
+
+          // Commands and file requests always need model re-feed (the model must see
+          // the output to continue). For tool calls, only MCP tools need re-feed;
+          // fire-and-forget tools (weather, search) do not.
+          const hasFeedbackCall =
+            commands.length > 0 ||
+            fileRequests.length > 0 ||
+            toolCalls.some((c) => feedbackTools.has(c.name) || c.name.startsWith("mcp:"));
+
+          if (hasFeedbackCall) {
+            currentMessages = [
+              ...currentMessages,
+              { role: "assistant", content: stripThinkingBlock(streamResponse) },
+              {
+                role: "user",
+                content: `System: Tool results:\n${executionFeedback}\n\nContinue your task — call more tools if needed, or give your final answer when you have everything you need.`,
+              },
+            ];
+          } else {
+            // Fire-and-forget: result already shown to user — end the turn here.
+            hasMoreCommands = false;
+            session.messages.push({
+              role: "assistant",
+              content: stripThinkingBlock(streamResponse),
+              sourceMode: session.mode,
+            });
+          }
         } else {
           hasMoreCommands = false;
 
@@ -571,6 +615,15 @@ export class Agent {
     const todoContent = readPlanTodoFile(this.workspacePath);
     if (todoContent) {
       systemContent += `\n\n### Active Plan Progress:\n${todoContent}`;
+    }
+
+    // Advertise the live MCP tool list to the model. The structured agent path
+    // also receives these via the API `tools` param (harmless redundancy here),
+    // but the XML modes (ask, planning, agent fallback) rely solely on this text
+    // to discover what they can call.
+    if (this.mcpRegistry.hasTools()) {
+      const mcpBlock = formatMcpToolsForPrompt(this.mcpRegistry.getAvailableTools());
+      if (mcpBlock) systemContent += `\n\n${mcpBlock}`;
     }
 
     if (session.messages.length > 0 && session.messages[0].role === "system") {
@@ -725,6 +778,7 @@ export class Agent {
       ? parseInt(process.env.REI_MAX_TURNS, 10)
       : 7;
     let lastResponse = "";
+    const feedbackTools = modelFeedbackToolNames(mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools()));
 
     while (hasMoreCommands && depth < maxDepth) {
       const raw = await this.provider.completeChat(currentMessages, {
@@ -780,17 +834,29 @@ export class Agent {
             this.logger,
           );
         }
+        const hasFeedbackCall = toolCalls.some(
+          (c) => feedbackTools.has(c.name) || c.name.startsWith("mcp:"),
+        );
+
         if (toolCalls.length > 0) {
           executionFeedback += await executeToolCallsFromResponse(
             lastResponse,
             this.provider,
             this.logger,
+            this.mcpRegistry,
           );
         }
-        currentMessages.push({
-          role: "user",
-          content: `System: Execution results:\n${executionFeedback}\n\nNow continue your process or provide your complete answer using these results.`,
-        });
+
+        if (hasFeedbackCall) {
+          // MCP: feed results to model so it can chain or act on them.
+          currentMessages.push({
+            role: "user",
+            content: `System: Tool results:\n${executionFeedback}\n\nContinue your task — call more tools if needed, or give your final answer when you have everything you need.`,
+          });
+        } else {
+          // Fire-and-forget: result shown to user, turn ends here.
+          hasMoreCommands = false;
+        }
       } else {
         hasMoreCommands = false;
       }
@@ -818,6 +884,7 @@ export class Agent {
         workspacePath: this.workspacePath,
         logger: this.logger,
         modelOverride: resolveModelForMode("agent"),
+        mcpRegistry: this.mcpRegistry,
       });
       if (outcome.validProposedPatches?.length) {
         const result = await applySREditBatchFS(outcome.validProposedPatches, this.workspacePath);
@@ -836,6 +903,8 @@ export class Agent {
             workspacePath: this.workspacePath,
             logger: this.logger,
             modelOverride: resolveModelForMode("agent"),
+            mcpRegistry: this.mcpRegistry,
+            modelFeedbackTools: modelFeedbackToolNames(mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools())),
           })
         : await executeAgentTurn({
             provider: agentProvider,
@@ -844,6 +913,8 @@ export class Agent {
             scannedFiles: this.getWorkspaceFiles(),
             logger: this.logger,
             modelOverride: resolveModelForMode("agent"),
+            mcpRegistry: this.mcpRegistry,
+            modelFeedbackTools: modelFeedbackToolNames(mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools())),
           });
 
     // Aplica los parches válidos directamente

@@ -47,6 +47,16 @@ async function startServer() {
   const agent = new Agent(provider, WORKSPACE_PATH);
   const chatHandler = new ChatHandler(agent, WORKSPACE_PATH);
 
+  // Connect configured MCP servers so their tools are available to every turn.
+  // Best-effort: per-server failures are swallowed by the registry.
+  try {
+    await agent.connectMcp();
+  } catch (error) {
+    console.error(
+      `⚠️  MCP startup failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
   const server = http.createServer(async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
