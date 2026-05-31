@@ -1,6 +1,17 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { McpRegistry } from "./mcp-registry.js";
 import * as mcpConfig from "./mcp-config.js";
+
+// Prevent real network calls in HTTP-server tests. The SDK's
+// StreamableHTTPClientTransport fires a background fetch even after the
+// connect() promise rejects, producing an unhandled rejection that fails the
+// test suite. By stubbing create() to reject synchronously we keep the test
+// intent (registry swallows connection failures) without touching the network.
+vi.mock("./http-client.js", () => ({
+  HttpMcpClient: {
+    create: vi.fn().mockRejectedValue(new Error("connection refused")),
+  },
+}));
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -28,8 +28,18 @@ export async function handleInputCommand(
     actions.pushTranscript(result.response);
 
     if (result.recreateAgent) {
+      // Tear down the old agent's MCP connections before swapping in a new one,
+      // then reconnect so the fresh agent has the same tools available.
+      await ctx.agent.disposeMcp();
       const newProvider = createModelProvider();
       ctx.agent = new Agent(newProvider, ctx.workspacePath);
+      try {
+        await ctx.agent.connectMcp();
+      } catch (error) {
+        console.error(
+          `⚠️  MCP reconnect failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
 
     if (result.newSession) {

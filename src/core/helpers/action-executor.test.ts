@@ -1,0 +1,109 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// Stub the external fire-and-forget tools so no network is touched.
+vi.mock("../../tools/weather-tool.js", () => ({
+  getWeather: vi.fn().mockResolvedValue({ location: "London" }),
+  formatWeatherOutput: vi.fn().mockReturnValue("WEATHER_OUTPUT"),
+}));
+vi.mock("../../tools/search-tool.js", () => ({
+  searchWeb: vi.fn().mockResolvedValue("SEARCH_OUTPUT"),
+}));
+
+import {
+  executeToolCallsFromResponse,
+  executeAgentToolsAndCommands,
+} from "./action-executor.js";
+
+const fakeLogger = {
+  logInfo: vi.fn(),
+  logCommandExecution: vi.fn(),
+} as never;
+
+const fakeProvider = {} as never;
+
+function makeRegistry(dispatch = vi.fn().mockResolvedValue("MCP_RESULT")) {
+  return { dispatch } as never;
+}
+
+describe("dispatchXmlToolCall (via executeToolCallsFromResponse)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("routes an mcp: call to the registry with the 'mcp:' prefix stripped", async () => {
+    const dispatch = vi.fn().mockResolvedValue("file contents");
+    const response = `<call_tool name="mcp:fs/readFile">{"path":"a.ts"}</call_tool>`;
+
+    const feedback = await executeToolCallsFromResponse(
+      response,
+      fakeProvider,
+      fakeLogger,
+      makeRegistry(dispatch),
+    );
+
+    expect(dispatch).toHaveBeenCalledWith("fs/readFile", { path: "a.ts" });
+    expect(feedback).toContain("🔌 MCP: fs/readFile");
+    expect(feedback).toContain("file contents");
+  });
+
+  it("reports an error (without throwing) for an unknown non-MCP tool", async () => {
+    const response = `<call_tool name="bogus">{"x":1}</call_tool>`;
+
+    const feedback = await executeToolCallsFromResponse(
+      response,
+      fakeProvider,
+      fakeLogger,
+      makeRegistry(),
+    );
+
+    expect(feedback).toContain("ERROR");
+    expect(feedback).toContain("is not implemented");
+  });
+
+  it("still dispatches the built-in weather tool (regression)", async () => {
+    const response = `<call_tool name="weather">London</call_tool>`;
+
+    const feedback = await executeToolCallsFromResponse(
+      response,
+      fakeProvider,
+      fakeLogger,
+      makeRegistry(),
+    );
+
+    expect(feedback).toContain("🌤️ Weather: London");
+    expect(feedback).toContain("WEATHER_OUTPUT");
+  });
+
+  it("surfaces an MCP dispatch failure as an error chunk", async () => {
+    const dispatch = vi.fn().mockRejectedValue(new Error("server exploded"));
+    const response = `<call_tool name="mcp:fs/readFile">{"path":"a.ts"}</call_tool>`;
+
+    const feedback = await executeToolCallsFromResponse(
+      response,
+      fakeProvider,
+      fakeLogger,
+      makeRegistry(dispatch),
+    );
+
+    expect(feedback).toContain("ERROR: server exploded");
+  });
+});
+
+describe("executeAgentToolsAndCommands", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("routes mcp: calls through the same dispatcher", async () => {
+    const dispatch = vi.fn().mockResolvedValue("MCP_RESULT");
+    const response = `<call_tool name="mcp:db/query">{"sql":"SELECT 1"}</call_tool>`;
+
+    const feedback = await executeAgentToolsAndCommands(
+      response,
+      "/workspace",
+      fakeProvider,
+      fakeLogger,
+      makeRegistry(dispatch),
+    );
+
+    expect(dispatch).toHaveBeenCalledWith("db/query", { sql: "SELECT 1" });
+    expect(feedback).toContain("🔌 MCP: db/query");
+    expect(feedback).toContain("MCP_RESULT");
+  });
+});

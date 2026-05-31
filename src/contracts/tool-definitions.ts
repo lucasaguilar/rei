@@ -1,4 +1,5 @@
 import type { ToolDefinition } from "../providers/model-provider.js";
+import type { McpTool } from "../tools/mcp/mcp-client.js";
 
 // ── Agent capabilities ────────────────────────────────────────────────────────
 
@@ -143,3 +144,74 @@ export const UTILITY_TOOLS: ToolDefinition[] = [
 
 /** All tools combined (agent + utility). */
 export const ALL_TOOLS: ToolDefinition[] = [...AGENT_TOOLS, ...UTILITY_TOOLS];
+
+/**
+ * Converts MCP tools from the registry into ToolDefinition format for
+ * structured function calling via completeChatWithTools.
+ *
+ * Names are prefixed with "mcp:" (e.g. "mcp:filesystem/readFile") to match
+ * the dispatch convention used in the tool handler. The registry returns names
+ * as "serverName/toolName" without the prefix, so the dispatch handler must
+ * strip "mcp:" before forwarding to McpRegistry.dispatch().
+ *
+ * McpTool.inputSchema is JSON Schema — structurally identical to
+ * ToolParameterSchema — so it maps directly. The fallback handles servers
+ * that declare no parameters for a tool.
+ */
+export function mcpToolsToDefinitions(mcpTools: McpTool[]): ToolDefinition[] {
+  return mcpTools.map((tool) => ({
+    type: "function" as const,
+    // MCP results must be fed back to the model so it can chain calls or act on them.
+    modelFeedback: true,
+    function: {
+      name: `mcp:${tool.name}`,
+      description: tool.description,
+      parameters: (tool.inputSchema ?? {
+        type: "object",
+        properties: {},
+        required: [],
+      }) as ToolDefinition["function"]["parameters"],
+    },
+  }));
+}
+
+/**
+ * Returns the set of tool names (as they appear in <call_tool> tags) that
+ * require their result to be fed back to the model.
+ *
+ * Used by the XML-path generators to decide whether to re-invoke the model
+ * after a tool call or simply show the result to the user (fire-and-forget).
+ * MCP tool names carry the "mcp:" prefix in the definitions but the parser
+ * strips nothing — the names in the Set must match what extractToolCalls returns.
+ */
+export function modelFeedbackToolNames(tools: ToolDefinition[]): Set<string> {
+  return new Set(
+    tools
+      .filter((t) => t.modelFeedback)
+      .map((t) => t.function.name),
+  );
+}
+
+/**
+ * Renders the connected MCP tools as a markdown block for the system prompt.
+ *
+ * Used by the XML-based modes (ask, planning, agent fallback) where tools are
+ * NOT passed through the structured `tools` API and must instead be advertised
+ * to the model as text so it knows what it can call. Names carry the same
+ * "mcp:" prefix as the structured path so the XML dispatcher can recognise and
+ * route them (stripping "mcp:" before calling McpRegistry.dispatch).
+ *
+ * Returns "" when no tools are available so callers can append unconditionally.
+ */
+export function formatMcpToolsForPrompt(mcpTools: McpTool[]): string {
+  if (mcpTools.length === 0) return "";
+
+  const lines = mcpTools.map((tool) => `- mcp:${tool.name} — ${tool.description}`);
+  return [
+    "## Available MCP Tools",
+    'Call these with XML and JSON arguments: `<call_tool name="mcp:server/tool">{ "arg": "value" }</call_tool>`',
+    "Emit only the tag (no preamble). You may chain multiple calls — each result is returned before your next step.",
+    "",
+    ...lines,
+  ].join("\n");
+}
