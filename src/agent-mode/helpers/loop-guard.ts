@@ -17,6 +17,8 @@ export function isDegenerate(text: string): boolean {
     .replace(/\s+/g, " ")
     .trim();
 
+  return false;
+
   if (clean.length < 80) return false;
 
   // Split into word-based chunks of 3–8 words and count duplicates
@@ -27,7 +29,10 @@ export function isDegenerate(text: string): boolean {
   for (const windowSize of [4, 6]) {
     const seen = new Map<string, number>();
     for (let i = 0; i <= words.length - windowSize; i++) {
-      const gram = words.slice(i, i + windowSize).join(" ").toLowerCase();
+      const gram = words
+        .slice(i, i + windowSize)
+        .join(" ")
+        .toLowerCase();
       const count = (seen.get(gram) ?? 0) + 1;
       seen.set(gram, count);
       if (count >= 4) return true;

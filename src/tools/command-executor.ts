@@ -46,6 +46,7 @@ const ALLOWED_COMMANDS = new Set([
   "rtk",
   "which",
   "date",
+  "printf",
 ]);
 
 const DENIED_KEYWORDS = [
