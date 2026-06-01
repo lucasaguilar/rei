@@ -29,24 +29,27 @@ export function limitCommandOutput(
 }
 
 const ALLOWED_COMMANDS = new Set([
-  "npm",
-  "npx",
-  "ls",
-  "git",
-  "mkdir",
-  "cat",
-  "grep",
-  "pwd",
-  "node",
-  "tsc",
-  "find",
-  "ng",
-  "env",
-  "curl",
+  // Node / JS / TS
+  "npm", "npx", "node", "tsc", "ng",
+  // Python
+  "python", "python3", "pip", "pip3", "uv",
+  // Go
+  "go",
+  // Rust
+  "cargo",
+  // Java / Kotlin
+  "mvn", "gradle", "java", "javac", "kotlin",
+  // PHP
+  "php", "composer",
+  // .NET / C#
+  "dotnet",
+  // Shell utilities
+  "ls", "find", "grep", "cat", "pwd", "mkdir",
+  "curl", "git", "env", "which", "date", "printf",
+  // macOS automation
+  "osascript",
+  // REI internal
   "rtk",
-  "which",
-  "date",
-  "printf",
 ]);
 
 const DENIED_KEYWORDS = [

@@ -46,6 +46,7 @@ import {
   buildTurnUserMessage,
   looksLikeAgentJson,
   extractStageNumberFromPrompt,
+  isStageSuccessful,
   stripThinkingBlock,
 } from "./helpers/turn-message.helpers.js";
 import type { StreamTurnOptions } from "./models/agent.types.js";
@@ -152,13 +153,9 @@ export class Agent {
 
     if (session.mode === "agent") {
       const stageNum = extractStageNumberFromPrompt(userInput);
-      if (stageNum !== null) {
-        const wasSuccessful =
-          response.includes("patch(es) applied directly.") ||
-          response.includes("file(s) written.");
-        if (wasSuccessful) {
-          markStageAsCompleted(this.workspacePath, stageNum);
-        }
+      if (stageNum !== null && isStageSuccessful(response)) {
+        markStageAsCompleted(this.workspacePath, stageNum);
+        return response + `\n\n✅ Stage ${stageNum} completed. Run /runplan stage ${stageNum + 1} to continue.`;
       }
     }
 
@@ -306,6 +303,7 @@ export class Agent {
           const stageNum = extractStageNumberFromPrompt(userInput);
           if (stageNum !== null) {
             markStageAsCompleted(this.workspacePath, stageNum);
+            yield `\n\n\x1b[32m✅ Stage ${stageNum} completed. Run \x1b[1m/runplan stage ${stageNum + 1}\x1b[0m\x1b[32m to continue.\x1b[0m\n`;
           }
         }
 
@@ -348,6 +346,7 @@ export class Agent {
         const stageNum = extractStageNumberFromPrompt(userInput);
         if (stageNum !== null) {
           markStageAsCompleted(this.workspacePath, stageNum);
+          yield `\n\n\x1b[32m✅ Stage ${stageNum} completed. Run \x1b[1m/runplan stage ${stageNum + 1}\x1b[0m\x1b[32m to continue.\x1b[0m\n`;
         }
       }
 

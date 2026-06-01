@@ -3,22 +3,48 @@ import * as path from 'node:path';
 import type { ChatMessage } from './types.js';
 
 const PLAN_TODO_FILE = '.rei/current-plan-todo.md';
+const PLAN_CONTENT_FILE = '.rei/current-plan-content.md';
 
 function getPlanTodoPath(workspacePath: string): string {
   return path.join(workspacePath, PLAN_TODO_FILE);
+}
+
+function getPlanContentPath(workspacePath: string): string {
+  return path.join(workspacePath, PLAN_CONTENT_FILE);
+}
+
+export function saveCurrentPlanContent(workspacePath: string, planContent: string): void {
+  const filePath = getPlanContentPath(workspacePath);
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, planContent, 'utf8');
+  } catch {
+    // Ignore errors
+  }
+}
+
+export function loadCurrentPlanContent(workspacePath: string): string | null {
+  const filePath = getPlanContentPath(workspacePath);
+  try {
+    if (fs.existsSync(filePath)) {
+      return fs.readFileSync(filePath, 'utf8');
+    }
+  } catch {
+    // Ignore errors
+  }
+  return null;
 }
 
 /**
  * Deletes the current-plan-todo.md file if it exists.
  */
 export function deletePlanTodoFile(workspacePath: string): void {
-  const filePath = getPlanTodoPath(workspacePath);
-  try {
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
+  for (const filePath of [getPlanTodoPath(workspacePath), getPlanContentPath(workspacePath)]) {
+    try {
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch {
+      // Ignore errors
     }
-  } catch {
-    // Ignore errors
   }
 }
 
@@ -37,7 +63,12 @@ export function readPlanTodoFile(workspacePath: string): string | null {
   return null;
 }
 
-export const STAGE_REGEX = /^(?:(#+)\s*(?:\*\*)?[^\w\d]*(?:stage\s+)?|(?:\d+\.\s*)\s*(?:\*\*)?[^\w\d]*(?:stage\s+)?|-\s*(?:\[\s*\]\s*)?(?:\*\*)?[^\w\d]*(?:stage\s+))(?:\*\*)?0*(\d+)\b(.*)$/i;
+// Matches stage headers in the canonical format enforced by the planning prompt:
+//   ## Stage N: title
+// Also accepts common fallback formats the model sometimes produces:
+//   ## Stage N — title  |  ### Stage N  |  - Stage N  |  ## N. title
+//   ### 📦 Stage N: title  (emoji/non-word chars between ## and "Stage")
+export const STAGE_REGEX = /^(?:(#+)[^\w\d]*(?:stage|etapa|step|paso)\s+|(?:\d+\.)\s*(?:\*\*)?(?:stage|etapa|step|paso)\s+|-\s*(?:\[\s*\]\s*)?(?:\*\*)?(?:stage|etapa|step|paso)\s+|(#+)\s*)(?:\*\*)?0*(\d+)\b(.*)$/i;
 
 export function isPlanMessage(content: string): boolean {
   const lines = content.split('\n');
@@ -61,8 +92,8 @@ export function initPlanTodoFile(workspacePath: string, planContent: string): vo
   for (const line of lines) {
     const match = line.match(STAGE_REGEX);
     if (match) {
-      const num = parseInt(match[2], 10);
-      const desc = match[3].replace(/^[\s.:\-*]+/, '').trim();
+      const num = parseInt(match[3], 10);
+      const desc = (match[4] ?? '').replace(/^[\s.:\-*]+/, '').trim();
       todoLines.push(`- [ ] **Stage ${num}:** ${desc || 'No description'}`);
       parsedCount++;
     }
@@ -80,6 +111,8 @@ export function initPlanTodoFile(workspacePath: string, planContent: string): vo
   } catch (err) {
     console.error('[PLAN TRACKER] Error creating plan todo file:', err);
   }
+
+  saveCurrentPlanContent(workspacePath, planContent);
 }
 
 /**
@@ -135,15 +168,31 @@ export function markStageAsCompleted(workspacePath: string, stageNumber: number)
 
     const content = fs.readFileSync(filePath, 'utf8');
     const lines = content.split('\n');
-    const targetRegex = new RegExp(`^-\\s*\\[\\s*\\]\\s*\\*\\*Stage\\s*${stageNumber}\\b`, 'i');
+
+    // Try patterns from most to least specific — stop at first match.
+    const patterns = [
+      // Canonical format written by initPlanTodoFile: "- [ ] **Stage N:**"
+      new RegExp(`^-\\s*\\[\\s*\\]\\s*\\*\\*Stage\\s*${stageNumber}[:\\s]`, 'i'),
+      // Without colon: "- [ ] **Stage N**"
+      new RegExp(`^-\\s*\\[\\s*\\]\\s*\\*\\*Stage\\s*${stageNumber}\\b`, 'i'),
+      // Spanish: "- [ ] **Etapa N"
+      new RegExp(`^-\\s*\\[\\s*\\].*\\bEtapa\\s*${stageNumber}\\b`, 'i'),
+      // Numbered list: "- [ ] N."
+      new RegExp(`^-\\s*\\[\\s*\\]\\s*${stageNumber}\\.`),
+      // Last resort: any unchecked line containing just that number
+      new RegExp(`^-\\s*\\[\\s*\\].*\\b${stageNumber}\\b`),
+    ];
 
     let modified = false;
-    for (let i = 0; i < lines.length; i++) {
-      if (targetRegex.test(lines[i])) {
-        lines[i] = lines[i].replace(/^-\s*\[\s*\]/, '- [x]');
-        modified = true;
-        break;
+    for (const pattern of patterns) {
+      for (let i = 0; i < lines.length; i++) {
+        if (pattern.test(lines[i])) {
+          lines[i] = lines[i].replace(/^(-\s*)\[\s*\]/, '$1[x]');
+          modified = true;
+          break;
+        }
       }
+      if (modified) break;
     }
 
     if (modified) {

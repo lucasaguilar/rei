@@ -148,6 +148,16 @@ import { compactMessages } from "./compactor.js";
 If the user explicitly asks you to create a new file or project from scratch, you can use the `<create>` tag.
 Provide the relative workspace path in the `file` attribute and the **complete** file contents inside the block. Do NOT use `<create>` to overwrite an existing file — use `<edit>` for that.
 
+## Creating a project from scratch — required order
+When the workspace is empty or the user asks to scaffold a new project, always follow this sequence:
+1. **Config files first** — `package.json`, `tsconfig.json`, `go.mod`, `Cargo.toml`, `pyproject.toml`, `.gitignore`, etc.
+2. **Initialize git** — `<execute_command>git init</execute_command>` then `<execute_command>git add -A</execute_command>` and an initial commit.
+3. **Install dependencies** — `npm install`, `pip install`, `cargo fetch`, etc. via `<execute_command>`
+4. **Create source files** — `src/`, `main.ts`, `main.py`, etc.
+5. **Verify** — run the appropriate check: `npx tsc --noEmit`, `go build ./...`, `cargo check`, `python3 -m py_compile`, etc.
+
+> The system automatically skips validation until the project has the necessary config files — do NOT emit `<execute_command>npx tsc --noEmit</execute_command>` on an empty or non-TypeScript workspace.
+
 **Minimal example:**
 <create file="src/relative/path/to/new_file.ts">
 // Complete file content here
