@@ -155,6 +155,9 @@ export async function handleInputTurn(
     let lastStatus: TurnStatus | undefined;
     // buffer accumulates non-thinking content (text + status/raw agent yields)
     let buffer = "";
+    // Tracks raw feedback chunks (command output, tool results) that were already
+    // shown live via streamText — excluded from the final markdown render to avoid duplication.
+    let liveDisplayedFeedback = "";
     // total output chars including thinking (for tok/s metrics)
     let totalOutputChars = 0;
     // track whether any thinking or status content was shown live
@@ -217,6 +220,8 @@ export async function handleInputTurn(
             liveContentShown = true;
           }
           actions.streamText(cleanToken);
+          // Track what was shown live so we can exclude it from the final markdown render
+          liveDisplayedFeedback += cleanToken;
         }
         // \x11 text tokens: silently buffered, rendered as markdown after stream ends
       }
@@ -224,9 +229,15 @@ export async function handleInputTurn(
 
     const endTime = Date.now();
 
-    // Strip ANSI codes and XML action tags to get clean markdown for rendering
+    // Strip ANSI codes and XML action tags to get clean markdown for rendering.
+    // Also remove any feedback that was already shown live (command output, tool results)
+    // to prevent it from appearing twice on screen.
     const edits = extractSREdits(buffer);
-    const finalContent = buffer
+    let cleanBuffer = buffer;
+    if (liveDisplayedFeedback) {
+      cleanBuffer = cleanBuffer.replace(liveDisplayedFeedback, "");
+    }
+    const finalContent = cleanBuffer
       .replace(/\x1b\[[0-9;]*m/g, "") // strip ANSI (e.g. from patch result)
       .replace(/<think>[\s\S]*?<\/think>/gi, "") // safety strip
       .replace(/<edit[\s\S]*?<\/edit>/gi, "")

@@ -8,7 +8,11 @@ import {
   executeAgentTurnWholefile,
 } from "../agent-mode/generator.js";
 import { executeAgentTurnWithTools } from "../agent-mode/generator-tools.js";
-import { formatMcpToolsForPrompt, mcpToolsToDefinitions, modelFeedbackToolNames } from "../contracts/tool-definitions.js";
+import {
+  formatMcpToolsForPrompt,
+  mcpToolsToDefinitions,
+  modelFeedbackToolNames,
+} from "../contracts/tool-definitions.js";
 import {
   buildSystemMessage,
   getAgentEditFormat,
@@ -57,8 +61,12 @@ import {
   ensureRepoMapIndexed,
   initWatcher,
 } from "./helpers/repo-map-indexer.js";
-import { isDegenerate, buildCommandSignature } from "../agent-mode/helpers/loop-guard.js";
-import { stripAllActionTags } from "../agent-mode/helpers/patch-helpers.js";
+import {
+  isDegenerate,
+  buildCommandSignature,
+} from "../agent-mode/helpers/loop-guard.js";
+import { stripAllActionTags, generateXmlToolCallId } from "../agent-mode/helpers/patch-helpers.js";
+import { formatCodeDiff } from "../cli/markdown-renderer.js";
 import { calculateContextBudget } from "../context/context-budget.js";
 import { estimateTokens } from "../chat/helpers/token-estimator.js";
 import {
@@ -195,11 +203,17 @@ export class Agent {
       let resolver: (() => void) | null = null;
       let done = false;
 
-      const onChunk = (chunk: { type: "thinking" | "text" | "status"; content: string }) => {
+      const onChunk = (chunk: {
+        type: "thinking" | "text" | "status";
+        content: string;
+      }) => {
         // \x10 = thinking (dim italic live), \x11 = text (buffered, rendered at end), status = raw
-        const encoded = chunk.type === "thinking" ? `\x10${chunk.content}`
-          : chunk.type === "text" ? `\x11${chunk.content}`
-          : chunk.content;
+        const encoded =
+          chunk.type === "thinking"
+            ? `\x10${chunk.content}`
+            : chunk.type === "text"
+              ? `\x11${chunk.content}`
+              : chunk.content;
         chunksQueue.push(encoded);
         resolver?.();
       };
@@ -223,7 +237,9 @@ export class Agent {
                 modelOverride: resolveModelForMode("agent"),
                 onChunk,
                 mcpRegistry: this.mcpRegistry,
-                modelFeedbackTools: modelFeedbackToolNames(mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools())),
+                modelFeedbackTools: modelFeedbackToolNames(
+                  mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools()),
+                ),
               })
             : executeAgentTurn({
                 provider: agentProvider,
@@ -234,7 +250,9 @@ export class Agent {
                 modelOverride: resolveModelForMode("agent"),
                 onChunk,
                 mcpRegistry: this.mcpRegistry,
-                modelFeedbackTools: modelFeedbackToolNames(mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools())),
+                modelFeedbackTools: modelFeedbackToolNames(
+                  mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools()),
+                ),
               })
       ).finally(() => {
         done = true;
@@ -264,13 +282,25 @@ export class Agent {
           this.workspacePath,
         );
         const msg = formatBatchPatchResult(result);
-        session.messages.push({ role: "assistant", content: stripThinkingBlock(outcome.response) });
+        session.messages.push({
+          role: "assistant",
+          content: stripThinkingBlock(outcome.response),
+        });
         options?.onStatus?.("producing_response");
         // Yield clean explanation as rendered text, then patch result as live status.
         // msg starts with \n\n---\n — strip leading whitespace so spacing is controlled by the CLI.
-        const explanation = stripAllActionTags(stripThinkingBlock(outcome.response));
+        const explanation = stripAllActionTags(
+          stripThinkingBlock(outcome.response),
+        );
         if (explanation) yield `\x11${explanation}`;
         yield msg.trimStart();
+        // Show diff for each applied patch so the user can see exactly what changed.
+        for (const edit of outcome.validProposedPatches) {
+          const applied = result.results.find((r) => r.file === edit.file && r.applied);
+          if (applied) {
+            yield `\n\x1b[1mArchivo:\x1b[0m ${edit.file}\n${formatCodeDiff(edit.search, edit.replace)}`;
+          }
+        }
 
         if (result.success) {
           const stageNum = extractStageNumberFromPrompt(userInput);
@@ -292,7 +322,9 @@ export class Agent {
       );
 
       if (feedback) {
-        const cleanExplanation = stripAllActionTags(stripThinkingBlock(outcome.response));
+        const cleanExplanation = stripAllActionTags(
+          stripThinkingBlock(outcome.response),
+        );
         session.messages.push({
           role: "assistant",
           content: stripThinkingBlock(outcome.response + feedback),
@@ -304,7 +336,10 @@ export class Agent {
       }
 
       // Si no hay parches ni comandos, solo responde
-      session.messages.push({ role: "assistant", content: stripThinkingBlock(outcome.response) });
+      session.messages.push({
+        role: "assistant",
+        content: stripThinkingBlock(outcome.response),
+      });
       options?.onStatus?.("producing_response");
       // Plain text response — yield as text for markdown rendering
       yield `\x11${stripThinkingBlock(outcome.response)}`;
@@ -330,7 +365,9 @@ export class Agent {
         : 7;
       // Pre-compute which tool names require their result fed back to the model
       // (MCP tools). Fire-and-forget tools (weather, search) are NOT in this set.
-      const feedbackTools = modelFeedbackToolNames(mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools()));
+      const feedbackTools = modelFeedbackToolNames(
+        mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools()),
+      );
 
       while (hasMoreCommands && depth < maxDepth) {
         options?.onStatus?.("producing_response");
@@ -340,10 +377,16 @@ export class Agent {
         let done = false;
         let finishReason = "stop";
 
-        const onChunk = (chunk: { type: "thinking" | "text" | "status"; content: string }) => {
-          const encoded = chunk.type === "thinking" ? `\x10${chunk.content}`
-            : chunk.type === "text" ? `\x11${chunk.content}`
-            : chunk.content;
+        const onChunk = (chunk: {
+          type: "thinking" | "text" | "status";
+          content: string;
+        }) => {
+          const encoded =
+            chunk.type === "thinking"
+              ? `\x10${chunk.content}`
+              : chunk.type === "text"
+                ? `\x11${chunk.content}`
+                : chunk.content;
           chunksQueue.push(encoded);
           resolver?.();
         };
@@ -354,7 +397,9 @@ export class Agent {
           model: resolveModelForMode(session.mode),
           mode: session.mode,
           onChunk,
-          onFinish: (r) => { finishReason = r; },
+          onFinish: (r) => {
+            finishReason = r;
+          },
         }).finally(() => {
           done = true;
           resolver?.();
@@ -376,21 +421,36 @@ export class Agent {
         // Auto-continue if truncated
         while (finishReason === "length" && truncationCount < 3) {
           truncationCount++;
-          this.logger.logInfo(`[truncation] ask/planning response cut off (${truncationCount}/3), continuing...`);
+          this.logger.logInfo(
+            `[truncation] ask/planning response cut off (${truncationCount}/3), continuing...`,
+          );
           const contMessages = [
             ...currentMessages,
-            { role: "assistant" as const, content: stripThinkingBlock(streamResponse) },
-            { role: "user" as const, content: "Your previous response was cut off by the output token limit. Continue EXACTLY from where you left off — do NOT repeat, summarize, or restart." },
+            {
+              role: "assistant" as const,
+              content: stripThinkingBlock(streamResponse),
+            },
+            {
+              role: "user" as const,
+              content:
+                "Your previous response was cut off by the output token limit. Continue EXACTLY from where you left off — do NOT repeat, summarize, or restart.",
+            },
           ];
           const contChunksQueue: string[] = [];
           let contResolver: (() => void) | null = null;
           let contDone = false;
           finishReason = "stop";
 
-          const contOnChunk = (chunk: { type: "thinking" | "text" | "status"; content: string }) => {
-            const encoded = chunk.type === "thinking" ? `\x10${chunk.content}`
-              : chunk.type === "text" ? `\x11${chunk.content}`
-              : chunk.content;
+          const contOnChunk = (chunk: {
+            type: "thinking" | "text" | "status";
+            content: string;
+          }) => {
+            const encoded =
+              chunk.type === "thinking"
+                ? `\x10${chunk.content}`
+                : chunk.type === "text"
+                  ? `\x11${chunk.content}`
+                  : chunk.content;
             contChunksQueue.push(encoded);
             contResolver?.();
           };
@@ -401,14 +461,21 @@ export class Agent {
             model: resolveModelForMode(session.mode),
             mode: session.mode,
             onChunk: contOnChunk,
-            onFinish: (r) => { finishReason = r; },
-          }).finally(() => { contDone = true; contResolver?.(); });
+            onFinish: (r) => {
+              finishReason = r;
+            },
+          }).finally(() => {
+            contDone = true;
+            contResolver?.();
+          });
 
           while (!contDone || contChunksQueue.length > 0) {
             if (contChunksQueue.length > 0) {
               yield contChunksQueue.shift()!;
             } else {
-              await new Promise<void>((resolve) => { contResolver = resolve; });
+              await new Promise<void>((resolve) => {
+                contResolver = resolve;
+              });
             }
           }
 
@@ -418,7 +485,9 @@ export class Agent {
 
         // ── Degenerate response detection ──────────────────────────────
         if (isDegenerate(streamResponse)) {
-          this.logger.logInfo("[loop-guard] Degenerate response detected, breaking loop");
+          this.logger.logInfo(
+            "[loop-guard] Degenerate response detected, breaking loop",
+          );
           yield `\n\x1b[31m⚠️  [REI] Degenerate response detected (repetitive text). ` +
             `The model entered a generation loop. ` +
             `Try: /session new, reducing the context, or increasing OLLAMA_NUM_CTX.\x1b[0m\n`;
@@ -436,24 +505,30 @@ export class Agent {
           fileRequests.length > 0
         ) {
           // ── Command loop detection ────────────────────────────────────
-          const cmdSignature = buildCommandSignature(commands, toolCalls, fileRequests);
-          if (cmdSignature && cmdSignature === lastCmdSignature) {
-            this.logger.logInfo("[loop-guard] Repeated command signature detected, breaking loop", { cmdSignature });
-            yield `\n\x1b[31m⚠️  [REI] Loop detected: the model is repeating the same commands/tools. ` +
-              `Stopping execution to prevent an infinite loop.\x1b[0m\n`;
-            hasMoreCommands = false;
-            break;
-          }
+          const cmdSignature = buildCommandSignature(
+            commands,
+            toolCalls,
+            fileRequests,
+          );
+
+          // if (cmdSignature && cmdSignature === lastCmdSignature) {
+          //   this.logger.logInfo("[loop-guard] Repeated command signature detected, breaking loop", { cmdSignature });
+          //   yield `\n\x1b[31m⚠️  [REI] Loop detected: the model is repeating the same commands/tools. ` +
+          //     `Stopping execution to prevent an infinite loop.\x1b[0m\n`;
+          //   hasMoreCommands = false;
+          //   break;
+          // }
           lastCmdSignature = cmdSignature;
 
           depth++;
-          const { executionFeedback, userVisibleFeedback } = await executeAndFormatTurnActions({
-            response: streamResponse,
-            workspacePath: this.workspacePath,
-            provider: this.provider,
-            logger: this.logger,
-            mcpRegistry: this.mcpRegistry,
-          });
+          const { executionFeedback, userVisibleFeedback } =
+            await executeAndFormatTurnActions({
+              response: streamResponse,
+              workspacePath: this.workspacePath,
+              provider: this.provider,
+              logger: this.logger,
+              mcpRegistry: this.mcpRegistry,
+            });
 
           yield userVisibleFeedback;
 
@@ -463,15 +538,27 @@ export class Agent {
           const hasFeedbackCall =
             commands.length > 0 ||
             fileRequests.length > 0 ||
-            toolCalls.some((c) => feedbackTools.has(c.name) || c.name.startsWith("mcp:"));
+            toolCalls.some(
+              (c) => feedbackTools.has(c.name) || c.name.startsWith("mcp:"),
+            );
 
           if (hasFeedbackCall) {
+            const turnId = generateXmlToolCallId("turn");
+            const toolName = commands.length > 0 ? "execute_command"
+              : fileRequests.length > 0 ? "request_files"
+              : toolCalls.map((c) => c.name).join(",") || "call_tool";
             currentMessages = [
               ...currentMessages,
-              { role: "assistant", content: stripThinkingBlock(streamResponse) },
               {
-                role: "user",
-                content: `System: Tool results:\n${executionFeedback}\n\nContinue your task — call more tools if needed, or give your final answer when you have everything you need.`,
+                role: "assistant",
+                content: stripThinkingBlock(streamResponse),
+                tool_calls: [{ id: turnId, type: "function", function: { name: toolName, arguments: "{}" } }],
+              },
+              {
+                role: "tool",
+                tool_call_id: turnId,
+                name: toolName,
+                content: executionFeedback,
               },
             ];
           } else {
@@ -507,7 +594,9 @@ export class Agent {
 
       // ── maxDepth exhausted: save what we have and warn ──────────────
       if (depth >= maxDepth) {
-        this.logger.logInfo(`[loop-guard] ask/planning loop exhausted ${maxDepth} iterations`);
+        this.logger.logInfo(
+          `[loop-guard] ask/planning loop exhausted ${maxDepth} iterations`,
+        );
         const lastAssistantMsgs = currentMessages
           .slice(messagesForModel.length)
           .filter((m) => m.role === "assistant")
@@ -622,7 +711,9 @@ export class Agent {
     // but the XML modes (ask, planning, agent fallback) rely solely on this text
     // to discover what they can call.
     if (this.mcpRegistry.hasTools()) {
-      const mcpBlock = formatMcpToolsForPrompt(this.mcpRegistry.getAvailableTools());
+      const mcpBlock = formatMcpToolsForPrompt(
+        this.mcpRegistry.getAvailableTools(),
+      );
       if (mcpBlock) systemContent += `\n\n${mcpBlock}`;
     }
 
@@ -653,7 +744,7 @@ export class Agent {
     //     this.logger.logInfo("[hardware] Warnings detected", { warnings: hwStatus.warnings });
     //   }
     // } else {
-      this.pendingHardwareWarnings = [];
+    this.pendingHardwareWarnings = [];
     // }
 
     onStatus?.("building_context");
@@ -674,7 +765,9 @@ export class Agent {
       10,
     );
     const responseReserve = parseInt(
-      process.env.OLLAMA_NUM_PREDICT ?? process.env.REI_RESPONSE_RESERVE ?? "16384",
+      process.env.OLLAMA_NUM_PREDICT ??
+        process.env.REI_RESPONSE_RESERVE ??
+        "16384",
       10,
     );
     const systemMessage = session.messages.find((m) => m.role === "system");
@@ -698,11 +791,14 @@ export class Agent {
     });
 
     if (context.budgetTrimmed) {
-      this.logger.logInfo("[context-budget] Context trimmed to fit token window", {
-        numCtx,
-        responseReserve,
-        tokenBudget,
-      });
+      this.logger.logInfo(
+        "[context-budget] Context trimmed to fit token window",
+        {
+          numCtx,
+          responseReserve,
+          tokenBudget,
+        },
+      );
     }
 
     if (context.ragResults && context.ragResults.length > 0) {
@@ -778,7 +874,9 @@ export class Agent {
       ? parseInt(process.env.REI_MAX_TURNS, 10)
       : 7;
     let lastResponse = "";
-    const feedbackTools = modelFeedbackToolNames(mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools()));
+    const feedbackTools = modelFeedbackToolNames(
+      mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools()),
+    );
 
     while (hasMoreCommands && depth < maxDepth) {
       const raw = await this.provider.completeChat(currentMessages, {
@@ -808,7 +906,10 @@ export class Agent {
         lastResponse = raw;
       }
 
-      currentMessages.push({ role: "assistant", content: stripThinkingBlock(lastResponse) });
+      currentMessages.push({
+        role: "assistant",
+        content: stripThinkingBlock(lastResponse),
+      });
 
       const commands = extractCommandRequests(lastResponse);
       const toolCalls = extractToolCalls(lastResponse);
@@ -887,7 +988,10 @@ export class Agent {
         mcpRegistry: this.mcpRegistry,
       });
       if (outcome.validProposedPatches?.length) {
-        const result = await applySREditBatchFS(outcome.validProposedPatches, this.workspacePath);
+        const result = await applySREditBatchFS(
+          outcome.validProposedPatches,
+          this.workspacePath,
+        );
         const msg = formatBatchPatchResult(result);
         return outcome.response + msg;
       }
@@ -904,7 +1008,9 @@ export class Agent {
             logger: this.logger,
             modelOverride: resolveModelForMode("agent"),
             mcpRegistry: this.mcpRegistry,
-            modelFeedbackTools: modelFeedbackToolNames(mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools())),
+            modelFeedbackTools: modelFeedbackToolNames(
+              mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools()),
+            ),
           })
         : await executeAgentTurn({
             provider: agentProvider,
@@ -914,7 +1020,9 @@ export class Agent {
             logger: this.logger,
             modelOverride: resolveModelForMode("agent"),
             mcpRegistry: this.mcpRegistry,
-            modelFeedbackTools: modelFeedbackToolNames(mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools())),
+            modelFeedbackTools: modelFeedbackToolNames(
+              mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools()),
+            ),
           });
 
     // Aplica los parches válidos directamente
@@ -927,8 +1035,14 @@ export class Agent {
         this.workspacePath,
       );
       const msg = formatBatchPatchResult(result);
-      const explanation = stripAllActionTags(stripThinkingBlock(outcome.response));
-      return (explanation ? explanation + "\n\n" : "") + msg;
+      const explanation = stripAllActionTags(
+        stripThinkingBlock(outcome.response),
+      );
+      const diffs = outcome.validProposedPatches
+        .filter((edit) => result.results.find((r) => r.file === edit.file && r.applied))
+        .map((edit) => `\n\x1b[1mArchivo:\x1b[0m ${edit.file}\n${formatCodeDiff(edit.search, edit.replace)}`)
+        .join("");
+      return (explanation ? explanation + "\n\n" : "") + msg + diffs;
     }
     const feedback = await executeAgentToolsAndCommands(
       outcome.response,
@@ -936,7 +1050,9 @@ export class Agent {
       this.provider,
       this.logger,
     );
-    const explanation = stripAllActionTags(stripThinkingBlock(outcome.response));
+    const explanation = stripAllActionTags(
+      stripThinkingBlock(outcome.response),
+    );
     return explanation + (feedback ? "\n\n" + feedback : "");
   }
 

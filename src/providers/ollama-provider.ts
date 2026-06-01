@@ -5,7 +5,7 @@ import type {
   ToolDefinition,
   ChatCompletionWithTools,
 } from "./model-provider.js";
-import { openaiCompleteChatWithTools } from "./openai-tool-caller.js";
+import { openaiCompleteChatWithTools, toApiMessage } from "./openai-tool-caller.js";
 
 interface OllamaChatResponse {
   message?: {
@@ -229,7 +229,7 @@ export class OllamaProvider implements ModelProvider {
       },
       body: JSON.stringify({
         model: resolvedModel,
-        messages,
+        messages: messages.map(toApiMessage),
         stream,
         keep_alive: this.keepAlive,
         // temperature + repetition penalties live inside ollamaOptions now.

@@ -3,6 +3,7 @@ import type {
   AgentWholeFileEdit,
 } from "../contracts/agent-interaction.types.js";
 import { formatCodeDiff } from "../cli/markdown-renderer.js";
+import { stripThinkingBlock } from "../core/helpers/turn-message.helpers.js";
 
 function normalizeBlockContent(raw: string): string {
   let content = raw.replace(/\r\n/g, "\n");
@@ -54,7 +55,7 @@ export function formatSREditsForLog(edits: AgentSREdit[]): Array<{
  */
 export function extractFileRequests(response: string): string[] {
   const matches = [
-    ...response.matchAll(/<request_files>(.*?)<\/request_files>/gs),
+    ...stripThinkingBlock(response).matchAll(/<request_files>(.*?)<\/request_files>/gs),
   ];
   const files = new Set<string>();
   for (const match of matches) {
@@ -73,7 +74,7 @@ export function extractFileRequests(response: string): string[] {
 export function extractSREdits(response: string): AgentSREdit[] {
   const edits: AgentSREdit[] = [];
   const editRegex = /<edit\s+file="([^"]+)">([\s\S]*?)<\/edit>/gi;
-  const matches = [...response.matchAll(editRegex)];
+  const matches = [...stripThinkingBlock(response).matchAll(editRegex)];
 
   for (const match of matches) {
     const file = match[1].trim();
@@ -159,9 +160,11 @@ function normalizeCommandContent(raw: string): string {
  * Extracts <execute_command> tags from the agent response.
  */
 export function extractCommandRequests(response: string): string[] {
-  const matches = [
-    ...response.matchAll(/<execute_command>([\s\S]*?)<\/execute_command>/gi),
-  ];
+  // Strip thinking blocks first — the model sometimes closes </think> inside
+  // an <execute_command> tag, causing the entire reasoning trace to be captured
+  // as the command string instead of the actual command.
+  const clean = stripThinkingBlock(response);
+  const matches = [...clean.matchAll(/<execute_command>([\s\S]*?)<\/execute_command>/gi)];
   return matches.map((match) => normalizeCommandContent(match[1]));
 }
 
@@ -173,7 +176,7 @@ export function extractToolCalls(
   response: string,
 ): Array<{ name: string; args: Record<string, unknown> }> {
   const matches = [
-    ...response.matchAll(
+    ...stripThinkingBlock(response).matchAll(
       /<call_tool\s+name="([^"]+)">([\s\S]*?)<\/call_tool>/gi,
     ),
   ];
