@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "spotify": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "/Users/lucas/www/spotify-mcp-server/build/index.js"
+      ]
+    }
+  }
+}

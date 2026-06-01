@@ -24,8 +24,10 @@ interface OpenAIToolCallResponse {
 /**
  * Converts a ChatMessage to the OpenAI API wire format.
  * Handles the tool and assistant-with-tool_calls special cases.
+ * Exported so providers can use it in their streamChat serialization,
+ * enabling role:"tool" + tool_call_id round-trips on the XML path.
  */
-function toApiMessage(msg: ChatMessage): Record<string, unknown> {
+export function toApiMessage(msg: ChatMessage): Record<string, unknown> {
   if (msg.role === "tool") {
     return {
       role: "tool",

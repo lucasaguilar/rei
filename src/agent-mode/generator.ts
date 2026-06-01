@@ -30,6 +30,7 @@ import {
   handleCreateFileBlocks,
   validateProposedPatches,
   stripAllActionTags,
+  generateXmlToolCallId,
   type ExecutionResult,
 } from "./helpers/patch-helpers.js";
 import { streamTurnWithInterception } from "./helpers/token-streamer.js";
@@ -249,11 +250,13 @@ export async function executeAgentTurn(params: {
         fileRequests,
       );
 
-      currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
+      const rfId = generateXmlToolCallId("request_files");
       currentMessages.push({
-        role: "user",
-        content: `Here are the requested files:\n${contextMessage}\nPlease continue your task.`,
+        role: "assistant",
+        content: stripThinkingBlock(rawResponse),
+        tool_calls: [{ id: rfId, type: "function", function: { name: "request_files", arguments: JSON.stringify({ files: fileRequests }) } }],
       });
+      currentMessages.push({ role: "tool", tool_call_id: rfId, name: "request_files", content: contextMessage });
       continue;
     }
 
@@ -418,11 +421,13 @@ export async function executeAgentTurn(params: {
       }
 
       if (loopCount < MAX_TURNS) {
-        currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
+        const cmdId = generateXmlToolCallId("execute_command");
         currentMessages.push({
-          role: "user",
-          content: `Command execution results:\n${commandFeedback}\nPlease continue with the task.`,
+          role: "assistant",
+          content: stripThinkingBlock(rawResponse),
+          tool_calls: [{ id: cmdId, type: "function", function: { name: "execute_command", arguments: JSON.stringify({ commands }) } }],
         });
+        currentMessages.push({ role: "tool", tool_call_id: cmdId, name: "execute_command", content: commandFeedback });
         continue;
       }
 
@@ -447,11 +452,14 @@ export async function executeAgentTurn(params: {
       const toolFeedback = await executeToolCallsFromResponse(rawResponse, provider, logger, mcpRegistry);
 
       if (hasFeedbackCall && loopCount < MAX_TURNS) {
-        currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
+        const tcId = generateXmlToolCallId("call_tool");
+        const toolNames = toolCalls.map((c) => c.name).join(",");
         currentMessages.push({
-          role: "user",
-          content: `Tool call results:\n${toolFeedback}\nPlease continue with the task.`,
+          role: "assistant",
+          content: stripThinkingBlock(rawResponse),
+          tool_calls: [{ id: tcId, type: "function", function: { name: toolNames, arguments: JSON.stringify(toolCalls.map((c) => c.args)) } }],
         });
+        currentMessages.push({ role: "tool", tool_call_id: tcId, name: toolNames, content: toolFeedback });
         continue;
       }
       // Fire-and-forget only, or at max turns: append result to response and return.
@@ -598,11 +606,13 @@ export async function executeAgentTurnWholefile(params: {
         workspacePath,
         fileRequests,
       );
-      currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
+      const rfId2 = generateXmlToolCallId("request_files");
       currentMessages.push({
-        role: "user",
-        content: `Here are the requested files:\n${contextMessage}\nPlease continue your task.`,
+        role: "assistant",
+        content: stripThinkingBlock(rawResponse),
+        tool_calls: [{ id: rfId2, type: "function", function: { name: "request_files", arguments: JSON.stringify({ files: fileRequests }) } }],
       });
+      currentMessages.push({ role: "tool", tool_call_id: rfId2, name: "request_files", content: contextMessage });
       continue;
     }
 
@@ -726,11 +736,13 @@ export async function executeAgentTurnWholefile(params: {
       }
 
       if (loopCount < MAX_TURNS) {
-        currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
+        const cmdId2 = generateXmlToolCallId("execute_command");
         currentMessages.push({
-          role: "user",
-          content: `Command execution results:\n${commandFeedback}\nPlease continue with the task.`,
+          role: "assistant",
+          content: stripThinkingBlock(rawResponse),
+          tool_calls: [{ id: cmdId2, type: "function", function: { name: "execute_command", arguments: JSON.stringify({ commands }) } }],
         });
+        currentMessages.push({ role: "tool", tool_call_id: cmdId2, name: "execute_command", content: commandFeedback });
         continue;
       }
 
@@ -760,11 +772,14 @@ export async function executeAgentTurnWholefile(params: {
       const toolFeedback = await executeToolCallsFromResponse(rawResponse, provider, logger, mcpRegistry);
 
       if (hasFeedbackCall && loopCount < MAX_TURNS) {
-        currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
+        const tcId2 = generateXmlToolCallId("call_tool");
+        const toolNames2 = toolCalls.map((c) => c.name).join(",");
         currentMessages.push({
-          role: "user",
-          content: `Tool call results:\n${toolFeedback}\nPlease continue with the task.`,
+          role: "assistant",
+          content: stripThinkingBlock(rawResponse),
+          tool_calls: [{ id: tcId2, type: "function", function: { name: toolNames2, arguments: JSON.stringify(toolCalls.map((c) => c.args)) } }],
         });
+        currentMessages.push({ role: "tool", tool_call_id: tcId2, name: toolNames2, content: toolFeedback });
         continue;
       }
       return finalizeOutcome(

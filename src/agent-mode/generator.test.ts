@@ -20,6 +20,7 @@ vi.mock("./helpers/patch-helpers.js", () => ({
   validateProposedPatches: vi.fn().mockResolvedValue({ success: false, feedback: "no match" }),
   handleCreateFileBlocks: vi.fn().mockResolvedValue(""),
   stripAllActionTags: vi.fn((s: string) => s),
+  generateXmlToolCallId: vi.fn((name: string) => `xml_${name}_test`),
   finalizeOutcome: vi.fn((logger: unknown, result: { response: string; validProposedPatches: unknown[]; failed?: boolean }, proposed: number, applied: number) => ({
     response: result.response,
     validProposedPatches: result.validProposedPatches,

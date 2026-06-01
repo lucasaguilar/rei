@@ -245,3 +245,15 @@ export function stripAllActionTags(text: string): string {
     .replace(/<(edit|create|request_files|execute_command|call_tool|wholefile)\b[\s\S]*?<\/\1>/gi, "")
     .trim();
 }
+
+let _xmlToolSeq = 0;
+
+/**
+ * Generates a stable, unique ID for a synthetic XML tool call.
+ * Used to pair role:"assistant" tool_calls with role:"tool" results
+ * on the XML agent path (where the model emits tags instead of JSON function calls).
+ */
+export function generateXmlToolCallId(toolName: string): string {
+  _xmlToolSeq = (_xmlToolSeq + 1) % 100000;
+  return `xml_${toolName}_${_xmlToolSeq.toString().padStart(5, "0")}`;
+}

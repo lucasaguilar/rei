@@ -5,7 +5,7 @@ import type {
   ToolDefinition,
   ChatCompletionWithTools,
 } from "./model-provider.js";
-import { openaiCompleteChatWithTools } from "./openai-tool-caller.js";
+import { openaiCompleteChatWithTools, toApiMessage } from "./openai-tool-caller.js";
 
 interface OpenRouterChatChoice {
   message?: {
@@ -262,7 +262,7 @@ export class OpenRouterProvider implements ModelProvider {
       },
       body: JSON.stringify({
         model: modelOverride ?? this.model,
-        messages,
+        messages: messages.map(toApiMessage),
         stream,
         temperature: 0,
       }),

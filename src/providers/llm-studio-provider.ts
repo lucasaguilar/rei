@@ -5,7 +5,7 @@ import type {
   ToolDefinition,
   ChatCompletionWithTools,
 } from "./model-provider.js";
-import { openaiCompleteChatWithTools } from "./openai-tool-caller.js";
+import { openaiCompleteChatWithTools, toApiMessage } from "./openai-tool-caller.js";
 
 interface LlmStudioChatChoice {
   message?: {
@@ -296,7 +296,7 @@ export class LlmStudioProvider implements ModelProvider {
 
     const requestBody: Record<string, unknown> = {
       model: modelOverride ?? this.model,
-      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+      messages: messages.map(toApiMessage),
       stream,
       temperature: this.temperature,          // non-zero to avoid greedy repetition loops
       max_tokens: this.maxTokens,             // hard cap — prevents runaway generation
