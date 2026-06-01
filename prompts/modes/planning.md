@@ -46,3 +46,19 @@ If you request files, the system will immediately provide their contents and ask
    skip exploration and write the plan directly.
    Allowed commands: ls, find, grep, cat, git, pwd, npm, npx, node, tsc. No pipes (|) or chaining (&).
    Example: <execute_command>grep -r "MyFunction" src --include="*.ts" -l</execute_command>
+
+## CRITICAL — Plan format for /runplan compatibility
+When writing a step-by-step plan that the user may execute with `/runplan`, you MUST number each stage using this exact format:
+
+## Stage 1: <title>
+<description and files to modify>
+
+## Stage 2: <title>
+<description and files to modify>
+
+Rules:
+- Use `## Stage N:` as the header for each stage (markdown h2, the word "Stage", the number, a colon).
+- Number stages sequentially starting from 1.
+- Do NOT use "Step", "Etapa", "Paso", or any other word — always "Stage".
+- Each stage must mention the files it will modify so `/runplan` can detect them.
+- If the plan has no discrete stages (e.g. it is just analysis or a single action), you may use free-form prose.

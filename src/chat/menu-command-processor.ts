@@ -20,6 +20,7 @@ import {
   recreatePlanTodoFileFromSession,
   savePlanToFile,
   loadPlanFromFile,
+  loadCurrentPlanContent,
   STAGE_REGEX,
   isPlanMessage,
 } from "./plan-tracker.js";
@@ -265,23 +266,27 @@ export async function processMenuCommand(
       };
     }
 
-    const lastPlanMsg = [...session.messages]
-      .reverse()
-      .find(
-        (m) =>
-          m.role === "assistant" &&
-          m.content &&
-          isPlanMessage(m.content),
-      );
+    // Prefer the persisted plan file over session search — avoids picking up
+    // agent execution responses that also contain "## Stage N:" headers.
+    const savedPlanContent = loadCurrentPlanContent(workspacePath);
+    const planContent = savedPlanContent ?? (() => {
+      const lastPlanMsg = [...session.messages]
+        .reverse()
+        .find(
+          (m) =>
+            m.role === "assistant" &&
+            m.content &&
+            isPlanMessage(m.content),
+        );
+      return lastPlanMsg?.content ?? null;
+    })();
 
-    if (!lastPlanMsg || !lastPlanMsg.content) {
+    if (!planContent) {
       return {
         success: false,
         response: "[RUNPLAN] No plan was found in this session.",
       };
     }
-
-    const planContent = lastPlanMsg.content;
     let targetContent = planContent;
     let stageTitle = "";
 
@@ -305,9 +310,9 @@ export async function processMenuCommand(
 
       for (let i = 0; i < lines.length; i++) {
         const m = lines[i].match(STAGE_REGEX);
-        if (m && parseInt(m[2], 10) === stageNum) {
+        if (m && parseInt(m[3], 10) === stageNum) {
           startIndex = i;
-          headerLevel = m[1] ? m[1].length : 0;
+          headerLevel = (m[1] ?? m[2] ?? "").length;
           stageTitle = lines[i];
           break;
         }

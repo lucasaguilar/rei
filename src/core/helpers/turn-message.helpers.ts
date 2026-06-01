@@ -145,6 +145,42 @@ export function extractStageNumberFromPrompt(prompt: string): number | null {
 }
 
 /**
+ * Returns true when an agent response indicates a stage completed successfully.
+ * Covers: patches applied, files written, files created, commands run, or
+ * any non-error text response (model confirmed completion in prose).
+ */
+export function isStageSuccessful(response: string): boolean {
+  if (!response.trim()) return false;
+  // Explicit failure markers
+  const failureMarkers = [
+    "could not complete",
+    "failed to apply",
+    "validation failed",
+    "REI could not complete",
+  ];
+  if (failureMarkers.some((m) => response.toLowerCase().includes(m.toLowerCase()))) {
+    return false;
+  }
+  // Explicit success markers
+  const successMarkers = [
+    "patch(es) applied directly",
+    "file(s) written",
+    "file created",
+    "successfully created",
+    "successfully applied",
+    "stage complete",
+    "task complete",
+    "done",
+  ];
+  if (successMarkers.some((m) => response.toLowerCase().includes(m.toLowerCase()))) {
+    return true;
+  }
+  // If the model produced a non-empty prose response without failure markers,
+  // treat it as successful — the agent loop already validated before returning.
+  return response.trim().length > 50;
+}
+
+/**
  * Strips all execution XML action tags (<execute_command>, <call_tool>, <request_files>)
  * and model reasoning blocks (<think>) from a response string so they are never
  * persisted into session history and re-sent to the LLM as wasted context tokens.
