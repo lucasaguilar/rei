@@ -19,8 +19,13 @@ const CHECK_INTERVAL = 100;
  *    (no early abort, but still caught before the command/tool loop runs).
  */
 export function withDegenerateGuard(provider: ModelProvider): ModelProvider {
-  return {
+  const wrapped: ModelProvider = {
     ...provider,
+
+    // Explicitly delegate prototype methods to prevent losing them during spread copy
+    complete(prompt: string, options?: CompletionOptions): Promise<string> {
+      return provider.complete(prompt, options);
+    },
 
     async completeChat(
       messages: ChatMessage[],
@@ -78,4 +83,13 @@ export function withDegenerateGuard(provider: ModelProvider): ModelProvider {
         }
       : undefined,
   };
+
+  // Conditionally delegate tool-calling capability if supported by the underlying provider
+  if (provider.completeChatWithTools) {
+    wrapped.completeChatWithTools = (messages, tools, options) => {
+      return provider.completeChatWithTools!(messages, tools, options);
+    };
+  }
+
+  return wrapped;
 }

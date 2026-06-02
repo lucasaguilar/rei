@@ -127,12 +127,14 @@ function isInsideXmlBlock(text: string): boolean {
 export async function handleInputTurn(
   trimmed: string,
   ctx: InputHandlerContext,
+  options?: { displayText?: string },
 ): Promise<void> {
   const { state, agent, session, transcript, actions } = ctx;
 
-  // Show user input immediately
+  // Show user input immediately — use a short label when the actual prompt is internal/verbose
+  const displayLabel = options?.displayText ?? trimmed;
   actions.pushTranscript("");
-  actions.pushTranscript(`\x1b[1;36mYou: ${trimmed}\x1b[0m`);
+  actions.pushTranscript(`\x1b[1;36mYou: ${displayLabel}\x1b[0m`);
   actions.pushTranscript("");
   actions.draw();
 

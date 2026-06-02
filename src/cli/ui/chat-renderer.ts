@@ -97,9 +97,9 @@ export class ChatRenderer {
           return `${head}${state.inputHistory[state.historySearchIndex]}`;
         })()
       : state.busy && state.activeStatus
-        ? `[REI] Thinking ${SPINNER_FRAMES[state.spinnerIndex % SPINNER_FRAMES.length]} ${
+        ? `\x1b[1;36m[REI] Thinking ${SPINNER_FRAMES[state.spinnerIndex % SPINNER_FRAMES.length]} ${
             THINKING_TEXT[state.activeStatus as TurnStatus]
-          }`
+          }\x1b[0m`
         : SHORTCUT_HINT;
 
     const uiLines: string[] = [];

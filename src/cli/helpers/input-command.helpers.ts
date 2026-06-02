@@ -2,6 +2,7 @@ import { processMenuCommand } from "../../chat/menu-command-processor.js";
 import type { InputHandlerContext } from "../models/input-handler.types.js";
 import { createModelProvider } from "../../providers/provider-factory.js";
 import { Agent } from "../../core/agent.js";
+import { handleInputTurn } from "./input-turn.helpers.js";
 
 export async function handleInputCommand(
   trimmed: string,
@@ -46,28 +47,15 @@ export async function handleInputCommand(
       Object.assign(session, result.newSession);
     }
 
-    // Handle automatic execution (e.g., /runplan)
+    // Handle automatic execution (e.g., /runplan) via the full streaming pipeline
+    // so patch diffs and live output are shown correctly.
     if (result.autoExecute) {
       const { prompt } = result.autoExecute;
-      session.messages.push({ role: "user", content: prompt });
-
-      state.busy = true;
-      state.activeStatus = "calling_model";
-      actions.startSpinner();
-      actions.draw();
-      try {
-        const response = await agent.runTurn(session, prompt);
-        actions.pushTranscript(response);
-      } catch (err) {
-        actions.pushTranscript(
-          `Error: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      } finally {
-        actions.stopSpinner();
-        state.activeStatus = undefined;
-        state.busy = false;
-        actions.draw();
-      }
+      const stageMatch = prompt.match(/\[RUNPLAN STAGE (\d+)\]/i);
+      const displayText = stageMatch
+        ? `[RUNPLAN STAGE ${stageMatch[1]}]`
+        : "[RUNPLAN]";
+      await handleInputTurn(prompt, ctx, { displayText });
     }
     return true;
   }

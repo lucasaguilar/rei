@@ -31,6 +31,7 @@ import {
   validateProposedPatches,
   stripAllActionTags,
   generateXmlToolCallId,
+  CREATED_FILES_MARKER,
   type ExecutionResult,
 } from "./helpers/patch-helpers.js";
 import { streamTurnWithInterception } from "./helpers/token-streamer.js";
@@ -129,12 +130,22 @@ export async function executeAgentTurn(params: {
   let lastCmdSignature = "";
   const autoInjectedCallerFiles = new Set<string>();
   let firstTurnExplanation = "";
+  // Accumulates files created via <create> across loop iterations so we can
+  // surface them to the user (otherwise successful creates are invisible).
+  const createdFiles: string[] = [];
 
   const getFinalResponse = (resp: string) => {
+    let out = resp;
     if (loopCount > 1 && firstTurnExplanation && !resp.includes(firstTurnExplanation)) {
-      return firstTurnExplanation + "\n\n" + resp;
+      out = firstTurnExplanation + "\n\n" + resp;
     }
-    return resp;
+    if (createdFiles.length > 0) {
+      const unique = [...new Set(createdFiles)];
+      out +=
+        `${CREATED_FILES_MARKER}${unique.length} file(s) created:[0m\n` +
+        unique.map((f) => `- ${f}`).join("\n");
+    }
+    return out;
   };
 
   while (loopCount < MAX_TURNS) {
@@ -224,18 +235,19 @@ export async function executeAgentTurn(params: {
     }
 
     // 1a. Handle <create> blocks (file creation requests)
-    const createFeedback = await handleCreateFileBlocks({
+    const createOutcome = await handleCreateFileBlocks({
       rawResponse,
       workspacePath,
       logger,
     });
+    createdFiles.push(...createOutcome.created);
 
-    if (createFeedback) {
+    if (createOutcome.feedback) {
       currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
       currentMessages.push({
         role: "user",
         content:
-          createFeedback +
+          createOutcome.feedback +
           "\nPlease fix these issues and reply with corrected <create> blocks or continue with the next step.",
       });
       continue;
@@ -389,7 +401,8 @@ export async function executeAgentTurn(params: {
     // 3b. Did the model request commands?
     const commands = extractCommandRequests(rawResponse);
     if (commands.length > 0) {
-      // Command loop detection: break if the same commands repeat across iterations
+      // Command loop detection: only break when the same commands FAILED last time.
+      // Successful repeated commands (e.g. a verification re-run) are allowed.
       const cmdSignature = buildCommandSignature(commands, [], []);
       if (cmdSignature && cmdSignature === lastCmdSignature) {
         logger.logInfo("[loop-guard] Repeated command signature detected, breaking agent loop", { cmdSignature });
@@ -398,7 +411,7 @@ export async function executeAgentTurn(params: {
           {
             response:
               getFinalResponse(rawResponse) +
-              "\n\n⚠️ REI detected a command loop — the model is repeating the same commands. " +
+              "\n\n⚠️ REI detected a command loop — the model is repeating the same failing commands. " +
               "Stopping execution. Try asking it to explain the error instead of executing commands.",
                 validProposedPatches: [],
           },
@@ -406,19 +419,24 @@ export async function executeAgentTurn(params: {
           0,
         );
       }
-      lastCmdSignature = cmdSignature;
 
       let commandFeedback = "";
+      let anyCommandFailed = false;
       for (const cmd of commands) {
         logger.logInfo(`Executing command: ${cmd}`);
         const cmdResult = await executeCommand(cmd, workspacePath);
         logger.logCommandExecution(cmd, cmdResult);
+        if (!cmdResult.success) anyCommandFailed = true;
         const truncatedStdout = limitCommandOutput(cmdResult.stdout || "none");
         const truncatedStderr = limitCommandOutput(cmdResult.stderr || "none");
         commandFeedback +=
           `\nCommand: ${cmd}\nExit Code: ${cmdResult.exitCode}` +
           `\nStdout: ${truncatedStdout}\nStderr: ${truncatedStderr}\n`;
       }
+
+      // Only arm the loop guard for this signature if at least one command failed.
+      // If all succeeded, the model may legitimately re-run them for verification.
+      lastCmdSignature = anyCommandFailed ? cmdSignature : "";
 
       if (loopCount < MAX_TURNS) {
         const cmdId = generateXmlToolCallId("execute_command");

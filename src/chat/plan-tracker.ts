@@ -13,6 +13,17 @@ function getPlanContentPath(workspacePath: string): string {
   return path.join(workspacePath, PLAN_CONTENT_FILE);
 }
 
+export function getTotalStagesInPlan(workspacePath: string): number {
+  const content = loadCurrentPlanContent(workspacePath);
+  if (!content) return 0;
+  const stageNums = new Set<number>();
+  for (const line of content.split('\n')) {
+    const m = line.match(STAGE_REGEX);
+    if (m) stageNums.add(parseInt(m[3], 10));
+  }
+  return stageNums.size;
+}
+
 export function saveCurrentPlanContent(workspacePath: string, planContent: string): void {
   const filePath = getPlanContentPath(workspacePath);
   try {
@@ -89,10 +100,23 @@ export function initPlanTodoFile(workspacePath: string, planContent: string): vo
   todoLines.push('');
 
   let parsedCount = 0;
+  let inCodeFence = false;
+  const seenStages = new Set<number>();
   for (const line of lines) {
+    // Skip stage headers that appear inside fenced code blocks (``` or ~~~):
+    // models often echo the plan inside a code block, which would duplicate entries.
+    if (/^\s*(```|~~~)/.test(line)) {
+      inCodeFence = !inCodeFence;
+      continue;
+    }
+    if (inCodeFence) continue;
+
     const match = line.match(STAGE_REGEX);
     if (match) {
       const num = parseInt(match[3], 10);
+      // Dedupe by stage number — keep only the first occurrence of each stage.
+      if (seenStages.has(num)) continue;
+      seenStages.add(num);
       const desc = (match[4] ?? '').replace(/^[\s.:\-*]+/, '').trim();
       todoLines.push(`- [ ] **Stage ${num}:** ${desc || 'No description'}`);
       parsedCount++;

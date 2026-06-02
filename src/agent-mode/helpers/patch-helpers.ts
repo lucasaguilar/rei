@@ -20,6 +20,9 @@ export interface ExecutionResult {
   lastValidationError?: string;
 }
 
+/** Marker prefixing the "N file(s) created" summary appended to a turn response. */
+export const CREATED_FILES_MARKER = "\n\n---\n[32m[1m";
+
 /**
  * Builds a system message injecting the contents of requested files.
  */
@@ -135,16 +138,20 @@ export async function handleCreateFileBlocks(params: {
   rawResponse: string;
   workspacePath: string;
   logger: AgentLogger;
-}): Promise<string | null> {
+}): Promise<{ feedback: string | null; created: string[] }> {
   const { rawResponse, workspacePath, logger } = params;
   const createFileRequests = extractCreateFileRequests(rawResponse);
-  if (createFileRequests.length === 0) return null;
+  if (createFileRequests.length === 0) return { feedback: null, created: [] };
 
   const createResults = await applyCreateFileBatchFS(
     createFileRequests,
     workspacePath,
   );
   logger.logInfo("File creation results", { createResults });
+
+  const created = createResults.results
+    .filter((r) => r.applied)
+    .map((r) => r.file);
 
   const failedCreates = createResults.results.filter((r) => !r.applied);
   if (failedCreates.length > 0) {
@@ -154,9 +161,9 @@ export async function handleCreateFileBlocks(params: {
         .map((r) => `- ${r.file}: ${r.validationErrors.join("; ")}`)
         .join("\n");
     logger.logInfo("File creation feedback", { feedback });
-    return feedback;
+    return { feedback, created };
   }
-  return null;
+  return { feedback: null, created };
 }
 
 /**
