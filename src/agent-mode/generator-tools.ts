@@ -16,6 +16,7 @@ import {
   buildFileContextMessage,
   finalizeOutcome,
   validateProposedPatches,
+  CREATED_FILES_MARKER,
   type ExecutionResult,
 } from "./helpers/patch-helpers.js";
 
@@ -38,12 +39,18 @@ export async function executeAgentTurnWithTools(params: {
   modelOverride?: string;
   /** Connected MCP registry. When provided, MCP tools are merged into the tool list. */
   mcpRegistry?: McpRegistry;
+  /** Live progress callback — emits "status" chunks as each tool runs so the
+   *  user sees activity (this path is otherwise silent until the turn ends). */
+  onChunk?: (event: { type: "thinking" | "text" | "status"; content: string }) => void;
 }): Promise<ExecutionResult> {
-  const { provider, messagesForModel, workspacePath, logger, modelOverride, mcpRegistry } = params;
+  const { provider, messagesForModel, workspacePath, logger, modelOverride, mcpRegistry, onChunk } = params;
 
   if (!provider.completeChatWithTools) {
     throw new Error("executeAgentTurnWithTools: provider does not support completeChatWithTools");
   }
+
+  // Emits a one-line live status for a tool action (shown immediately by the CLI).
+  const emitStatus = (msg: string) => onChunk?.({ type: "status", content: `\n\x1b[33m${msg}\x1b[0m\n` });
 
   const mcpDefinitions = mcpRegistry ? mcpToolsToDefinitions(mcpRegistry.getAvailableTools()) : [];
   const allTools = [...AGENT_TOOLS, ...mcpDefinitions];
@@ -51,6 +58,19 @@ export async function executeAgentTurnWithTools(params: {
   let currentMessages: ChatMessage[] = [...messagesForModel];
   let loopCount = 0;
   let firstTurnExplanation = "";
+  // Files created via create_file across the loop — surfaced to the user, since
+  // the native tool path otherwise only reports creation back to the model.
+  const createdFiles: string[] = [];
+
+  const appendCreatedSummary = (resp: string): string => {
+    if (createdFiles.length === 0) return resp;
+    const unique = [...new Set(createdFiles)];
+    return (
+      resp +
+      `${CREATED_FILES_MARKER}${unique.length} file(s) created:[0m\n` +
+      unique.map((f) => `- ${f}`).join("\n")
+    );
+  };
 
   while (loopCount < MAX_TURNS) {
     loopCount++;
@@ -94,7 +114,7 @@ export async function executeAgentTurnWithTools(params: {
       }
 
       return finalizeOutcome(logger, {
-        response: firstTurnExplanation || accumulated,
+        response: appendCreatedSummary(firstTurnExplanation || accumulated),
         validProposedPatches: [],
       }, 0, 0);
     }
@@ -109,7 +129,7 @@ export async function executeAgentTurnWithTools(params: {
       const response = firstTurnExplanation && result.content !== firstTurnExplanation
         ? firstTurnExplanation + "\n\n" + result.content
         : result.content;
-      return finalizeOutcome(logger, { response, validProposedPatches: [] }, 0, 0);
+      return finalizeOutcome(logger, { response: appendCreatedSummary(response), validProposedPatches: [] }, 0, 0);
     }
 
     // ── Process tool calls ─────────────────────────────────────────────────
@@ -134,6 +154,7 @@ export async function executeAgentTurnWithTools(params: {
           case "read_files": {
             const paths = (args.paths as string[]) ?? [];
             logger.logInfo(`[tools] read_files: ${paths.join(", ")}`);
+            emitStatus(`🔍  [REI] Reading: ${paths.join(", ") || "(none)"}`);
             toolResult = await buildFileContextMessage(workspacePath, paths);
             break;
           }
@@ -146,6 +167,7 @@ export async function executeAgentTurnWithTools(params: {
               replace: args.replace as string,
             };
             logger.logInfo(`[tools] edit_file: ${edit.file}`);
+            emitStatus(`🛠️  [REI] Editing: ${edit.file}`);
             // Validate immediately so the model gets per-edit feedback
             const validation = await validateProposedPatches({
               workspacePath,
@@ -167,12 +189,14 @@ export async function executeAgentTurnWithTools(params: {
           case "create_file": {
             const filePath = path.join(workspacePath, args.file as string);
             const exists = await fs.stat(filePath).then(() => true).catch(() => false);
+            emitStatus(`📂  [REI] Creating: ${args.file}`);
             if (exists) {
               toolResult = `SKIPPED: ${args.file} already exists — use edit_file to modify it`;
             } else {
               await fs.mkdir(path.dirname(filePath), { recursive: true });
               await fs.writeFile(filePath, args.content as string, "utf-8");
               logger.logInfo(`[tools] create_file: ${args.file}`);
+              createdFiles.push(args.file as string);
               toolResult = `OK: ${args.file} created`;
             }
             break;
@@ -182,6 +206,7 @@ export async function executeAgentTurnWithTools(params: {
           case "run_command": {
             const cmd = args.command as string;
             logger.logInfo(`[tools] run_command: ${cmd}`);
+            emitStatus(`💻  [REI] Running: ${cmd}`);
             const cmdResult = await executeCommand(cmd, workspacePath);
             logger.logCommandExecution(cmd, cmdResult);
             const stdout = limitCommandOutput(cmdResult.stdout ?? "");
@@ -198,6 +223,7 @@ export async function executeAgentTurnWithTools(params: {
               // dispatching — the registry key is "serverName/toolName" not "mcp:...".
               const qualifiedName = call.function.name.slice(4);
               logger.logInfo(`[tools] mcp: ${qualifiedName}`);
+              emitStatus(`🔧  [REI] Tool: ${qualifiedName}`);
               toolResult = await mcpRegistry.dispatch(qualifiedName, args);
             } else {
               toolResult = `ERROR: Unknown tool "${call.function.name}"`;
@@ -224,7 +250,7 @@ export async function executeAgentTurnWithTools(params: {
       return finalizeOutcome(
         logger,
         {
-          response: firstTurnExplanation,
+          response: appendCreatedSummary(firstTurnExplanation),
           validProposedPatches: pendingEdits,
         },
         pendingEdits.length,

@@ -62,3 +62,17 @@ Rules:
 - Do NOT use "Step", "Etapa", "Paso", or any other word — always "Stage".
 - Each stage must mention the files it will modify so `/runplan` can detect them.
 - If the plan has no discrete stages (e.g. it is just analysis or a single action), you may use free-form prose.
+
+## Project bootstrapping — REQUIRED stages for new projects
+When the plan involves creating a project from scratch (empty workspace or no existing config files), you MUST include these stages explicitly:
+
+1. **Git initialization stage** — always the first or second stage:
+   - `git init`, create `.gitignore`, make the initial commit.
+   - Example: `## Stage 1: Initialize git repository`
+
+2. **Dependency installation stage** — immediately after config files are created (package.json, pyproject.toml, Cargo.toml, etc.):
+   - Run the appropriate install command: `npm install`, `pip install -r requirements.txt`, `cargo fetch`, etc.
+   - This stage has no files to modify — use `<execute_command>` to run the install.
+   - Example: `## Stage 2: Install dependencies` with instruction to run `npm install`.
+
+Do NOT skip these stages even if they seem obvious. The agent cannot install dependencies or initialize git automatically unless the plan explicitly includes them.

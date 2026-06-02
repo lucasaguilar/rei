@@ -25,6 +25,7 @@ import { type ChatSession } from "../chat/types.js";
 import {
   readPlanTodoFile,
   markStageAsCompleted,
+  getTotalStagesInPlan,
 } from "../chat/plan-tracker.js";
 import { VectorStore } from "../context/rag/vector-store.js";
 import { getRelevantMapContext } from "../context/rag/map-retriever.js";
@@ -46,6 +47,7 @@ import {
   buildTurnUserMessage,
   looksLikeAgentJson,
   extractStageNumberFromPrompt,
+  buildStageCompletionMessage,
   isStageSuccessful,
   stripThinkingBlock,
 } from "./helpers/turn-message.helpers.js";
@@ -66,7 +68,7 @@ import {
   isDegenerate,
   buildCommandSignature,
 } from "../agent-mode/helpers/loop-guard.js";
-import { stripAllActionTags, generateXmlToolCallId } from "../agent-mode/helpers/patch-helpers.js";
+import { stripAllActionTags, generateXmlToolCallId, CREATED_FILES_MARKER } from "../agent-mode/helpers/patch-helpers.js";
 import { formatCodeDiff } from "../cli/markdown-renderer.js";
 import { calculateContextBudget } from "../context/context-budget.js";
 import { estimateTokens } from "../chat/helpers/token-estimator.js";
@@ -155,7 +157,8 @@ export class Agent {
       const stageNum = extractStageNumberFromPrompt(userInput);
       if (stageNum !== null && isStageSuccessful(response)) {
         markStageAsCompleted(this.workspacePath, stageNum);
-        return response + `\n\n✅ Stage ${stageNum} completed. Run /runplan stage ${stageNum + 1} to continue.`;
+        const total = getTotalStagesInPlan(this.workspacePath);
+        return response + buildStageCompletionMessage(stageNum, total, false);
       }
     }
 
@@ -199,6 +202,9 @@ export class Agent {
       const chunksQueue: string[] = [];
       let resolver: (() => void) | null = null;
       let done = false;
+      // Track whether any text was streamed via onChunk — used to prevent
+      // double-buffering when the generator already streamed its response.
+      let hasStreamedText = false;
 
       const onChunk = (chunk: {
         type: "thinking" | "text" | "status";
@@ -211,6 +217,7 @@ export class Agent {
             : chunk.type === "text"
               ? `\x11${chunk.content}`
               : chunk.content;
+        if (chunk.type === "text") hasStreamedText = true;
         chunksQueue.push(encoded);
         resolver?.();
       };
@@ -224,6 +231,7 @@ export class Agent {
               logger: this.logger,
               modelOverride: resolveModelForMode("agent"),
               mcpRegistry: this.mcpRegistry,
+              onChunk,
             })
           : editFormat === "wholefile"
             ? executeAgentTurnWholefile({
@@ -284,12 +292,12 @@ export class Agent {
           content: stripThinkingBlock(outcome.response),
         });
         options?.onStatus?.("producing_response");
-        // Yield clean explanation as rendered text, then patch result as live status.
+        // Yield clean explanation as rendered text (only if not already streamed via onChunk).
         // msg starts with \n\n---\n — strip leading whitespace so spacing is controlled by the CLI.
         const explanation = stripAllActionTags(
           stripThinkingBlock(outcome.response),
         );
-        if (explanation) yield `\x11${explanation}`;
+        if (explanation && !hasStreamedText) yield `\x11${explanation}`;
         yield msg.trimStart();
         // Show diff for each applied patch so the user can see exactly what changed.
         for (const edit of outcome.validProposedPatches) {
@@ -303,7 +311,8 @@ export class Agent {
           const stageNum = extractStageNumberFromPrompt(userInput);
           if (stageNum !== null) {
             markStageAsCompleted(this.workspacePath, stageNum);
-            yield `\n\n\x1b[32m✅ Stage ${stageNum} completed. Run \x1b[1m/runplan stage ${stageNum + 1}\x1b[0m\x1b[32m to continue.\x1b[0m\n`;
+            const total = getTotalStagesInPlan(this.workspacePath);
+            yield buildStageCompletionMessage(stageNum, total, true);
           }
         }
 
@@ -328,8 +337,14 @@ export class Agent {
           content: stripThinkingBlock(outcome.response + feedback),
         });
         options?.onStatus?.("producing_response");
-        if (cleanExplanation) yield `\x11${cleanExplanation}`;
+        if (cleanExplanation && !hasStreamedText) yield `\x11${cleanExplanation}`;
         yield feedback.trimStart();
+        const stageNumFb = extractStageNumberFromPrompt(userInput);
+        if (stageNumFb !== null && isStageSuccessful(outcome.response + feedback)) {
+          markStageAsCompleted(this.workspacePath, stageNumFb);
+          const total = getTotalStagesInPlan(this.workspacePath);
+          yield buildStageCompletionMessage(stageNumFb, total, true);
+        }
         return;
       }
 
@@ -339,14 +354,29 @@ export class Agent {
         content: stripThinkingBlock(outcome.response),
       });
       options?.onStatus?.("producing_response");
-      // Plain text response — yield as text for markdown rendering
-      yield `\x11${stripThinkingBlock(outcome.response)}`;
+      // Only yield the response text if it wasn't already streamed via onChunk
+      // (completeChatWithTools doesn't stream, so we must emit; XML generators do stream).
+      const plainResponse = stripThinkingBlock(outcome.response);
+      if (!hasStreamedText) {
+        yield `\x11${plainResponse}`;
+      } else {
+        // Prose was already streamed/buffered; surface only content appended AFTER
+        // streaming (the created-files summary) so it isn't lost. Yielded raw → shown live.
+        const markerIdx = plainResponse.indexOf(CREATED_FILES_MARKER);
+        if (markerIdx !== -1) {
+          yield plainResponse.slice(markerIdx);
+        }
+      }
 
-      if (editFormat === "wholefile" && !outcome.failed) {
+      if (!outcome.failed) {
         const stageNum = extractStageNumberFromPrompt(userInput);
-        if (stageNum !== null) {
+        const succeeded = editFormat === "wholefile"
+          ? true
+          : isStageSuccessful(outcome.response);
+        if (stageNum !== null && succeeded) {
           markStageAsCompleted(this.workspacePath, stageNum);
-          yield `\n\n\x1b[32m✅ Stage ${stageNum} completed. Run \x1b[1m/runplan stage ${stageNum + 1}\x1b[0m\x1b[32m to continue.\x1b[0m\n`;
+          const total = getTotalStagesInPlan(this.workspacePath);
+          yield buildStageCompletionMessage(stageNum, total, true);
         }
       }
 
@@ -992,7 +1022,11 @@ export class Agent {
           this.workspacePath,
         );
         const msg = formatBatchPatchResult(result);
-        return outcome.response + msg;
+        const diffs = outcome.validProposedPatches
+          .filter((edit) => result.results.find((r) => r.file === edit.file && r.applied))
+          .map((edit) => `\n\x1b[1mArchivo:\x1b[0m ${edit.file}\n${formatCodeDiff(edit.search, edit.replace)}`)
+          .join("");
+        return outcome.response + msg + diffs;
       }
       return outcome.response;
     }

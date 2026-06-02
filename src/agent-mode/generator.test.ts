@@ -18,7 +18,7 @@ vi.mock("../core/helpers/action-executor.js", () => ({
 vi.mock("./helpers/patch-helpers.js", () => ({
   buildFileContextMessage: vi.fn().mockResolvedValue(""),
   validateProposedPatches: vi.fn().mockResolvedValue({ success: false, feedback: "no match" }),
-  handleCreateFileBlocks: vi.fn().mockResolvedValue(""),
+  handleCreateFileBlocks: vi.fn().mockResolvedValue({ feedback: null, created: [] }),
   stripAllActionTags: vi.fn((s: string) => s),
   generateXmlToolCallId: vi.fn((name: string) => `xml_${name}_test`),
   finalizeOutcome: vi.fn((logger: unknown, result: { response: string; validProposedPatches: unknown[]; failed?: boolean }, proposed: number, applied: number) => ({

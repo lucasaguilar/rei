@@ -136,6 +136,18 @@ export function looksLikeAgentJson(raw: string): boolean {
   );
 }
 
+export function buildStageCompletionMessage(stageNum: number, totalStages: number, ansi = false): string {
+  const isLast = totalStages > 0 && stageNum >= totalStages;
+  if (isLast) {
+    return ansi
+      ? `\n\n\x1b[32m✅ Stage ${stageNum} completed. Plan complete! All ${totalStages} stages done.\x1b[0m\n`
+      : `\n\n✅ Stage ${stageNum} completed. Plan complete! All ${totalStages} stages done.`;
+  }
+  return ansi
+    ? `\n\n\x1b[32m✅ Stage ${stageNum} completed. Run \x1b[1m/runplan stage ${stageNum + 1}\x1b[0m\x1b[32m to continue.\x1b[0m\n`
+    : `\n\n✅ Stage ${stageNum} completed. Run /runplan stage ${stageNum + 1} to continue.`;
+}
+
 export function extractStageNumberFromPrompt(prompt: string): number | null {
   const match = prompt.match(/\[RUNPLAN STAGE (\d+)\]/i);
   if (match) {

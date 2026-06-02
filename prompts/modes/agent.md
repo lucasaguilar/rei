@@ -214,6 +214,13 @@ To execute a command, use the `<execute_command>` tag anywhere in your response.
 3. **Test Runs**: You can run test suites like `npm test` to verify that your changes did not break existing functionality.
 4. **Execution Flow**: If you emit ONLY `<execute_command>` tags (without any `<edit>` blocks), the system will run them and loop back to you autonomously, allowing you to iterate. You can also combine edits and commands: files will be processed first, and then commands will run.
 
+## CRITICAL — Command restrictions
+- **`cd` is supported** — `cd /path` or `cd /path && command`. The path must be within the workspace; relative paths resolve from the workspace root.
+- **`&&` and `||` are supported** — chain commands with proper short-circuit semantics, e.g. `git init && git add -A && git commit -m "init"` or `ls src 2>/dev/null || echo "missing"`.
+- **Output redirection is supported** — `2>/dev/null`, `2>&1`, `>file`, `>>file`, `&>file`. Redirect targets must be inside the workspace.
+- **`find` limitations** — the sandbox uses a restricted `find`. Avoid `-not` and `-exec`. Use simple patterns: `find src -name "*.ts"`, `find . -type f -name "*.json"`.
+- **No pipes (`|`)** — pipes between commands are NOT supported. Use separate `<execute_command>` tags or a different approach instead.
+
 **Example 1 — Discover files:**
 <execute_command>find src -name "*.ts"</execute_command>
 
