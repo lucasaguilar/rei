@@ -52,11 +52,35 @@ fi
 # Create global 'rei-server' launcher script in ~/.local/bin
 cat > "$BIN_DIR/rei-server" << 'EOF'
 #!/bin/bash
-# Load local .env first, fallback to global ~/.rei/.env
+# Load global ~/.rei/.env first, then local .env (filtering placeholders)
+load_env_file() {
+  local env_file="$1"
+  while IFS= read -r line; do
+    [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
+    local key="${line%%=*}"
+    local val="${line#*=}"
+    val="${val%\"}"
+    val="${val#\"}"
+    val="${val%\'}"
+    val="${val#\'}"
+    
+    if [[ "$val" == *"_here"* || "$val" == "your_"* || "$val" == *"placeholder"* || -z "$val" ]]; then
+      continue
+    fi
+    export "$key=$val"
+  done < "$env_file"
+}
+
+# Check if .env files exist
+env_exists=0
+if [ -f "$HOME/.rei/.env" ]; then
+  env_exists=1
+  load_env_file "$HOME/.rei/.env"
+fi
+
 if [ -f .env ]; then
-  export $(grep -v '^#' .env | xargs)
-elif [ -f "$HOME/.rei/.env" ]; then
-  export $(grep -v '^#' "$HOME/.rei/.env" | xargs)
+  env_exists=1
+  load_env_file .env
 fi
 
 # Force local TMPDIR to avoid permission issues
