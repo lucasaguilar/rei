@@ -48,7 +48,16 @@ async function dispatchXmlToolCall(
       const qualified = call.name.slice(4);
       logger.logInfo(`[tools] mcp: ${qualified}`);
       const result = await mcpRegistry.dispatch(qualified, call.args);
-      return `\n### 🔌 MCP: ${qualified}\n${result}\n`;
+      
+      let formattedResult = result;
+      try {
+        const parsed = JSON.parse(result);
+        formattedResult = `\`\`\`json\n${JSON.stringify(parsed, null, 2)}\n\`\`\``;
+      } catch {
+        // If not valid JSON, wrap in a plain code block
+        formattedResult = `\`\`\`\n${result}\n\`\`\``;
+      }
+      return `\n### 🔌 MCP: ${qualified}\n${formattedResult}\n`;
     }
     throw new Error(`Tool "${call.name}" is not implemented.`);
   } catch (err) {
