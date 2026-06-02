@@ -143,6 +143,14 @@ export async function executeAgentTurnWithTools(params: {
     const pendingEdits: AgentSREdit[] = [];
     let hasToolFailure = false;
 
+    // Track edit tasks and all tool results by call ID to preserve correct response order
+    interface EditTask {
+      callId: string;
+      edit: AgentSREdit;
+    }
+    const editTasks: EditTask[] = [];
+    const toolResultsMap = new Map<string, string>();
+
     for (const call of result.toolCalls) {
       let toolResult: string;
 
@@ -156,6 +164,7 @@ export async function executeAgentTurnWithTools(params: {
             logger.logInfo(`[tools] read_files: ${paths.join(", ")}`);
             emitStatus(`🔍  [REI] Reading: ${paths.join(", ") || "(none)"}`);
             toolResult = await buildFileContextMessage(workspacePath, paths);
+            toolResultsMap.set(call.id, toolResult);
             break;
           }
 
@@ -168,20 +177,7 @@ export async function executeAgentTurnWithTools(params: {
             };
             logger.logInfo(`[tools] edit_file: ${edit.file}`);
             emitStatus(`🛠️  [REI] Editing: ${edit.file}`);
-            // Validate immediately so the model gets per-edit feedback
-            const validation = await validateProposedPatches({
-              workspacePath,
-              edits: [edit],
-              loopCount,
-              logger,
-            });
-            if (validation.success) {
-              pendingEdits.push(edit);
-              toolResult = `OK: edit queued for ${edit.file}`;
-            } else {
-              hasToolFailure = true;
-              toolResult = `ERROR: ${validation.feedback ?? "search block did not match file content"}`;
-            }
+            editTasks.push({ callId: call.id, edit });
             break;
           }
 
@@ -199,6 +195,7 @@ export async function executeAgentTurnWithTools(params: {
               createdFiles.push(args.file as string);
               toolResult = `OK: ${args.file} created`;
             }
+            toolResultsMap.set(call.id, toolResult);
             break;
           }
 
@@ -214,6 +211,7 @@ export async function executeAgentTurnWithTools(params: {
             toolResult = `Exit: ${cmdResult.exitCode}\n` +
               (stdout ? `Stdout:\n${stdout}\n` : "") +
               (stderr ? `Stderr:\n${stderr}\n` : "") || "(no output)";
+            toolResultsMap.set(call.id, toolResult);
             break;
           }
 
@@ -229,17 +227,48 @@ export async function executeAgentTurnWithTools(params: {
               toolResult = `ERROR: Unknown tool "${call.function.name}"`;
               hasToolFailure = true;
             }
+            toolResultsMap.set(call.id, toolResult);
           }
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        toolResult = `ERROR: ${msg}`;
+        toolResultsMap.set(call.id, `ERROR: ${msg}`);
         hasToolFailure = true;
       }
+    }
 
+    // Perform a single batch validation for all proposed edits in this turn
+    if (editTasks.length > 0) {
+      const batchEdits = editTasks.map((t) => t.edit);
+      const validation = await validateProposedPatches({
+        workspacePath,
+        edits: batchEdits,
+        loopCount,
+        logger,
+      });
+
+      if (validation.success) {
+        pendingEdits.push(...batchEdits);
+        for (const task of editTasks) {
+          toolResultsMap.set(task.callId, `OK: edit queued for ${task.edit.file}`);
+        }
+      } else {
+        hasToolFailure = true;
+        for (const task of editTasks) {
+          toolResultsMap.set(
+            task.callId,
+            `ERROR: ${validation.feedback ?? "compilation or search block mismatch in batch"}`
+          );
+        }
+      }
+    }
+
+    // Feed back all tool results to model history in correct chronological order
+    for (const call of result.toolCalls) {
+      const res = toolResultsMap.get(call.id) ?? "ERROR: Tool execution failed";
       currentMessages.push({
         role: "tool",
-        content: toolResult,
+        content: res,
         tool_call_id: call.id,
         name: call.function.name,
       });
