@@ -50,9 +50,14 @@ export const PROVIDER_MODELS = {
         };
     }
 
-    const currentWorkspace = process.env.REI_WORKSPACE_PATH || process.cwd();
-    if (!PROJECTS.includes(currentWorkspace)) {
-        PROJECTS.unshift(currentWorkspace);
+    const cwd = process.cwd();
+    if (!PROJECTS.includes(cwd)) {
+        PROJECTS.unshift(cwd);
+    }
+
+    const envWorkspace = process.env.REI_WORKSPACE_PATH;
+    if (envWorkspace && !PROJECTS.includes(envWorkspace)) {
+        PROJECTS.unshift(envWorkspace);
     }
 
     PROVIDERS = Object.keys(PROVIDER_MODELS);
@@ -187,6 +192,7 @@ async function pickModel(provider, message, initialModel) {
 
 async function main() {
     const last = loadLast();
+    const initialWorkspace = process.cwd();
 
     intro('REI Launcher');
 
@@ -196,7 +202,7 @@ async function main() {
         const selected = await select({
             message: 'Workspace:',
             options: PROJECTS.map(p => ({ value: p, label: p })),
-            initialValue: last.project,
+            initialValue: initialWorkspace,
         });
         if (isCancel(selected)) { cancel('Cancelled'); process.exit(0); }
 

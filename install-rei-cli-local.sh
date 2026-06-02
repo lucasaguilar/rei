@@ -53,12 +53,22 @@ fi
 # Create global 'rei' launcher script in ~/.local/bin
 cat > "$BIN_DIR/rei" << 'EOF'
 #!/bin/bash
-# Load local .env first, fallback to global ~/.rei/.env
+# Load global ~/.rei/.env first, then local .env (filtering placeholders)
 load_env_file() {
   local env_file="$1"
   while IFS= read -r line; do
     [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
-    export "$line"
+    local key="${line%%=*}"
+    local val="${line#*=}"
+    val="${val%\"}"
+    val="${val#\"}"
+    val="${val%\'}"
+    val="${val#\'}"
+    
+    if [[ "$val" == *"_here"* || "$val" == "your_"* || "$val" == *"placeholder"* || -z "$val" ]]; then
+      continue
+    fi
+    export "$key=$val"
   done < "$env_file"
 }
 
@@ -98,12 +108,14 @@ fi
 
 # Check if .env files exist
 env_exists=0
+if [ -f "$HOME/.rei/.env" ]; then
+  env_exists=1
+  load_env_file "$HOME/.rei/.env"
+fi
+
 if [ -f .env ]; then
   env_exists=1
   load_env_file .env
-elif [ -f "$HOME/.rei/.env" ]; then
-  env_exists=1
-  load_env_file "$HOME/.rei/.env"
 fi
 
 # Force local TMPDIR to avoid permission issues
