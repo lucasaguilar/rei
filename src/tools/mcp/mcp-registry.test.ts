@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { McpRegistry } from "./mcp-registry.js";
 import * as mcpConfig from "./mcp-config.js";
+import { StdioMcpClient } from "./stdio-client.js";
 
 // Prevent real network calls in HTTP-server tests. The SDK's
 // StreamableHTTPClientTransport fires a background fetch even after the
@@ -96,6 +97,43 @@ describe("McpRegistry", () => {
       await registry.connect(); // must not throw
 
       expect(registry.getAvailableTools()).toEqual([]);
+    });
+
+    it("interpolates environment variables, args and headers with process.env values", async () => {
+      const createSpy = vi.spyOn(StdioMcpClient, "create").mockResolvedValue({
+        listTools: vi.fn().mockResolvedValue([]),
+        callTool: vi.fn(),
+        dispose: vi.fn(),
+      } as any);
+
+      process.env.TEST_VAR_1 = "test-val-1";
+      process.env.TEST_VAR_2 = "test-val-2";
+
+      vi.spyOn(mcpConfig, "loadReiConfig").mockReturnValue({
+        mcpServers: {
+          testServer: {
+            type: "stdio",
+            command: "test-cmd",
+            args: ["--arg=${TEST_VAR_1}"],
+            env: {
+              VAR: "${TEST_VAR_2}",
+            },
+          },
+        },
+      });
+
+      const registry = McpRegistry.forWorkspace("/workspace");
+      await registry.connect();
+
+      expect(createSpy).toHaveBeenCalledWith(
+        "testServer",
+        "test-cmd",
+        ["--arg=test-val-1"],
+        { VAR: "test-val-2" },
+      );
+
+      delete process.env.TEST_VAR_1;
+      delete process.env.TEST_VAR_2;
     });
   });
 

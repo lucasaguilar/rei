@@ -6,6 +6,14 @@
       "args": [
         "/Users/lucas/www/spotify-mcp-server/build/index.js"
       ]
+    },
+    "github": {
+      "type": "stdio",
+      "command": "/Users/lucas/.rei/bin/github-mcp-server",
+      "args": ["stdio"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+      }
     }
   }
 }

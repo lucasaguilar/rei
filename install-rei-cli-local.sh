@@ -19,10 +19,16 @@ if command -v rsync >/dev/null 2>&1; then
     --exclude "node_modules" \
     --exclude "dist" \
     --exclude ".rei" \
+    --exclude "bin/github-mcp-server" \
     "$SOURCE_DIR/" "$INSTALL_DIR/"
 else
   echo "rsync not found, using cp fallback"
-  rm -rf "$INSTALL_DIR"/*
+  if [ -d "$INSTALL_DIR" ]; then
+    find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 ! -name "bin" ! -name ".env" ! -name "sessions" -exec rm -rf {} +
+    if [ -d "$INSTALL_DIR/bin" ]; then
+      find "$INSTALL_DIR/bin" -mindepth 1 ! -name "github-mcp-server" -exec rm -rf {} +
+    fi
+  fi
   cp -R "$SOURCE_DIR"/* "$INSTALL_DIR"/
   if [ -f "$SOURCE_DIR/.env" ]; then
     cp "$SOURCE_DIR/.env" "$INSTALL_DIR/.env"

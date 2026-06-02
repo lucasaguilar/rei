@@ -1,6 +1,7 @@
 import { spawn, execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as os from "node:os";
 
 export interface CommandResult {
   stdout: string;
@@ -47,7 +48,8 @@ const ALLOWED_COMMANDS = new Set([
   "dotnet",
   // Shell utilities
   "ls", "find", "grep", "cat", "pwd", "mkdir",
-  "curl", "git", "env", "which", "date", "printf", "echo",
+  "curl", "git", "env", "which", "date", "printf", "echo", "chmod", "command",
+  "rm", "tar", "unzip", "file", "wget",
   "true", "false", "test",
   // macOS automation
   "osascript",
@@ -58,7 +60,6 @@ const ALLOWED_COMMANDS = new Set([
 const DENIED_KEYWORDS = [
   "rm -rf",
   "sudo",
-  "chmod",
   "chown",
   "mkfs",
   //">",
@@ -288,6 +289,46 @@ async function executeSingleSegment(
   // Allow-list
   if (!ALLOWED_COMMANDS.has(cmd)) {
     return { success: false, exitCode: -1, stdout: "", stderr: `Security Error: Command '${cmd}' is not in the allow-list.` };
+  }
+
+  // Extra security for 'rm'
+  if (cmd === "rm") {
+    // 1. Block recursive flags (e.g. -r, -R, --recursive) to prevent directory tree deletion
+    const hasRecursive = args.some(
+      (arg) => arg.startsWith("-") && (/[rR]/.test(arg) || arg === "--recursive"),
+    );
+    if (hasRecursive) {
+      return {
+        success: false,
+        exitCode: -1,
+        stdout: "",
+        stderr: "Security Error: Recursive deletion is not allowed.",
+      };
+    }
+
+    // 2. Restrict deletion targets to workspaceRoot and ~/.rei
+    const homedir = process.env.HOME || os.homedir();
+    const allowedDirs = [
+      path.normalize(workspaceRoot),
+      path.normalize(path.join(homedir, ".rei")),
+    ];
+
+    for (const arg of args) {
+      if (arg.startsWith("-")) continue; // skip flags
+      const absPath = path.isAbsolute(arg) ? arg : path.join(cwd, arg);
+      const normPath = path.normalize(absPath);
+      const isAllowed = allowedDirs.some(
+        (dir) => normPath === dir || normPath.startsWith(dir + path.sep),
+      );
+      if (!isAllowed) {
+        return {
+          success: false,
+          exitCode: -1,
+          stdout: "",
+          stderr: `Security Error: rm target '${arg}' is outside the allowed directories (workspace or ~/.rei).`,
+        };
+      }
+    }
   }
 
   const useRtk = isRtkAvailable() && cmd !== "rtk";

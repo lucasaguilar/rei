@@ -19,7 +19,7 @@ fi
 # Sync local files to the global install directory, excluding build artifacts and node_modules
 echo "🔄 Copying local codebase..."
 if command -v rsync >/dev/null 2>&1; then
-  rsync -av --exclude="node_modules" --exclude=".git" --exclude="dist" --exclude=".rei" --exclude="install-rei-server-local.sh" ./ "$INSTALL_DIR/"
+  rsync -av --exclude="node_modules" --exclude=".git" --exclude="dist" --exclude=".rei" --exclude="install-rei-server-local.sh" --exclude="bin/github-mcp-server" ./ "$INSTALL_DIR/"
 else
   echo "⚠️ rsync not found, falling back to cp (this might copy node_modules and other temporary files)..."
   cp -R ./* "$INSTALL_DIR/"

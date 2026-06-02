@@ -55,13 +55,31 @@ export class McpRegistry {
     config: McpConnectionConfig,
   ): Promise<McpClient> {
     if (config.type === "http") {
-      return HttpMcpClient.create(serverName, config.url, config.headers);
+      const headers: Record<string, string> = {};
+      if (config.headers) {
+        for (const [key, value] of Object.entries(config.headers)) {
+          headers[key] = value.replace(/\${([^}]+)}/g, (_, name) => process.env[name] ?? "");
+        }
+      }
+      return HttpMcpClient.create(serverName, config.url, headers);
     }
+
+    const env: Record<string, string> = {};
+    if (config.env) {
+      for (const [key, value] of Object.entries(config.env)) {
+        env[key] = value.replace(/\${([^}]+)}/g, (_, name) => process.env[name] ?? "");
+      }
+    }
+
+    const args = (config.args ?? []).map((arg) =>
+      arg.replace(/\${([^}]+)}/g, (_, name) => process.env[name] ?? ""),
+    );
+
     return StdioMcpClient.create(
       serverName,
       config.command,
-      config.args ?? [],
-      config.env,
+      args,
+      env,
     );
   }
 
