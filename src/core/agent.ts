@@ -68,7 +68,11 @@ import {
   isDegenerate,
   buildCommandSignature,
 } from "../agent-mode/helpers/loop-guard.js";
-import { stripAllActionTags, generateXmlToolCallId, CREATED_FILES_MARKER } from "../agent-mode/helpers/patch-helpers.js";
+import {
+  stripAllActionTags,
+  generateXmlToolCallId,
+  CREATED_FILES_MARKER,
+} from "../agent-mode/helpers/patch-helpers.js";
 import { formatCodeDiff } from "../cli/markdown-renderer.js";
 import { calculateContextBudget } from "../context/context-budget.js";
 import { estimateTokens } from "../chat/helpers/token-estimator.js";
@@ -301,7 +305,9 @@ export class Agent {
         yield msg.trimStart();
         // Show diff for each applied patch so the user can see exactly what changed.
         for (const edit of outcome.validProposedPatches) {
-          const applied = result.results.find((r) => r.file === edit.file && r.applied);
+          const applied = result.results.find(
+            (r) => r.file === edit.file && r.applied,
+          );
           if (applied) {
             yield `\n\x1b[1mArchivo:\x1b[0m ${edit.file}\n${formatCodeDiff(edit.search, edit.replace)}`;
           }
@@ -337,10 +343,14 @@ export class Agent {
           content: stripThinkingBlock(outcome.response + feedback),
         });
         options?.onStatus?.("producing_response");
-        if (cleanExplanation && !hasStreamedText) yield `\x11${cleanExplanation}`;
+        if (cleanExplanation && !hasStreamedText)
+          yield `\x11${cleanExplanation}`;
         yield feedback.trimStart();
         const stageNumFb = extractStageNumberFromPrompt(userInput);
-        if (stageNumFb !== null && isStageSuccessful(outcome.response + feedback)) {
+        if (
+          stageNumFb !== null &&
+          isStageSuccessful(outcome.response + feedback)
+        ) {
           markStageAsCompleted(this.workspacePath, stageNumFb);
           const total = getTotalStagesInPlan(this.workspacePath);
           yield buildStageCompletionMessage(stageNumFb, total, true);
@@ -370,9 +380,10 @@ export class Agent {
 
       if (!outcome.failed) {
         const stageNum = extractStageNumberFromPrompt(userInput);
-        const succeeded = editFormat === "wholefile"
-          ? true
-          : isStageSuccessful(outcome.response);
+        const succeeded =
+          editFormat === "wholefile"
+            ? true
+            : isStageSuccessful(outcome.response);
         if (stageNum !== null && succeeded) {
           markStageAsCompleted(this.workspacePath, stageNum);
           const total = getTotalStagesInPlan(this.workspacePath);
@@ -393,10 +404,11 @@ export class Agent {
         ? parseInt(process.env.REI_MAX_TURNS, 10)
         : 7;
       // Pre-compute which tool names require their result fed back to the model
-      // (MCP tools). Fire-and-forget tools (weather, search) are NOT in this set.
+      // (MCP tools). Built-in search and weather tools also require feedback.
       const feedbackTools = modelFeedbackToolNames(
         mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools()),
       );
+      feedbackTools.add("search");
 
       while (hasMoreCommands && depth < maxDepth) {
         options?.onStatus?.("producing_response");
@@ -573,15 +585,24 @@ export class Agent {
 
           if (hasFeedbackCall) {
             const turnId = generateXmlToolCallId("turn");
-            const toolName = commands.length > 0 ? "execute_command"
-              : fileRequests.length > 0 ? "request_files"
-              : toolCalls.map((c) => c.name).join(",") || "call_tool";
+            const toolName =
+              commands.length > 0
+                ? "execute_command"
+                : fileRequests.length > 0
+                  ? "request_files"
+                  : toolCalls.map((c) => c.name).join(",") || "call_tool";
             currentMessages = [
               ...currentMessages,
               {
                 role: "assistant",
                 content: stripThinkingBlock(streamResponse),
-                tool_calls: [{ id: turnId, type: "function", function: { name: toolName, arguments: "{}" } }],
+                tool_calls: [
+                  {
+                    id: turnId,
+                    type: "function",
+                    function: { name: toolName, arguments: "{}" },
+                  },
+                ],
               },
               {
                 role: "tool",
@@ -906,6 +927,7 @@ export class Agent {
     const feedbackTools = modelFeedbackToolNames(
       mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools()),
     );
+    feedbackTools.add("search");
 
     while (hasMoreCommands && depth < maxDepth) {
       const raw = await this.provider.completeChat(currentMessages, {
@@ -1023,8 +1045,13 @@ export class Agent {
         );
         const msg = formatBatchPatchResult(result);
         const diffs = outcome.validProposedPatches
-          .filter((edit) => result.results.find((r) => r.file === edit.file && r.applied))
-          .map((edit) => `\n\x1b[1mArchivo:\x1b[0m ${edit.file}\n${formatCodeDiff(edit.search, edit.replace)}`)
+          .filter((edit) =>
+            result.results.find((r) => r.file === edit.file && r.applied),
+          )
+          .map(
+            (edit) =>
+              `\n\x1b[1mArchivo:\x1b[0m ${edit.file}\n${formatCodeDiff(edit.search, edit.replace)}`,
+          )
           .join("");
         return outcome.response + msg + diffs;
       }
@@ -1072,8 +1099,13 @@ export class Agent {
         stripThinkingBlock(outcome.response),
       );
       const diffs = outcome.validProposedPatches
-        .filter((edit) => result.results.find((r) => r.file === edit.file && r.applied))
-        .map((edit) => `\n\x1b[1mArchivo:\x1b[0m ${edit.file}\n${formatCodeDiff(edit.search, edit.replace)}`)
+        .filter((edit) =>
+          result.results.find((r) => r.file === edit.file && r.applied),
+        )
+        .map(
+          (edit) =>
+            `\n\x1b[1mArchivo:\x1b[0m ${edit.file}\n${formatCodeDiff(edit.search, edit.replace)}`,
+        )
         .join("");
       return (explanation ? explanation + "\n\n" : "") + msg + diffs;
     }
