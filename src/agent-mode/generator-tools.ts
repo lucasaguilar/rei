@@ -77,6 +77,20 @@ export async function executeAgentTurnWithTools(params: {
 
     logger.logInfo(`[tools] Turn ${loopCount}/${MAX_TURNS}`);
 
+    // Observability for preserve-thinking: record whether reasoning is actually
+    // being re-fed to the model this turn (only when REI_PRESERVE_THINKING=true).
+    const preserveOn = process.env.REI_PRESERVE_THINKING === "true";
+    const reasoningCarried = currentMessages.filter(
+      (m) => m.role === "assistant" && m.reasoning_content,
+    );
+    logger.logInfo("[tools] preserve-thinking", {
+      enabled: preserveOn,
+      assistantMsgsWithReasoning: reasoningCarried.length,
+      reasoningCharsResent: preserveOn
+        ? reasoningCarried.reduce((n, m) => n + (m.reasoning_content?.length ?? 0), 0)
+        : 0,
+    });
+
     const result = await provider.completeChatWithTools(
       currentMessages,
       allTools,
@@ -87,7 +101,14 @@ export async function executeAgentTurnWithTools(params: {
       finishReason: result.finishReason,
       toolCalls: result.toolCalls.map((tc) => tc.function.name),
       contentPreview: result.content.slice(0, 120),
+      reasoningPreview: result.reasoning?.slice(0, 120),
     });
+
+    // Surface the model's reasoning live. In tool-calling turns, qwen3.6 puts its
+    // narration in `reasoning` while `content` is empty — without this it's invisible.
+    if (result.reasoning?.trim()) {
+      onChunk?.({ type: "thinking", content: result.reasoning.trim() + "\n" });
+    }
 
     // Auto-continue if truncated (no tool calls and output was cut off)
     if (result.finishReason === "length" && result.toolCalls.length === 0) {
@@ -133,11 +154,13 @@ export async function executeAgentTurnWithTools(params: {
     }
 
     // ── Process tool calls ─────────────────────────────────────────────────
-    // Add the assistant message with tool_calls to history
+    // Add the assistant message with tool_calls to history. Carry the reasoning
+    // so it can be re-sent to the model when REI_PRESERVE_THINKING=true.
     currentMessages.push({
       role: "assistant",
       content: result.content,
       tool_calls: result.toolCalls,
+      ...(result.reasoning ? { reasoning_content: result.reasoning } : {}),
     });
 
     const pendingEdits: AgentSREdit[] = [];

@@ -10,6 +10,8 @@ interface OpenAIToolCallResponse {
   choices?: Array<{
     message?: {
       content?: string | null;
+      reasoning_content?: string | null;
+      reasoning?: string | null;
       tool_calls?: Array<{
         id?: string;
         type?: string;
@@ -28,6 +30,15 @@ interface OpenAIToolCallResponse {
  * enabling role:"tool" + tool_call_id round-trips on the XML path.
  */
 export function toApiMessage(msg: ChatMessage): Record<string, unknown> {
+  // Re-send prior reasoning only when preservation is enabled. Reasoning models
+  // (e.g. qwen3.6 "Preserve Thinking") return reasoning_content as a dedicated
+  // field; carrying it back gives them their prior reasoning across turns.
+  const preserve = process.env.REI_PRESERVE_THINKING === "true";
+  const reasoningField =
+    preserve && msg.role === "assistant" && msg.reasoning_content
+      ? { reasoning_content: msg.reasoning_content }
+      : {};
+
   if (msg.role === "tool") {
     return {
       role: "tool",
@@ -41,9 +52,10 @@ export function toApiMessage(msg: ChatMessage): Record<string, unknown> {
       role: "assistant",
       content: msg.content || null,
       tool_calls: msg.tool_calls,
+      ...reasoningField,
     };
   }
-  return { role: msg.role, content: msg.content };
+  return { role: msg.role, content: msg.content, ...reasoningField };
 }
 
 /**
@@ -59,7 +71,8 @@ export async function openaiCompleteChatWithTools(params: {
   timeoutMs: number;
   options?: CompletionOptions;
 }): Promise<ChatCompletionWithTools> {
-  const { baseUrl, headers, model, messages, tools, timeoutMs, options } = params;
+  const { baseUrl, headers, model, messages, tools, timeoutMs, options } =
+    params;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -87,20 +100,23 @@ export async function openaiCompleteChatWithTools(params: {
 
   const data = (await response.json()) as OpenAIToolCallResponse;
   if (data.error) {
-    throw new Error(`Tool calling error: ${data.error.message ?? JSON.stringify(data.error)}`);
+    throw new Error(
+      `Tool calling error: ${data.error.message ?? JSON.stringify(data.error)}`,
+    );
   }
 
   const choice = data.choices?.[0];
   const msg = choice?.message;
 
   const content =
-    typeof msg?.content === "string" ? msg.content :
-    Array.isArray(msg?.content)
-      ? (msg.content as Array<{ type?: string; text?: string }>)
-          .filter((p) => p.type === "text")
-          .map((p) => p.text ?? "")
-          .join("")
-      : "";
+    typeof msg?.content === "string"
+      ? msg.content
+      : Array.isArray(msg?.content)
+        ? (msg.content as Array<{ type?: string; text?: string }>)
+            .filter((p) => p.type === "text")
+            .map((p) => p.text ?? "")
+            .join("")
+        : "";
 
   const toolCalls: ToolCall[] = (msg?.tool_calls ?? [])
     .filter((tc) => tc.id && tc.function?.name)
@@ -113,9 +129,19 @@ export async function openaiCompleteChatWithTools(params: {
       },
     }));
 
+  // Reasoning models (e.g. qwen3.6 in LM Studio) return their reasoning in a
+  // dedicated field, separate from content — which is often empty in tool-calling
+  // turns. Capture it so callers can surface/preserve it.
+  const reasoning =
+    (typeof msg?.reasoning_content === "string" ? msg.reasoning_content : "") ||
+    (typeof msg?.reasoning === "string" ? msg.reasoning : "") ||
+    "";
+
   return {
     content,
     toolCalls,
-    finishReason: choice?.finish_reason ?? (toolCalls.length > 0 ? "tool_calls" : "stop"),
+    finishReason:
+      choice?.finish_reason ?? (toolCalls.length > 0 ? "tool_calls" : "stop"),
+    ...(reasoning ? { reasoning } : {}),
   };
 }

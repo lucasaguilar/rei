@@ -3,7 +3,7 @@ import type { ModelProvider } from "../providers/model-provider.js";
 import type { FileMeta } from "../workspace/workspace-scanner.js";
 import type { AgentLogger } from "../core/logger.js";
 import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
-import { stripThinkingBlock } from "../core/helpers/turn-message.helpers.js";
+import { cleanResponseForHistory } from "../core/helpers/turn-message.helpers.js";
 import {
   extractFileRequests,
   extractSREdits,
@@ -170,7 +170,7 @@ export async function executeAgentTurn(params: {
       logger.logInfo(`[truncation] Response cut off (attempt ${truncationCount}/${MAX_TRUNCATION_CONTINUATIONS}), continuing...`);
       currentMessages = [
         ...currentMessages,
-        { role: "assistant", content: stripThinkingBlock(rawResponse) },
+        { role: "assistant", content: cleanResponseForHistory(rawResponse) },
         { role: "user", content: TRUNCATION_CONTINUATION },
       ];
       finishReason = "stop";
@@ -213,7 +213,7 @@ export async function executeAgentTurn(params: {
     } else {
       logger.logInfo("Model returned empty response", { loopCount });
       if (loopCount < MAX_TURNS) {
-        currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
+        currentMessages.push({ role: "assistant", content: cleanResponseForHistory(rawResponse) });
         currentMessages.push({
           role: "user",
           content:
@@ -243,7 +243,7 @@ export async function executeAgentTurn(params: {
     createdFiles.push(...createOutcome.created);
 
     if (createOutcome.feedback) {
-      currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
+      currentMessages.push({ role: "assistant", content: cleanResponseForHistory(rawResponse) });
       currentMessages.push({
         role: "user",
         content:
@@ -265,7 +265,7 @@ export async function executeAgentTurn(params: {
       const rfId = generateXmlToolCallId("request_files");
       currentMessages.push({
         role: "assistant",
-        content: stripThinkingBlock(rawResponse),
+        content: cleanResponseForHistory(rawResponse),
         tool_calls: [{ id: rfId, type: "function", function: { name: "request_files", arguments: JSON.stringify({ files: fileRequests }) } }],
       });
       currentMessages.push({ role: "tool", tool_call_id: rfId, name: "request_files", content: contextMessage });
@@ -306,7 +306,7 @@ export async function executeAgentTurn(params: {
           callerFiles,
         );
 
-        currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
+        currentMessages.push({ role: "assistant", content: cleanResponseForHistory(rawResponse) });
         currentMessages.push({
           role: "user",
           content:
@@ -336,7 +336,7 @@ export async function executeAgentTurn(params: {
           logger.logInfo(
             `Virtual validation failed. Feeding back errors (Turn ${loopCount}/${MAX_TURNS}).`,
           );
-          currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
+          currentMessages.push({ role: "assistant", content: cleanResponseForHistory(rawResponse) });
 
           if (consecutiveSearchMismatchFailures >= 2) {
             const requestedFiles = [...new Set(edits.map((edit) => edit.file))];
@@ -442,7 +442,7 @@ export async function executeAgentTurn(params: {
         const cmdId = generateXmlToolCallId("execute_command");
         currentMessages.push({
           role: "assistant",
-          content: stripThinkingBlock(rawResponse),
+          content: cleanResponseForHistory(rawResponse),
           tool_calls: [{ id: cmdId, type: "function", function: { name: "execute_command", arguments: JSON.stringify({ commands }) } }],
         });
         currentMessages.push({ role: "tool", tool_call_id: cmdId, name: "execute_command", content: commandFeedback });
@@ -474,7 +474,7 @@ export async function executeAgentTurn(params: {
         const toolNames = toolCalls.map((c) => c.name).join(",");
         currentMessages.push({
           role: "assistant",
-          content: stripThinkingBlock(rawResponse),
+          content: cleanResponseForHistory(rawResponse),
           tool_calls: [{ id: tcId, type: "function", function: { name: toolNames, arguments: JSON.stringify(toolCalls.map((c) => c.args)) } }],
         });
         currentMessages.push({ role: "tool", tool_call_id: tcId, name: toolNames, content: toolFeedback });
@@ -576,7 +576,7 @@ export async function executeAgentTurnWholefile(params: {
       logger.logInfo(`[truncation] Response cut off (attempt ${truncationCount}/${MAX_TRUNCATION_CONTINUATIONS}), continuing...`);
       currentMessages = [
         ...currentMessages,
-        { role: "assistant", content: stripThinkingBlock(rawResponse) },
+        { role: "assistant", content: cleanResponseForHistory(rawResponse) },
         { role: "user", content: TRUNCATION_CONTINUATION },
       ];
       finishReason = "stop";
@@ -600,7 +600,7 @@ export async function executeAgentTurnWholefile(params: {
       }
     } else {
       if (loopCount < MAX_TURNS) {
-        currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
+        currentMessages.push({ role: "assistant", content: cleanResponseForHistory(rawResponse) });
         currentMessages.push({
           role: "user",
           content:
@@ -627,7 +627,7 @@ export async function executeAgentTurnWholefile(params: {
       const rfId2 = generateXmlToolCallId("request_files");
       currentMessages.push({
         role: "assistant",
-        content: stripThinkingBlock(rawResponse),
+        content: cleanResponseForHistory(rawResponse),
         tool_calls: [{ id: rfId2, type: "function", function: { name: "request_files", arguments: JSON.stringify({ files: fileRequests }) } }],
       });
       currentMessages.push({ role: "tool", tool_call_id: rfId2, name: "request_files", content: contextMessage });
@@ -655,7 +655,7 @@ export async function executeAgentTurnWholefile(params: {
             .map((r) => `- ${r.file}: ${r.validationErrors.join("; ")}`)
             .join("\n");
         if (loopCount < MAX_TURNS) {
-          currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
+          currentMessages.push({ role: "assistant", content: cleanResponseForHistory(rawResponse) });
           currentMessages.push({
             role: "user",
             content: feedback + "\nPlease retry.",
@@ -713,7 +713,7 @@ export async function executeAgentTurnWholefile(params: {
           });
 
           if (!isAngularProject && loopCount < MAX_TURNS) {
-            currentMessages.push({ role: "assistant", content: stripThinkingBlock(rawResponse) });
+            currentMessages.push({ role: "assistant", content: cleanResponseForHistory(rawResponse) });
             currentMessages.push({
               role: "user",
               content:
@@ -757,7 +757,7 @@ export async function executeAgentTurnWholefile(params: {
         const cmdId2 = generateXmlToolCallId("execute_command");
         currentMessages.push({
           role: "assistant",
-          content: stripThinkingBlock(rawResponse),
+          content: cleanResponseForHistory(rawResponse),
           tool_calls: [{ id: cmdId2, type: "function", function: { name: "execute_command", arguments: JSON.stringify({ commands }) } }],
         });
         currentMessages.push({ role: "tool", tool_call_id: cmdId2, name: "execute_command", content: commandFeedback });
@@ -794,7 +794,7 @@ export async function executeAgentTurnWholefile(params: {
         const toolNames2 = toolCalls.map((c) => c.name).join(",");
         currentMessages.push({
           role: "assistant",
-          content: stripThinkingBlock(rawResponse),
+          content: cleanResponseForHistory(rawResponse),
           tool_calls: [{ id: tcId2, type: "function", function: { name: toolNames2, arguments: JSON.stringify(toolCalls.map((c) => c.args)) } }],
         });
         currentMessages.push({ role: "tool", tool_call_id: tcId2, name: toolNames2, content: toolFeedback });

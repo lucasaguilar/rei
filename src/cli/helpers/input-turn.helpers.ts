@@ -76,33 +76,20 @@ function resolveActiveModelLabel(mode?: string): string {
 
   const modelName = getModelName(provider);
 
-  if (provider === "ollama") {
-    return `🦙 ${modelName}`;
-  }
-  if (provider === "openrouter") {
-    return `🧠 ${modelName}`;
-  }
-  if (provider === "groq") {
-    return `⚡ ${modelName}`;
-  }
-  if (provider === "gemini") {
-    return `♊ ${modelName}`;
-  }
-  if (provider === "huggingface") {
-    return `🤗 ${modelName}`;
-  }
-  if (provider === "llmstudio") {
-    return `💻 ${modelName}`;
-  }
-  if (provider === "mock") {
-    return `🧪 ${modelName}`;
-  }
+  const emoji: Record<string, string> = {
+    ollama: "Ollama 🦙",
+    openrouter: "OpenRouter 🧠",
+    groq: "Groq ⚡",
+    gemini: "Gemini ♊",
+    huggingface: "HuggingFace 🤗",
+    llmstudio: "Lm Studio 💻",
+    mock: "Mock 🧪",
+  };
 
-  if (provider) {
-    return `${provider}(${modelName})`;
-  }
-
-  return "unknown";
+  if (!provider) return "unknown";
+  const icon = emoji[provider] ?? "";
+  // Show provider / model so it's clear which backend AND model is active per mode.
+  return `${icon ? icon + " " : ""}${provider} / ${modelName}`;
 }
 
 function isInsideXmlBlock(text: string): boolean {
@@ -198,8 +185,10 @@ export async function handleInputTurn(
       }
 
       if (isThinking) {
-        // Skip whitespace-only thinking tokens (model emits \n at init, creates blank lines)
-        if (!cleanToken.trim()) continue;
+        // Skip whitespace-only thinking tokens ONLY at the start (model emits \n at
+        // init, creating leading blank lines). Once content is flowing, preserve
+        // whitespace so paragraph breaks in the reasoning render correctly.
+        if (!liveContentShown && !cleanToken.trim()) continue;
         if (!liveContentShown) {
           actions.stopSpinner();
           state.activeStatus = undefined;

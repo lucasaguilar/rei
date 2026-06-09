@@ -50,6 +50,8 @@ export interface ChatCompletionWithTools {
   content: string;        // text portion of the response (may be empty)
   toolCalls: ToolCall[];  // structured tool calls (may be empty)
   finishReason: string;   // "stop" | "tool_calls" | "length" | ...
+  reasoning?: string;     // model reasoning (reasoning_content) — present for reasoning models
+                          // even when content is empty (e.g. qwen3.6 in tool-calling mode)
 }
 
 // ── Provider interface ───────────────────────────────────────────────────────

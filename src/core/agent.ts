@@ -50,6 +50,7 @@ import {
   buildStageCompletionMessage,
   isStageSuccessful,
   stripThinkingBlock,
+  cleanResponseForHistory,
 } from "./helpers/turn-message.helpers.js";
 import type { StreamTurnOptions } from "./models/agent.types.js";
 import {
@@ -153,7 +154,7 @@ export class Agent {
     );
     session.messages.push({
       role: "assistant",
-      content: stripThinkingBlock(response),
+      content: cleanResponseForHistory(response),
       sourceMode: session.mode,
     });
 
@@ -293,7 +294,7 @@ export class Agent {
         const msg = formatBatchPatchResult(result);
         session.messages.push({
           role: "assistant",
-          content: stripThinkingBlock(outcome.response),
+          content: cleanResponseForHistory(outcome.response),
         });
         options?.onStatus?.("producing_response");
         // Yield clean explanation as rendered text (only if not already streamed via onChunk).
@@ -340,7 +341,7 @@ export class Agent {
         );
         session.messages.push({
           role: "assistant",
-          content: stripThinkingBlock(outcome.response + feedback),
+          content: cleanResponseForHistory(outcome.response + feedback),
         });
         options?.onStatus?.("producing_response");
         if (cleanExplanation && !hasStreamedText)
@@ -361,7 +362,7 @@ export class Agent {
       // Si no hay parches ni comandos, solo responde
       session.messages.push({
         role: "assistant",
-        content: stripThinkingBlock(outcome.response),
+        content: cleanResponseForHistory(outcome.response),
       });
       options?.onStatus?.("producing_response");
       // Only yield the response text if it wasn't already streamed via onChunk
@@ -469,7 +470,7 @@ export class Agent {
             ...currentMessages,
             {
               role: "assistant" as const,
-              content: stripThinkingBlock(streamResponse),
+              content: cleanResponseForHistory(streamResponse),
             },
             {
               role: "user" as const,
@@ -595,7 +596,7 @@ export class Agent {
               ...currentMessages,
               {
                 role: "assistant",
-                content: stripThinkingBlock(streamResponse),
+                content: cleanResponseForHistory(streamResponse),
                 tool_calls: [
                   {
                     id: turnId,
@@ -616,7 +617,7 @@ export class Agent {
             hasMoreCommands = false;
             session.messages.push({
               role: "assistant",
-              content: stripThinkingBlock(streamResponse),
+              content: cleanResponseForHistory(streamResponse),
               sourceMode: session.mode,
             });
           }
@@ -632,7 +633,7 @@ export class Agent {
           allAssistantChunks.push(streamResponse);
 
           const finalContent = allAssistantChunks.join("\n\n");
-          const cleanAssistantContent = stripThinkingBlock(finalContent);
+          const cleanAssistantContent = cleanResponseForHistory(finalContent);
 
           session.messages.push({
             role: "assistant",
@@ -959,7 +960,7 @@ export class Agent {
 
       currentMessages.push({
         role: "assistant",
-        content: stripThinkingBlock(lastResponse),
+        content: cleanResponseForHistory(lastResponse),
       });
 
       const commands = extractCommandRequests(lastResponse);
