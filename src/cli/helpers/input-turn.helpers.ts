@@ -77,13 +77,13 @@ function resolveActiveModelLabel(mode?: string): string {
   const modelName = getModelName(provider);
 
   const emoji: Record<string, string> = {
-    ollama: "Ollama 🦙",
-    openrouter: "OpenRouter 🧠",
-    groq: "Groq ⚡",
-    gemini: "Gemini ♊",
-    huggingface: "HuggingFace 🤗",
-    llmstudio: "Lm Studio 💻",
-    mock: "Mock 🧪",
+    ollama: "🦙",
+    openrouter: "🧠",
+    groq: "⚡",
+    gemini: "♊",
+    huggingface: "🤗",
+    llmstudio: "💻",
+    mock: "🧪",
   };
 
   if (!provider) return "unknown";

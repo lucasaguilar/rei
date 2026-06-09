@@ -541,6 +541,14 @@ export class Agent {
         const toolCalls = extractToolCalls(streamResponse);
         const fileRequests = extractFileRequests(streamResponse);
 
+        this.logger.logInfo("Raw LLM Response (ask/planning)", {
+          finishReason,
+          commands: commands.length,
+          toolCalls: toolCalls.map((c) => c.name),
+          fileRequests: fileRequests.length,
+          contentPreview: stripThinkingBlock(streamResponse).slice(0, 200),
+        });
+
         if (
           commands.length > 0 ||
           toolCalls.length > 0 ||
