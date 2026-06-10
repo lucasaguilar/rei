@@ -214,3 +214,22 @@ export function stripThinkingBlock(text: string): string {
   return text.replace(/<think>[\s\S]*?(<\/think>|$)/gi, "").trim();
 }
 
+/**
+ * Cleans an assistant response for SESSION-HISTORY storage (i.e. what gets
+ * re-sent to the model on subsequent turns). This is the opt-in lever for
+ * "preserve thinking": when REI_PRESERVE_THINKING=true, the <think> reasoning
+ * is kept in the stored content so reasoning models (e.g. Qwen3.6 with
+ * "Preserve Thinking") receive their prior reasoning back. Default: strip it
+ * (recommended for most models — avoids context bloat and repetition loops).
+ *
+ * NOTE: this only governs HISTORY/context. User-facing display always strips
+ * <think> independently (CLI buffer + stripThinkingBlock on yields), so
+ * enabling this never leaks raw reasoning tags to the screen.
+ */
+export function cleanResponseForHistory(content: string): string {
+  if (process.env.REI_PRESERVE_THINKING === "true") {
+    return content;
+  }
+  return stripThinkingBlock(content);
+}
+

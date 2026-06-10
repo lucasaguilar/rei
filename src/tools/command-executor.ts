@@ -51,6 +51,8 @@ const ALLOWED_COMMANDS = new Set([
   "curl", "git", "env", "which", "date", "printf", "echo", "chmod", "command",
   "rm", "tar", "unzip", "file", "wget",
   "true", "false", "test",
+  // Read-only text utilities (file exploration: read by parts, slice, count)
+  "head", "tail", "sed", "awk", "wc", "sort", "uniq", "cut", "tr",
   // macOS automation
   "osascript",
   // REI internal
@@ -268,76 +270,107 @@ function runSpawn(finalCmd: string, finalArgs: string[], cwd: string): Promise<C
   });
 }
 
-/** Runs one command segment (allow-list + redirects), in the given cwd. */
-async function executeSingleSegment(
+/**
+ * Splits a command segment on top-level pipes (`|`), respecting quotes.
+ * Assumes `||` was already consumed by splitOnLogicalOps, so any `|` here is a pipe.
+ */
+function splitOnPipe(segment: string): string[] {
+  const stages: string[] = [];
+  let current = "";
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < segment.length; i++) {
+    const ch = segment[i];
+    if (ch === "'" && !inDouble) inSingle = !inSingle;
+    else if (ch === '"' && !inSingle) inDouble = !inDouble;
+    if (!inSingle && !inDouble && ch === "|") {
+      stages.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  stages.push(current.trim());
+  return stages.filter((s) => s.length > 0);
+}
+
+interface PreparedCommand {
+  finalCmd: string;
+  finalArgs: string[];
+  redir: Redirects;
+}
+
+/**
+ * Validates a single command segment (keywords, allow-list, rm safety) and
+ * resolves redirects + the rtk wrapper. Shared by the single-command and
+ * pipeline execution paths.
+ */
+function prepareCommand(
   segment: string,
   cwd: string,
   workspaceRoot: string,
-): Promise<CommandResult> {
-  // Forbidden keywords/operators (rm -rf, sudo, ...)
+  allowRtk = true,
+): { ok: true; prepared: PreparedCommand } | { ok: false; error: string } {
   if (DENIED_KEYWORDS.some((keyword) => segment.includes(keyword))) {
-    return { success: false, exitCode: -1, stdout: "", stderr: `Security Error: Command contains forbidden keywords or operators.` };
+    return { ok: false, error: "Security Error: Command contains forbidden keywords or operators." };
   }
 
   const { args: cleanArgs, redir } = extractRedirects(segment);
   const [cmd, ...args] = cleanArgs;
 
-  if (!cmd) {
-    return { success: false, exitCode: -1, stdout: "", stderr: "Empty command." };
-  }
+  if (!cmd) return { ok: false, error: "Empty command." };
 
-  // Allow-list
   if (!ALLOWED_COMMANDS.has(cmd)) {
-    return { success: false, exitCode: -1, stdout: "", stderr: `Security Error: Command '${cmd}' is not in the allow-list.` };
+    return { ok: false, error: `Security Error: Command '${cmd}' is not in the allow-list.` };
   }
 
   // Extra security for 'rm'
   if (cmd === "rm") {
-    // 1. Block recursive flags (e.g. -r, -R, --recursive) to prevent directory tree deletion
     const hasRecursive = args.some(
       (arg) => arg.startsWith("-") && (/[rR]/.test(arg) || arg === "--recursive"),
     );
     if (hasRecursive) {
-      return {
-        success: false,
-        exitCode: -1,
-        stdout: "",
-        stderr: "Security Error: Recursive deletion is not allowed.",
-      };
+      return { ok: false, error: "Security Error: Recursive deletion is not allowed." };
     }
-
-    // 2. Restrict deletion targets to workspaceRoot and ~/.rei
     const homedir = process.env.HOME || os.homedir();
     const allowedDirs = [
       path.normalize(workspaceRoot),
       path.normalize(path.join(homedir, ".rei")),
     ];
-
     for (const arg of args) {
-      if (arg.startsWith("-")) continue; // skip flags
+      if (arg.startsWith("-")) continue;
       const absPath = path.isAbsolute(arg) ? arg : path.join(cwd, arg);
       const normPath = path.normalize(absPath);
       const isAllowed = allowedDirs.some(
         (dir) => normPath === dir || normPath.startsWith(dir + path.sep),
       );
       if (!isAllowed) {
-        return {
-          success: false,
-          exitCode: -1,
-          stdout: "",
-          stderr: `Security Error: rm target '${arg}' is outside the allowed directories (workspace or ~/.rei).`,
-        };
+        return { ok: false, error: `Security Error: rm target '${arg}' is outside the allowed directories (workspace or ~/.rei).` };
       }
     }
   }
 
-  const useRtk = isRtkAvailable() && cmd !== "rtk";
-  const finalCmd = useRtk ? "rtk" : cmd;
-  const finalArgs = useRtk ? [cmd, ...args] : args;
+  // rtk reformats output to save tokens — great for standalone commands (output
+  // goes to the model), but it breaks pipelines, where stages must exchange RAW
+  // output. So pipelines pass allowRtk=false and run the real commands.
+  const useRtk = allowRtk && isRtkAvailable() && cmd !== "rtk";
+  return {
+    ok: true,
+    prepared: {
+      finalCmd: useRtk ? "rtk" : cmd,
+      finalArgs: useRtk ? [cmd, ...args] : args,
+      redir,
+    },
+  };
+}
 
-  const result = await runSpawn(finalCmd, finalArgs, cwd);
-
-  // Apply redirections to the captured output.
+/** Applies parsed redirections to a captured command result (in place). */
+function applyRedirects(
+  result: CommandResult,
+  redir: Redirects,
+  cwd: string,
+  workspaceRoot: string,
+): CommandResult {
   if (redir.stderrToStdout) {
     result.stdout = [result.stdout, result.stderr].filter(Boolean).join("\n");
     result.stderr = "";
@@ -366,14 +399,102 @@ async function executeSingleSegment(
       result.stderr = "";
     }
   }
-
   return result;
+}
+
+/** Runs one command segment (allow-list + redirects), in the given cwd. */
+async function executeSingleSegment(
+  segment: string,
+  cwd: string,
+  workspaceRoot: string,
+): Promise<CommandResult> {
+  const prep = prepareCommand(segment, cwd, workspaceRoot);
+  if (!prep.ok) return { success: false, exitCode: -1, stdout: "", stderr: prep.error };
+
+  const result = await runSpawn(prep.prepared.finalCmd, prep.prepared.finalArgs, cwd);
+  return applyRedirects(result, prep.prepared.redir, cwd, workspaceRoot);
+}
+
+/**
+ * Runs a pipeline (`cmd1 | cmd2 | ... | cmdN`) by spawning each stage and wiring
+ * stdout → stdin between them — no shell, so each stage is allow-list validated.
+ * The final stage's stdout is captured; redirects on the last stage apply to it.
+ */
+async function runPipeline(
+  stages: string[],
+  cwd: string,
+  workspaceRoot: string,
+): Promise<CommandResult> {
+  // Validate EVERY stage before spawning anything — fail fast, spawn nothing on
+  // error. allowRtk=false: stages must exchange raw output for pipes to work.
+  const prepared: PreparedCommand[] = [];
+  for (const stage of stages) {
+    const prep = prepareCommand(stage, cwd, workspaceRoot, false);
+    if (!prep.ok) return { success: false, exitCode: -1, stdout: "", stderr: prep.error };
+    prepared.push(prep.prepared);
+  }
+
+  return new Promise((resolve) => {
+    const children = prepared.map((p) =>
+      spawn(p.finalCmd, p.finalArgs, { cwd, shell: false, env: { ...process.env, FORCE_COLOR: "0" } }),
+    );
+
+    // Wire stdout → stdin between consecutive stages; swallow EPIPE when a
+    // downstream stage (e.g. head) exits early and closes its stdin.
+    for (let i = 0; i < children.length - 1; i++) {
+      children[i].stdout.pipe(children[i + 1].stdin);
+      children[i].stdout.on("error", () => {});
+      children[i + 1].stdin.on("error", () => {});
+    }
+
+    const lastIdx = children.length - 1;
+    let lastStdout = "";
+    const stderrParts: string[] = [];
+    let lastExit = -1;
+    let spawnErr: string | null = null;
+    let pending = children.length;
+
+    children[lastIdx].stdout.on("data", (d) => (lastStdout += d.toString()));
+
+    children.forEach((child, i) => {
+      let cstderr = "";
+      child.stderr.on("data", (d) => (cstderr += d.toString()));
+      child.on("error", (err) => {
+        spawnErr = `Execution Error: ${err.message}`;
+      });
+      child.on("close", (code) => {
+        if (i === lastIdx) lastExit = code ?? -1;
+        // Honor per-stage stderr suppression; last stage's stderr is handled by applyRedirects.
+        if (i !== lastIdx && !prepared[i].redir.discardStderr && cstderr.trim()) {
+          stderrParts.push(cstderr.trim());
+        } else if (i === lastIdx && cstderr.trim()) {
+          stderrParts.push(cstderr.trim());
+        }
+        pending--;
+        if (pending > 0) return;
+
+        if (spawnErr) {
+          resolve({ success: false, exitCode: -1, stdout: "", stderr: spawnErr });
+          return;
+        }
+        const result: CommandResult = {
+          stdout: lastStdout.trim(),
+          stderr: stderrParts.join("\n").trim(),
+          exitCode: lastExit,
+          success: lastExit === 0,
+        };
+        // Last stage's redirects (e.g. `... | tail -5 > out.txt`) apply to final output.
+        resolve(applyRedirects(result, prepared[lastIdx].redir, cwd, workspaceRoot));
+      });
+    });
+  });
 }
 
 /**
  * Executes a terminal command safely within the workspace path.
  * Supports `cd <dir>` (validated to stay in the workspace), `&&`/`||` chaining
- * with proper short-circuit semantics, and output redirection
+ * with proper short-circuit semantics, pipelines (`cmd1 | cmd2`, wired without a
+ * shell so each stage is allow-list validated), and output redirection
  * (`2>/dev/null`, `2>&1`, `>file`, `>>file`, `&>file`). `cd` updates the working
  * directory for subsequent segments.
  */
@@ -421,7 +542,13 @@ export async function executeCommand(
       continue;
     }
 
-    last = await executeSingleSegment(seg, cwd, workspacePath);
+    // A pipeline within this segment (cmd1 | cmd2 | ...) runs as a wired chain;
+    // a single command runs directly.
+    const stages = splitOnPipe(seg);
+    last =
+      stages.length > 1
+        ? await runPipeline(stages, cwd, workspacePath)
+        : await executeSingleSegment(seg, cwd, workspacePath);
     appendOut(last.stdout);
     appendErr(last.stderr);
   }

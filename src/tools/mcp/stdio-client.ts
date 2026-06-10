@@ -9,12 +9,18 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
-import type { McpClient, McpTool, McpResource, McpPrompt } from "./mcp-client.js";
+import type {
+  McpClient,
+  McpTool,
+  McpResource,
+  McpPrompt,
+} from "./mcp-client.js";
 import {
   setupNotificationHandlers,
   extractTextContent,
   extractTextContentFromContents,
   extractPromptMessages,
+  getToolCallOptions,
 } from "./shared.js";
 
 // ---------------------------------------------------------------------------
@@ -104,14 +110,19 @@ export class StdioMcpClient implements McpClient {
     const result = await this.client.callTool(
       { name: toolName, arguments: args },
       CallToolResultSchema,
+      getToolCallOptions(),
     );
 
     if (result.isError) {
-      const errorText = extractTextContent(result as { content?: Array<{ type: string; text?: string }> });
+      const errorText = extractTextContent(
+        result as { content?: Array<{ type: string; text?: string }> },
+      );
       throw new Error(errorText || "Unknown MCP tool error");
     }
 
-    return extractTextContent(result as { content?: Array<{ type: string; text?: string }> });
+    return extractTextContent(
+      result as { content?: Array<{ type: string; text?: string }> },
+    );
   }
 
   async dispose(): Promise<void> {
@@ -146,7 +157,9 @@ export class StdioMcpClient implements McpClient {
 
   async readResource(uri: string): Promise<string> {
     const result = await this.client.readResource({ uri });
-    return extractTextContentFromContents(result as { contents?: Array<{ type?: string; text?: string }> });
+    return extractTextContentFromContents(
+      result as { contents?: Array<{ type?: string; text?: string }> },
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -166,9 +179,13 @@ export class StdioMcpClient implements McpClient {
     }));
   }
 
-  async getPrompt(name: string, args?: Record<string, string>): Promise<string> {
+  async getPrompt(
+    name: string,
+    args?: Record<string, string>,
+  ): Promise<string> {
     const result = await this.client.getPrompt({ name, arguments: args });
-    return extractPromptMessages(result as { messages?: Array<{ content?: { text?: string } }> });
+    return extractPromptMessages(
+      result as { messages?: Array<{ content?: { text?: string } }> },
+    );
   }
 }
-

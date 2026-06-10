@@ -14,6 +14,7 @@ import {
   extractTextContent,
   extractTextContentFromContents,
   extractPromptMessages,
+  getToolCallOptions,
 } from "./shared.js";
 
 // ---------------------------------------------------------------------------
@@ -141,6 +142,7 @@ export class HttpMcpClient implements McpClient {
     const result = await this.client.callTool(
       { name: toolName, arguments: args },
       CallToolResultSchema,
+      getToolCallOptions(),
     );
 
     if (result.isError) {

@@ -28,6 +28,21 @@ const TRUNCATION_CONTINUATION =
   "Just continue the text as one uninterrupted response.";
 
 /**
+ * Detects when the model TRIED to call a tool but emitted it as text/XML instead
+ * of using the native function-calling interface (e.g. `<read_files>`, `<edit_file>`,
+ * or the legacy XML-path tags). Without this, such a turn is silently treated as a
+ * plain-text final answer and nothing happens.
+ */
+function looksLikeAttemptedToolCall(content: string): boolean {
+  if (!content) return false;
+  // Native tool names emitted as XML-ish tags, the legacy XML action tags, or the
+  // tell-tale `<parameter=` shape models use when faking function calls as text.
+  return /<\s*(read_files|edit_file|create_file|run_command|edit|create|wholefile|request_files|execute_command|call_tool)\b/i.test(
+    content,
+  ) || /<parameter\s*=/i.test(content);
+}
+
+/**
  * Executes an agent turn using native function/tool calling instead of XML parsing.
  * Returns the same ExecutionResult shape as the XML generator so callers are interchangeable.
  */
@@ -58,6 +73,10 @@ export async function executeAgentTurnWithTools(params: {
   let currentMessages: ChatMessage[] = [...messagesForModel];
   let loopCount = 0;
   let firstTurnExplanation = "";
+  // Caps the number of format-correction nudges when the model emits a tool call
+  // as text/XML instead of via the native function-calling interface.
+  let formatCorrections = 0;
+  const MAX_FORMAT_CORRECTIONS = 2;
   // Files created via create_file across the loop — surfaced to the user, since
   // the native tool path otherwise only reports creation back to the model.
   const createdFiles: string[] = [];
@@ -77,6 +96,20 @@ export async function executeAgentTurnWithTools(params: {
 
     logger.logInfo(`[tools] Turn ${loopCount}/${MAX_TURNS}`);
 
+    // Observability for preserve-thinking: record whether reasoning is actually
+    // being re-fed to the model this turn (only when REI_PRESERVE_THINKING=true).
+    const preserveOn = process.env.REI_PRESERVE_THINKING === "true";
+    const reasoningCarried = currentMessages.filter(
+      (m) => m.role === "assistant" && m.reasoning_content,
+    );
+    logger.logInfo("[tools] preserve-thinking", {
+      enabled: preserveOn,
+      assistantMsgsWithReasoning: reasoningCarried.length,
+      reasoningCharsResent: preserveOn
+        ? reasoningCarried.reduce((n, m) => n + (m.reasoning_content?.length ?? 0), 0)
+        : 0,
+    });
+
     const result = await provider.completeChatWithTools(
       currentMessages,
       allTools,
@@ -87,7 +120,14 @@ export async function executeAgentTurnWithTools(params: {
       finishReason: result.finishReason,
       toolCalls: result.toolCalls.map((tc) => tc.function.name),
       contentPreview: result.content.slice(0, 120),
+      reasoningPreview: result.reasoning?.slice(0, 120),
     });
+
+    // Surface the model's reasoning live. In tool-calling turns, qwen3.6 puts its
+    // narration in `reasoning` while `content` is empty — without this it's invisible.
+    if (result.reasoning?.trim()) {
+      onChunk?.({ type: "thinking", content: result.reasoning.trim() + "\n" });
+    }
 
     // Auto-continue if truncated (no tool calls and output was cut off)
     if (result.finishReason === "length" && result.toolCalls.length === 0) {
@@ -124,8 +164,37 @@ export async function executeAgentTurnWithTools(params: {
       firstTurnExplanation = result.content.trim();
     }
 
-    // ── No tool calls: plain text response ────────────────────────────────
+    // ── No tool calls ──────────────────────────────────────────────────────
     if (result.toolCalls.length === 0) {
+      // The model sometimes emits a tool call as TEXT/XML (e.g. "<read_files>...")
+      // instead of using the native function-calling interface. That would be lost
+      // as a plain-text answer. Nudge it back to the proper format and retry.
+      if (
+        looksLikeAttemptedToolCall(result.content) &&
+        formatCorrections < MAX_FORMAT_CORRECTIONS &&
+        loopCount < MAX_TURNS
+      ) {
+        formatCorrections++;
+        logger.logInfo("[tools] format-correction", {
+          attempt: formatCorrections,
+          contentPreview: result.content.slice(0, 120),
+        });
+        currentMessages = [
+          ...currentMessages,
+          { role: "assistant", content: result.content },
+          {
+            role: "user",
+            content:
+              "You emitted a tool call as text/XML, which is not executable. " +
+              "Do NOT write tool calls as text or XML tags. Use the native function-calling " +
+              "interface to invoke the tools (read_files, edit_file, create_file, run_command) directly. " +
+              "Retry the same action now using a proper tool call.",
+          },
+        ];
+        continue;
+      }
+
+      // Genuine plain-text response.
       const response = firstTurnExplanation && result.content !== firstTurnExplanation
         ? firstTurnExplanation + "\n\n" + result.content
         : result.content;
@@ -133,11 +202,13 @@ export async function executeAgentTurnWithTools(params: {
     }
 
     // ── Process tool calls ─────────────────────────────────────────────────
-    // Add the assistant message with tool_calls to history
+    // Add the assistant message with tool_calls to history. Carry the reasoning
+    // so it can be re-sent to the model when REI_PRESERVE_THINKING=true.
     currentMessages.push({
       role: "assistant",
       content: result.content,
       tool_calls: result.toolCalls,
+      ...(result.reasoning ? { reasoning_content: result.reasoning } : {}),
     });
 
     const pendingEdits: AgentSREdit[] = [];

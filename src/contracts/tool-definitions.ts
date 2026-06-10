@@ -212,6 +212,12 @@ export function formatMcpToolsForPrompt(mcpTools: McpTool[]): string {
     'Call these with XML and JSON arguments: `<call_tool name="mcp:server/tool">{ "arg": "value" }</call_tool>`',
     "Emit only the tag (no preamble). You may chain multiple calls — each result is returned before your next step.",
     "",
+    "**CRITICAL — execute, don't narrate:** If the user requests an action a tool can perform " +
+      "(play/pause/search music, control a device, etc.), you MUST emit the `<call_tool>` to do it. " +
+      "NEVER reply with prose describing what you are about to do without actually emitting the tool call " +
+      '(e.g. do NOT answer "I will play X on your iPhone:" and stop). If the action needs a parameter you ' +
+      "don't have (e.g. a target device id), first call the tool that lists the options, then act on the result.",
+    "",
     ...lines,
   ].join("\n");
 }

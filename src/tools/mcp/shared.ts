@@ -15,6 +15,33 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 // ---------------------------------------------------------------------------
+// Tool-call request options (hang protection)
+// ---------------------------------------------------------------------------
+
+/**
+ * RequestOptions for MCP `callTool`. Without these, a tool that streams progress
+ * notifications (e.g. a music server waiting for an active device) can reset the
+ * SDK's per-request timeout indefinitely and hang the whole agent turn.
+ *
+ * - `timeout`: per-request inactivity timeout.
+ * - `maxTotalTimeout`: HARD cap regardless of progress — guarantees the call
+ *   eventually rejects instead of hanging forever.
+ * - `resetTimeoutOnProgress: false`: progress notifications do NOT extend the
+ *   inactivity window (belt-and-suspenders with maxTotalTimeout).
+ *
+ * Configurable via MCP_TOOL_TIMEOUT_MS (default 30s) / MCP_TOOL_MAX_TIMEOUT_MS (default 60s).
+ */
+export function getToolCallOptions(): {
+  timeout: number;
+  maxTotalTimeout: number;
+  resetTimeoutOnProgress: boolean;
+} {
+  const timeout = parseInt(process.env.MCP_TOOL_TIMEOUT_MS ?? "30000", 10);
+  const maxTotalTimeout = parseInt(process.env.MCP_TOOL_MAX_TIMEOUT_MS ?? "60000", 10);
+  return { timeout, maxTotalTimeout, resetTimeoutOnProgress: false };
+}
+
+// ---------------------------------------------------------------------------
 // Text extraction helpers
 // ---------------------------------------------------------------------------
 
