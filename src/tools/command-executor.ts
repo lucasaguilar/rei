@@ -491,20 +491,42 @@ async function runPipeline(
 }
 
 /**
- * Executes a terminal command safely within the workspace path.
- * Supports `cd <dir>` (validated to stay in the workspace), `&&`/`||` chaining
- * with proper short-circuit semantics, pipelines (`cmd1 | cmd2`, wired without a
- * shell so each stage is allow-list validated), and output redirection
- * (`2>/dev/null`, `2>&1`, `>file`, `>>file`, `&>file`). `cd` updates the working
- * directory for subsequent segments.
+ * Splits a command line on top-level `;` separators (sequential statements that
+ * run regardless of each other's exit code), respecting quotes.
  */
-export async function executeCommand(
-  commandLine: string,
-  workspacePath: string,
-): Promise<CommandResult> {
-  const { segments, operators } = splitOnLogicalOps(commandLine.trim());
+function splitOnSemicolon(commandLine: string): string[] {
+  const statements: string[] = [];
+  let current = "";
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < commandLine.length; i++) {
+    const ch = commandLine[i];
+    if (ch === "'" && !inDouble) inSingle = !inSingle;
+    else if (ch === '"' && !inSingle) inDouble = !inDouble;
+    if (!inSingle && !inDouble && ch === ";") {
+      statements.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  statements.push(current.trim());
+  return statements.filter((s) => s.length > 0);
+}
 
-  let cwd = workspacePath;
+/**
+ * Runs one statement (a `&&`/`||` chain of segments, each possibly a pipeline),
+ * threading the working directory through any `cd`. Returns the final result and
+ * the resulting cwd so callers can carry `cd` across `;`-separated statements.
+ */
+async function executeStatement(
+  statement: string,
+  startCwd: string,
+  workspaceRoot: string,
+): Promise<{ result: CommandResult; cwd: string }> {
+  const { segments, operators } = splitOnLogicalOps(statement.trim());
+
+  let cwd = startCwd;
   let combinedStdout = "";
   let combinedStderr = "";
   let last: CommandResult = { success: true, exitCode: 0, stdout: "", stderr: "" };
@@ -513,7 +535,6 @@ export async function executeCommand(
   const appendErr = (s: string) => { if (s) combinedStderr += (combinedStderr ? "\n" : "") + s; };
 
   for (let i = 0; i < segments.length; i++) {
-    // Short-circuit based on the operator joining us to the previous segment.
     if (i > 0) {
       const op = operators[i - 1];
       if (op === "&&" && !last.success) continue; // prior failed → skip &&-chained
@@ -530,7 +551,7 @@ export async function executeCommand(
         last = { success: true, exitCode: 0, stdout: `(now in ${cwd})`, stderr: "" };
         continue;
       }
-      const res = resolveCdTarget(target, cwd, workspacePath);
+      const res = resolveCdTarget(target, cwd, workspaceRoot);
       if (!res.ok) {
         last = { success: false, exitCode: res.error.startsWith("Security") ? -1 : 1, stdout: "", stderr: res.error };
         appendErr(res.error);
@@ -547,10 +568,54 @@ export async function executeCommand(
     const stages = splitOnPipe(seg);
     last =
       stages.length > 1
-        ? await runPipeline(stages, cwd, workspacePath)
-        : await executeSingleSegment(seg, cwd, workspacePath);
+        ? await runPipeline(stages, cwd, workspaceRoot)
+        : await executeSingleSegment(seg, cwd, workspaceRoot);
     appendOut(last.stdout);
     appendErr(last.stderr);
+  }
+
+  return {
+    result: {
+      success: last.success,
+      exitCode: last.exitCode,
+      stdout: combinedStdout.trim(),
+      stderr: combinedStderr.trim(),
+    },
+    cwd,
+  };
+}
+
+/**
+ * Executes a terminal command safely within the workspace path.
+ * Supports `cd <dir>` (validated to stay in the workspace), `;` sequential
+ * statements, `&&`/`||` chaining with proper short-circuit semantics, pipelines
+ * (`cmd1 | cmd2`, wired without a shell so each stage is allow-list validated),
+ * and output redirection (`2>/dev/null`, `2>&1`, `>file`, `>>file`, `&>file`).
+ * `cd` carries across both `&&`/`||` segments and `;` statements.
+ */
+export async function executeCommand(
+  commandLine: string,
+  workspacePath: string,
+): Promise<CommandResult> {
+  // `;` (lowest precedence) splits sequential statements that run regardless of
+  // each other's exit code; `cd` state threads across them.
+  const statements = splitOnSemicolon(commandLine.trim());
+
+  let cwd = workspacePath;
+  let combinedStdout = "";
+  let combinedStderr = "";
+  let last: CommandResult = { success: true, exitCode: 0, stdout: "", stderr: "" };
+
+  const appendOut = (s: string) => { if (s) combinedStdout += (combinedStdout ? "\n" : "") + s; };
+  const appendErr = (s: string) => { if (s) combinedStderr += (combinedStderr ? "\n" : "") + s; };
+
+  for (const statement of statements) {
+    const { result, cwd: nextCwd } = await executeStatement(statement, cwd, workspacePath);
+    cwd = nextCwd; // carry `cd` across `;`
+    last = result;
+    appendOut(result.stdout);
+    appendErr(result.stderr);
+    // `;` ignores exit codes — always continue to the next statement.
   }
 
   return {

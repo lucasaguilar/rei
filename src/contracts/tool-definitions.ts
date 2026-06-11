@@ -218,6 +218,13 @@ export function formatMcpToolsForPrompt(mcpTools: McpTool[]): string {
       '(e.g. do NOT answer "I will play X on your iPhone:" and stop). If the action needs a parameter you ' +
       "don't have (e.g. a target device id), first call the tool that lists the options, then act on the result.",
     "",
+    "**Efficiency — prefer summaries over full content:** Many servers expose a cheap " +
+      "`search`/`list` tool that already returns summaries (subject, sender, snippet, title) and a " +
+      "separate expensive tool to fetch full content/bodies. To summarize or list items, use the " +
+      "`search`/`list` results directly — do NOT fetch the full content of every item. Fetch full " +
+      "content ONLY for the specific items the user asks to read in detail. This avoids huge, slow " +
+      "responses that can exhaust the context window.",
+    "",
     ...lines,
   ].join("\n");
 }

@@ -3,9 +3,7 @@
     "spotify": {
       "type": "stdio",
       "command": "node",
-      "args": [
-        "/Users/lucas/www/spotify-mcp-server/build/index.js"
-      ]
+      "args": ["/Users/lucas/www/spotify-mcp-server/build/index.js"]
     },
     "github": {
       "type": "stdio",
@@ -13,6 +11,24 @@
       "args": ["stdio"],
       "env": {
         "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+      }
+    },
+    "google_workspace": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "tool",
+        "run",
+        "workspace-mcp",
+        "--single-user",
+        "--tools",
+        "gmail"
+      ],
+      "env": {
+        "GOOGLE_OAUTH_CLIENT_ID": "${GOOGLE_OAUTH_CLIENT_ID}",
+        "GOOGLE_OAUTH_CLIENT_SECRET": "${GOOGLE_OAUTH_CLIENT_SECRET}",
+        "OAUTHLIB_INSECURE_TRANSPORT": "1",
+        "user_google_email": "lucasaguilar@gmail.com"
       }
     }
   }

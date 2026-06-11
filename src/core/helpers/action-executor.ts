@@ -42,22 +42,34 @@ async function dispatchXmlToolCall(
       const searchRes = await searchWeb(call.args.query as string, provider);
       return `\n### 🔍 Search Results: ${call.args.query}\n${searchRes}\n`;
     }
-    if (call.name.startsWith("mcp:") && mcpRegistry) {
-      // Strip the "mcp:" namespace prefix before dispatching — the registry
-      // key is "server/tool", not "mcp:server/tool" (same as the structured path).
-      const qualified = call.name.slice(4);
-      logger.logInfo(`[tools] mcp: ${qualified}`);
-      const result = await mcpRegistry.dispatch(qualified, call.args);
-      
-      let formattedResult = result;
-      try {
-        const parsed = JSON.parse(result);
-        formattedResult = `\`\`\`json\n${JSON.stringify(parsed, null, 2)}\n\`\`\``;
-      } catch {
-        // If not valid JSON, wrap in a plain code block
-        formattedResult = `\`\`\`\n${result}\n\`\`\``;
+    // Resolve the MCP tool name leniently: the registry key is "server/tool".
+    // A "mcp:" prefix routes directly; but models frequently DROP the prefix
+    // (e.g. "google_workspace/search_gmail_messages" instead of "mcp:google_workspace/..."),
+    // so a bare name is also routed to MCP when it matches a connected tool —
+    // otherwise the call wrongly fails as "not implemented".
+    if (mcpRegistry) {
+      const hasPrefix = call.name.startsWith("mcp:");
+      const bareName = hasPrefix ? call.name.slice(4) : call.name;
+      let routeToMcp = hasPrefix;
+      if (!routeToMcp && typeof mcpRegistry.getAvailableTools === "function") {
+        routeToMcp = mcpRegistry
+          .getAvailableTools()
+          .some((t) => t.name === bareName);
       }
-      return `\n### 🔌 MCP: ${qualified}\n${formattedResult}\n`;
+
+      if (routeToMcp) {
+        logger.logInfo(`[tools] mcp: ${bareName}`);
+        const result = await mcpRegistry.dispatch(bareName, call.args);
+
+        let formattedResult = result;
+        try {
+          const parsed = JSON.parse(result);
+          formattedResult = `\`\`\`json\n${JSON.stringify(parsed, null, 2)}\n\`\`\``;
+        } catch {
+          formattedResult = `\`\`\`\n${result}\n\`\`\``;
+        }
+        return `\n### 🔌 MCP: ${bareName}\n${formattedResult}\n`;
+      }
     }
     throw new Error(`Tool "${call.name}" is not implemented.`);
   } catch (err) {
