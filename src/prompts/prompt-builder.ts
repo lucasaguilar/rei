@@ -34,8 +34,17 @@ export function buildSystemMessage(
 ): string {
   const projectRules = buildProjectRules(workspacePath);
 
+  // Current date — the model has a training cutoff and otherwise hallucinates
+  // "today", breaking date-relative tasks (e.g. "today's emails", "last week").
+  const now = new Date();
+  const isoDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const weekday = now.toLocaleDateString("en-US", { weekday: "long" });
+  const currentDateLine = `Current date: ${weekday}, ${isoDate} (user's local time). Use this for any date-relative request; do not guess the date.`;
+
   const sections: string[] = [
     loadPrompt("shared/base"),
+    "",
+    currentDateLine,
     "",
     `Active mode: ${mode}`,
     "",

@@ -12,6 +12,7 @@ import {
   formatMcpToolsForPrompt,
   mcpToolsToDefinitions,
   modelFeedbackToolNames,
+  AGENT_TOOLS,
 } from "../contracts/tool-definitions.js";
 import {
   buildSystemMessage,
@@ -75,7 +76,10 @@ import {
   CREATED_FILES_MARKER,
 } from "../agent-mode/helpers/patch-helpers.js";
 import { formatCodeDiff } from "../cli/markdown-renderer.js";
-import { calculateContextBudget } from "../context/context-budget.js";
+import {
+  calculateContextBudget,
+  estimateToolsTokens,
+} from "../context/context-budget.js";
 import { estimateTokens } from "../chat/helpers/token-estimator.js";
 import {
   checkHardware,
@@ -584,12 +588,20 @@ export class Agent {
 
           // Commands and file requests always need model re-feed (the model must see
           // the output to continue). For tool calls, only MCP tools need re-feed;
-          // fire-and-forget tools (weather, search) do not.
+          // fire-and-forget tools (weather, search) do not. Match leniently: models
+          // often drop the "mcp:" prefix, so also treat a bare connected MCP tool name
+          // as needing re-feed.
+          const mcpToolNames = new Set(
+            this.mcpRegistry.getAvailableTools().map((t) => t.name),
+          );
           const hasFeedbackCall =
             commands.length > 0 ||
             fileRequests.length > 0 ||
             toolCalls.some(
-              (c) => feedbackTools.has(c.name) || c.name.startsWith("mcp:"),
+              (c) =>
+                feedbackTools.has(c.name) ||
+                c.name.startsWith("mcp:") ||
+                mcpToolNames.has(c.name),
             );
 
           if (hasFeedbackCall) {
@@ -765,11 +777,13 @@ export class Agent {
       systemContent += `\n\n### Active Plan Progress:\n${todoContent}`;
     }
 
-    // Advertise the live MCP tool list to the model. The structured agent path
-    // also receives these via the API `tools` param (harmless redundancy here),
-    // but the XML modes (ask, planning, agent fallback) rely solely on this text
-    // to discover what they can call.
-    if (this.mcpRegistry.hasTools()) {
+    // Advertise the live MCP tool list to the model — but ONLY for the XML modes
+    // (ask, planning, agent XML fallback) that discover tools from this text.
+    // The structured agent tools path already receives them via the API `tools`
+    // param, so adding the text list there just DUPLICATES the token cost — which
+    // is severe with large MCP servers (e.g. Google Workspace: dozens of tools).
+    const usesToolsApi = session.mode === "agent" && this.useToolCalling;
+    if (this.mcpRegistry.hasTools() && !usesToolsApi) {
       const mcpBlock = formatMcpToolsForPrompt(
         this.mcpRegistry.getAvailableTools(),
       );
@@ -824,19 +838,45 @@ export class Agent {
       10,
     );
     const responseReserve = parseInt(
-      process.env.OLLAMA_NUM_PREDICT ??
-        process.env.REI_RESPONSE_RESERVE ??
+      process.env.REI_RESPONSE_RESERVE ??
+        process.env.OLLAMA_NUM_PREDICT ??
         "16384",
       10,
     );
     const systemMessage = session.messages.find((m) => m.role === "system");
     const historyMessages = session.messages.filter((m) => m.role !== "system");
+
+    // The function-calling `tools` array (sent only on the agent tools path) is
+    // NOT part of the message history, so account for it here — large MCP servers
+    // (e.g. Google Workspace) add many tool schemas that would otherwise overflow
+    // the model's context invisibly.
+    let toolsTokens = 0;
+    if (session.mode === "agent" && this.useToolCalling) {
+      const toolDefs = [
+        ...AGENT_TOOLS,
+        ...mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools()),
+      ];
+      toolsTokens = estimateToolsTokens(toolDefs);
+
+      // Warn clearly if the tools array alone eats a large share of the window —
+      // far more actionable than LM Studio's cryptic 400 context-overflow error.
+      if (numCtx > 0 && toolsTokens > numCtx * 0.4) {
+        this.pendingHardwareWarnings.push(
+          `\n\x1b[33m⚠️  [REI] The connected MCP tools occupy ~${toolsTokens} tokens ` +
+            `(${Math.round((toolsTokens / numCtx) * 100)}% of the ${numCtx}-token window). ` +
+            `This can overflow the model's context. Reduce the enabled MCP tools ` +
+            `(e.g. enable only the services you need) or load the model with a larger context.\x1b[0m\n`,
+        );
+      }
+    }
+
     const tokenBudget = calculateContextBudget({
       numCtx,
       systemPrompt: systemMessage?.content ?? "",
       history: historyMessages,
       userInput,
       responseReserve,
+      toolsTokens,
     });
 
     const context = await buildTurnContext({

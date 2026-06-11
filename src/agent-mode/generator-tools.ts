@@ -96,19 +96,21 @@ export async function executeAgentTurnWithTools(params: {
 
     logger.logInfo(`[tools] Turn ${loopCount}/${MAX_TURNS}`);
 
-    // Observability for preserve-thinking: record whether reasoning is actually
-    // being re-fed to the model this turn (only when REI_PRESERVE_THINKING=true).
-    const preserveOn = process.env.REI_PRESERVE_THINKING === "true";
-    const reasoningCarried = currentMessages.filter(
-      (m) => m.role === "assistant" && m.reasoning_content,
-    );
-    logger.logInfo("[tools] preserve-thinking", {
-      enabled: preserveOn,
-      assistantMsgsWithReasoning: reasoningCarried.length,
-      reasoningCharsResent: preserveOn
-        ? reasoningCarried.reduce((n, m) => n + (m.reasoning_content?.length ?? 0), 0)
-        : 0,
-    });
+    // Observability for preserve-thinking: only log when it's actually ON and
+    // re-feeding reasoning — otherwise it's just noise (default is OFF).
+    if (process.env.REI_PRESERVE_THINKING === "true") {
+      const reasoningCarried = currentMessages.filter(
+        (m) => m.role === "assistant" && m.reasoning_content,
+      );
+      logger.logInfo("[tools] preserve-thinking", {
+        enabled: true,
+        assistantMsgsWithReasoning: reasoningCarried.length,
+        reasoningCharsResent: reasoningCarried.reduce(
+          (n, m) => n + (m.reasoning_content?.length ?? 0),
+          0,
+        ),
+      });
+    }
 
     const result = await provider.completeChatWithTools(
       currentMessages,

@@ -13,7 +13,12 @@ const OVERHEAD_BUFFER = 600;
  *
  * Formula:
  *   budget = numCtx - systemPrompt - sessionHistory - userInput
- *            - responseReserve - repoMapBuffer - overheadBuffer
+ *            - responseReserve - toolsTokens - repoMapBuffer - overheadBuffer
+ *
+ * `toolsTokens` accounts for the function-calling `tools` array sent in the API
+ * request (large MCP servers like Google Workspace add many tool schemas). It is
+ * NOT part of the message history, so without subtracting it the request can
+ * overflow the model's context even though REI thinks the history fits.
  *
  * Returns undefined when numCtx is 0/unknown (no trimming applied).
  */
@@ -23,8 +28,9 @@ export function calculateContextBudget(params: {
   history: ChatMessage[];
   userInput: string;
   responseReserve: number;
+  toolsTokens?: number;
 }): number | undefined {
-  const { numCtx, systemPrompt, history, userInput, responseReserve } = params;
+  const { numCtx, systemPrompt, history, userInput, responseReserve, toolsTokens = 0 } = params;
   if (!numCtx || numCtx <= 0) return undefined;
 
   const consumed =
@@ -32,12 +38,26 @@ export function calculateContextBudget(params: {
     history.reduce((acc, m) => acc + estimateTokens(m.content), 0) +
     estimateTokens(userInput) +
     responseReserve +
+    toolsTokens +
     REPO_MAP_BUFFER +
     OVERHEAD_BUFFER;
 
   const available = numCtx - consumed;
   // Always leave at least 500 tokens for context — prevents complete starvation
   return Math.max(500, available);
+}
+
+/**
+ * Estimates the token cost of the function-calling `tools` array (its JSON
+ * serialization). Used to reserve room so requests don't overflow the context.
+ */
+export function estimateToolsTokens(tools: unknown[]): number {
+  if (!tools || tools.length === 0) return 0;
+  try {
+    return estimateTokens(JSON.stringify(tools));
+  } catch {
+    return 0;
+  }
 }
 
 /** Estimates the token cost of the variable parts of a TurnContext. */

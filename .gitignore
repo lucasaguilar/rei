@@ -27,3 +27,5 @@ scripts/launch-rei.config.js
 # Windsurf
 .windsurf/
 .ai/
+
+rei.config.json
