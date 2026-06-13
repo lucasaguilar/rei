@@ -13,6 +13,14 @@ import type { McpRegistry } from "../tools/mcp/mcp-registry.js";
 import { AGENT_TOOLS, mcpToolsToDefinitions } from "../contracts/tool-definitions.js";
 import { executeCommand, limitCommandOutput } from "../tools/command-executor.js";
 import {
+  searchMcpTools,
+  SEARCH_TOOLS_DEF,
+  MAX_UNFILTERED,
+  PRELOAD_K,
+  SEARCH_K,
+} from "../tools/tool-retriever.js";
+import { getMaxTurns } from "../config/model-runtime.js";
+import {
   buildFileContextMessage,
   finalizeOutcome,
   validateProposedPatches,
@@ -20,12 +28,20 @@ import {
   type ExecutionResult,
 } from "./helpers/patch-helpers.js";
 
-const MAX_TURNS = process.env.REI_MAX_TURNS ? parseInt(process.env.REI_MAX_TURNS, 10) : 7;
+const MAX_TURNS = getMaxTurns();
 const MAX_TRUNCATION_CONTINUATIONS = 3;
 const TRUNCATION_CONTINUATION =
   "Your previous response was cut off by the output token limit. " +
   "Continue EXACTLY from where you left off — do NOT repeat, summarize, or restart. " +
   "Just continue the text as one uninterrupted response.";
+
+/** Last user message text — fallback query for tool-RAG when userQuery isn't passed. */
+function lastUserText(messages: ChatMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "user") return messages[i].content;
+  }
+  return "";
+}
 
 /**
  * Detects when the model TRIED to call a tool but emitted it as text/XML instead
@@ -57,8 +73,10 @@ export async function executeAgentTurnWithTools(params: {
   /** Live progress callback — emits "status" chunks as each tool runs so the
    *  user sees activity (this path is otherwise silent until the turn ends). */
   onChunk?: (event: { type: "thinking" | "text" | "status"; content: string }) => void;
+  /** Raw user request, used by tool-RAG to select only relevant MCP tools. */
+  userQuery?: string;
 }): Promise<ExecutionResult> {
-  const { provider, messagesForModel, workspacePath, logger, modelOverride, mcpRegistry, onChunk } = params;
+  const { provider, messagesForModel, workspacePath, logger, modelOverride, mcpRegistry, onChunk, userQuery } = params;
 
   if (!provider.completeChatWithTools) {
     throw new Error("executeAgentTurnWithTools: provider does not support completeChatWithTools");
@@ -67,8 +85,37 @@ export async function executeAgentTurnWithTools(params: {
   // Emits a one-line live status for a tool action (shown immediately by the CLI).
   const emitStatus = (msg: string) => onChunk?.({ type: "status", content: `\n\x1b[33m${msg}\x1b[0m\n` });
 
-  const mcpDefinitions = mcpRegistry ? mcpToolsToDefinitions(mcpRegistry.getAvailableTools()) : [];
-  const allTools = [...AGENT_TOOLS, ...mcpDefinitions];
+  // Tool selection: with large MCP servers (e.g. Google Workspace ~60-90 tools)
+  // sending every schema overflows local context. When there are many tools, expose
+  // only a best-effort pre-load + a `search_tools` meta-tool, and let the model load
+  // more on demand (model-driven, no embeddings). Small sets are sent in full.
+  const allMcpTools = mcpRegistry ? mcpRegistry.getAvailableTools() : [];
+  const query = userQuery ?? lastUserText(messagesForModel);
+  const useToolSearch =
+    allMcpTools.length > MAX_UNFILTERED && process.env.REI_TOOL_RAG !== "false";
+
+  // Names of MCP tools currently exposed to the model (grows as it searches).
+  const activeMcp = new Set<string>(
+    useToolSearch
+      ? searchMcpTools(query, allMcpTools, PRELOAD_K).map((t) => t.name)
+      : allMcpTools.map((t) => t.name),
+  );
+  if (useToolSearch) {
+    logger.logInfo("[tools] tool-search mode", {
+      total: allMcpTools.length,
+      preloaded: [...activeMcp],
+    });
+  }
+
+  // The tools array is rebuilt each turn so newly-searched tools become callable.
+  const buildTools = () => {
+    const mcp = mcpToolsToDefinitions(
+      allMcpTools.filter((t) => activeMcp.has(t.name)),
+    );
+    const tools = [...AGENT_TOOLS, ...mcp];
+    if (useToolSearch) tools.push(SEARCH_TOOLS_DEF);
+    return tools;
+  };
 
   let currentMessages: ChatMessage[] = [...messagesForModel];
   let loopCount = 0;
@@ -90,6 +137,11 @@ export async function executeAgentTurnWithTools(params: {
       unique.map((f) => `- ${f}`).join("\n")
     );
   };
+
+  // Edits accumulate ACROSS iterations so the model can fix multiple files in one
+  // turn (read → edit fileA → edit fileB → … → done). They are applied by the caller
+  // only when the model finishes (emits a plain-text answer, no more tool calls).
+  const pendingEdits: AgentSREdit[] = [];
 
   while (loopCount < MAX_TURNS) {
     loopCount++;
@@ -114,7 +166,7 @@ export async function executeAgentTurnWithTools(params: {
 
     const result = await provider.completeChatWithTools(
       currentMessages,
-      allTools,
+      buildTools(),
       { model: modelOverride },
     );
 
@@ -196,11 +248,17 @@ export async function executeAgentTurnWithTools(params: {
         continue;
       }
 
-      // Genuine plain-text response.
+      // Genuine plain-text response = the model is done. Apply any edits it queued
+      // across the turn (possibly across multiple files).
       const response = firstTurnExplanation && result.content !== firstTurnExplanation
         ? firstTurnExplanation + "\n\n" + result.content
         : result.content;
-      return finalizeOutcome(logger, { response: appendCreatedSummary(response), validProposedPatches: [] }, 0, 0);
+      return finalizeOutcome(
+        logger,
+        { response: appendCreatedSummary(response), validProposedPatches: pendingEdits },
+        pendingEdits.length,
+        pendingEdits.length,
+      );
     }
 
     // ── Process tool calls ─────────────────────────────────────────────────
@@ -213,7 +271,6 @@ export async function executeAgentTurnWithTools(params: {
       ...(result.reasoning ? { reasoning_content: result.reasoning } : {}),
     });
 
-    const pendingEdits: AgentSREdit[] = [];
     let hasToolFailure = false;
 
     // Track edit tasks and all tool results by call ID to preserve correct response order
@@ -237,6 +294,23 @@ export async function executeAgentTurnWithTools(params: {
             logger.logInfo(`[tools] read_files: ${paths.join(", ")}`);
             emitStatus(`🔍  [REI] Reading: ${paths.join(", ") || "(none)"}`);
             toolResult = await buildFileContextMessage(workspacePath, paths);
+            toolResultsMap.set(call.id, toolResult);
+            break;
+          }
+
+          // ── search_tools (meta-tool) ─────────────────────────────────
+          case "search_tools": {
+            const q = (args.query as string) ?? "";
+            const found = searchMcpTools(q, allMcpTools, SEARCH_K);
+            found.forEach((t) => activeMcp.add(t.name));
+            logger.logInfo(`[tools] search_tools: "${q}"`, {
+              found: found.map((t) => t.name),
+            });
+            emitStatus(`🧰  [REI] Searching tools: ${q}`);
+            toolResult = found.length
+              ? "Loaded these tools — you can now call them directly:\n" +
+                found.map((t) => `- ${t.name}: ${t.description ?? ""}`).join("\n")
+              : `No tools matched "${q}". Try different keywords.`;
             toolResultsMap.set(call.id, toolResult);
             break;
           }
@@ -323,7 +397,12 @@ export async function executeAgentTurnWithTools(params: {
       if (validation.success) {
         pendingEdits.push(...batchEdits);
         for (const task of editTasks) {
-          toolResultsMap.set(task.callId, `OK: edit queued for ${task.edit.file}`);
+          toolResultsMap.set(
+            task.callId,
+            `OK: edit to ${task.edit.file} validated and queued. ` +
+              `If OTHER files still need changes for this task, edit them now too. ` +
+              `When ALL changes are done, reply with a brief summary (no tool call).`,
+          );
         }
       } else {
         hasToolFailure = true;
@@ -347,21 +426,28 @@ export async function executeAgentTurnWithTools(params: {
       });
     }
 
-    // ── If we collected valid edits and nothing failed, return them ────────
-    if (pendingEdits.length > 0 && !hasToolFailure) {
-      return finalizeOutcome(
-        logger,
-        {
-          response: appendCreatedSummary(firstTurnExplanation),
-          validProposedPatches: pendingEdits,
-        },
-        pendingEdits.length,
-        pendingEdits.length,
-      );
-    }
+    // Do NOT return here just because we have valid edits — keep looping so the
+    // model can edit additional files in the same task. We apply everything once
+    // the model signals completion (a plain-text response, handled above, which
+    // returns `validProposedPatches: pendingEdits`). Reads, commands, queued edits
+    // and failures all simply continue the loop.
+  }
 
-    // ── If only file reads or commands happened, loop so model can continue
-    // ── If there were failures, loop so model can retry with error feedback
+  // Hit the turn limit. If the model queued edits along the way, apply them rather
+  // than discard the work; otherwise report the failure with guidance.
+  if (pendingEdits.length > 0) {
+    return finalizeOutcome(
+      logger,
+      {
+        response: appendCreatedSummary(
+          firstTurnExplanation ||
+            `Applied ${pendingEdits.length} edit(s); stopped at the ${MAX_TURNS}-turn limit (there may be more to do).`,
+        ),
+        validProposedPatches: pendingEdits,
+      },
+      pendingEdits.length,
+      pendingEdits.length,
+    );
   }
 
   return finalizeOutcome(

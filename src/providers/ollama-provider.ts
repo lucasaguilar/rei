@@ -6,6 +6,7 @@ import type {
   ChatCompletionWithTools,
 } from "./model-provider.js";
 import { openaiCompleteChatWithTools, toApiMessage } from "./openai-tool-caller.js";
+import { getContextWindow, getMaxOutputTokens } from "../config/model-runtime.js";
 
 interface OllamaChatResponse {
   message?: {
@@ -285,7 +286,6 @@ interface OllamaRequestOptions {
   repeat_penalty?: number;
 }
 
-const DEFAULT_OLLAMA_NUM_PREDICT = 16384; // Generous default to prevent empty responses
 // Match the LM Studio provider: non-zero temperature + repetition penalties to stop
 // cyclic repetition loops ("I will check X. I will check Y. I will check X...").
 const DEFAULT_OLLAMA_TEMPERATURE = 0.6;
@@ -396,12 +396,13 @@ function parseRequestTimeoutMs(
 }
 
 function buildOllamaRequestOptions(): OllamaRequestOptions {
+  // Unified budget: REI_CONTEXT_WINDOW (falls back to OLLAMA_NUM_CTX) and
+  // REI_MAX_OUTPUT_TOKENS (falls back to OLLAMA_NUM_PREDICT). A context window of
+  // 0 means "unknown" → leave num_ctx unset so Ollama uses the model's default.
+  const contextWindow = getContextWindow();
   const options: OllamaRequestOptions = {
-    num_ctx: parseOptionalPositiveInteger(process.env.OLLAMA_NUM_CTX),
-    num_predict: parseOptionalPositiveInteger(
-      process.env.OLLAMA_NUM_PREDICT,
-      DEFAULT_OLLAMA_NUM_PREDICT,
-    ),
+    num_ctx: contextWindow > 0 ? contextWindow : undefined,
+    num_predict: getMaxOutputTokens(),
     num_thread: parseOptionalPositiveInteger(process.env.OLLAMA_NUM_THREAD),
     // Float-aware (the old integer parser floored 0.6 → 0, forcing greedy decoding).
     temperature: parseOptionalFloat(

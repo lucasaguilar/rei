@@ -450,9 +450,13 @@ async function runPipeline(
     const lastIdx = children.length - 1;
     let lastStdout = "";
     const stderrParts: string[] = [];
-    let lastExit = -1;
     let spawnErr: string | null = null;
     let pending = children.length;
+    // Exit code + signal of every stage, so we can apply `pipefail` semantics
+    // below instead of trusting only the last stage (which masks upstream
+    // failures, e.g. `ng build | head` reporting head's 0 for a failed build).
+    const exitInfo: Array<{ code: number | null; signal: NodeJS.Signals | null }> =
+      new Array(children.length).fill(null);
 
     children[lastIdx].stdout.on("data", (d) => (lastStdout += d.toString()));
 
@@ -462,8 +466,8 @@ async function runPipeline(
       child.on("error", (err) => {
         spawnErr = `Execution Error: ${err.message}`;
       });
-      child.on("close", (code) => {
-        if (i === lastIdx) lastExit = code ?? -1;
+      child.on("close", (code, signal) => {
+        exitInfo[i] = { code, signal };
         // Honor per-stage stderr suppression; last stage's stderr is handled by applyRedirects.
         if (i !== lastIdx && !prepared[i].redir.discardStderr && cstderr.trim()) {
           stderrParts.push(cstderr.trim());
@@ -477,11 +481,30 @@ async function runPipeline(
           resolve({ success: false, exitCode: -1, stdout: "", stderr: spawnErr });
           return;
         }
+
+        // `pipefail`: the pipeline's exit code is that of the rightmost stage that
+        // failed — so an upstream failure (e.g. `ng build` exiting 1) is no longer
+        // hidden by a trailing `| head` that exits 0. Exception: a non-last stage
+        // killed by SIGPIPE (code 141 / signal SIGPIPE) just means a downstream
+        // stage closed the pipe early (normal truncation, e.g. `… | head -50`),
+        // NOT a real failure — ignore those so legitimate `cmd | head` still works.
+        let effectiveExit = 0;
+        for (let s = 0; s <= lastIdx; s++) {
+          const info = exitInfo[s];
+          if (!info) continue;
+          const sigpipeTrunc =
+            s !== lastIdx && (info.signal === "SIGPIPE" || info.code === 141);
+          const failed = info.signal != null || (info.code != null && info.code !== 0);
+          if (failed && !sigpipeTrunc) {
+            effectiveExit = info.code ?? 1; // rightmost real failure wins
+          }
+        }
+
         const result: CommandResult = {
           stdout: lastStdout.trim(),
           stderr: stderrParts.join("\n").trim(),
-          exitCode: lastExit,
-          success: lastExit === 0,
+          exitCode: effectiveExit,
+          success: effectiveExit === 0,
         };
         // Last stage's redirects (e.g. `... | tail -5 > out.txt`) apply to final output.
         resolve(applyRedirects(result, prepared[lastIdx].redir, cwd, workspaceRoot));

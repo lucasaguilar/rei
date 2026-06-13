@@ -6,6 +6,7 @@ import type {
   ChatCompletionWithTools,
 } from "./model-provider.js";
 import { openaiCompleteChatWithTools, toApiMessage } from "./openai-tool-caller.js";
+import { getMaxOutputTokens } from "../config/model-runtime.js";
 
 interface LlmStudioChatChoice {
   message?: {
@@ -39,10 +40,6 @@ interface LlmStudioStreamChunk {
 
 const DEFAULT_LLM_STUDIO_BASE_URL = "http://localhost:1234/v1";
 const DEFAULT_LLM_STUDIO_REQUEST_TIMEOUT_MS = 600_000; // 10 minutes fallback for local inference
-// Hard cap on output tokens. Without this, a reasoning model that enters a
-// degenerate loop will keep generating until the request timeout (10 min).
-// 8192 is generous for normal responses but stops runaway "thinking forever".
-const DEFAULT_LLM_STUDIO_MAX_TOKENS = 8192;
 // Greedy decoding (temperature 0) is the most common cause of repetition loops
 // ("I will write the response... I will write the response..."). LM Studio's own
 // chat UI uses a non-zero default (~0.6), which is why it doesn't loop. Match that.
@@ -80,10 +77,8 @@ export class LlmStudioProvider implements ModelProvider {
       process.env.LLM_STUDIO_REQUEST_TIMEOUT_MS,
       DEFAULT_LLM_STUDIO_REQUEST_TIMEOUT_MS,
     );
-    this.maxTokens = parseMaxTokens(
-      process.env.LLM_STUDIO_MAX_TOKENS,
-      DEFAULT_LLM_STUDIO_MAX_TOKENS,
-    );
+    // Unified: REI_MAX_OUTPUT_TOKENS (falls back to LLM_STUDIO_MAX_TOKENS).
+    this.maxTokens = getMaxOutputTokens();
     this.temperature = parseFloatEnv(
       process.env.LLM_STUDIO_TEMPERATURE,
       DEFAULT_LLM_STUDIO_TEMPERATURE,
@@ -339,16 +334,6 @@ function parseRequestTimeoutMs(
   if (!value) return fallback;
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 1000) {
-    return fallback;
-  }
-  return Math.floor(parsed);
-}
-
-function parseMaxTokens(value: string | undefined, fallback: number): number {
-  if (!value) return fallback;
-  const parsed = Number(value);
-  // Reject non-numeric / non-positive values; 0 or negative would break the request.
-  if (!Number.isFinite(parsed) || parsed < 1) {
     return fallback;
   }
   return Math.floor(parsed);

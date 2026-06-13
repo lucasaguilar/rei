@@ -3,18 +3,72 @@ import type {
   RagNodeSnippet,
 } from "../../context/context-builder.js";
 
+const FILE_TREE_HEADER = "### PROJECT FILE TREE";
+/** ~1500 tokens ≈ 6000 chars. Generous: a flat path list is cheap and deterministic. */
+const DEFAULT_TREE_CHAR_BUDGET = 6000;
+
+/**
+ * Renders the scanned workspace files as a compact, deterministic path listing so
+ * the model knows the real repo layout and never has to guess paths (which wastes
+ * agent turns rediscovering structure via `find`). Unlike the RAG skeleton map this
+ * is language-independent — it never fails on non-English queries.
+ *
+ * Capped to a char budget: when the full listing is too big it degrades to
+ * directory-level entries with file counts, and finally truncates.
+ */
+export function buildProjectFileTree(
+  files: { path: string }[],
+  charBudget: number = DEFAULT_TREE_CHAR_BUDGET,
+): string {
+  if (!files || files.length === 0) return "";
+
+  const paths = files.map((f) => f.path).sort();
+
+  // 1. Full listing if it fits.
+  const full = paths.join("\n");
+  if (full.length <= charBudget) {
+    return `${FILE_TREE_HEADER}\n\n${full}`;
+  }
+
+  // 2. Too big: collapse to directories with file counts.
+  const dirCounts = new Map<string, number>();
+  for (const p of paths) {
+    const slash = p.lastIndexOf("/");
+    const dir = slash === -1 ? "." : p.slice(0, slash);
+    dirCounts.set(dir, (dirCounts.get(dir) ?? 0) + 1);
+  }
+  const collapsed = [...dirCounts.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([dir, n]) => `${dir}/ (${n} files)`)
+    .join("\n");
+  if (collapsed.length <= charBudget) {
+    return `${FILE_TREE_HEADER} (collapsed to directories — ${paths.length} files total)\n\n${collapsed}`;
+  }
+
+  // 3. Still too big: truncate the directory listing.
+  return `${FILE_TREE_HEADER} (truncated — ${paths.length} files total)\n\n${collapsed.slice(0, charBudget)}\n…`;
+}
+
 export function buildTurnUserMessage(params: {
   userInput: string;
   context: TurnContext;
   repositorySkeletonMap?: string;
+  projectFileTree?: string;
 }): string {
-  const { userInput, context, repositorySkeletonMap } = params;
+  const { userInput, context, repositorySkeletonMap, projectFileTree } = params;
   const lines: string[] = [];
 
   // Dynamic repo map goes at the top of the user message — NOT in the system message.
   // This keeps the system message byte-identical across turns, preserving the Ollama KV cache prefix.
   if (repositorySkeletonMap) {
     lines.push(repositorySkeletonMap);
+    lines.push(``);
+  }
+
+  // Deterministic file tree: tells the model exactly where files live so it reads
+  // the right paths on the first try instead of guessing. Always present (cheap).
+  if (projectFileTree) {
+    lines.push(projectFileTree);
     lines.push(``);
   }
 
