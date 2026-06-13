@@ -39,7 +39,7 @@ orchestration plan's persistent queue + resumable session. **Build that kernel o
 
 | # | Incompatibility | Sev | Resolution in v6 |
 |---|---|---|---|
-| C1 | "Orchestrator"/"Worker" meant a Role *and* a component | 🟡 | Glossary split: **Director/Worker** = A2A Roles; **Orchestrator Engine** = the `/auto` component (§ CONTEXT.md). |
+| C1 | "Orchestrator" meant a Role *and* a component; "Worker" spans an A2A Role *and* the kernel's queue-drainer | 🟡 | Glossary split: **Orchestrator Engine** = the `/auto` component; **Director/Worker** = A2A Roles. "Worker" stays **intentionally** dual-scoped (A2A Role + kernel queue-drainer) — flagged in [CONTEXT.md](../../CONTEXT.md). |
 | C2 | A2A serving mutex **vs** model-lifecycle lock → double model load → crash | 🔴 | **One node-wide Model/Execution Lock** for every trigger ([ADR 0002](../adr/0002-single-model-execution-lock.md)). |
 | C3 | Two queues + two "single workers" | 🔴 | **One persistent queue + one Worker**; A2A-inbound long tasks **enqueue** into it. |
 | C4 | v5 "concurrency = N later" vs single-heavy-model reality | 🟡 | **N = 1 per Node, permanently.** Concurrency = **scale-out via A2A**, never parallel-local. |
@@ -56,13 +56,13 @@ orchestration plan's persistent queue + resumable session. **Build that kernel o
 
 ```
         triggers                       ┌──────────────── one Node ────────────────┐
-  interactive (chat) ───┐              │   ┌──── Model/Execution Lock (N=1) ────┐  │
-  A2A-inbound (Worker) ─┼─► enqueue ──►│   │  single Worker drains the queue    │  │
-  scheduled (daemon)  ──┘   OR sync    │   │     └─ RunTask(req, signal)         │  │
-                            fast-path  │   │           ├─ plain Agent Turn       │  │
-                                       │   │           └─ Orchestrator Engine    │  │
-                                       │   └────────────────────────────────────┘  │
-                                       └──── persistent queue + resumable session ──┘
+  interactive (chat) ───┐              │   ┌──── Model/Execution Lock (N=1) ────┐ │
+  A2A-inbound (Worker) ─┼─► enqueue ──►│   │  single Worker drains the queue    │ │
+  scheduled (daemon)  ──┘   OR sync    │   │     └─ RunTask(req, signal)        │ │
+                            fast-path  │   │           ├─ plain Agent Turn      │ │
+                                       │   │           └─ Orchestrator Engine   │ │
+                                       │   └────────────────────────────────────┘ │
+                                       └── persistent queue + resumable session ──┘
 ```
 
 ### 2.3 Seam interfaces (the integration contract — either plan can build first)
@@ -80,6 +80,7 @@ interface TaskQueue {
   enqueue(item: QueuedTask): void;
   claimNext(): QueuedTask | null;        // marks running, atomic
   complete(id: string, state: QueuedTaskState): void;
+  pending(): QueuedTask[];
 }
 
 // Trace + safety context carried across A2A (alongside W3C traceparent).

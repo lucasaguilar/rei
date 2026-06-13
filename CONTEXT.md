@@ -58,6 +58,11 @@ The two **A2A Roles** (the *outside* view of a Node in a delegation). A **Direct
 and **delegates** subtasks to other Nodes; a **Worker** executes a delegated task and returns a result.
 A Worker may itself become a Director for sub-delegations.
 
+> "Worker" is **intentionally dual-scoped.** Here it is an **A2A Role** (the outside view of a Node
+> serving a delegation). In the **Execution Kernel** it also names the single in-process
+> **queue-drainer** that runs one task at a time. Related but distinct levels: a Node acting in the
+> **Director** Role still has a kernel Worker draining its own local queue.
+
 ## Orchestrator Engine
 The opt-in, **single-node** component (`/auto` mode) that executes **one** task as a hardware-aware
 pipeline: macro-planning → micro-task decomposition → AST-validated execution → transactional apply,

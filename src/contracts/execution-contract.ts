@@ -9,7 +9,7 @@
  * core, against a mock `RunTask`.
  *
  * Owned jointly by:
- *   - docs/features/Multi-Agent A2A + OTel for rei - v6.md
+ *   - docs/features/Multi-Agent A2A + OTel.md
  *   - docs/features/rei-plan-orchestration.md
  * See docs/features/plan-integration-contract.md and
  *     docs/adr/0003-plan-integration-contract.md.

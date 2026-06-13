@@ -1,6 +1,6 @@
 # Plan Integration Contract
 
-> The stable **firewall** between the [Multi-Agent A2A + OTel plan](<Multi-Agent A2A + OTel for rei - v6.md>)
+> The stable **firewall** between the [Multi-Agent A2A + OTel plan](<Multi-Agent A2A + OTel.md>)
 > and the [hardware-aware Orchestration plan](rei-plan-orchestration.md).
 > Normative interfaces live in code: [`src/contracts/execution-contract.ts`](../../src/contracts/execution-contract.ts).
 > Decision record: [ADR 0003](../adr/0003-plan-integration-contract.md). Glossary: [CONTEXT.md](../../CONTEXT.md).
