@@ -128,6 +128,11 @@ export async function executeAgentTurnWithTools(params: {
   // self-correction before giving up (and applying with a not-verified warning).
   let verifyRetries = 0;
   const MAX_VERIFY_RETRIES = 2;
+  // Tracks consecutive search-block mismatches (edit_file whose <search> text is
+  // not found verbatim in the file). After 2 in a row the model clearly can't
+  // reproduce the exact text, so we auto-inject the full file content to break the
+  // mismatch death-loop — mirrors the XML path (generator.ts).
+  let consecutiveSearchMismatchFailures = 0;
   // Files created via create_file across the loop — surfaced to the user, since
   // the native tool path otherwise only reports creation back to the model.
   const createdFiles: string[] = [];
@@ -427,6 +432,9 @@ export async function executeAgentTurnWithTools(params: {
     // Validate the CUMULATIVE set (previously queued edits + this batch) so the
     // sandbox reflects the true evolving state: edits that depend on, or conflict
     // with, earlier ones are caught now instead of misapplying at the end.
+    // After repeated search mismatches, hold the affected files here so we can
+    // inject their exact content AFTER the tool results are fed back.
+    let mismatchFilesToInject: string[] | null = null;
     if (editTasks.length > 0) {
       const batchEdits = editTasks.map((t) => t.edit);
       const validation = await validateProposedPatches({
@@ -437,6 +445,7 @@ export async function executeAgentTurnWithTools(params: {
       });
 
       if (validation.success) {
+        consecutiveSearchMismatchFailures = 0;
         pendingEdits.push(...batchEdits);
         for (const task of editTasks) {
           toolResultsMap.set(
@@ -448,11 +457,20 @@ export async function executeAgentTurnWithTools(params: {
         }
       } else {
         hasToolFailure = true;
+        // Count a search-mismatch streak; a compile error (not a mismatch) resets it.
+        consecutiveSearchMismatchFailures = validation.mismatchOnly
+          ? consecutiveSearchMismatchFailures + 1
+          : 0;
         for (const task of editTasks) {
           toolResultsMap.set(
             task.callId,
             `ERROR: ${validation.feedback ?? "compilation or search block mismatch in batch"}`
           );
+        }
+        // Break the mismatch death-loop: once the model has failed to match the
+        // exact <search> text twice, stop letting it guess and hand it the real file.
+        if (validation.mismatchOnly && consecutiveSearchMismatchFailures >= 2) {
+          mismatchFilesToInject = [...new Set(batchEdits.map((e) => e.file))];
         }
       }
     }
@@ -466,6 +484,26 @@ export async function executeAgentTurnWithTools(params: {
         tool_call_id: call.id,
         name: call.function.name,
       });
+    }
+
+    // Escalation: inject the exact current content of the file(s) the model keeps
+    // failing to match, then reset the streak so it gets a couple of fresh tries
+    // before we'd re-inject. This is what finally breaks the SR mismatch loop.
+    if (mismatchFilesToInject) {
+      logger.logInfo(
+        `[tools] auto-injecting file context after repeated search mismatches: ${mismatchFilesToInject.join(", ")}`,
+      );
+      emitStatus(`📄  [REI] Re-sending exact file content so edits match: ${mismatchFilesToInject.join(", ")}`);
+      const contextMessage = await buildFileContextMessage(workspacePath, mismatchFilesToInject);
+      currentMessages.push({
+        role: "user",
+        content:
+          "Your edit_file `search` blocks did NOT match the file content exactly. " +
+          "Below is the current, exact content of the file(s). Copy the `search` text " +
+          "VERBATIM from here (including indentation and whitespace), then retry edit_file:\n" +
+          contextMessage,
+      });
+      consecutiveSearchMismatchFailures = 0;
     }
 
     // Do NOT return here just because we have valid edits — keep looping so the
