@@ -58,6 +58,10 @@ export async function runChat(
 
   readline.emitKeypressEvents(process.stdin);
   process.stdin.setRawMode(true);
+  // Bracketed paste: the terminal wraps pasted text in \e[200~ … \e[201~, which
+  // Node surfaces as 'paste-start'/'paste-end' keypress events. This lets us treat
+  // newlines inside a paste as literal text instead of submitting on each one.
+  process.stdout.write("\x1b[?2004h");
 
   let spinnerTimer: NodeJS.Timeout | undefined;
   const transcript: string[] = [];
@@ -78,6 +82,7 @@ export async function runChat(
     inputHistory: [],
     historyCursor: undefined,
     historyDraft: "",
+    pasting: false,
 
     selectedCommandIndex: 0,
     paletteClosed: false,
@@ -296,6 +301,7 @@ export async function runChat(
   }
 
   stopSpinner();
+  process.stdout.write("\x1b[?2004l"); // disable bracketed paste
   process.stdin.off("keypress", onKeypress);
   process.stdout.off("resize", onResize);
 

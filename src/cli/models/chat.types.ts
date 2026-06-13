@@ -58,6 +58,10 @@ export interface ChatUIState {
   historyCursor: number | undefined;
   historyDraft: string;
 
+  // True while consuming a bracketed-paste burst (between paste-start and
+  // paste-end), so Enter inside the paste inserts a newline instead of submitting.
+  pasting: boolean;
+
   selectedCommandIndex: number;
   paletteClosed: boolean;
   cols: number;

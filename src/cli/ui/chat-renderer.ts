@@ -161,7 +161,11 @@ export class ChatRenderer {
       Math.max(0, viewport.visible.length),
     );
 
-    uiLines.push(`${promptText}${viewport.visible}`);
+    // Render newlines (from a multi-line paste) as a dim ↵ glyph so the input
+    // box stays on one scrolling line. Each \n maps to exactly one visible column,
+    // so the cursor-column math below is unaffected. The buffer keeps real \n.
+    const visibleInput = viewport.visible.replace(/\n/g, "\x1b[90m↵\x1b[0m");
+    uiLines.push(`${promptText}${visibleInput}`);
 
     process.stdout.write("\x1b[?25l");
     process.stdout.write(uiLines.join("\r\n"));
