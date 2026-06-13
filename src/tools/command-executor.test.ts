@@ -90,3 +90,34 @@ describe("command-executor: rm command security checks", () => {
     expect(result.stderr).toContain("Security Error: Recursive deletion is not allowed.");
   });
 });
+
+describe("command-executor: pipefail semantics", () => {
+  let tempWorkspace = "";
+
+  beforeEach(async () => {
+    tempWorkspace = await fs.promises.mkdtemp(path.join(os.tmpdir(), "rei-pipe-test-"));
+  });
+  afterEach(async () => {
+    if (tempWorkspace) await fs.promises.rm(tempWorkspace, { recursive: true, force: true });
+  });
+
+  it("reports failure when an upstream stage fails, even if the last stage exits 0", async () => {
+    // `false` exits 1; without pipefail the pipeline would inherit `head`'s 0.
+    const result = await executeCommand("false | head -5", tempWorkspace);
+    expect(result.success).toBe(false);
+    expect(result.exitCode).toBe(1);
+  });
+
+  it("keeps success for a normal pipe whose last stage exits 0", async () => {
+    const result = await executeCommand('printf "a\\nb\\nc\\n" | head -1', tempWorkspace);
+    expect(result.success).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("a");
+  });
+
+  it("does not fail when only the last stage filters output (head truncation)", async () => {
+    const result = await executeCommand('true | head -1', tempWorkspace);
+    expect(result.success).toBe(true);
+    expect(result.exitCode).toBe(0);
+  });
+});

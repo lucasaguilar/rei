@@ -46,6 +46,7 @@ import { AgentLogger } from "./logger.js";
 import { SCAN_CACHE_TTL_MS } from "./constants/agent.constants.js";
 import {
   buildTurnUserMessage,
+  buildProjectFileTree,
   looksLikeAgentJson,
   extractStageNumberFromPrompt,
   buildStageCompletionMessage,
@@ -80,6 +81,11 @@ import {
   calculateContextBudget,
   estimateToolsTokens,
 } from "../context/context-budget.js";
+import {
+  getContextWindow,
+  getMaxOutputTokens,
+  getMaxTurns,
+} from "../config/model-runtime.js";
 import { estimateTokens } from "../chat/helpers/token-estimator.js";
 import {
   checkHardware,
@@ -241,6 +247,7 @@ export class Agent {
               modelOverride: resolveModelForMode("agent"),
               mcpRegistry: this.mcpRegistry,
               onChunk,
+              userQuery: userInput,
             })
           : editFormat === "wholefile"
             ? executeAgentTurnWholefile({
@@ -405,9 +412,7 @@ export class Agent {
       let depth = 0;
       let truncationCount = 0;
       let lastCmdSignature = "";
-      const maxDepth = process.env.REI_MAX_TURNS
-        ? parseInt(process.env.REI_MAX_TURNS, 10)
-        : 7;
+      const maxDepth = getMaxTurns();
       // Pre-compute which tool names require their result fed back to the model
       // (MCP tools). Built-in search and weather tools also require feedback.
       const feedbackTools = modelFeedbackToolNames(
@@ -832,17 +837,10 @@ export class Agent {
     });
 
     // Calculate token budget so context-builder can trim if the window is tight.
-    // REI_CONTEXT_WINDOW / OLLAMA_NUM_CTX = total context window size (0 = unknown → no trimming).
-    const numCtx = parseInt(
-      process.env.REI_CONTEXT_WINDOW ?? process.env.OLLAMA_NUM_CTX ?? "0",
-      10,
-    );
-    const responseReserve = parseInt(
-      process.env.REI_RESPONSE_RESERVE ??
-        process.env.OLLAMA_NUM_PREDICT ??
-        "16384",
-      10,
-    );
+    // Resolved from the unified config (0 = unknown → no trimming). The response
+    // reserve IS the model's output cap, so the budget never over-reserves.
+    const numCtx = getContextWindow();
+    const responseReserve = getMaxOutputTokens();
     const systemMessage = session.messages.find((m) => m.role === "system");
     const historyMessages = session.messages.filter((m) => m.role !== "system");
 
@@ -879,9 +877,11 @@ export class Agent {
       toolsTokens,
     });
 
+    const scannedFiles = this.getWorkspaceFiles();
+
     const context = await buildTurnContext({
       workspacePath: this.workspacePath,
-      scannedFiles: this.getWorkspaceFiles(),
+      scannedFiles,
       userInput,
       mode: session.mode,
       knowledgeOrchestrator: this.knowledgeOrchestrator,
@@ -916,6 +916,7 @@ export class Agent {
       userInput,
       context,
       repositorySkeletonMap,
+      projectFileTree: buildProjectFileTree(scannedFiles),
     });
 
     this.logger.logInfo("Enriched user message size", {
@@ -969,9 +970,7 @@ export class Agent {
     let currentMessages = [...messagesForModel];
     let hasMoreCommands = true;
     let depth = 0;
-    const maxDepth = process.env.REI_MAX_TURNS
-      ? parseInt(process.env.REI_MAX_TURNS, 10)
-      : 7;
+    const maxDepth = getMaxTurns();
     let lastResponse = "";
     const feedbackTools = modelFeedbackToolNames(
       mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools()),

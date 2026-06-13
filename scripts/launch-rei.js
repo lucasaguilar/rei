@@ -67,9 +67,10 @@ const OLLAMA_PERF_VARS = [
     'OLLAMA_FLASH_ATTENTION',
     'OLLAMA_KV_CACHE_TYPE',
     'OLLAMA_KEEP_ALIVE',
-    'OLLAMA_NUM_CTX',
-    'OLLAMA_NUM_PREDICT',
     'OLLAMA_NUM_THREADS',
+    // Unified budget (replaces OLLAMA_NUM_CTX / OLLAMA_NUM_PREDICT in the summary).
+    'REI_CONTEXT_WINDOW',
+    'REI_MAX_OUTPUT_TOKENS',
 ];
 
 // ─── Persisted last-selection ─────────────────────────────────────────────────
@@ -303,31 +304,58 @@ async function main() {
         }
     }
 
-    // ── Step 5: Ollama context window ──────────────────────────────────────
+    // ── Step 5: Context & token budget (unified) ───────────────────────────
+    // Writes the provider-agnostic REI_* names that src/config/model-runtime.ts
+    // resolves. These take precedence over OLLAMA_NUM_CTX / LLM_STUDIO_MAX_TOKENS,
+    // so the wizard must use them — otherwise a value it writes gets shadowed and
+    // silently ignored. Prompted only for local providers (cloud models have large
+    // fixed windows and rarely need REI's budget overrides).
     const usesOllama = envVars.MODEL_PROVIDER === 'ollama' || envVars.AGENT_MODEL_PROVIDER === 'ollama';
-    if (usesOllama) {
-        if (process.env.OLLAMA_NUM_CTX) {
-            // Already set in .env — carry it through silently
-            envVars.OLLAMA_NUM_CTX = process.env.OLLAMA_NUM_CTX;
+    const LOCAL_PROVIDERS = ['ollama', 'llmstudio'];
+    const usesLocal =
+        LOCAL_PROVIDERS.includes(envVars.MODEL_PROVIDER) ||
+        LOCAL_PROVIDERS.includes(envVars.AGENT_MODEL_PROVIDER);
+
+    if (usesLocal) {
+        // Context window (REI's history-trimming assumption). 0 = no trimming.
+        if (process.env.REI_CONTEXT_WINDOW !== undefined) {
+            // Already set in .env — carry it through silently so the wizard never
+            // overwrites a deliberate choice (and never writes a shadowed value).
+            envVars.REI_CONTEXT_WINDOW = process.env.REI_CONTEXT_WINDOW;
         } else {
             const setCtx = await confirm({
-                message: 'Set OLLAMA_NUM_CTX (context window)?',
-                initialValue: last.setOllamaCtx ?? false,
+                message: 'Set REI_CONTEXT_WINDOW (history-trimming budget; 0 = no trimming)?',
+                initialValue: last.setCtxWindow ?? false,
             });
             if (isCancel(setCtx)) { cancel('Cancelled'); process.exit(0); }
 
             if (setCtx) {
                 const ctxValue = await select({
-                    message: 'OLLAMA_NUM_CTX:',
-                    options: ['8192', '16384', '32768', '65536'].map(v => ({ value: v, label: v })),
-                    initialValue: last.ollamaNumCtx ?? '32768',
+                    message: 'REI_CONTEXT_WINDOW (0 = let the model manage its own window):',
+                    options: ['0', '8192', '16384', '32768', '60000'].map(v => ({ value: v, label: v })),
+                    initialValue: last.ctxWindow ?? '0',
                 });
                 if (isCancel(ctxValue)) { cancel('Cancelled'); process.exit(0); }
-                envVars.OLLAMA_NUM_CTX = ctxValue;
-                Object.assign(config, { setOllamaCtx: true, ollamaNumCtx: ctxValue });
+                envVars.REI_CONTEXT_WINDOW = ctxValue;
+                Object.assign(config, { setCtxWindow: true, ctxWindow: ctxValue });
             } else {
-                Object.assign(config, { setOllamaCtx: false });
+                Object.assign(config, { setCtxWindow: false });
             }
+        }
+
+        // Output cap = provider hard limit AND budget reserve (one value). Keep
+        // >= 8192: 4096 truncates long tool calls mid-edit.
+        if (process.env.REI_MAX_OUTPUT_TOKENS !== undefined) {
+            envVars.REI_MAX_OUTPUT_TOKENS = process.env.REI_MAX_OUTPUT_TOKENS;
+        } else {
+            const outValue = await select({
+                message: 'REI_MAX_OUTPUT_TOKENS (max tokens the model can emit per turn):',
+                options: ['8192', '16384', '32768'].map(v => ({ value: v, label: v })),
+                initialValue: last.maxOutputTokens ?? '8192',
+            });
+            if (isCancel(outValue)) { cancel('Cancelled'); process.exit(0); }
+            envVars.REI_MAX_OUTPUT_TOKENS = outValue;
+            Object.assign(config, { maxOutputTokens: outValue });
         }
     }
 

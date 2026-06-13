@@ -35,8 +35,9 @@ import {
   type ExecutionResult,
 } from "./helpers/patch-helpers.js";
 import { streamTurnWithInterception } from "./helpers/token-streamer.js";
+import { getMaxTurns } from "../config/model-runtime.js";
 
-const MAX_TURNS = process.env.REI_MAX_TURNS ? parseInt(process.env.REI_MAX_TURNS, 10) : 7;
+const MAX_TURNS = getMaxTurns();
 
 /** Max consecutive truncation continuations before giving up. */
 const MAX_TRUNCATION_CONTINUATIONS = 3;

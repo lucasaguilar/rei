@@ -1,5 +1,6 @@
 import type { ChatMessage } from "../chat/types.js";
 import type { ModelProvider, CompletionOptions } from "./model-provider.js";
+import { getMaxOutputTokens } from "../config/model-runtime.js";
 
 interface HFChatChoice {
   message?: { role?: string; content?: string | null };
@@ -23,7 +24,6 @@ interface HFStreamChunk {
 const HF_API_BASE_URL = "https://router.huggingface.co/v1";
 const DEFAULT_HF_MODEL = "Qwen/Qwen2.5-72B-Instruct";
 const DEFAULT_HF_REQUEST_TIMEOUT_MS = 120_000;
-const DEFAULT_HF_MAX_TOKENS = 8192;
 
 export class HuggingFaceProvider implements ModelProvider {
   private readonly apiKey: string;
@@ -44,10 +44,8 @@ export class HuggingFaceProvider implements ModelProvider {
       process.env.HF_REQUEST_TIMEOUT_MS,
       DEFAULT_HF_REQUEST_TIMEOUT_MS,
     );
-    this.maxTokens = parsePositiveInt(
-      process.env.HF_MAX_TOKENS,
-      DEFAULT_HF_MAX_TOKENS,
-    );
+    // Unified: REI_MAX_OUTPUT_TOKENS (falls back to HF_MAX_TOKENS).
+    this.maxTokens = getMaxOutputTokens();
   }
 
   async complete(prompt: string, options?: CompletionOptions): Promise<string> {
@@ -198,15 +196,6 @@ function parseRequestTimeoutMs(
   if (!envValue) return defaultMs;
   const parsed = parseInt(envValue, 10);
   return isNaN(parsed) || parsed <= 0 ? defaultMs : parsed;
-}
-
-function parsePositiveInt(
-  envValue: string | undefined,
-  fallback: number,
-): number {
-  if (!envValue) return fallback;
-  const parsed = parseInt(envValue, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function shouldHintJsonResponse(messages: ChatMessage[]): boolean {

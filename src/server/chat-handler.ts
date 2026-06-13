@@ -1,4 +1,5 @@
 import { Agent } from "../core/agent.js";
+import { createModelProvider } from "../providers/provider-factory.js";
 import { SessionMode, type ChatSession } from "../chat/types.js";
 import { isWorkspaceAllowed } from "../server/workspace-config.js";
 import type { FileMeta } from "../workspace/workspace-scanner.js";
@@ -6,6 +7,24 @@ import { loadCurrentSession, saveSession } from "../chat/session-store.js";
 import { runChat } from "../cli/run-chat.js";
 import { buildMentionEntries } from "../cli/helpers/chat.helpers.js";
 import { processMenuCommand } from "../chat/menu-command-processor.js";
+
+/**
+ * REI yields per-edit diffs in terminal format: `Archivo: <file>` followed by
+ * lines prefixed with `+`/`-`/space. Markdown renderers (e.g. Continue) read `-`
+ * as a bullet and indented lines as separate code blocks, fragmenting the diff.
+ * This rewrites such a chunk into a single fenced ```diff block.
+ */
+function wrapDiffForMarkdown(text: string): string {
+  const lead = text.match(/^\s*/)?.[0] ?? "";
+  const body = text.slice(lead.length);
+  if (!body.startsWith("Archivo:")) return text;
+
+  const nl = body.indexOf("\n");
+  if (nl === -1) return text;
+  const file = body.slice("Archivo:".length, nl).trim();
+  const diff = body.slice(nl + 1).replace(/\s+$/, "");
+  return `${lead}**Archivo:** ${file}\n\`\`\`diff\n${diff}\n\`\`\`\n`;
+}
 
 export class ChatHandler {
   constructor(
@@ -41,7 +60,40 @@ export class ChatHandler {
         }
       : { messages: [], mode: "agent" };
 
-    // Interceptar comandos de menú (ej: /index, /compact, /clear)
+    // Accumulates everything emitted to the client this request. The helper below
+    // applies the same prefix/ANSI cleanup, de-dup and leading-trim used for the
+    // main agent stream, so commands that auto-execute (e.g. /runplan) render the
+    // same way as a normal turn.
+    let fullResponse = "";
+    const consumeStream = async (
+      stream: AsyncIterable<string>,
+    ): Promise<void> => {
+      for await (const chunk of stream) {
+        // \x10 = thinking (discard from API output), \x11 = response text,
+        // raw = status/ANSI strings.
+        if (chunk.startsWith("\x10")) {
+          fullResponse += chunk.slice(1);
+          continue;
+        }
+        let clean = chunk.startsWith("\x11")
+          ? chunk.slice(1)
+          : chunk.replace(/\x1b\[[0-9;]*m/g, "").replace(/\x1b\[[^m]*m/g, "");
+        if (!clean) continue;
+        // Patch diffs are emitted in terminal format ("Archivo: …" + +/-/space
+        // prefixed lines). Markdown clients (Continue) turn those into bullets and
+        // fragmented code blocks, so wrap them in a ```diff fence to render as one block.
+        clean = wrapDiffForMarkdown(clean);
+        // De-dup: streaming clients accumulate deltas — skip large chunks already sent.
+        if (clean.length > 40 && fullResponse.includes(clean.trim())) continue;
+        // Trim leading whitespace only at the very start of the response.
+        const out = fullResponse.length === 0 ? clean.replace(/^\s+/, "") : clean;
+        if (!out) continue;
+        fullResponse += out;
+        onChunk(out);
+      }
+    };
+
+    // Interceptar comandos de menú (ej: /index, /compact, /clear, /runplan)
     if (promptTrimmed.startsWith("/")) {
       const cmdResult = await processMenuCommand(
         promptTrimmed,
@@ -56,24 +108,56 @@ export class ChatHandler {
           Object.assign(session, cmdResult.newSession);
         }
 
-        // Guardamos la sesión actualizada y devolvemos la respuesta del comando
+        // Commands like /model and /provider change env vars and ask to rebuild the
+        // agent so the new model/provider + MCP tools take effect. Mirror the CLI:
+        // dispose the old MCP connections, build a fresh agent, reconnect MCP. Done
+        // BEFORE any autoExecute so it runs on the new agent.
+        if (cmdResult.recreateAgent) {
+          try {
+            await this.agent.disposeMcp();
+          } catch {
+            // best-effort teardown
+          }
+          this.agent = new Agent(createModelProvider(), this.workspacePath);
+          try {
+            await this.agent.connectMcp();
+          } catch (error) {
+            console.error(
+              `⚠️  MCP reconnect failed: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+
         if (cmdResult.recordInSession !== false) {
           session.messages.push({ role: "user", content: promptTrimmed });
           session.messages.push({
             role: "assistant",
             content: cmdResult.response,
           });
-          saveSession(
-            this.workspacePath,
-            session.messages,
-            session.mode,
-            session.summary,
-            session.createdAt,
-          );
         }
 
         onChunk(cmdResult.response);
-        return cmdResult.response;
+        fullResponse += cmdResult.response;
+
+        // Commands like /runplan return an autoExecute prompt that must actually run
+        // the agent turn — the CLI does this; the server must too, otherwise the
+        // command only prints "Switching to AGENT mode…" and nothing executes.
+        if (cmdResult.autoExecute) {
+          await consumeStream(
+            this.agent.streamTurn(session, cmdResult.autoExecute.prompt, {
+              onStatus: () => {},
+            }),
+          );
+        }
+
+        saveSession(
+          this.workspacePath,
+          session.messages,
+          session.mode,
+          session.summary,
+          session.createdAt,
+        );
+        return fullResponse;
       } else {
         onChunk(cmdResult.response);
         return cmdResult.response;
@@ -84,31 +168,9 @@ export class ChatHandler {
     // Delegamos la construcción del contexto y el mensaje de sistema al Agent.
     // El Agent internamente utiliza buildTurnContext y buildSystemMessage (prompt-builder.ts)
     // para asegurar que la lógica de negocio sea consistente en CLI y Server.
-    let fullResponse = "";
-    const stream = this.agent.streamTurn(session, promptTrimmed, {
-      onStatus: () => {},
-    });
-
-    for await (const chunk of stream) {
-      // Strip internal CLI type prefixes before sending to external clients:
-      // \x10 = thinking content (dim italic in CLI) — discard from server output
-      // \x11 = response text — strip prefix, send clean text
-      // raw status/ANSI strings — strip ANSI codes and send as plain text
-      if (chunk.startsWith("\x10")) {
-        // Thinking content: skip — don't expose model reasoning to API consumers
-        fullResponse += chunk.slice(1);
-        continue;
-      }
-
-      const clean = chunk.startsWith("\x11")
-        ? chunk.slice(1) // text: strip prefix
-        : chunk.replace(/\x1b\[[0-9;]*m/g, "").replace(/\x1b\[[^m]*m/g, ""); // status: strip ANSI
-
-      if (clean) {
-        fullResponse += clean;
-        onChunk(clean);
-      }
-    }
+    await consumeStream(
+      this.agent.streamTurn(session, promptTrimmed, { onStatus: () => {} }),
+    );
 
     // streamTurn already pushes user + assistant messages to session.messages
     // internally (via prepareSessionForTurn and the various return paths).

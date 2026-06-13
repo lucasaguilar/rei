@@ -56,21 +56,31 @@ const CONFIG_FILENAME = "rei.config.json";
  * be parsed.
  */
 export function loadReiConfig(workspacePath: string): ReiConfig {
-  const candidates = [
+  // Try the workspace config first, then REI's cwd as a global fallback.
+  // De-duplicated so the same path isn't parsed (and warned about) twice when
+  // the workspace IS the cwd.
+  const candidates = [...new Set([
     path.join(workspacePath, CONFIG_FILENAME),
     path.join(process.cwd(), CONFIG_FILENAME),
-  ];
+  ])];
 
   for (const candidate of candidates) {
     if (!fs.existsSync(candidate)) continue;
+
+    // The FIRST existing config file is authoritative — its presence is an
+    // explicit "this is my config". So we never fall through to a later candidate
+    // (e.g. the global one) just because this file is empty or malformed. An empty
+    // `{}` or `{"mcpServers": {}}` therefore means "no MCP servers here".
     try {
-      const raw = fs.readFileSync(candidate, "utf-8");
+      const raw = fs.readFileSync(candidate, "utf-8").trim();
+      if (!raw) return {}; // empty file → explicit "no servers", no global fallback
       return JSON.parse(raw) as ReiConfig;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(
-        `[REI/MCP] Could not parse ${candidate}: ${msg} — skipping.`,
+        `[REI/MCP] Could not parse ${candidate}: ${msg} — treating as no MCP servers.`,
       );
+      return {}; // malformed but present → no servers, do NOT use the global fallback
     }
   }
 

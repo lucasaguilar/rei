@@ -63,7 +63,13 @@ export function detectProjectType(workspacePath: string): ProjectDetection {
 
   if (has("angular.json")) {
     type = "angular";
-    command = "npx tsc --noEmit --pretty false";
+    // Angular CLI uses a solution-style root tsconfig.json ("files": [],
+    // "references": [...]) that compiles NOTHING on its own — `tsc --noEmit`
+    // against it silently passes even on real type errors. Point tsc at the app
+    // project (tsconfig.app.json) so it actually type-checks src/.
+    command = has("tsconfig.app.json")
+      ? "npx tsc --noEmit --pretty false -p tsconfig.app.json"
+      : "npx tsc --noEmit --pretty false";
   } else if (has("tsconfig.json")) {
     type = "typescript";
     command = "npx tsc --noEmit --pretty false";
