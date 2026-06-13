@@ -314,6 +314,12 @@ export class Agent {
           stripThinkingBlock(outcome.response),
         );
         if (explanation && !hasStreamedText) yield `\x11${explanation}`;
+        // Honest signal: if the final combined verify did NOT pass, the model
+        // exhausted its self-correction retries — warn the user instead of
+        // implying the changes compile.
+        if (outcome.verified === false) {
+          yield `\n\x1b[33m⚠️  [REI] Applied, but the combined changes do NOT pass the project type-check. Review before relying on them.\x1b[0m\n`;
+        }
         yield msg.trimStart();
         // Show diff for each applied patch so the user can see exactly what changed.
         for (const edit of outcome.validProposedPatches) {

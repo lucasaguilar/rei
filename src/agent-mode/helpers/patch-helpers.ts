@@ -18,6 +18,14 @@ export interface ExecutionResult {
   failed?: boolean;
   failedProposedPatches?: AgentSREdit[];
   lastValidationError?: string;
+  /**
+   * Whether the FINAL combined set of edits passed sandbox verification (the
+   * verify command compiled the whole result). Distinct from per-batch checks:
+   * a turn can have all batches individually pass yet the combined result fail.
+   * Undefined → no explicit final verify ran; callers fall back to the legacy
+   * "not failed && has patches" heuristic.
+   */
+  verified?: boolean;
 }
 
 /** Marker prefixing the "N file(s) created" summary appended to a turn response. */
@@ -111,7 +119,9 @@ export function finalizeOutcome(
   const validCount = outcome.validProposedPatches.length;
   const failedCount = outcome.failedProposedPatches?.length ?? 0;
   const rejectedCount = Math.max(0, generatedPatchCount - validCount);
-  const sandboxVerified = !outcome.failed && validCount > 0;
+  // Prefer the explicit final-verify result; fall back to the legacy heuristic
+  // only when no final verify ran (e.g. turns that produced no edits).
+  const sandboxVerified = outcome.verified ?? (!outcome.failed && validCount > 0);
 
   logger.logPatchOutcome({
     validCount,
@@ -128,7 +138,7 @@ export function finalizeOutcome(
     appliedPatchCount,
   });
 
-  return outcome;
+  return { ...outcome, verified: sandboxVerified };
 }
 
 /**
