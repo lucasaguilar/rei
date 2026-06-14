@@ -1,4 +1,4 @@
-# Plan: Multi-Agent A2A + OTel for rei (v6)
+# Plan: Multi-Agent A2A + OTel for rei (v7)
 
 > Builds on v5. **v6 aligns the A2A + OTel plan with the hardware-aware
 > [Orchestration plan](rei-plan-orchestration.md)** so the two compose instead of colliding.
@@ -108,7 +108,7 @@ the daemon can be built first; A2A serving just becomes another producer into it
 | Worker safety | Phase 1 convention + documented gap; Phase 2 capability profile (§9). |
 | Delegation safety | Phase 1 propagated **delegation-depth cap** in A2A metadata; origin cycle detection deferred. |
 | Token attrs | Deferred (the decorator is the seam). |
-| Span processor | `SimpleSpanProcessor` for the demo. |
+| Span processor | Telemetry via the **Laminar SDK directly** (`Laminar.initialize` + `observe`); `disableBatch: true` ⇒ `SimpleSpanProcessor` under the hood (demo). |
 
 ---
 
@@ -153,7 +153,7 @@ is still `delegate_to_agent` (sync) vs `delegate_async` + `check_delegation` (as
 
 ## 8. Integration Points (v6 updates marked ▲)
 
-- **IP-1 Telemetry bootstrap** — `telemetry/init.ts`, first import, `SimpleSpanProcessor`, manual spans.
+- **IP-1 Telemetry bootstrap** — `telemetry/init.ts` calls `Laminar.initialize` (first import); manual spans via `observe` (`disableBatch` ⇒ `SimpleSpanProcessor`). IP-3/IP-4 span helpers are `observe`-based too.
 - **IP-2 Root span (Turn)** — wrap `Agent.runTurn`/`streamTurn`. One prompt = one `rei.turn`.
 - ▲ **IP-3 Step + Orchestration spans** — `withStepSpan` at each loop head; **and** `withStageSpan` /
   `withMicroTaskSpan` so an `/auto` run nests **Orchestration → Macro-Stage → Micro-Task → Turn → Step**.
@@ -228,7 +228,8 @@ security gap; long-running = Phase 2). **New in v6:**
 | `docs/adr/0002-single-model-execution-lock.md` | Create — the shared-lock decision |
 | `src/exec/kernel.ts` (new) | Create — `ExecutionLock`, `TaskQueue`, `RunTask` seam (minimal Phase-1 impls) |
 | `src/providers/provider-factory.ts` | Modify — `withTelemetry` **forwards lifecycle methods** + `model-swap` span |
-| `src/telemetry/spans.ts` | Create — `withStepSpan` + `withStageSpan`/`withMicroTaskSpan` (stubs) |
+| `src/telemetry/init.ts` | Create — `initTelemetry` via Laminar `initialize` (`disableBatch` ⇒ SimpleSpanProcessor); not raw OTel |
+| `src/telemetry/spans.ts` | Create — `observe`-based `withTurnSpan`/`withStepSpan`/`withToolSpan` (+ stage/micro stubs later) |
 | `src/a2a/server.ts` | Create — uses kernel (lock + queue + `RunTask`), **no private mutex** |
 | `src/a2a/client.ts`, `types.ts` | Create — `sendTask` (depth cap, cold-load deadline), `A2AMeta` |
 | _(rest as v5 §11)_ | telemetry init, agent.ts spans, tool-dispatch, ReiConfig.a2aNodes, docker-compose, etc. |
@@ -254,4 +255,5 @@ and (stub) scheduled triggers all serialize behind the one lock.
 | **v3** | 2026-06-12 | Reality-check vs the code; Integration Points IP-1…IP-9; extensibility scorecard; unsolved points. |
 | **v4** | 2026-06-13 | Orchestration model: role≠node, orchestrator-workers tree, local-joins sync, accept/ack-vs-execute OCP seam, capability matrix, delegate sync/async boundary. |
 | **v5** | 2026-06-13 | Grilled terminology ([CONTEXT.md](../../CONTEXT.md)): Turn/Step, A2A Node (impl-agnostic), Identity vs Role, SRP. Serving model + [ADR 0001](../adr/0001-a2a-serving-concurrency.md); read-only = convention + documented gap; delegation-depth cap; `SimpleSpanProcessor`; `a2aPeers`→`a2aNodes`. |
+| **v7** | 2026-06-14 | IP-1 telemetry switched from hand-rolled OTel (`BasicTracerProvider`/OTLP exporter) to the **Laminar SDK directly** (`Laminar.initialize` + `observe`); `disableBatch: true` preserves `SimpleSpanProcessor` semantics. Implemented `telemetry/{init,spans}.ts`; wired `initTelemetry()` into `main.ts`/`server.ts`. **IP-2:** one `rei.turn` per prompt wrapping `Agent.runTurn`/`streamTurn`. **IP-4:** `withTelemetry(provider)` decorator (`src/providers/with-telemetry.ts`) emits `llm-call`/`model-swap` spans and forwards `ModelLifecycle` (C6); `withDegenerateGuard` also forwards lifecycle so the factory chain doesn't drop it. Stayed Laminar-direct (native `LaminarAttributes`, no raw OTel dep). **IP-3 (partial, ask-mode only):** `step-N` spans wrap each iteration of the ask/planning streaming loop via `startStepSpan` (global-active so `llm-call` nests Turn→Step→llm-call). Turn/Step use `Laminar.startActiveSpan({ global: true })` to nest across the teed streaming generator (single-Turn-at-a-time invariant). Orchestration/macro/micro + `ast-validate`/`git-checkpoint`/`cooling` spans deferred to the Orchestrator Engine; agent-mode + non-streaming step spans deferred. |
 | **v6** | 2026-06-13 | **Aligned with the [Orchestration plan](rei-plan-orchestration.md).** Terminology de-collided (**Director**/Worker vs **Orchestrator Engine**, Macro-Stage/Micro-Task). Resolved blockers via **one shared execution kernel** — single **Model/Execution Lock** ([ADR 0002](../adr/0002-single-model-execution-lock.md)), one queue + one Worker, `RunTask` seam targeting Agent-Turn-or-Orchestrator-Engine. Reframed concurrency to **N=1 local / scale-out via A2A**; daemon as unified host; sync fast-path + enqueue; `withTelemetry` **forwards model-lifecycle**; extended spans to Orchestration/Macro/Micro; A2A as a **swap-cost optimization** for orchestration (C12). Defined seam interfaces so either plan can be built first. |

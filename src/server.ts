@@ -1,4 +1,6 @@
+import "dotenv/config";
 import * as http from "node:http";
+import { initTelemetry } from "./telemetry/init.js";
 import { createModelProvider } from "./providers/provider-factory.js";
 import { Agent } from "./core/agent.js";
 import { ChatHandler } from "./server/chat-handler.js";
@@ -11,6 +13,8 @@ import {
 import { scanWorkspace } from "./workspace/workspace-scanner.js";
 import { generateRepoMap } from "./tools/repo-map-generator.js";
 import { startIndexingWorker, hasRagIndex } from "./context/rag/rag-indexer.js";
+
+initTelemetry();
 
 const PORT = process.env.REI_SERVER_PORT || 3000;
 const WORKSPACE_PATH = process.env.REI_WORKSPACE_PATH || getDefaultWorkspace();

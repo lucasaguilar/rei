@@ -93,6 +93,11 @@ import {
   resolveModelNameForHardwareCheck,
 } from "./hardware-monitor.js";
 import { McpRegistry } from "../tools/mcp/mcp-registry.js";
+import {
+  withTurnSpan,
+  withTurnSpanStream,
+  startStepSpan,
+} from "../telemetry/spans.js";
 
 export class Agent {
   private scanCache?: {
@@ -138,7 +143,15 @@ export class Agent {
     return this.provider.complete(prompt);
   }
 
+  /** One prompt = one `rei.turn` root span (IP-2). Wraps the non-streaming Turn. */
   async runTurn(session: ChatSession, userInput: string): Promise<string> {
+    return withTurnSpan(userInput, () => this.runTurnInternal(session, userInput));
+  }
+
+  private async runTurnInternal(
+    session: ChatSession,
+    userInput: string,
+  ): Promise<string> {
     this.logger.startTurn();
     this.logger.setCorrelationId(this.correlationId);
     const enrichedUserMessage = await this.prepareSessionForTurn(
@@ -180,7 +193,21 @@ export class Agent {
     return response;
   }
 
-  async *streamTurn(
+  /**
+   * One prompt = one `rei.turn` root span (IP-2). Wraps the streaming Turn; the span
+   * stays open until the caller finishes iterating. Tokens pass through unchanged.
+   */
+  streamTurn(
+    session: ChatSession,
+    userInput: string,
+    options?: StreamTurnOptions,
+  ): AsyncIterable<string> {
+    return withTurnSpanStream(userInput, () =>
+      this.streamTurnInternal(session, userInput, options),
+    );
+  }
+
+  private async *streamTurnInternal(
     session: ChatSession,
     userInput: string,
     options?: StreamTurnOptions,
@@ -427,6 +454,10 @@ export class Agent {
       feedbackTools.add("search");
 
       while (hasMoreCommands && depth < maxDepth) {
+        // One `step-N` span per loop iteration (IP-3, ask/planning). Global-active so the
+        // llm-call / tool spans created while this iteration streams nest under it.
+        const endStep = startStepSpan(depth);
+        try {
         options?.onStatus?.("producing_response");
 
         const chunksQueue: string[] = [];
@@ -671,6 +702,9 @@ export class Agent {
             content: cleanAssistantContent,
             sourceMode: session.mode,
           });
+        }
+        } finally {
+          endStep();
         }
       }
 
