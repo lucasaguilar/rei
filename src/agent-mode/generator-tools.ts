@@ -124,6 +124,15 @@ export async function executeAgentTurnWithTools(params: {
   // as text/XML instead of via the native function-calling interface.
   let formatCorrections = 0;
   const MAX_FORMAT_CORRECTIONS = 2;
+  // Caps how many times we bounce a failing FINAL verify back to the model for
+  // self-correction before giving up (and applying with a not-verified warning).
+  let verifyRetries = 0;
+  const MAX_VERIFY_RETRIES = 2;
+  // Tracks consecutive search-block mismatches (edit_file whose <search> text is
+  // not found verbatim in the file). After 2 in a row the model clearly can't
+  // reproduce the exact text, so we auto-inject the full file content to break the
+  // mismatch death-loop — mirrors the XML path (generator.ts).
+  let consecutiveSearchMismatchFailures = 0;
   // Files created via create_file across the loop — surfaced to the user, since
   // the native tool path otherwise only reports creation back to the model.
   const createdFiles: string[] = [];
@@ -248,14 +257,49 @@ export async function executeAgentTurnWithTools(params: {
         continue;
       }
 
-      // Genuine plain-text response = the model is done. Apply any edits it queued
-      // across the turn (possibly across multiple files).
+      // Genuine plain-text response = the model is done. Before finishing, run a
+      // FINAL verify of the whole queued set (catches cross-edit breakage and any
+      // create_file content that no per-batch check covered). If it fails and we
+      // still have budget, bounce the diagnostics back for one more self-correction.
+      let finalVerified: boolean | undefined = undefined;
+      if (pendingEdits.length > 0) {
+        const finalCheck = await validateProposedPatches({
+          workspacePath,
+          edits: pendingEdits,
+          loopCount,
+          logger,
+        });
+        finalVerified = finalCheck.success;
+        if (!finalCheck.success && verifyRetries < MAX_VERIFY_RETRIES && loopCount < MAX_TURNS) {
+          verifyRetries++;
+          logger.logInfo("[tools] final-verify failed — requesting self-correction", {
+            attempt: verifyRetries,
+          });
+          emitStatus(`🔁  [REI] Combined changes don't compile — asking the model to fix`);
+          currentMessages.push(
+            { role: "assistant", content: result.content },
+            {
+              role: "user",
+              content:
+                "Before finishing: your combined changes do NOT compile.\n" +
+                `${finalCheck.feedback ?? "(no diagnostics)"}\n` +
+                "Fix the affected file(s) with edit_file, then finish with a brief summary.",
+            },
+          );
+          continue;
+        }
+      }
+
       const response = firstTurnExplanation && result.content !== firstTurnExplanation
         ? firstTurnExplanation + "\n\n" + result.content
         : result.content;
       return finalizeOutcome(
         logger,
-        { response: appendCreatedSummary(response), validProposedPatches: pendingEdits },
+        {
+          response: appendCreatedSummary(response),
+          validProposedPatches: pendingEdits,
+          verified: finalVerified,
+        },
         pendingEdits.length,
         pendingEdits.length,
       );
@@ -384,17 +428,24 @@ export async function executeAgentTurnWithTools(params: {
       }
     }
 
-    // Perform a single batch validation for all proposed edits in this turn
+    // Perform a single batch validation for all proposed edits in this turn.
+    // Validate the CUMULATIVE set (previously queued edits + this batch) so the
+    // sandbox reflects the true evolving state: edits that depend on, or conflict
+    // with, earlier ones are caught now instead of misapplying at the end.
+    // After repeated search mismatches, hold the affected files here so we can
+    // inject their exact content AFTER the tool results are fed back.
+    let mismatchFilesToInject: string[] | null = null;
     if (editTasks.length > 0) {
       const batchEdits = editTasks.map((t) => t.edit);
       const validation = await validateProposedPatches({
         workspacePath,
-        edits: batchEdits,
+        edits: [...pendingEdits, ...batchEdits],
         loopCount,
         logger,
       });
 
       if (validation.success) {
+        consecutiveSearchMismatchFailures = 0;
         pendingEdits.push(...batchEdits);
         for (const task of editTasks) {
           toolResultsMap.set(
@@ -406,11 +457,20 @@ export async function executeAgentTurnWithTools(params: {
         }
       } else {
         hasToolFailure = true;
+        // Count a search-mismatch streak; a compile error (not a mismatch) resets it.
+        consecutiveSearchMismatchFailures = validation.mismatchOnly
+          ? consecutiveSearchMismatchFailures + 1
+          : 0;
         for (const task of editTasks) {
           toolResultsMap.set(
             task.callId,
             `ERROR: ${validation.feedback ?? "compilation or search block mismatch in batch"}`
           );
+        }
+        // Break the mismatch death-loop: once the model has failed to match the
+        // exact <search> text twice, stop letting it guess and hand it the real file.
+        if (validation.mismatchOnly && consecutiveSearchMismatchFailures >= 2) {
+          mismatchFilesToInject = [...new Set(batchEdits.map((e) => e.file))];
         }
       }
     }
@@ -426,6 +486,26 @@ export async function executeAgentTurnWithTools(params: {
       });
     }
 
+    // Escalation: inject the exact current content of the file(s) the model keeps
+    // failing to match, then reset the streak so it gets a couple of fresh tries
+    // before we'd re-inject. This is what finally breaks the SR mismatch loop.
+    if (mismatchFilesToInject) {
+      logger.logInfo(
+        `[tools] auto-injecting file context after repeated search mismatches: ${mismatchFilesToInject.join(", ")}`,
+      );
+      emitStatus(`📄  [REI] Re-sending exact file content so edits match: ${mismatchFilesToInject.join(", ")}`);
+      const contextMessage = await buildFileContextMessage(workspacePath, mismatchFilesToInject);
+      currentMessages.push({
+        role: "user",
+        content:
+          "Your edit_file `search` blocks did NOT match the file content exactly. " +
+          "Below is the current, exact content of the file(s). Copy the `search` text " +
+          "VERBATIM from here (including indentation and whitespace), then retry edit_file:\n" +
+          contextMessage,
+      });
+      consecutiveSearchMismatchFailures = 0;
+    }
+
     // Do NOT return here just because we have valid edits — keep looping so the
     // model can edit additional files in the same task. We apply everything once
     // the model signals completion (a plain-text response, handled above, which
@@ -434,8 +514,15 @@ export async function executeAgentTurnWithTools(params: {
   }
 
   // Hit the turn limit. If the model queued edits along the way, apply them rather
-  // than discard the work; otherwise report the failure with guidance.
+  // than discard the work; otherwise report the failure with guidance. No budget
+  // left to self-correct, but still run a final verify so `verified` is honest.
   if (pendingEdits.length > 0) {
+    const finalCheck = await validateProposedPatches({
+      workspacePath,
+      edits: pendingEdits,
+      loopCount,
+      logger,
+    });
     return finalizeOutcome(
       logger,
       {
@@ -444,6 +531,7 @@ export async function executeAgentTurnWithTools(params: {
             `Applied ${pendingEdits.length} edit(s); stopped at the ${MAX_TURNS}-turn limit (there may be more to do).`,
         ),
         validProposedPatches: pendingEdits,
+        verified: finalCheck.success,
       },
       pendingEdits.length,
       pendingEdits.length,

@@ -388,11 +388,15 @@ export async function executeAgentTurn(params: {
         );
       }
 
+      // Reached only after validateProposedPatches succeeded above: the full edit
+      // set compiled in the sandbox, so mark it explicitly verified (rather than
+      // relying on the legacy "not failed" heuristic). Mirrors the tools path.
       return finalizeOutcome(
         logger,
         {
           response: getFinalResponse(rawResponse),
           validProposedPatches: edits,
+          verified: true,
         },
         edits.length,
         edits.length,

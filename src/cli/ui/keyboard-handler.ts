@@ -18,6 +18,21 @@ export class KeyboardHandler {
     const keyWithSequence = key as readline.Key & { sequence?: string };
     const sequence = keyWithSequence.sequence ?? str;
 
+    // ── Bracketed paste ────────────────────────────────────────────────────
+    // The terminal brackets pasted text in \e[200~ … \e[201~, which Node emits
+    // as 'paste-start'/'paste-end'. While inside a paste we keep newlines as
+    // literal text (handled in the return branch below) instead of submitting,
+    // so a multi-line paste lands as ONE message.
+    if (key.name === "paste-start") {
+      state.pasting = true;
+      return;
+    }
+    if (key.name === "paste-end") {
+      state.pasting = false;
+      actions.draw();
+      return;
+    }
+
     // Ignore terminal mouse SGR sequences so they never leak into input text.
     if (isMouseSgrSequence(str, key)) {
       return;
@@ -112,6 +127,13 @@ export class KeyboardHandler {
     }
 
     if (key.name === "return" || key.name === "enter") {
+      // Inside a paste, a newline is literal text, not a submit.
+      if (state.pasting) {
+        state.inputBuffer = `${state.inputBuffer.slice(0, state.inputCursor)}\n${state.inputBuffer.slice(state.inputCursor)}`;
+        state.inputCursor += 1;
+        actions.draw();
+        return;
+      }
       void actions.submitCurrentUserInput();
       return;
     }
