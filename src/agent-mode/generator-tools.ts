@@ -129,10 +129,15 @@ export async function executeAgentTurnWithTools(params: {
   let verifyRetries = 0;
   const MAX_VERIFY_RETRIES = 2;
   // Tracks consecutive search-block mismatches (edit_file whose <search> text is
-  // not found verbatim in the file). After 2 in a row the model clearly can't
-  // reproduce the exact text, so we auto-inject the full file content to break the
-  // mismatch death-loop — mirrors the XML path (generator.ts).
+  // not found verbatim in the file). Two-tier escalation, since a weak local model
+  // often can't reproduce exact search text even with the file in front of it:
+  //   - at 2: inject the file's exact content so it can copy the search verbatim.
+  //   - at 4: it STILL can't match → tell it to stop using edit_file and call
+  //           rewrite_file (whole-file overwrite), which has no match requirement.
+  // The streak only resets on a successful edit.
   let consecutiveSearchMismatchFailures = 0;
+  const MISMATCH_INJECT_AT = 2;
+  const MISMATCH_WHOLEFILE_AT = 4;
   // Files created via create_file across the loop — surfaced to the user, since
   // the native tool path otherwise only reports creation back to the model.
   const createdFiles: string[] = [];
@@ -372,13 +377,40 @@ export async function executeAgentTurnWithTools(params: {
             break;
           }
 
+          // ── rewrite_file ─────────────────────────────────────────────
+          // Whole-file overwrite. REI fills in the `search` with the EXACT current
+          // file content (read from disk), so the model never has to reproduce it —
+          // this sidesteps the search-mismatch problem entirely. The edit still goes
+          // through the normal validation pipeline as a search→replace.
+          case "rewrite_file": {
+            const file = args.file as string;
+            const newContent = (args.content as string) ?? "";
+            const absPath = path.join(workspacePath, file);
+            const current = await fs.readFile(absPath, "utf-8").catch(() => null);
+            logger.logInfo(`[tools] rewrite_file: ${file}`);
+            emitStatus(`📝  [REI] Rewriting whole file: ${file}`);
+            if (current === null) {
+              // Doesn't exist yet — just write it (like create_file).
+              await fs.mkdir(path.dirname(absPath), { recursive: true });
+              await fs.writeFile(absPath, newContent, "utf-8");
+              createdFiles.push(file);
+              toolResultsMap.set(call.id, `OK: ${file} created`);
+            } else {
+              editTasks.push({
+                callId: call.id,
+                edit: { file, search: current, replace: newContent },
+              });
+            }
+            break;
+          }
+
           // ── create_file ──────────────────────────────────────────────
           case "create_file": {
             const filePath = path.join(workspacePath, args.file as string);
             const exists = await fs.stat(filePath).then(() => true).catch(() => false);
             emitStatus(`📂  [REI] Creating: ${args.file}`);
             if (exists) {
-              toolResult = `SKIPPED: ${args.file} already exists — use edit_file to modify it`;
+              toolResult = `SKIPPED: ${args.file} already exists — use edit_file to modify it (or rewrite_file to overwrite it entirely)`;
             } else {
               await fs.mkdir(path.dirname(filePath), { recursive: true });
               await fs.writeFile(filePath, args.content as string, "utf-8");
@@ -432,9 +464,9 @@ export async function executeAgentTurnWithTools(params: {
     // Validate the CUMULATIVE set (previously queued edits + this batch) so the
     // sandbox reflects the true evolving state: edits that depend on, or conflict
     // with, earlier ones are caught now instead of misapplying at the end.
-    // After repeated search mismatches, hold the affected files here so we can
-    // inject their exact content AFTER the tool results are fed back.
-    let mismatchFilesToInject: string[] | null = null;
+    // After repeated search mismatches, hold the affected files + escalation mode
+    // here so we can act AFTER the tool results are fed back.
+    let mismatchEscalation: { files: string[]; mode: "inject" | "wholefile" } | null = null;
     if (editTasks.length > 0) {
       const batchEdits = editTasks.map((t) => t.edit);
       const validation = await validateProposedPatches({
@@ -467,10 +499,15 @@ export async function executeAgentTurnWithTools(params: {
             `ERROR: ${validation.feedback ?? "compilation or search block mismatch in batch"}`
           );
         }
-        // Break the mismatch death-loop: once the model has failed to match the
-        // exact <search> text twice, stop letting it guess and hand it the real file.
-        if (validation.mismatchOnly && consecutiveSearchMismatchFailures >= 2) {
-          mismatchFilesToInject = [...new Set(batchEdits.map((e) => e.file))];
+        // Escalate the mismatch death-loop. Counter does NOT reset here (only on
+        // success), so it climbs through both tiers.
+        if (validation.mismatchOnly) {
+          const files = [...new Set(batchEdits.map((e) => e.file))];
+          if (consecutiveSearchMismatchFailures >= MISMATCH_WHOLEFILE_AT) {
+            mismatchEscalation = { files, mode: "wholefile" };
+          } else if (consecutiveSearchMismatchFailures === MISMATCH_INJECT_AT) {
+            mismatchEscalation = { files, mode: "inject" };
+          }
         }
       }
     }
@@ -486,24 +523,42 @@ export async function executeAgentTurnWithTools(params: {
       });
     }
 
-    // Escalation: inject the exact current content of the file(s) the model keeps
-    // failing to match, then reset the streak so it gets a couple of fresh tries
-    // before we'd re-inject. This is what finally breaks the SR mismatch loop.
-    if (mismatchFilesToInject) {
-      logger.logInfo(
-        `[tools] auto-injecting file context after repeated search mismatches: ${mismatchFilesToInject.join(", ")}`,
-      );
-      emitStatus(`📄  [REI] Re-sending exact file content so edits match: ${mismatchFilesToInject.join(", ")}`);
-      const contextMessage = await buildFileContextMessage(workspacePath, mismatchFilesToInject);
-      currentMessages.push({
-        role: "user",
-        content:
-          "Your edit_file `search` blocks did NOT match the file content exactly. " +
-          "Below is the current, exact content of the file(s). Copy the `search` text " +
-          "VERBATIM from here (including indentation and whitespace), then retry edit_file:\n" +
-          contextMessage,
-      });
-      consecutiveSearchMismatchFailures = 0;
+    // Escalation against the SR mismatch death-loop.
+    if (mismatchEscalation) {
+      const { files, mode } = mismatchEscalation;
+      if (mode === "inject") {
+        // Tier 1: hand the model the exact current content so it can copy the
+        // search block verbatim.
+        logger.logInfo(
+          `[tools] auto-injecting file context after repeated search mismatches: ${files.join(", ")}`,
+        );
+        emitStatus(`📄  [REI] Re-sending exact file content so edits match: ${files.join(", ")}`);
+        const contextMessage = await buildFileContextMessage(workspacePath, files);
+        currentMessages.push({
+          role: "user",
+          content:
+            "Your edit_file `search` blocks did NOT match the file content exactly. " +
+            "Below is the current, exact content of the file(s). Copy the `search` text " +
+            "VERBATIM from here (including indentation and whitespace), then retry edit_file:\n" +
+            contextMessage,
+        });
+      } else {
+        // Tier 2: it still can't match even with the file in hand. Stop using
+        // edit_file — instruct it to overwrite the whole file via rewrite_file,
+        // which has no exact-match requirement.
+        logger.logInfo(
+          `[tools] escalating to whole-file rewrite after persistent mismatches: ${files.join(", ")}`,
+        );
+        emitStatus(`🔁  [REI] edit_file keeps failing — switching to whole-file rewrite: ${files.join(", ")}`);
+        currentMessages.push({
+          role: "user",
+          content:
+            `edit_file keeps failing to match the search block for ${files.join(", ")}. ` +
+            "STOP using edit_file for these file(s). Instead call `rewrite_file` with the " +
+            "file path and its COMPLETE corrected content — you do not need to match any " +
+            "search text. Use the exact file content shown above as your starting point.",
+        });
+      }
     }
 
     // Do NOT return here just because we have valid edits — keep looping so the
