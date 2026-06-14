@@ -141,7 +141,7 @@ export async function runVerifyCommand(
         FORCE_COLOR: "0",
       },
     });
-    return { exitCode: 0, stdout, stderr };
+    return { exitCode: 0, stdout: stripAnsi(stdout), stderr: stripAnsi(stderr) };
   } catch (error) {
     const err = error as {
       code?: number;
@@ -151,10 +151,21 @@ export async function runVerifyCommand(
     };
     return {
       exitCode: typeof err.code === "number" ? err.code : 1,
-      stdout: err.stdout ?? "",
-      stderr: err.stderr ?? err.message ?? "",
+      stdout: stripAnsi(err.stdout ?? ""),
+      stderr: stripAnsi(err.stderr ?? err.message ?? ""),
     };
   }
+}
+
+/**
+ * Strips ANSI color/escape codes from compiler output. Some compilers (notably
+ * Angular's ngc) ignore FORCE_COLOR=0 and still emit colors, which would clutter
+ * the diagnostics fed back to the model.
+ */
+function stripAnsi(text: string | undefined): string {
+  if (!text) return "";
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
 export function groupEditsByFile(edits: AgentSREdit[]): Map<string, AgentSREdit[]> {

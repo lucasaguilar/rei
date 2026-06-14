@@ -63,13 +63,14 @@ export function detectProjectType(workspacePath: string): ProjectDetection {
 
   if (has("angular.json")) {
     type = "angular";
-    // Angular CLI uses a solution-style root tsconfig.json ("files": [],
-    // "references": [...]) that compiles NOTHING on its own — `tsc --noEmit`
-    // against it silently passes even on real type errors. Point tsc at the app
-    // project (tsconfig.app.json) so it actually type-checks src/.
+    // Use the Angular compiler (ngc), NOT bare tsc: tsc type-checks .ts files but
+    // is blind to template errors (e.g. NG5002 in .html) — it would pass a broken
+    // template and report a false "verified". ngc compiles templates too and is
+    // ~1s (vs ~1min for `ng build`). Point it at the app project tsconfig, since
+    // the root tsconfig.json is solution-style ("files": []) and checks nothing.
     command = has("tsconfig.app.json")
-      ? "npx tsc --noEmit --pretty false -p tsconfig.app.json"
-      : "npx tsc --noEmit --pretty false";
+      ? "npx ngc -p tsconfig.app.json --noEmit"
+      : "npx ngc --noEmit";
   } else if (has("tsconfig.json")) {
     type = "typescript";
     command = "npx tsc --noEmit --pretty false";

@@ -70,6 +70,31 @@ export const CREATE_FILE_TOOL: ToolDefinition = {
   },
 };
 
+export const REWRITE_FILE_TOOL: ToolDefinition = {
+  type: "function",
+  function: {
+    name: "rewrite_file",
+    description:
+      "Overwrite an existing file with its COMPLETE new content. Use ONLY when " +
+      "edit_file repeatedly fails to match the search block — this avoids the exact " +
+      "search-match requirement entirely. Provide the full corrected file content.",
+    parameters: {
+      type: "object",
+      properties: {
+        file: {
+          type: "string",
+          description: "Relative path to the file to overwrite.",
+        },
+        content: {
+          type: "string",
+          description: "The COMPLETE new content of the file (replaces it entirely).",
+        },
+      },
+      required: ["file", "content"],
+    },
+  },
+};
+
 export const RUN_COMMAND_TOOL: ToolDefinition = {
   type: "function",
   function: {
@@ -133,6 +158,7 @@ export const AGENT_TOOLS: ToolDefinition[] = [
   READ_FILES_TOOL,
   EDIT_FILE_TOOL,
   CREATE_FILE_TOOL,
+  REWRITE_FILE_TOOL,
   RUN_COMMAND_TOOL,
 ];
 
