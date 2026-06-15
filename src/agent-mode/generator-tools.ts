@@ -396,6 +396,17 @@ export async function executeAgentTurnWithTools(params: {
               createdFiles.push(file);
               toolResultsMap.set(call.id, `OK: ${file} created`);
             } else {
+              // Authoritative overwrite: drop any partial edits to this file already
+              // queued this turn. They're superseded by the full rewrite, and would
+              // otherwise conflict at final apply (their search no longer matches once
+              // the file is replaced). `search` = exact current disk content → matches.
+              const superseded = pendingEdits.filter((e) => e.file === file).length;
+              if (superseded > 0) {
+                for (let i = pendingEdits.length - 1; i >= 0; i--) {
+                  if (pendingEdits[i].file === file) pendingEdits.splice(i, 1);
+                }
+                logger.logInfo(`[tools] rewrite_file superseded ${superseded} queued edit(s) for ${file}`);
+              }
               editTasks.push({
                 callId: call.id,
                 edit: { file, search: current, replace: newContent },
@@ -460,10 +471,12 @@ export async function executeAgentTurnWithTools(params: {
       }
     }
 
-    // Perform a single batch validation for all proposed edits in this turn.
-    // Validate the CUMULATIVE set (previously queued edits + this batch) so the
-    // sandbox reflects the true evolving state: edits that depend on, or conflict
-    // with, earlier ones are caught now instead of misapplying at the end.
+    // Validate ONLY this turn's batch, against the on-disk file content — which is
+    // exactly what the model sees (queued pendingEdits are NOT written to disk during
+    // the loop). Validating the cumulative set here was wrong: it enforced a sandbox
+    // state the model can't observe, so any further edit to an already-edited file
+    // mismatched ("poisoned file"), and even rewrite_file broke. The combined set is
+    // still checked once at the end by the final verify (C2).
     // After repeated search mismatches, hold the affected files + escalation mode
     // here so we can act AFTER the tool results are fed back.
     let mismatchEscalation: { files: string[]; mode: "inject" | "wholefile" } | null = null;
@@ -471,7 +484,7 @@ export async function executeAgentTurnWithTools(params: {
       const batchEdits = editTasks.map((t) => t.edit);
       const validation = await validateProposedPatches({
         workspacePath,
-        edits: [...pendingEdits, ...batchEdits],
+        edits: batchEdits,
         loopCount,
         logger,
       });
