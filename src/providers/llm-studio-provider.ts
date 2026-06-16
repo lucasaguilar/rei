@@ -276,6 +276,7 @@ export class LlmStudioProvider implements ModelProvider {
       messages,
       tools,
       timeoutMs: this.requestTimeoutMs,
+      maxTokens: this.maxTokens,
       options,
     });
   }
