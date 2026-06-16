@@ -48,8 +48,8 @@ export async function ensureRepoMapIndexed(params: {
   if (chunksToEmbed.length > 0) {
     onStatus?.("indexing_repository");
     console.log(
-      `\n\x1b[33m[REI] Indexando repositorio: Generando embeddings locales para ${chunksToEmbed.length} bloque(s) de código...` +
-      `\n      Esto se procesa en tu CPU y puede tomar de 30 a 90 segundos en el primer arranque. Por favor espera...\x1b[0m\n`
+      `\n\x1b[33m[REI] Indexing repository: Generating local embeddings for ${chunksToEmbed.length} code block(s)...` +
+      `\n      This runs on your CPU. Please wait...\x1b[0m\n`
     );
   }
 

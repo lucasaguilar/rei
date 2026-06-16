@@ -5,6 +5,7 @@ import type {
   ChatCompletionWithTools,
   CompletionOptions,
 } from "./model-provider.js";
+import { getMaxOutputTokens } from "../config/model-runtime.js";
 
 interface OpenAIToolCallResponse {
   choices?: Array<{
@@ -70,9 +71,15 @@ export async function openaiCompleteChatWithTools(params: {
   tools: ToolDefinition[];
   timeoutMs: number;
   options?: CompletionOptions;
+  /** Hard output cap. Defaults to the unified REI_MAX_OUTPUT_TOKENS. */
+  maxTokens?: number;
 }): Promise<ChatCompletionWithTools> {
   const { baseUrl, headers, model, messages, tools, timeoutMs, options } =
     params;
+  // Cap output on the tools path too (the non-tools path already does). Without
+  // this, an agent turn can generate until it fills the context window — runaway
+  // narration/loops. Falls back to the unified REI_MAX_OUTPUT_TOKENS.
+  const maxTokens = params.maxTokens ?? getMaxOutputTokens();
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -86,6 +93,7 @@ export async function openaiCompleteChatWithTools(params: {
       tools,
       tool_choice: "auto",
       temperature: 0,
+      max_tokens: maxTokens,
       stream: false,
     }),
     signal: controller.signal,
