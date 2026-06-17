@@ -20,6 +20,7 @@ import {
   SEARCH_K,
 } from "../tools/tool-retriever.js";
 import { getMaxTurns } from "../config/model-runtime.js";
+import { loadSkills, buildUseSkillTool, findSkill } from "../skills/skill-loader.js";
 import {
   buildFileContextMessage,
   finalizeOutcome,
@@ -107,6 +108,12 @@ export async function executeAgentTurnWithTools(params: {
     });
   }
 
+  // Skills: reusable task recipes loaded on demand. Only the catalog (name +
+  // description) rides in the `use_skill` tool; the full body is injected only
+  // when the model invokes it — so many skills cost almost no context.
+  const skills = loadSkills(workspacePath);
+  const useSkillTool = buildUseSkillTool(skills);
+
   // The tools array is rebuilt each turn so newly-searched tools become callable.
   const buildTools = () => {
     const mcp = mcpToolsToDefinitions(
@@ -114,6 +121,7 @@ export async function executeAgentTurnWithTools(params: {
     );
     const tools = [...AGENT_TOOLS, ...mcp];
     if (useToolSearch) tools.push(SEARCH_TOOLS_DEF);
+    if (useSkillTool) tools.push(useSkillTool);
     return tools;
   };
 
@@ -360,6 +368,21 @@ export async function executeAgentTurnWithTools(params: {
               ? "Loaded these tools — you can now call them directly:\n" +
                 found.map((t) => `- ${t.name}: ${t.description ?? ""}`).join("\n")
               : `No tools matched "${q}". Try different keywords.`;
+            toolResultsMap.set(call.id, toolResult);
+            break;
+          }
+
+          // ── use_skill (meta-tool) ────────────────────────────────────
+          case "use_skill": {
+            const skillName = (args.name as string) ?? "";
+            const skill = findSkill(skills, skillName);
+            logger.logInfo(`[tools] use_skill: "${skillName}"`, {
+              matched: skill?.name ?? null,
+            });
+            emitStatus(`📘  [REI] Loading skill: ${skill?.name ?? skillName}`);
+            toolResult = skill
+              ? `Skill "${skill.name}" loaded — follow these steps:\n\n${skill.body}`
+              : `No skill named "${skillName}". Available: ${skills.map((s) => s.name).join(", ") || "(none)"}.`;
             toolResultsMap.set(call.id, toolResult);
             break;
           }

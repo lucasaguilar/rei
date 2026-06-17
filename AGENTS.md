@@ -1,87 +1,145 @@
 # AGENTS.md — REI Agent Specification
 
+> **Scope note:** this file documents REI for people (and agents) working **on the REI codebase**.
+> It is NOT sent to REI's runtime models — REI's system prompt is assembled from `prompts/**` plus
+> the target workspace's `.rei/rules.md`. Keep this file accurate to the current code; it is the
+> contributor-facing source of truth.
+
 ## What is REI?
 
-REI (Repository-Aware AI) is a personal CLI coding agent that operates directly on a local repository.
-It reads, understands, and reasons about the codebase using only the context that has been explicitly
-provided — no hallucinations, no invented behavior.
+REI (Repository-Aware AI) is a personal, local-first CLI coding agent that operates directly on a
+repository. It reads and reasons about the codebase using only the provided context, proposes and
+**applies** changes, and validates every edit against the project's real compiler before keeping it.
 
-REI is designed to be a trustworthy, grounded assistant that helps developers understand, plan, and
-eventually execute changes to their repositories.
-
----
-
-## General Behavior Rules
-
-- **No hallucination.** Never invent files, APIs, code, functions, or behavior not present in the
-  provided context.
-- **Respect context boundaries.** If file previews are truncated, acknowledge it. Do not infer or
-  reconstruct omitted content.
-- **Be direct.** Answer the user's question first. Add context only when it supports the answer.
-- **Be honest about uncertainty.** If the available context is insufficient, say exactly what is
-  missing instead of guessing.
-- **No generic assistant behavior.** Prefer grounded, technical, repo-specific answers over
-  general-purpose explanations.
+It targets **local models** (via LM Studio / Ollama) with optional cloud providers, and is built
+around one core bet: **trust nothing the model says — verify every edit against ground truth.**
 
 ---
 
-## Execution & Validation Approach
+## General behavior rules
 
-REI operates as an **execution-capable** agent with strict verification gates. This means:
+- **No hallucination.** Never invent files, APIs, code, or behavior not present in the context.
+- **Respect context boundaries.** If a file preview is truncated, acknowledge it; never reconstruct.
+- **Act, don't narrate.** In agent mode, emit the tool call — a turn that *describes* an action
+  without performing it accomplishes nothing.
+- **Be direct and grounded.** Answer first, technical, repo-specific. State what's missing instead
+  of guessing.
 
-- REI can read, analyze, and map the semantic relationships of repository files using an AST dependency graph.
-- REI can explain, plan, and propose concrete code changes.
-- REI validates proposed edits in a temporary sandbox workspace and runs project verification (for TypeScript, `npx tsc --noEmit --pretty false`) before presenting them.
 ---
 
 ## Modes
 
-REI supports three operational modes that shape how it interprets and responds to user requests.
+REI has three modes (`SessionMode` in `src/chat/types.ts`):
 
-### ask
-Answer questions about the repository. Explain code, describe roles of files, and provide grounded
-observations. Do not produce unsolicited plans or adopt an execution mindset.
+- **ask** — answer questions about the repo. No unsolicited plans, no edits.
+- **planning** — produce a structured implementation plan. No edits. Plans can be persisted and
+  executed stage-by-stage via `/runplan stage N`.
+- **agent** — execution mode: read, propose, and apply concrete edits, validated in a sandbox.
 
-### planning
-Analyze the codebase and produce a structured implementation plan. Separate observations from
-proposed changes. Do not simulate execution or modify files.
+---
 
-### agent
+## Agent execution: TWO paths
 
-Operate as an execution-oriented coding agent when the task requires repository work. Identify
-relevant files, extract AST dependencies (repo skeleton map), describe applicable actions, and propose concrete
-patches. The agent validates proposals in a sandbox and applies all successful edits directly to the filesystem—there is no pending queue or manual confirmation step.
+Agent mode has two distinct execution paths. Which one runs is decided in `prompt-builder.ts` /
+`agent.ts` (`useToolCalling`):
 
-**If the repo skeleton map or import graph indicates the existence of relevant files or dependencies not currently visible, you MUST emit <request_files> for those files to obtain their contents before proceeding with analysis or edits.**
+### 1. Native tool-calling (PRIMARY)
+For models/providers that support the OpenAI function-calling API (e.g. qwen via LM Studio).
+- Driver: `generator-tools.ts` → `completeChatWithTools` → `openai-tool-caller.ts`.
+- Prompt: `prompts/modes/agent-tools.md` + `prompts/formats/agent-format-tools.md`.
+- The model emits structured `tool_calls`; REI executes them in a loop.
+- **This is the path to optimize for** — it's what capable local models (Qwen family) use.
 
-In agent mode, model actions use XML tags (`<request_files>` and `<edit>`) and are validated in a
-sandbox before being applied directly to the workspace.
+### 2. XML tags (FALLBACK)
+For models/providers WITHOUT reliable native function-calling — the model emits XML tags REI parses.
+- Driver: `generator.ts` (streaming, intercepts `<edit>`, `<create>`, `<request_files>`, `<call_tool>`).
+- Prompts: `prompts/modes/agent.md` (search-replace, default) or `prompts/modes/agent-wholefile.md`
+  (whole-file, when `AGENT_EDIT_FORMAT=wholefile`).
+- Lower priority — maintained as a compatibility fallback.
 
-"Contract Integrity: When a task involves changing a public method, exported function, or interface, you must use the Repository Skeleton Map and Caller Graph to identify all affected consumers. You are responsible for ensuring the entire workspace remains in a valid state by proposing edits for both the definition and its references."
+> A model trained for tool-use (Qwen) follows path 1 reliably. Chat-first models (e.g. Gemma) tend to
+> narrate instead of emitting tool calls — prefer a tool-trained model for agent work.
 
-#### Tool Calls
+---
 
-The agent can execute built-in tools during the action loop. Tool calls are detected using the XML tag format:
+## Agent tools (native path)
 
-  <call_tool name="toolName">arguments</call_tool>
+Defined in `src/contracts/tool-definitions.ts`:
 
-For example, to fetch the weather for a location:
+- **read_files** — read file contents before editing (never guess exact code).
+- **edit_file** — search-and-replace edit; `search` must match the file verbatim.
+- **rewrite_file** — overwrite a file's full content (no `search` needed). Fallback when `edit_file`
+  repeatedly fails to match. REI fills the `search` with the on-disk content, so the model can't miss.
+- **create_file** — create a new file.
+- **run_command** — shell, **exploration/verification only** (find, grep, `ng build`, tests). Writing
+  files via shell (`sed -i`, `>` redirects, `python`) is discouraged by prompt; destructive
+  recursive deletes (`rm -rf`) are blocked by the command-executor's security guard.
+- **search_tools** — meta-tool (tool-RAG). When an MCP server exposes > 25 tools, REI hides them
+  behind this and the model loads relevant ones on demand (keyword search, no embeddings).
+- **MCP tools** — appear as `mcp:server/tool` when MCP servers are connected (see `rei.config.json`,
+  workspace or global `~/.rei`). Used the same as built-in tools.
 
-  <call_tool name="weather">London</call_tool>
+---
 
-When a tool call is detected, REI executes it, appends the result to the conversation as System Feedback, and continues the turn. This enables the agent to use real-time or external data as part of its reasoning and edits.
+## Validation — the core strength
 
-Currently available tools include:
-- `weather(location)` — Returns current weather for the specified location.
-- `search(query)` — Performs a web search and returns a factual summary.
+Every edit is validated **before** it touches the real filesystem:
 
-Additional tools may be added in the future. See the contributor documentation for implementation details.
+1. **Sandbox:** edits are applied to a temp copy of the workspace (`node_modules` symlinked).
+2. **Verify command:** the project-type-aware compiler runs against the sandbox
+   (`src/workspace/project-type.ts`). E.g. **Angular → `npx ngc -p tsconfig.app.json --noEmit`**
+   (ngc, not bare tsc — tsc is blind to Angular template errors); plain TS → `tsc --noEmit`.
+   Override with `REI_SANDBOX_VERIFY_COMMAND`.
+3. **In-loop (tools path):** each batch of edits is validated; failures are fed back to the model.
+4. **Search-mismatch escalation:** after 2 consecutive `search` mismatches REI injects the file's
+   exact content; after 4 it instructs the model to use `rewrite_file`.
+5. **Final verify:** when the model finishes, the full combined edit set is verified once more; on
+   failure the model gets up to `MAX_VERIFY_RETRIES` self-correction attempts.
+6. **Honest `verified` flag:** `ExecutionResult.verified` reflects the real final-verify result, not
+   an optimistic heuristic. `verified: true` means *"what was applied compiles"* — NOT *"the task is
+   complete"* (a model can apply a partial, compiling change and stop).
 
-## Adding New Modes
+---
 
-1. Add a new value to `SessionMode` in `src/chat/types.ts`.
-2. Create `prompts/modes/<new-mode>.md` with the mode instructions.
-3. Create `prompts/formats/<new-mode>-format.md` with the preferred response structure.
-4. Update `src/prompts/prompt-builder.ts` if any special programmatic injection is needed.
+## Context & token budget
 
-See `docs/prompt-architecture.md` for a full explanation of the prompt assembly pipeline.
+Unified in `src/config/model-runtime.ts` (single source of truth):
+
+- **`REI_CONTEXT_WINDOW`** — REI's trimming budget (input + output). `0` = no trimming. Should match
+  the model's loaded context in LM Studio (≥ 30000 recommended for agent work that reads files —
+  smaller windows truncate mid-turn).
+- **`REI_MAX_OUTPUT_TOKENS`** — output cap, sent on both the non-tools and tools paths. ~8192.
+- **`REI_MAX_TURNS`** — max agent-loop iterations per turn.
+
+Trimming + the MCP-tools-overflow warning only activate when `REI_CONTEXT_WINDOW > 0`.
+
+---
+
+## Prompt assembly
+
+`src/prompts/prompt-builder.ts` composes the system prompt (NOT this file):
+
+```
+shared/base  +  shared/response-rules  +  modes/<mode>  +  formats/<mode>-format
+```
+
+For agent mode the mode/format pair depends on the execution path (tools vs XML, see above).
+Per-workspace conventions are injected from `{workspace}/.rei/rules.md` (`loadLocalRules`).
+
+### Adding a new mode
+1. Add the value to `SessionMode` in `src/chat/types.ts`.
+2. Create `prompts/modes/<mode>.md` and `prompts/formats/<mode>-format.md`.
+3. Wire any special injection in `src/prompts/prompt-builder.ts`.
+
+See `docs/prompt-architecture.md` for the full pipeline.
+
+---
+
+## Recommended setup for local models
+
+- **Agent model:** a tool-trained model (e.g. `qwen/qwen3.6-35b-a3b` MoE — fast/cool, or `qwen3.6-27b`).
+- **LM Studio:** load the agent model with **≥ 30000 context** and **full GPU offload**; enable
+  *Only Keep Last JIT Loaded Model* so per-mode model swaps don't blow memory.
+- **`.env`:** `REI_CONTEXT_WINDOW` matching the loaded window, `REI_MAX_OUTPUT_TOKENS=8192`.
+- Avoid heavily-quantized / chat-first models for the agent path — they narrate instead of calling
+  tools and hallucinate completed actions.

@@ -44,6 +44,8 @@ export function buildSystemMessage(
   const sections: string[] = [
     loadPrompt("shared/base"),
     "",
+    loadPrompt("shared/personality"),
+    "",
     currentDateLine,
     "",
     `Active mode: ${mode}`,
