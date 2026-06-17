@@ -254,12 +254,14 @@ export async function validateProposedPatches(params: {
 }
 
 /**
- * Strips all agent-mode action blocks (edit, create, request_files, execute_command, call_tool, wholefile) from a response string.
- * Used to extract the natural prose explanation from the first turn.
+ * Strips all agent-mode action blocks (edit, create, request_files, execute_command,
+ * call_tool, wholefile) from a response string — plus the native function-call syntax
+ * (tool_call, function) that tool-trained models sometimes leak as text on the XML path.
+ * Used to extract the natural prose explanation from a response.
  */
 export function stripAllActionTags(text: string): string {
   return text
-    .replace(/<(edit|create|request_files|execute_command|call_tool|wholefile)\b[\s\S]*?<\/\1>/gi, "")
+    .replace(/<(edit|create|request_files|execute_command|call_tool|wholefile|tool_call|function)\b[\s\S]*?<\/\1>/gi, "")
     .trim();
 }
 

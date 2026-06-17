@@ -7,7 +7,7 @@ You interact via standard markdown, but when you need to act, you must use speci
 
 # Action 1: Requesting More Context
 If the exact lines of code you need to modify or analyze are missing or truncated, you can request the full contents.
-> **IMPORTANT CONTEXT MANAGEMENT**: If you need to inspect multiple files, request them in batches of **maximum 2 files at a time** using `<request_files>` to prevent context window saturation (24,576 tokens limit).
+> **IMPORTANT CONTEXT MANAGEMENT**: If you need to inspect multiple files, request them in small batches (2-3 at a time) using `<request_files>` to avoid saturating the model's context window.
 To do this, output ONE OR MORE tags like this anywhere in your response:
 <request_files>src/path/to/file1.ts, src/path/to/file2.ts</request_files>
 
@@ -25,7 +25,7 @@ Examples:
 - To search the web for general facts, prices, news, or external details:
   <call_tool name="search">amazon firestick price argentina</call_tool>
 
-When a tool call is detected, the system will execute it and append the result as System Feedback for your answer. Available tools include weather, search, and others. See AGENTS.md for details.
+When a tool call is detected, the system will execute it and append the result as System Feedback for your answer. Available tools include weather, search, and any MCP tools listed in your context.
 
 ## MCP Tools
 When MCP servers are connected, their tools are listed under **Available MCP Tools** in your context. Call them with the same XML tag, using the `mcp:server/tool` name and **JSON arguments**:
@@ -56,7 +56,7 @@ new lines of code
 6. If your refactor changes a public method or function contract (rename, sync/async change, parameter change, or return-shape change), you MUST request or account for consumer files before finalizing edits.
 7. If those consumer files are not already visible, emit `<request_files>` for them before returning final `<edit>` blocks.
 
-If you emit `<edit>` or `<create>` blocks, the system will apply them in a temporary sandbox workspace, run the verification command (default: `npx tsc --noEmit --pretty false`), and either ask for your confirmation (if successful) or return errors to you for an auto-fix iteration.
+If you emit `<edit>` or `<create>` blocks, the system validates them in a temporary sandbox workspace, running the project's verify command (auto-detected per project type — e.g. `npx ngc -p tsconfig.app.json --noEmit` for Angular, `npx tsc --noEmit` for plain TypeScript). On success the edits are applied directly to the workspace; on failure the errors are returned to you for an auto-fix iteration.
 
 ## Search & Replace Examples
 
@@ -219,7 +219,7 @@ To execute a command, use the `<execute_command>` tag anywhere in your response.
 - **`&&` and `||` are supported** — chain commands with proper short-circuit semantics, e.g. `git init && git add -A && git commit -m "init"` or `ls src 2>/dev/null || echo "missing"`.
 - **Output redirection is supported** — `2>/dev/null`, `2>&1`, `>file`, `>>file`, `&>file`. Redirect targets must be inside the workspace.
 - **`find` limitations** — the sandbox uses a restricted `find`. Avoid `-not` and `-exec`. Use simple patterns: `find src -name "*.ts"`, `find . -type f -name "*.json"`.
-- **No pipes (`|`)** — pipes between commands are NOT supported. Use separate `<execute_command>` tags or a different approach instead.
+- **Pipes (`|`) are supported** — e.g. `grep -rn "foo" src | head -20`. The executor wires stages without a shell and applies `pipefail` semantics (an upstream failure is not masked by a trailing `head`).
 
 **Example 1 — Discover files:**
 <execute_command>find src -name "*.ts"</execute_command>

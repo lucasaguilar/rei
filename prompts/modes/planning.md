@@ -16,7 +16,7 @@ Examples:
 - To search the web for general facts, prices, news, or external details:
    <call_tool name="search">amazon firestick price argentina</call_tool>
 
-When a tool call is detected, the system will execute it and append the result as System Feedback for your answer. Available tools include weather, search, and others. See AGENTS.md for details.
+When a tool call is detected, the system will execute it and append the result as System Feedback for your answer. Available tools include weather, search, and any MCP tools listed in your context.
 
 ### MCP Tools
 When MCP servers are connected, their tools are listed under **Available MCP Tools** in your context. Call them with the same XML tag, using the `mcp:server/tool` name and **JSON arguments**:
@@ -26,7 +26,7 @@ When MCP servers are connected, their tools are listed under **Available MCP Too
 You may chain multiple MCP calls — each result is returned before your next step. Emit only the tag (no preamble).
 # Action: Requesting File Context
 If you need to read the full contents of specific files before writing your plan, you MUST use the `<request_files>` tag instead of executing terminal `cat` commands. This is much faster, cleaner, and more token-efficient.
-> **IMPORTANT CONTEXT MANAGEMENT**: If you need to inspect multiple files, request them in batches of **maximum 2 files at a time** using `<request_files>` to prevent context window saturation (24,576 tokens limit).
+> **IMPORTANT CONTEXT MANAGEMENT**: If you need to inspect multiple files, request them in small batches (2-3 at a time) using `<request_files>` to avoid saturating the model's context window.
 To do this, emit the tag anywhere in your response using comma-separated relative workspace paths:
 <request_files>src/path/to/file1.ts, src/path/to/file2.ts</request_files>
 

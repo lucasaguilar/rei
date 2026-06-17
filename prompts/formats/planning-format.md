@@ -11,11 +11,11 @@ Formatting notes:
 - Explicitly separate what is observed in visible code from what is proposed as change.
 
 ### Plan Stage Formatting Rules (Strictly Enforced)
-When generating the plan, you MUST structure every stage as an H3 level markdown header starting with the following prefix: `### Stage X: [Title]`
+When generating the plan, you MUST structure every stage as an **H2** markdown header with this exact prefix: `## Stage N: [Title]`
 
-(Where X is the stage number, starting at 1, e.g. 1, 2, 3, etc.)
+(Where N is the stage number, starting at 1, e.g. 1, 2, 3, etc.)
 Under each stage header, include the detailed checklist of actions to be executed.
-Do NOT use plain bold text or bullet items for stage headers. Always use H3 level headers starting with `#` to ensure proper parsing.
+Do NOT use plain bold text or bullet items for stage headers. Always use `## Stage N:` (H2) so `/runplan` parses them reliably. This MUST match the format in the planning mode instructions.
 
 ### CRITICAL: File path requirements under each stage
 Under each stage header, you MUST explicitly list the file paths that need to be modified or created for that stage. Use a line like:

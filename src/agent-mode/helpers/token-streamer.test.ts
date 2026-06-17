@@ -70,4 +70,32 @@ describe("token-streamer streamTurnWithInterception", () => {
       { type: "text", content: "I will update it.\n\nDone." },
     ]);
   });
+
+  it("strips leaked native <tool_call> syntax (ask/planning), keeps prose", async () => {
+    const chunks = [
+      "Te explico.\n",
+      "<tool_call>\n<function=execute_command>\n</function>\n</tool_call>\n",
+      "Las skills usan use_skill.",
+    ];
+    const mockProvider = {
+      streamChat: () =>
+        (async function* () {
+          for (const c of chunks) yield c;
+        })(),
+    } as unknown as ModelProvider;
+
+    let text = "";
+    await streamTurnWithInterception({
+      provider: mockProvider,
+      messages: [],
+      mode: "ask",
+      onChunk: (e) => {
+        if (e.type === "text") text += e.content;
+      },
+    });
+
+    expect(text).not.toMatch(/tool_call|function=/);
+    expect(text).toContain("Te explico");
+    expect(text).toContain("use_skill");
+  });
 });
