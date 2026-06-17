@@ -237,6 +237,9 @@ export async function handleInputTurn(
       .replace(/<request_files[\s\S]*?<\/request_files>/gi, "")
       .replace(/<execute_command[\s\S]*?<\/execute_command>/gi, "")
       .replace(/<call_tool[\s\S]*?<\/call_tool>/gi, "")
+      // Native function-call syntax leaked as text by tool-trained models on the XML path
+      .replace(/<tool_call[\s\S]*?<\/tool_call>/gi, "")
+      .replace(/<function[\s\S]*?<\/function>/gi, "")
       .trim();
 
     // One newline separator after live thinking/status content, only when there's a rendered response to follow

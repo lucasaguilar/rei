@@ -23,7 +23,7 @@ export async function streamTurnWithInterception(params: {
     // Fallback: strip think wrapper (keep content) and action blocks, emit as text
     const prose = fullResponse
       .replace(/<think>([\s\S]*?)(<\/think>|$)/gi, "$1")
-      .replace(/<(edit|create|request_files|execute_command|call_tool|wholefile)\b[\s\S]*?<\/\1>/gi, "")
+      .replace(/<(edit|create|request_files|execute_command|call_tool|wholefile|tool_call|function)\b[\s\S]*?<\/\1>/gi, "")
       .trim();
     if (prose) {
       onChunk?.({ type: "text", content: prose });
@@ -37,7 +37,11 @@ export async function streamTurnWithInterception(params: {
   let insideThink = false;             // currently inside a <think> block
 
   const TAG_START_REGEX = /<([a-z0-9_]+)\b[^>]*>/i;
-  const INTERCEPT_TAGS = ["edit", "create", "wholefile", "request_files", "execute_command", "call_tool"];
+  // `tool_call` and `function` are NOT REI tags — they're the native function-call
+  // syntax that tool-trained models (e.g. qwen) sometimes leak as TEXT in the XML
+  // (ask/planning) path. Intercept them so they don't pollute the visible/saved
+  // answer or trigger empty command execution. The model's real prose survives.
+  const INTERCEPT_TAGS = ["edit", "create", "wholefile", "request_files", "execute_command", "call_tool", "tool_call", "function"];
 
   // Emit prose content, using the current insideThink state to pick the type.
   const emitProse = (content: string) => {
