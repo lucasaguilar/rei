@@ -1,6 +1,7 @@
 ---
 name: create-pr
 description: Open a GitHub pull request for the current branch's commits using the GitHub MCP
+modes: agent
 ---
 
 # Skill: Create a GitHub Pull Request

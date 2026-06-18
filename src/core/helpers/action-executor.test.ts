@@ -9,6 +9,30 @@ vi.mock("../../tools/search-tool.js", () => ({
   searchWeb: vi.fn().mockResolvedValue("SEARCH_OUTPUT"),
 }));
 
+// Control the skill catalog without touching disk; keep the real skillsForMode /
+// findSkill so the mode-scoping and lookup logic is exercised for real.
+vi.mock("../../skills/skill-loader.js", async (importActual) => {
+  const actual =
+    await importActual<typeof import("../../skills/skill-loader.js")>();
+  return {
+    ...actual,
+    loadSkills: vi.fn(() => [
+      {
+        name: "micro-task-decomposition",
+        description: "break stages into micro tasks",
+        modes: ["planning"],
+        body: "RECIPE_BODY_MICRO",
+      },
+      {
+        name: "write-tests",
+        description: "write tests",
+        modes: ["agent"],
+        body: "RECIPE_BODY_TESTS",
+      },
+    ]),
+  };
+});
+
 import {
   executeToolCallsFromResponse,
   executeAgentToolsAndCommands,
@@ -84,6 +108,110 @@ describe("dispatchXmlToolCall (via executeToolCallsFromResponse)", () => {
     );
 
     expect(feedback).toContain("ERROR: server exploded");
+  });
+});
+
+describe("use_skill dispatch (regression)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const skillCtx = (mode: "planning" | "agent") => ({
+    workspacePath: "/workspace",
+    mode,
+  });
+
+  it("loads the skill body from the XML tag's inner text (args.input)", async () => {
+    // <call_tool name="use_skill">NAME</call_tool> parses the inner text into
+    // args.input — reading args.name/args.skill instead silently broke this.
+    const response = `<call_tool name="use_skill">micro-task-decomposition</call_tool>`;
+
+    const feedback = await executeToolCallsFromResponse(
+      response,
+      fakeProvider,
+      fakeLogger,
+      makeRegistry(),
+      skillCtx("planning"),
+    );
+
+    expect(feedback).toContain("🧩 Skill: micro-task-decomposition");
+    expect(feedback).toContain("RECIPE_BODY_MICRO");
+    expect(feedback).not.toContain("ERROR");
+  });
+
+  it("scopes skills by mode: a planning-only skill is not loadable from agent mode", async () => {
+    const response = `<call_tool name="use_skill">micro-task-decomposition</call_tool>`;
+
+    const feedback = await executeToolCallsFromResponse(
+      response,
+      fakeProvider,
+      fakeLogger,
+      makeRegistry(),
+      skillCtx("agent"),
+    );
+
+    expect(feedback).toContain("ERROR");
+    expect(feedback).toContain("no such skill for agent mode");
+    expect(feedback).not.toContain("RECIPE_BODY_MICRO");
+  });
+
+  it("tolerantly loads a skill called by its own name (not via use_skill)", async () => {
+    // Models often emit <call_tool name="write-spec"> instead of
+    // <call_tool name="use_skill">write-spec</call_tool> — load it anyway.
+    const response = `<call_tool name="micro-task-decomposition">{"title":"x"}</call_tool>`;
+
+    const feedback = await executeToolCallsFromResponse(
+      response,
+      fakeProvider,
+      fakeLogger,
+      makeRegistry(),
+      skillCtx("planning"),
+    );
+
+    expect(feedback).toContain("🧩 Skill: micro-task-decomposition");
+    expect(feedback).toContain("RECIPE_BODY_MICRO");
+    expect(feedback).not.toContain("not implemented");
+  });
+
+  it("does not treat an unknown tool name as a skill", async () => {
+    const response = `<call_tool name="bogus-tool">{}</call_tool>`;
+
+    const feedback = await executeToolCallsFromResponse(
+      response,
+      fakeProvider,
+      fakeLogger,
+      makeRegistry(),
+      skillCtx("planning"),
+    );
+
+    expect(feedback).toContain("is not implemented");
+  });
+
+  it("returns an error (not a wrong-skill match) when no skill name is given", async () => {
+    const response = `<call_tool name="use_skill"></call_tool>`;
+
+    const feedback = await executeToolCallsFromResponse(
+      response,
+      fakeProvider,
+      fakeLogger,
+      makeRegistry(),
+      skillCtx("planning"),
+    );
+
+    expect(feedback).toContain("ERROR");
+    expect(feedback).not.toContain("RECIPE_BODY_MICRO");
+  });
+
+  it("reports skills unavailable when no skill context is provided", async () => {
+    const response = `<call_tool name="use_skill">micro-task-decomposition</call_tool>`;
+
+    const feedback = await executeToolCallsFromResponse(
+      response,
+      fakeProvider,
+      fakeLogger,
+      makeRegistry(),
+      // no skillContext
+    );
+
+    expect(feedback).toContain("not available in this context");
   });
 });
 

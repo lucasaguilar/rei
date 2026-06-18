@@ -18,8 +18,19 @@ import type { ToolDefinition } from "../providers/model-provider.js";
 export interface Skill {
   name: string;
   description: string;
+  /**
+   * Which agent modes this skill is offered in. Defaults to `["agent"]` when the
+   * frontmatter omits `modes:` — most skills are execution recipes. Planning-only
+   * process skills (e.g. micro-task decomposition) declare `modes: [planning]`.
+   */
+  modes: SkillMode[];
   body: string;
 }
+
+export type SkillMode = "agent" | "planning" | "ask";
+
+const DEFAULT_SKILL_MODES: SkillMode[] = ["agent"];
+const VALID_SKILL_MODES: SkillMode[] = ["agent", "planning", "ask"];
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -36,7 +47,25 @@ function parseSkill(raw: string, fallbackName: string): Skill | null {
   const description =
     meta.match(/^\s*description:\s*(.+)$/m)?.[1].trim() || "";
   if (!body) return null;
-  return { name, description, body };
+  return { name, description, modes: parseModes(meta), body };
+}
+
+/**
+ * Parses the optional `modes:` frontmatter field. Accepts a bracketed list
+ * (`modes: [planning, agent]`), a bare comma list (`modes: planning, agent`),
+ * or a single value (`modes: planning`). Unknown tokens are dropped; if nothing
+ * valid remains the skill falls back to `DEFAULT_SKILL_MODES` (`["agent"]`).
+ */
+function parseModes(meta: string): SkillMode[] {
+  const raw = meta.match(/^\s*modes:\s*(.+)$/m)?.[1].trim();
+  if (!raw) return [...DEFAULT_SKILL_MODES];
+  const tokens = raw
+    .replace(/^\[|\]$/g, "")
+    .split(",")
+    .map((t) => t.trim().toLowerCase())
+    .filter(Boolean) as SkillMode[];
+  const valid = tokens.filter((t) => VALID_SKILL_MODES.includes(t));
+  return valid.length > 0 ? [...new Set(valid)] : [...DEFAULT_SKILL_MODES];
 }
 
 function readSkillsFromDir(dir: string): Skill[] {
@@ -70,6 +99,34 @@ export function loadSkills(workspacePath: string): Skill[] {
   for (const s of builtin) byName.set(s.name, s);
   for (const s of workspace) byName.set(s.name, s); // workspace overrides built-in
   return [...byName.values()];
+}
+
+/** Filters skills to those offered in the given agent mode. */
+export function skillsForMode(skills: Skill[], mode: SkillMode): Skill[] {
+  return skills.filter((s) => s.modes.includes(mode));
+}
+
+/**
+ * Builds the skill catalog block injected into the ask/planning system prompt
+ * (the XML path has no structured tool schema, so the catalog rides in the
+ * prompt and the model invokes a skill with `<call_tool name="use_skill">`).
+ * Returns "" when there are no skills for the mode, so nothing is injected.
+ */
+export function buildSkillCatalogText(skills: Skill[]): string {
+  if (skills.length === 0) return "";
+  const catalog = skills
+    .map((s) => `- ${s.name}: ${s.description}`)
+    .join("\n");
+  return (
+    "## Skills (on-demand recipes)\n" +
+    "Before starting work that matches one of the skills below, load its full recipe by emitting " +
+    "ONLY this tag (no preamble):\n\n" +
+    "  <call_tool name=\"use_skill\">skill-name</call_tool>\n\n" +
+    "The tool name is literally `use_skill`; the skill name goes INSIDE the tag as the argument. " +
+    "Do NOT put the skill name in the `name=\"...\"` attribute. The system returns the recipe; then " +
+    "follow it. Available skills:\n" +
+    catalog
+  );
 }
 
 /**
@@ -108,6 +165,7 @@ export function buildUseSkillTool(skills: Skill[]): ToolDefinition | null {
 /** Looks up a skill by name (case-insensitive, tolerant of minor mismatches). */
 export function findSkill(skills: Skill[], name: string): Skill | undefined {
   const target = name.trim().toLowerCase();
+  if (!target) return undefined; // empty name must not fuzzy-match the first skill
   return (
     skills.find((s) => s.name.toLowerCase() === target) ??
     skills.find((s) => s.name.toLowerCase().includes(target) || target.includes(s.name.toLowerCase()))

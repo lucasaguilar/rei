@@ -17,7 +17,7 @@ flowchart TD
     F -- no --> H{mode + path}
     G --> H
 
-    H -- "ask / planning" --> I[XML streaming path<br/>streamTurnWithInterception<br/>intercepts &lt;execute_command&gt; &lt;call_tool&gt; &lt;request_files&gt;]
+    H -- "ask / planning" --> I[XML streaming path<br/>streamTurnWithInterception<br/>intercepts &lt;execute_command&gt; &lt;call_tool&gt; &lt;request_files&gt;<br/>call_tool=use_skill loads mode-scoped recipe]
     H -- "agent · XML fallback" --> K[generator.ts<br/>&lt;edit&gt; / &lt;wholefile&gt; / &lt;create&gt;]
     H -- "agent · native tools" --> J0
 
@@ -62,7 +62,13 @@ flowchart TD
 - **Verify command** is project-type aware (`project-type.ts`): Angular → `ngc` (catches
   template errors), plain TS → `tsc --noEmit`.
 - **Search-mismatch escalation:** 2 mismatches → inject the file; 4 → switch to `rewrite_file`.
-- **Skills:** `use_skill` loads a recipe on demand (catalog always present, body only when invoked).
+- **Skills:** `use_skill` loads a recipe on demand (catalog always present, body only when
+  invoked). Skills are **mode-scoped** via `modes:` frontmatter (default `[agent]`): the native
+  agent loop exposes agent-mode skills in the tool schema, while ask/planning inject the
+  mode's catalog into the prompt and invoke via `<call_tool name="use_skill">`. This is how the
+  `[planning]` SDD skills work: `write-spec` (goal / in-out scope / acceptance criteria — the
+  scope-creep guard) → `micro-task-decomposition` (atomic stages traced to the spec) → `/runplan`
+  executes each stage → verify. Spec → Plan → Execute → Verify, all on top of the skill system.
 - **run_command** is for exploration/verification; destructive `rm -rf` is blocked.
 
 ## Known limitations (for review/improvement)

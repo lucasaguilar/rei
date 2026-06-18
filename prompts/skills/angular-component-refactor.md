@@ -1,6 +1,7 @@
 ---
 name: angular-component-refactor
 description: Consolidate near-duplicate Angular components into one generic component wired by route data
+modes: agent
 ---
 
 # Skill: Consolidate duplicated Angular components

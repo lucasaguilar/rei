@@ -23,11 +23,7 @@ import { buildTurnContext } from "../context/context-builder.js";
 import { buildMessagesForModel } from "../chat/message-builder.js";
 import { compactSession, needsCompaction } from "../chat/compactor.js";
 import { type ChatSession } from "../chat/types.js";
-import {
-  readPlanTodoFile,
-  markStageAsCompleted,
-  getTotalStagesInPlan,
-} from "../chat/plan-tracker.js";
+import { getTotalStagesInPlan } from "../chat/plan-tracker.js";
 import { VectorStore } from "../context/rag/vector-store.js";
 import { getRelevantMapContext } from "../context/rag/map-retriever.js";
 import type { FSWatcher } from "chokidar";
@@ -63,6 +59,11 @@ import {
   formatBatchPatchResult,
   executeAndFormatTurnActions,
 } from "./helpers/action-executor.js";
+import {
+  loadSkills,
+  skillsForMode,
+  type SkillMode,
+} from "../skills/skill-loader.js";
 import {
   ensureRepoMapIndexed,
   initWatcher,
@@ -171,7 +172,6 @@ export class Agent {
     if (session.mode === "agent") {
       const stageNum = extractStageNumberFromPrompt(userInput);
       if (stageNum !== null && isStageSuccessful(response)) {
-        markStageAsCompleted(this.workspacePath, stageNum);
         const total = getTotalStagesInPlan(this.workspacePath);
         return response + buildStageCompletionMessage(stageNum, total, false);
       }
@@ -334,7 +334,6 @@ export class Agent {
         if (result.success) {
           const stageNum = extractStageNumberFromPrompt(userInput);
           if (stageNum !== null) {
-            markStageAsCompleted(this.workspacePath, stageNum);
             const total = getTotalStagesInPlan(this.workspacePath);
             yield buildStageCompletionMessage(stageNum, total, true);
           }
@@ -369,7 +368,6 @@ export class Agent {
           stageNumFb !== null &&
           isStageSuccessful(outcome.response + feedback)
         ) {
-          markStageAsCompleted(this.workspacePath, stageNumFb);
           const total = getTotalStagesInPlan(this.workspacePath);
           yield buildStageCompletionMessage(stageNumFb, total, true);
         }
@@ -403,7 +401,6 @@ export class Agent {
             ? true
             : isStageSuccessful(outcome.response);
         if (stageNum !== null && succeeded) {
-          markStageAsCompleted(this.workspacePath, stageNum);
           const total = getTotalStagesInPlan(this.workspacePath);
           yield buildStageCompletionMessage(stageNum, total, true);
         }
@@ -425,6 +422,17 @@ export class Agent {
         mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools()),
       );
       feedbackTools.add("search");
+      // use_skill returns a recipe the model must act on — feed it back so the
+      // model continues (e.g. writes the plan) instead of ending the turn. Skill
+      // names are added too: models often call a skill by its own name directly
+      // (<call_tool name="write-spec">) instead of via use_skill.
+      feedbackTools.add("use_skill");
+      for (const s of skillsForMode(
+        loadSkills(this.workspacePath),
+        session.mode as SkillMode,
+      )) {
+        feedbackTools.add(s.name);
+      }
 
       while (hasMoreCommands && depth < maxDepth) {
         options?.onStatus?.("producing_response");
@@ -593,6 +601,7 @@ export class Agent {
               provider: this.provider,
               logger: this.logger,
               mcpRegistry: this.mcpRegistry,
+              mode: session.mode as SkillMode,
             });
 
           yield userVisibleFeedback;
@@ -783,10 +792,6 @@ export class Agent {
       session.mode === "agent" ? this.useToolCalling : false,
     );
     let systemContent = baseSystemContent;
-    const todoContent = readPlanTodoFile(this.workspacePath);
-    if (todoContent) {
-      systemContent += `\n\n### Active Plan Progress:\n${todoContent}`;
-    }
 
     // Advertise the live MCP tool list to the model — but ONLY for the XML modes
     // (ask, planning, agent XML fallback) that discover tools from this text.
@@ -982,6 +987,13 @@ export class Agent {
       mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools()),
     );
     feedbackTools.add("search");
+    feedbackTools.add("use_skill");
+    for (const s of skillsForMode(
+      loadSkills(this.workspacePath),
+      mode as SkillMode,
+    )) {
+      feedbackTools.add(s.name);
+    }
 
     while (hasMoreCommands && depth < maxDepth) {
       const raw = await this.provider.completeChat(currentMessages, {
@@ -1050,6 +1062,7 @@ export class Agent {
             this.provider,
             this.logger,
             this.mcpRegistry,
+            { workspacePath: this.workspacePath, mode: mode as SkillMode },
           );
         }
 

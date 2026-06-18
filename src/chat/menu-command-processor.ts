@@ -15,15 +15,20 @@ import type { ModelProvider } from "../providers/model-provider.js";
 import { clearPromptCache } from "../prompts/loader.js";
 import { buildFileMatcherRegex } from "../language/language-capabilities.js";
 import {
-  deletePlanTodoFile,
-  initPlanTodoFile,
-  recreatePlanTodoFileFromSession,
+  clearCurrentPlan,
+  saveCurrentPlanContent,
+  restoreCurrentPlanFromSession,
   savePlanToFile,
   loadPlanFromFile,
   loadCurrentPlanContent,
   STAGE_REGEX,
   isPlanMessage,
 } from "./plan-tracker.js";
+import {
+  saveSpecToFile,
+  loadSpecFromFile,
+  isSpecMessage,
+} from "./spec-tracker.js";
 
 export interface CommandResult {
   success: boolean;
@@ -68,7 +73,7 @@ export async function processMenuCommand(
     const newSession: ChatSession = { messages: [], mode: session.mode };
 
     saveSession(workspacePath, newSession.messages, newSession.mode);
-    deletePlanTodoFile(workspacePath);
+    clearCurrentPlan(workspacePath);
 
     return {
       success: true,
@@ -92,7 +97,7 @@ export async function processMenuCommand(
     const archivedName = archiveCurrentSession(workspacePath, customName);
     const newSession: ChatSession = { messages: [], mode: session.mode };
     saveSession(workspacePath, newSession.messages, newSession.mode);
-    deletePlanTodoFile(workspacePath);
+    clearCurrentPlan(workspacePath);
 
     return {
       success: true,
@@ -148,7 +153,7 @@ export async function processMenuCommand(
       loaded.summary,
       loaded.createdAt,
     );
-    recreatePlanTodoFileFromSession(workspacePath, loaded.messages);
+    restoreCurrentPlanFromSession(workspacePath, loaded.messages);
 
     return {
       success: true,
@@ -181,7 +186,7 @@ export async function processMenuCommand(
       session.summary,
       session.createdAt,
     );
-    deletePlanTodoFile(workspacePath);
+    clearCurrentPlan(workspacePath);
     return {
       success: true,
       response:
@@ -266,20 +271,22 @@ export async function processMenuCommand(
       };
     }
 
-    // Prefer the persisted plan file over session search — avoids picking up
-    // agent execution responses that also contain "## Stage N:" headers.
-    const savedPlanContent = loadCurrentPlanContent(workspacePath);
-    const planContent = savedPlanContent ?? (() => {
-      const lastPlanMsg = [...session.messages]
-        .reverse()
-        .find(
-          (m) =>
-            m.role === "assistant" &&
-            m.content &&
-            isPlanMessage(m.content),
-        );
-      return lastPlanMsg?.content ?? null;
-    })();
+    // SOURCE selection: prefer the latest plan produced in THIS session's
+    // planning turns, falling back to the persisted file only when the session
+    // has none (e.g. after /session, before /loadplan). This way a freshly
+    // (re)generated plan runs immediately — no /saveplan+/loadplan dance and no
+    // stale-plan footgun. We exclude `sourceMode === "agent"` so we never pick
+    // up an agent execution response that happens to echo "## Stage N:" headers.
+    const lastPlanMsg = [...session.messages]
+      .reverse()
+      .find(
+        (m) =>
+          m.role === "assistant" &&
+          m.content &&
+          m.sourceMode !== "agent" &&
+          isPlanMessage(m.content),
+      );
+    const planContent = lastPlanMsg?.content ?? loadCurrentPlanContent(workspacePath);
 
     if (!planContent) {
       return {
@@ -293,14 +300,10 @@ export async function processMenuCommand(
     const stageNumStr = runPlanMatch[1];
     const stageNum = stageNumStr ? parseInt(stageNumStr, 10) : null;
 
-    if (stageNum === null || stageNum === 1) {
-      initPlanTodoFile(workspacePath, planContent);
-    } else {
-      const todoPath = path.join(workspacePath, ".rei/current-plan-todo.md");
-      if (!fs.existsSync(todoPath)) {
-        initPlanTodoFile(workspacePath, planContent);
-      }
-    }
+    // Persist the active plan as the SOURCE fallback (used cross-session when the
+    // session has no in-memory plan). No progress checklist — the agent executes
+    // holistically, so "done" is the code + verify, not a per-stage todo.
+    saveCurrentPlanContent(workspacePath, planContent);
 
      if (stageNum !== null) {
       const lines = planContent.split("\n");
@@ -760,10 +763,12 @@ export async function processMenuCommand(
     try {
       const planContent = loadPlanFromFile(workspacePath, planName);
       
-      // Ingest the loaded plan as a new assistant message
+      // Ingest the loaded plan as a planning-mode assistant message so /runplan
+      // picks it up as the SOURCE (latest planning plan in the session).
       const updatedMessages = [...session.messages, {
         role: "assistant" as const,
         content: planContent,
+        sourceMode: "planning" as const,
       }];
 
       saveSession(
@@ -774,18 +779,102 @@ export async function processMenuCommand(
         session.createdAt,
       );
 
-      // Re-initialize the plan todo file in the workspace
-      initPlanTodoFile(workspacePath, planContent);
+      // Persist it as the cross-session SOURCE fallback too.
+      saveCurrentPlanContent(workspacePath, planContent);
 
       return {
         success: true,
-        response: `[REI] Plan '${planName}' loaded successfully. Re-generated active checklist in .rei/current-plan-todo.md.`,
+        response: `[REI] Plan '${planName}' loaded into the session. Run it with /runplan or /runplan stage <n>.`,
         newSession: { ...session, messages: updatedMessages },
       };
     } catch (err) {
       return {
         success: false,
         response: `[REI] Error loading plan: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
+  if (trimmed.startsWith("/savespec")) {
+    const saveMatch = trimmed.match(/^\/savespec\s+(\S+)$/i);
+    if (!saveMatch) {
+      return {
+        success: false,
+        response: "[REI] Invalid format. Use: /savespec <name>",
+      };
+    }
+
+    const specName = saveMatch[1];
+    const lastSpecMsg = [...session.messages]
+      .reverse()
+      .find(
+        (m) =>
+          m.role === "assistant" && m.content && isSpecMessage(m.content),
+      );
+
+    if (!lastSpecMsg || !lastSpecMsg.content) {
+      return {
+        success: false,
+        response:
+          "[REI] No spec was found in this session to save. Use the write-spec skill first.",
+      };
+    }
+
+    try {
+      const savedPath = saveSpecToFile(
+        workspacePath,
+        specName,
+        lastSpecMsg.content,
+      );
+      return {
+        success: true,
+        response: `[REI] Spec saved successfully to: ${savedPath}`,
+      };
+    } catch (err) {
+      return {
+        success: false,
+        response: `[REI] Error saving spec: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
+  if (trimmed.startsWith("/loadspec")) {
+    const loadMatch = trimmed.match(/^\/loadspec\s+(\S+)$/i);
+    if (!loadMatch) {
+      return {
+        success: false,
+        response: "[REI] Invalid format. Use: /loadspec <name>",
+      };
+    }
+
+    const specName = loadMatch[1];
+    try {
+      const specContent = loadSpecFromFile(workspacePath, specName);
+
+      // Ingest the spec as an assistant message so the next planning turn
+      // (micro-task-decomposition) consumes it as the scope contract.
+      const updatedMessages = [
+        ...session.messages,
+        { role: "assistant" as const, content: specContent },
+      ];
+
+      saveSession(
+        workspacePath,
+        updatedMessages,
+        session.mode,
+        session.summary,
+        session.createdAt,
+      );
+
+      return {
+        success: true,
+        response: `[REI] Spec '${specName}' loaded into the session. Decompose it with the micro-task-decomposition skill.`,
+        newSession: { ...session, messages: updatedMessages },
+      };
+    } catch (err) {
+      return {
+        success: false,
+        response: `[REI] Error loading spec: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
   }

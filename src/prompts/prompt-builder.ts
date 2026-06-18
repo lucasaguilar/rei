@@ -1,6 +1,12 @@
 import type { SessionMode } from "../chat/types.js";
 import { loadLocalRules, loadPrompt } from "./loader.js";
 import { detectProjectType } from "../workspace/project-type.js";
+import {
+  loadSkills,
+  skillsForMode,
+  buildSkillCatalogText,
+  type SkillMode,
+} from "../skills/skill-loader.js";
 
 export type AgentEditFormat = "sr" | "wholefile";
 
@@ -17,7 +23,10 @@ const ANGULAR_RULES = `### Angular Project Rules (mandatory — violations are b
 - Reactivity: use \`signal()\`, \`computed()\`, \`effect()\` from \`@angular/core\`.
 - Dependency injection: use \`inject()\`. NEVER use constructor parameter injection.
 - Async: \`async/await\` for one-off HTTP calls. Observables only for streams.
-- Strict types: no \`any\`. Use TypeScript strict mode.`;
+- Strict types: no \`any\`. Use TypeScript strict mode.
+- Atomicity (planning): a component (class + template + styles) is ONE atomic unit — never split its
+  files across separate stages. An orphan \`.html\`/\`.scss\` without its \`.ts\` gives a false-green
+  \`ngc\` check, because the template is only type-validated once the component class references it.`;
 
 function buildProjectRules(workspacePath?: string): string {
   const wsPath = workspacePath ?? process.env.REI_WORKSPACE_PATH;
@@ -25,6 +34,17 @@ function buildProjectRules(workspacePath?: string): string {
   const { type } = detectProjectType(wsPath);
   if (type === "angular") return ANGULAR_RULES;
   return "";
+}
+
+/** Builds the mode-scoped skill catalog text for the XML (ask/planning) path. */
+function buildModeSkillCatalog(
+  mode: SessionMode,
+  workspacePath?: string,
+): string {
+  const wsPath = workspacePath ?? process.env.REI_WORKSPACE_PATH;
+  if (!wsPath) return "";
+  const skills = skillsForMode(loadSkills(wsPath), mode as SkillMode);
+  return buildSkillCatalogText(skills);
 }
 
 export function buildSystemMessage(
@@ -76,6 +96,11 @@ export function buildSystemMessage(
   } else {
     sections.push(loadPrompt(`modes/${mode}`), "");
     sections.push(loadPrompt(`formats/${mode}-format`));
+    // Ask/planning use the XML path (no structured tool schema), so the skill
+    // catalog rides in the prompt and the model invokes one via <call_tool
+    // name="use_skill">. Only skills scoped to this mode are offered.
+    const catalog = buildModeSkillCatalog(mode, workspacePath);
+    if (catalog) sections.push("", catalog);
   }
 
   return sections.join("\n");
