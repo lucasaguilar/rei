@@ -97,6 +97,16 @@ describe("withTelemetry — transparent passthrough", () => {
     expect(out).toEqual(["a", "b", "c"]);
   });
 
+  it("streamChat invokes the underlying generator exactly once", async () => {
+    const base = new LifecycleProvider();
+    const spy = vi.spyOn(base, "streamChat");
+    const wrapped = withTelemetry(base, "mock");
+    const out: string[] = [];
+    for await (const t of wrapped.streamChat!(msgs)) out.push(t);
+    expect(out).toEqual(["a", "b", "c"]);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
   it("completeChatWithTools returns the structured result", async () => {
     const wrapped = withTelemetry(new LifecycleProvider(), "mock");
     const tools: ToolDefinition[] = [];

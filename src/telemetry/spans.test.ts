@@ -40,8 +40,24 @@ describe("telemetry span helpers", () => {
 
   it("withToolSpan runs the wrapped fn and returns its value", async () => {
     await expect(
-      withToolSpan("delegate_to_agent", async () => ({ ok: true })),
+      withToolSpan("delegate_to_agent", { target: "auditor" }, async () => ({
+        ok: true,
+      })),
     ).resolves.toEqual({ ok: true });
+  });
+
+  it("withToolSpan nests under an active Turn/Step without throwing", async () => {
+    const result = await withTurnSpan("prompt", async () => {
+      const endStep = startStepSpan(0);
+      try {
+        return await withToolSpan("run_command", { command: "ls" }, async () =>
+          "ok",
+        );
+      } finally {
+        endStep();
+      }
+    });
+    expect(result).toBe("ok");
   });
 });
 

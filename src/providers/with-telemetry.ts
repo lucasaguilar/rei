@@ -53,16 +53,62 @@ export function withTelemetry(
       const fn = orig as (...args: unknown[]) => unknown;
 
       if (LLM_METHODS.has(prop)) {
+        // Record the span INPUT as the messages/prompt only (the first arg of every LLM
+        // method: `(messages, tools?, opts?)`). An `LLM`-typed span renders its input as a
+        // chat conversation, so feeding it the raw positional arg list `[messages, tools,
+        // opts]` makes Laminar mis-read it as a 3-message array and hide the real messages.
+        // The model is recorded as an attribute; tools/opts are config, not the prompt.
+        const setLlmAttrs = (args: unknown[]) => {
+          const attrs: Record<string, string> = {
+            [LaminarAttributes.PROVIDER]: providerName,
+          };
+          const model = extractModel(args);
+          if (model) attrs[LaminarAttributes.REQUEST_MODEL] = model;
+          Laminar.setSpanAttributes(attrs);
+        };
+
+        // `streamChat` returns an async generator. A plain `observe` would close the span the
+        // instant the generator is *returned* — before the model HTTP request fires during
+        // consumption — so the streamed text wouldn't be captured and the request's
+        // auto-instrumented span would detach (surfacing un-nested). Instead keep a
+        // global-active span open across iteration (like `withTurnSpanStream` does for the
+        // Turn): the request span nests under it and the accumulated text becomes the output.
+        if (prop === "streamChat") {
+          return (...args: unknown[]): AsyncIterable<string> => {
+            async function* traced(): AsyncIterable<string> {
+              const span = Laminar.startActiveSpan({
+                name: SpanName.llmCall,
+                spanType: "LLM",
+                input: args[0],
+                global: true,
+              });
+              setLlmAttrs(args);
+              const chunks: string[] = [];
+              try {
+                for await (const chunk of fn.apply(
+                  target,
+                  args,
+                ) as AsyncIterable<string>) {
+                  chunks.push(chunk);
+                  yield chunk;
+                }
+              } finally {
+                Laminar.setSpanOutput(chunks.join(""));
+                span.end();
+              }
+            }
+            return traced();
+          };
+        }
+
         return (...args: unknown[]) =>
-          observe({ name: SpanName.llmCall, spanType: "LLM" }, () => {
-            const attrs: Record<string, string> = {
-              [LaminarAttributes.PROVIDER]: providerName,
-            };
-            const model = extractModel(args);
-            if (model) attrs[LaminarAttributes.REQUEST_MODEL] = model;
-            Laminar.setSpanAttributes(attrs);
-            return fn.apply(target, args);
-          });
+          observe(
+            { name: SpanName.llmCall, spanType: "LLM", input: args[0] },
+            () => {
+              setLlmAttrs(args);
+              return fn.apply(target, args);
+            },
+          );
       }
 
       if (SWAP_METHODS.has(prop)) {

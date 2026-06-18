@@ -12,6 +12,7 @@ import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
 import type { McpRegistry } from "../tools/mcp/mcp-registry.js";
 import { AGENT_TOOLS, mcpToolsToDefinitions } from "../contracts/tool-definitions.js";
 import { executeCommand, limitCommandOutput } from "../tools/command-executor.js";
+import { startStepSpan, startToolSpan } from "../telemetry/spans.js";
 import {
   searchMcpTools,
   SEARCH_TOOLS_DEF,
@@ -168,6 +169,10 @@ export async function executeAgentTurnWithTools(params: {
   while (loopCount < MAX_TURNS) {
     loopCount++;
 
+    // One `step-N` span per loop iteration (IP-3, agent function-calling). Global-active so
+    // the llm-call / tool spans created while this iteration runs nest under it.
+    const endStep = startStepSpan(loopCount - 1);
+    try {
     logger.logInfo(`[tools] Turn ${loopCount}/${MAX_TURNS}`);
 
     // Observability for preserve-thinking: only log when it's actually ON and
@@ -341,6 +346,16 @@ export async function executeAgentTurnWithTools(params: {
     for (const call of result.toolCalls) {
       let toolResult: string;
 
+      // `tool.<name>` span for each call. run_command and mcp:* tools are already traced at
+      // their executors (executeCommand / McpRegistry.dispatch), so skip them here to avoid
+      // double-wrapping; the inline built-ins have no shared executor and are traced here.
+      const endTool =
+        call.function.name === "run_command" ||
+        call.function.name.startsWith("mcp:")
+          ? null
+          : startToolSpan(call.function.name, {
+              arguments: call.function.arguments,
+            });
       try {
         const args = JSON.parse(call.function.arguments) as Record<string, unknown>;
 
@@ -491,6 +506,8 @@ export async function executeAgentTurnWithTools(params: {
         const msg = err instanceof Error ? err.message : String(err);
         toolResultsMap.set(call.id, `ERROR: ${msg}`);
         hasToolFailure = true;
+      } finally {
+        endTool?.();
       }
     }
 
@@ -602,6 +619,9 @@ export async function executeAgentTurnWithTools(params: {
     // the model signals completion (a plain-text response, handled above, which
     // returns `validProposedPatches: pendingEdits`). Reads, commands, queued edits
     // and failures all simply continue the loop.
+    } finally {
+      endStep();
+    }
   }
 
   // Hit the turn limit. If the model queued edits along the way, apply them rather

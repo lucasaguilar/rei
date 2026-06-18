@@ -36,6 +36,10 @@ export function initTelemetry(): void {
     httpPort: Number(process.env.LMNR_HTTP_PORT ?? 8000),
     grpcPort: Number(process.env.LMNR_GRPC_PORT ?? 8001),
     disableBatch: true, // ⇒ SimpleSpanProcessor under the hood (plan §3)
+    // Disable Laminar's automatic SDK/fetch instrumentation: rei's telemetry is fully
+    // manual (IP-1/IP-4, `observe`-based spans). Without this, Laminar auto-instruments the
+    // model HTTP calls and emits a duplicate model-named span next to each manual `llm-call`.
+    instrumentModules: {},
   });
   initialized = true;
 }

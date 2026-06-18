@@ -83,6 +83,32 @@ export function startStepSpan(n: number): () => void {
   return () => span.end();
 }
 
-/** Tool-dispatch span — `tool.<name>`. Nests under the active Turn/Step. */
-export const withToolSpan = <T>(name: string, fn: () => Promise<T>): Promise<T> =>
-  observe({ name: `${SpanName.tool}.${name}` }, fn);
+/**
+ * Tool-dispatch span — `tool.<name>`, Laminar `spanType: "TOOL"` (mirrors the `llm-call`
+ * span's `"LLM"` type). `input` carries the tool's arguments; Laminar captures `fn`'s return
+ * value as the span output. Nests under the active Turn/Step via the process-global stack.
+ */
+export const withToolSpan = <T>(
+  name: string,
+  input: Record<string, unknown>,
+  fn: () => Promise<T>,
+): Promise<T> =>
+  observe({ name: `${SpanName.tool}.${name}`, spanType: "TOOL", input }, fn);
+
+/**
+ * Open a tool span (`tool.<name>`, `spanType: "TOOL"`) for code that mutates state across the
+ * call (so it can't be expressed as a single `withToolSpan` thunk). Global-active so it nests
+ * under the current Step/Turn. Returns an `end` thunk the caller MUST invoke (in `finally`).
+ */
+export function startToolSpan(
+  name: string,
+  input: Record<string, unknown>,
+): () => void {
+  const span = Laminar.startActiveSpan({
+    name: `${SpanName.tool}.${name}`,
+    spanType: "TOOL",
+    input,
+    global: true,
+  });
+  return () => span.end();
+}
