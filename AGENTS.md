@@ -76,8 +76,33 @@ Defined in `src/contracts/tool-definitions.ts`:
   recursive deletes (`rm -rf`) are blocked by the command-executor's security guard.
 - **search_tools** — meta-tool (tool-RAG). When an MCP server exposes > 25 tools, REI hides them
   behind this and the model loads relevant ones on demand (keyword search, no embeddings).
+- **use_skill** — meta-tool: load a reusable recipe on demand (see *Skills* below).
 - **MCP tools** — appear as `mcp:server/tool` when MCP servers are connected (see `rei.config.json`,
   workspace or global `~/.rei`). Used the same as built-in tools.
+
+---
+
+## Skills & the spec-driven flow
+
+Skills are reusable Markdown recipes loaded **on demand** — only the catalog (name + description)
+rides in the prompt; the full body is injected when the model invokes `use_skill`. They live in
+`prompts/skills/` (built-in) and `{workspace}/.rei/skills/` (workspace overrides built-in).
+
+- **Mode-scoped** via `modes:` frontmatter (default `[agent]`). `skillsForMode()` filters: the native
+  agent path exposes agent-mode skills in the tool schema; ask/planning inject the mode's catalog into
+  the prompt (`buildSkillCatalogText`) and the model invokes via `<call_tool name="use_skill">`.
+- A model often calls a skill by its own name (`<call_tool name="write-spec">`) instead of via
+  `use_skill` — `action-executor.ts` tolerates this (loads any tool name matching a mode-scoped skill,
+  after built-ins/MCP), and `agent.ts` adds the mode's skill names to `feedbackTools` so the recipe is
+  fed back. **Dispatch and re-feed are two separate gates — a skill call needs both.**
+
+**Spec-driven loop** (planning skills): `write-spec` (Goal / In scope / **Out of scope** / Acceptance
+criteria — the scope-creep guard) → `micro-task-decomposition` (smallest atomic stages, each with
+`Satisfies: AC-N` and a `Verify:` command; resolves spec Open Questions under `## Assumptions` rather
+than silently) → `/runplan stage N` executes each → sandbox + verify. **SOURCE** of `/runplan` is the
+latest planning-mode plan in the session (fallback `.rei/current-plan-content.md`); plans/specs can be
+archived via `/saveplan`/`/savespec`. There is intentionally **no progress checklist** — the agent
+executes holistically, so "done" is the code + the verify command.
 
 ---
 

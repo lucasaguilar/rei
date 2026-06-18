@@ -54,6 +54,13 @@ Every single step REI takes is logged transparently. REI outputs structured tele
 * Which symbols and caller references were discovered.
 * The exact diffs proposed, compilation errors encountered, and sandbox auto-healing cycles.
 
+### 6. 📐 Spec-Driven, Skill-Powered Planning
+REI turns vague requests into safe, incremental implementations using a full **Spec → Plan → Execute → Verify** loop, built on an extensible **on-demand skills** system:
+* **On-demand skills:** reusable Markdown recipes loaded only when needed — the catalog (name + description) rides in the prompt, the full body is injected on invocation. Drop your own in `{workspace}/.rei/skills/`; scope them per mode with `modes:` frontmatter. Have many without burning context.
+* **Spec first (`write-spec`):** pins down Goal, In/Out of scope, and testable acceptance criteria. The explicit **Out of scope** section is the guardrail that stops the model from inflating "show the config" into "build an editable, persisted config editor".
+* **Micro-task decomposition:** slices the spec into the smallest atomic, independently-verifiable stages — each tracing back to an acceptance criterion (`Satisfies: AC-N`) with its own `Verify:` command. This plays directly to local models' strength: small steps they can nail and compile-check one at a time.
+* **Frictionless execution:** `/runplan` runs the latest plan from your session automatically — regenerate it and it picks up the new one. No checklist to babysit; "done" is the code plus the verify command.
+
 ## 📥 Installation & Scripts Setup
 
 You can install REI globally using our streamlined shell scripts or compile it manually from source.
@@ -137,74 +144,70 @@ npm run server:dev
 
 ---
 
-## 🎮 Practical Use Case: Step-by-Step `/runplan` Cycle
+## 🎮 Practical Use Case: Spec-Driven Development (Spec → Plan → Execute → Verify)
 
-REI excels at executing multi-stage architectural changes. Here is a real-world walkthrough of a complete feature implementation:
+REI excels at executing multi-stage architectural changes. The recommended flow is **spec-driven**: pin down *what* you want and how you'll know it's done, decompose it into the smallest verifiable stages, then execute them one at a time. This plays directly to local models' strengths — small, atomic, independently-compilable steps.
 
-### 1. Planning the Feature
-Switch to Planning Mode inside the chat to brainstorm and design the implementation:
+It is powered by **on-demand skills**: reusable Markdown recipes that are loaded only when needed. A lightweight catalog (name + description) rides in the prompt; the full recipe is injected only when the model invokes it — so you can have many skills without burning context. Skills are **mode-scoped** via `modes:` frontmatter and live in `prompts/skills/` (built-in) or `{workspace}/.rei/skills/` (your own).
+
+### 1. Write a spec (`write-spec` skill)
+Switch to Planning Mode and ask for a spec when a task is non-trivial or its scope is fuzzy:
 ```text
 /mode planning
-Plan the implementation of a new state store for market listing indices.
+Add a configuration section showing the real API URLs, their params and cache durations. Use write-spec to specify it first.
 ```
-REI analyzes the codebase structure using local RAG and AST analysis, then outputs a structured, markdown-compatible design plan divided into distinct milestones (e.g., `### Stage 1: Define Interface`, `### Stage 2: Create Store Service`, etc.).
+REI grounds itself in the real codebase (RAG + AST + reading files), then emits a spec: **Goal / In scope / Out of scope (non-goals) / Acceptance criteria / Constraints / Open questions**. The **Out of scope** section and the testable **Acceptance criteria** are the guardrails that stop the plan (and the code) from drifting beyond what you asked.
 
-### 2. Auto-Checklist Generation
-As soon as the plan is presented, REI automatically creates an active progress tracking checklist inside your workspace directory at **`.rei/current-plan-todo.md`**:
-```markdown
-# PLAN PROGRESS
-- [ ] **Stage 1:** Define Interface
-- [ ] **Stage 2:** Create Store Service
+### 2. Decompose into micro-tasks (`micro-task-decomposition` skill)
+Answer any open questions, then ask for the plan:
+```text
+Integrate it as a new /config route. Now build the plan with micro-task-decomposition.
 ```
+The plan is sliced into the **smallest atomic, independently-verifiable stages** (`## Stage N:`), each one tracing back to the spec via a `Satisfies: AC-N` line, each with the files it touches and the exact `Verify:` command. If the model had to assume an answer to an open question, it states it up front under `## Assumptions` so you can correct it before running.
 
-### 3. Automated Stage Execution
-To execute the first stage of the plan, run `/runplan` followed by the target stage:
+### 3. Execute stage by stage (`/runplan`)
 ```text
 /runplan stage 1
 ```
 REI will:
 1. Transition dynamically to **Agent Mode**.
-2. Run **AST Caller Discovery** to identify all files and references affected by the new interfaces.
-3. Call your premium agent model (e.g., `qwen/qwen3.6-plus` on OpenRouter) to write/modify the exact code.
+2. Run **AST Caller Discovery** to find all files/references affected.
+3. Call your agent model to write/modify the exact code, then verify it.
 
-### 4. Sandbox auto-healing & Compilation
-Before the code is written back to your workspace:
+> **No save/load needed within a session.** `/runplan` runs the **latest plan from your current session** automatically — regenerate the plan and `/runplan` immediately uses the new one. (See *Plan persistence* below.)
+
+### 4. Sandbox auto-healing & compilation (Verify)
+Before any code is written back to your workspace:
 * REI copies the files to an isolated **temporary sandbox**.
-* It applies the proposed changes and runs type diagnostics (`npx tsc --noEmit`).
-* If typescript compiler errors are found (e.g., a missing export, wrong type cast), REI feeds the exact compiler diagnostic block back to the LLM for **Auto-Healing**.
-* Once the edits compile with **zero type errors**, the verified code is cleanly applied to your working directory.
+* It applies the proposed changes and runs the **project-type-aware verify command** (e.g. `npx ngc -p tsconfig.app.json --noEmit` for Angular, `npx tsc --noEmit` for plain TypeScript).
+* If compiler errors are found, REI feeds the exact diagnostic block back to the LLM for **Auto-Healing**.
+* Once the edits compile with **zero errors**, the verified code is cleanly applied to your working directory.
 
-### 5. Automated Checklist Update
-Upon successful execution, REI automatically updates your progress file (`.rei/current-plan-todo.md`):
-```markdown
-# PLAN PROGRESS
-- [x] **Stage 1:** Define Interface
-- [ ] **Stage 2:** Create Store Service
-```
-You can now continue to the next stage by executing `/runplan stage 2`.
+Continue with `/runplan stage 2`, `stage 3`, and so on. After each stage REI prints a lightweight `Stage X of Y completed` note — but the real "done" signal is the code plus the verify command, not a checklist.
 
-### 💾 6. Plan Persistence & Session Reloading (`/saveplan` & `/loadplan`)
+### 💾 5. Plan & spec persistence
 
-While the temporary active checklist is stored at `.rei/current-plan-todo.md` during execution, you can persist the **entire detailed technical plan** directly into your repository to share it, version control it with Git, or resume it later in a fresh chat session.
+REI separates two concepts (there is **no progress checklist** — the agent executes plans holistically, so a per-stage todo file drifted from reality and was removed):
 
-#### Persisting a Plan to Disk (`/saveplan`)
-Once a solid plan is generated in your chat conversation, save it by running:
+* **SOURCE — what `/runplan` executes.** The latest planning-mode plan in your current session, automatically. As a cross-session fallback it is mirrored to `.rei/current-plan-content.md`.
+* **ARCHIVE — save for later (optional).** Persist a plan or spec to disk to commit it to Git or resume it in a fresh session:
+
+| Command | Effect |
+|---|---|
+| `/saveplan <name>` | Save the full plan to `.rei/plans/<name>.md` |
+| `/loadplan <name>` | Load a saved plan back into the session (then `/runplan`) |
+| `/savespec <name>` | Save the write-spec spec to `.rei/specs/<name>.md` |
+| `/loadspec <name>` | Load a saved spec into the session (then decompose it) |
+
+A typical cross-session resume:
 ```text
-/saveplan <name>
+/loadspec show-config      # bring the spec back into the session
+"Decompose it with micro-task-decomposition."
+/runplan stage 1
 ```
-* This creates a permanent Markdown document at `.rei/plans/<name>.md` containing the complete detailed plan, including observations, risks, and stage details.
-* You can commit this file to Git so your team can access the exact implementation recipe.
-
-#### Loading/Resuming a Plan (`/loadplan`)
-When you start a new chat session or switch branches, you can reload the saved plan and rebuild the active tracking todo checklist:
-```text
-/loadplan <name>
-```
-* **Instant Re-indexing**: REI reads the saved Markdown file from `.rei/plans/<name>.md`, appends it into your current conversation context, and immediately rebuilds/regenerates `.rei/current-plan-todo.md` with all stages marked as pending.
-* **Granular Step Execution**: After loading the plan, execute any stage step-by-step using `/runplan stage <n>` (e.g. `/runplan stage 1`). The agent will immediately switch to **Agent Mode** and implement that stage.
 
 > [!TIP]
-> **Manual Editing Supported**: Since plans are saved as raw Markdown, you can manually open and edit the `.rei/plans/<name>.md` file inside your IDE to adjust steps or add items. Simply run `/loadplan <name>` again, and REI will dynamically synchronize the active todo checklist with your manual changes!
+> Plans and specs are raw Markdown — open and edit `.rei/plans/<name>.md` or `.rei/specs/<name>.md` in your IDE, reload, and continue.
 
 ---
 
@@ -264,9 +267,11 @@ REI's interactive Curses terminal interface supports slash commands to give you 
 | `/clear` | Clear active conversation history (starts fresh). | `/clear` |
 | `/exit` | End the active terminal session and exit. | `/exit` |
 | `/mode <mode>` | Switch chat session mode. Supports `ask`, `planning`, or `agent`. | `/mode planning` |
-| `/runplan [stage <n>]` | Execute plan step-by-step (transitions to `agent` mode for that stage). | `/runplan stage 1` |
+| `/runplan [stage <n>]` | Execute the latest session plan step-by-step (transitions to `agent` mode for that stage). | `/runplan stage 1` |
 | `/saveplan <name>` | Save the full detailed plan to disk as `.rei/plans/<name>.md`. | `/saveplan feat-auth` |
-| `/loadplan <name>` | Load a plan from disk and dynamically sync `.rei/current-plan-todo.md`. | `/loadplan feat-auth` |
+| `/loadplan <name>` | Load a saved plan from disk back into the session. | `/loadplan feat-auth` |
+| `/savespec <name>` | Save the `write-spec` spec to disk as `.rei/specs/<name>.md`. | `/savespec show-config` |
+| `/loadspec <name>` | Load a saved spec into the session (then decompose it). | `/loadspec show-config` |
 | `/tdd` | Toggle TDD mode (runs `npm run test` during sandbox validation of edits). | `/tdd` |
 | `/index` | Re-index the codebase and refresh the AST semantic skeleton map. | `/index` |
 | `/compact` | Manually compact conversation memory into a high-level summary. | `/compact` |

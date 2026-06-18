@@ -20,7 +20,7 @@ import {
   SEARCH_K,
 } from "../tools/tool-retriever.js";
 import { getMaxTurns } from "../config/model-runtime.js";
-import { loadSkills, buildUseSkillTool, findSkill } from "../skills/skill-loader.js";
+import { loadSkills, buildUseSkillTool, findSkill, skillsForMode } from "../skills/skill-loader.js";
 import {
   buildFileContextMessage,
   finalizeOutcome,
@@ -111,7 +111,7 @@ export async function executeAgentTurnWithTools(params: {
   // Skills: reusable task recipes loaded on demand. Only the catalog (name +
   // description) rides in the `use_skill` tool; the full body is injected only
   // when the model invokes it — so many skills cost almost no context.
-  const skills = loadSkills(workspacePath);
+  const skills = skillsForMode(loadSkills(workspacePath), "agent");
   const useSkillTool = buildUseSkillTool(skills);
 
   // The tools array is rebuilt each turn so newly-searched tools become callable.

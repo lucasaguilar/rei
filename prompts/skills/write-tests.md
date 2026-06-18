@@ -1,6 +1,7 @@
 ---
 name: write-tests
 description: Write unit tests for a file following the repo's existing test style and runner
+modes: agent
 ---
 
 # Skill: Write unit tests matching the repo

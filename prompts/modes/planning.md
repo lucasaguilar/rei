@@ -32,6 +32,11 @@ To do this, emit the tag anywhere in your response using comma-separated relativ
 
 If you request files, the system will immediately provide their contents and ask you to continue. Emit ONLY the tag when requesting files.
 
+0. If the task is non-trivial or its scope is fuzzy (vague verbs like "add a section", "improve",
+   "manage X"), recommend writing a spec FIRST with the `write-spec` skill — it pins down scope and
+   acceptance criteria so the plan can't drift past what was asked. If a spec is already present in the
+   conversation, treat it as the contract and plan strictly within it. For small, unambiguous tasks,
+   skip the spec and plan directly.
 1. Identify the relevant parts of the codebase.
 2. Summarize the key observations from the visible code.
 3. Propose a concrete, step-by-step implementation plan.

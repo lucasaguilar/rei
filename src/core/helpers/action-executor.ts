@@ -11,6 +11,12 @@ import {
   formatWeatherOutput,
 } from "../../tools/weather-tool.js";
 import { searchWeb } from "../../tools/search-tool.js";
+import {
+  loadSkills,
+  skillsForMode,
+  findSkill,
+  type SkillMode,
+} from "../../skills/skill-loader.js";
 import type { AgentLogger } from "../logger.js";
 import type { ModelProvider } from "../../providers/model-provider.js";
 import type { BatchPatchApplyResult } from "../../tools/patch-applier.js";
@@ -31,9 +37,39 @@ async function dispatchXmlToolCall(
   provider: ModelProvider,
   logger: AgentLogger,
   mcpRegistry?: McpRegistry,
+  skillContext?: { workspacePath: string; mode: SkillMode },
 ): Promise<string> {
   logger.logInfo(`Calling tool: ${call.name}`, { args: call.args });
   try {
+    // ── use_skill (meta-tool) ────────────────────────────────────────────
+    // Loads a reusable recipe on demand. The catalog lives in the prompt
+    // (buildSkillCatalogText); here we return the full body so the model can
+    // follow it. Scoped to the current mode so planning-only skills aren't
+    // loadable from agent and vice-versa.
+    if (call.name === "use_skill") {
+      if (!skillContext) {
+        return `\n[TOOL] use_skill -> ERROR: skills are not available in this context.\n`;
+      }
+      // XML <call_tool name="use_skill">NAME</call_tool> yields args.input (the
+      // tag's inner text); structured/JSON callers may use name/skill instead.
+      const skillName = String(
+        call.args.input ?? call.args.name ?? call.args.skill ?? "",
+      ).trim();
+      const skills = skillsForMode(
+        loadSkills(skillContext.workspacePath),
+        skillContext.mode,
+      );
+      const skill = findSkill(skills, skillName);
+      logger.logInfo(`[tools] use_skill: "${skillName}"`, {
+        found: !!skill,
+        mode: skillContext.mode,
+      });
+      if (!skill) {
+        const available = skills.map((s) => s.name).join(", ") || "(none)";
+        return `\n[TOOL] use_skill("${skillName}") -> ERROR: no such skill for ${skillContext.mode} mode. Available: ${available}\n`;
+      }
+      return `\n### 🧩 Skill: ${skill.name}\n${skill.body}\n`;
+    }
     if (call.name === "weather") {
       const weatherRes = await getWeather(call.args.location as string);
       return `\n### 🌤️ Weather: ${call.args.location}\n${formatWeatherOutput(weatherRes)}\n`;
@@ -69,6 +105,23 @@ async function dispatchXmlToolCall(
           formattedResult = `\`\`\`\n${result}\n\`\`\``;
         }
         return `\n### 🔌 MCP: ${bareName}\n${formattedResult}\n`;
+      }
+    }
+    // Tolerant fallback: the model called a skill by its own name instead of via
+    // use_skill (e.g. <call_tool name="write-spec">). If the name matches a skill
+    // in the current mode, load it — mirrors the lenient MCP bare-name routing.
+    // Runs last, so built-in tools and MCP take precedence over a skill name.
+    if (skillContext) {
+      const skills = skillsForMode(
+        loadSkills(skillContext.workspacePath),
+        skillContext.mode,
+      );
+      const skill = findSkill(skills, call.name);
+      if (skill) {
+        logger.logInfo(`[tools] use_skill (direct name): "${call.name}"`, {
+          mode: skillContext.mode,
+        });
+        return `\n### 🧩 Skill: ${skill.name}\n${skill.body}\n`;
       }
     }
     throw new Error(`Tool "${call.name}" is not implemented.`);
@@ -137,13 +190,20 @@ export async function executeToolCallsFromResponse(
   provider: ModelProvider,
   logger: AgentLogger,
   mcpRegistry?: McpRegistry,
+  skillContext?: { workspacePath: string; mode: SkillMode },
 ): Promise<string> {
   const toolCalls = extractToolCalls(response);
   if (toolCalls.length === 0) return "";
 
   let feedback = "\n\n---\n**Tool Call Results:**\n";
   for (const call of toolCalls) {
-    feedback += await dispatchXmlToolCall(call, provider, logger, mcpRegistry);
+    feedback += await dispatchXmlToolCall(
+      call,
+      provider,
+      logger,
+      mcpRegistry,
+      skillContext,
+    );
   }
   return feedback;
 }
@@ -208,8 +268,10 @@ export async function executeAndFormatTurnActions(params: {
   provider: ModelProvider;
   logger: AgentLogger;
   mcpRegistry?: McpRegistry;
+  mode?: SkillMode;
 }): Promise<{ executionFeedback: string; userVisibleFeedback: string }> {
-  const { response, workspacePath, provider, logger, mcpRegistry } = params;
+  const { response, workspacePath, provider, logger, mcpRegistry, mode } =
+    params;
   const fileRequests = extractFileRequests(response);
   const commands = extractCommandRequests(response);
   const toolCalls = extractToolCalls(response);
@@ -246,6 +308,7 @@ export async function executeAndFormatTurnActions(params: {
       provider,
       logger,
       mcpRegistry,
+      mode ? { workspacePath, mode } : undefined,
     );
     executionFeedback += toolFeedback;
     userVisibleFeedback += toolFeedback;
