@@ -16,6 +16,7 @@ import { executeToolCallsFromResponse } from "../core/helpers/action-executor.js
 import type { McpRegistry } from "../tools/mcp/mcp-registry.js";
 import { isDegenerate, buildCommandSignature } from "./helpers/loop-guard.js";
 import { executeCommand, limitCommandOutput } from "../tools/command-executor.js";
+import { startStepSpan } from "../telemetry/spans.js";
 import { applyWholeFileBatchFS } from "../tools/patch-applier.js";
 import {
   resolveVerifyCommand,
@@ -152,6 +153,10 @@ export async function executeAgentTurn(params: {
   while (loopCount < MAX_TURNS) {
     loopCount++;
 
+    // One `step-N` span per loop iteration (IP-3, agent XML/search-replace). Global-active so
+    // the llm-call / tool spans created while this iteration runs nest under it.
+    const endStep = startStepSpan(loopCount - 1);
+    try {
     // 1. Ask the LLM — accumulate continuations if truncated
     let finishReason = "stop";
     let rawResponse = await streamTurnWithInterception({
@@ -511,6 +516,9 @@ export async function executeAgentTurn(params: {
       0,
       0,
     );
+    } finally {
+      endStep();
+    }
   }
 
   // Loop exhausted without any edits (e.g. only file requests, model never produced patches)
@@ -564,6 +572,10 @@ export async function executeAgentTurnWholefile(params: {
   while (loopCount < MAX_TURNS) {
     loopCount++;
 
+    // One `step-N` span per loop iteration (IP-3, agent whole-file). Global-active so the
+    // llm-call / tool spans created while this iteration runs nest under it.
+    const endStep = startStepSpan(loopCount - 1);
+    try {
     let finishReason = "stop";
     let rawResponse = await streamTurnWithInterception({
       provider,
@@ -827,6 +839,9 @@ export async function executeAgentTurnWholefile(params: {
       0,
       0,
     );
+    } finally {
+      endStep();
+    }
   }
 
   return finalizeOutcome(

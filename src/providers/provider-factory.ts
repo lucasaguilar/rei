@@ -8,6 +8,7 @@ import { GroqProvider } from "./groq-provider.js";
 import { OpenRouterProvider } from "./openrouter-provider.js";
 import { HuggingFaceProvider } from "./huggingface-provider.js";
 import { withDegenerateGuard } from "./degenerate-guard.js";
+import { withTelemetry } from "./with-telemetry.js";
 
 export type ProviderName =
   | "mock"
@@ -54,7 +55,7 @@ export function createModelProvider(providerNameArg?: string): ModelProvider {
       );
   }
 
-  return withDegenerateGuard(provider);
+  return withTelemetry(withDegenerateGuard(provider), providerName);
 }
 
 /**

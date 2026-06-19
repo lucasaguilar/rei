@@ -10,6 +10,7 @@ import type { McpClient, McpTool } from "./mcp-client.js";
 import { StdioMcpClient } from "./stdio-client.js";
 import { HttpMcpClient } from "./http-client.js";
 import { loadReiConfig, type McpConnectionConfig } from "./mcp-config.js";
+import { withToolSpan } from "../../telemetry/spans.js";
 
 interface ConnectedServer {
   client: McpClient;
@@ -177,6 +178,17 @@ export class McpRegistry {
    *         returns an error.
    */
   async dispatch(
+    qualifiedName: string,
+    args: Record<string, unknown>,
+  ): Promise<string> {
+    // `tool.mcp.<server>/<tool>` span (Laminar `spanType: "TOOL"`) — single chokepoint for
+    // every MCP call, from both the native and XML dispatch paths. No-op without telemetry.
+    return withToolSpan(`mcp.${qualifiedName}`, args, () =>
+      this.dispatchImpl(qualifiedName, args),
+    );
+  }
+
+  private async dispatchImpl(
     qualifiedName: string,
     args: Record<string, unknown>,
   ): Promise<string> {

@@ -4,6 +4,7 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
+    "skipLibCheck": true,
     "outDir": "dist",
     "paths": {
       "web-tree-sitter": ["./node_modules/web-tree-sitter/web-tree-sitter.d.ts"]
