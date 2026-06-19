@@ -5,6 +5,7 @@ import { saveSession } from "../../chat/session-store.js";
 import { extractSREdits } from "../../agent-mode/response-handler.js";
 import { formatCodeDiff } from "../markdown-renderer.js";
 import { estimateMessagesTokens } from "../../chat/helpers/token-estimator.js";
+import { stripNativeToolSyntax } from "../../core/helpers/turn-message.helpers.js";
 
 /**
  * Resolves the active model label and maps it to its corresponding brand icon or emoji
@@ -228,19 +229,17 @@ export async function handleInputTurn(
     if (liveDisplayedFeedback) {
       cleanBuffer = cleanBuffer.replace(liveDisplayedFeedback, "");
     }
-    const finalContent = cleanBuffer
-      .replace(/\x1b\[[0-9;]*m/g, "") // strip ANSI (e.g. from patch result)
-      .replace(/<think>[\s\S]*?<\/think>/gi, "") // safety strip
-      .replace(/<edit[\s\S]*?<\/edit>/gi, "")
-      .replace(/<wholefile[\s\S]*?<\/wholefile>/gi, "")
-      .replace(/<create[\s\S]*?<\/create>/gi, "")
-      .replace(/<request_files[\s\S]*?<\/request_files>/gi, "")
-      .replace(/<execute_command[\s\S]*?<\/execute_command>/gi, "")
-      .replace(/<call_tool[\s\S]*?<\/call_tool>/gi, "")
-      // Native function-call syntax leaked as text by tool-trained models on the XML path
-      .replace(/<tool_call[\s\S]*?<\/tool_call>/gi, "")
-      .replace(/<function[\s\S]*?<\/function>/gi, "")
-      .trim();
+    const finalContent = stripNativeToolSyntax(
+      cleanBuffer
+        .replace(/\x1b\[[0-9;]*m/g, "") // strip ANSI (e.g. from patch result)
+        .replace(/<think>[\s\S]*?<\/think>/gi, "") // safety strip
+        .replace(/<edit[\s\S]*?<\/edit>/gi, "")
+        .replace(/<wholefile[\s\S]*?<\/wholefile>/gi, "")
+        .replace(/<create[\s\S]*?<\/create>/gi, "")
+        .replace(/<request_files[\s\S]*?<\/request_files>/gi, "")
+        .replace(/<execute_command[\s\S]*?<\/execute_command>/gi, "")
+        .replace(/<call_tool[\s\S]*?<\/call_tool>/gi, ""),
+    ).trim();
 
     // One newline separator after live thinking/status content, only when there's a rendered response to follow
     const rendered = renderMarkdown(finalContent);

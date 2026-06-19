@@ -9,6 +9,7 @@ import {
 } from "../../tools/compile-check-factory.js";
 import { applyFileEdits } from "../../tools/search-replace.js";
 import { extractCreateFileRequests } from "../response-handler.js";
+import { stripNativeToolSyntax } from "../../core/helpers/turn-message.helpers.js";
 
 const SEARCH_MISMATCH_HINT = "Could not find exact match for search block in";
 
@@ -260,8 +261,8 @@ export async function validateProposedPatches(params: {
  * Used to extract the natural prose explanation from a response.
  */
 export function stripAllActionTags(text: string): string {
-  return text
-    .replace(/<(edit|create|request_files|execute_command|call_tool|wholefile|tool_call|function)\b[\s\S]*?<\/\1>/gi, "")
+  return stripNativeToolSyntax(text)
+    .replace(/<(edit|create|request_files|execute_command|call_tool|wholefile)\b[\s\S]*?<\/\1>/gi, "")
     .trim();
 }
 
