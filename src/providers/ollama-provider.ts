@@ -203,7 +203,8 @@ export class OllamaProvider implements ModelProvider {
     options?: CompletionOptions,
   ): Promise<ChatCompletionWithTools> {
     return openaiCompleteChatWithTools({
-      baseUrl: this.baseUrl,
+      // Ollama's OpenAI-compatible API lives under /v1 (native chat is at /api/chat).
+      baseUrl: `${this.baseUrl}/v1`,
       headers: {},
       model: options?.model ?? this.model,
       messages,
