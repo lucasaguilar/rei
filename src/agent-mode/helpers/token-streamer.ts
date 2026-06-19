@@ -1,5 +1,6 @@
 import type { ModelProvider } from "../../providers/model-provider.js";
 import type { ChatMessage } from "../../chat/types.js";
+import { stripNativeToolSyntax } from "../../core/helpers/turn-message.helpers.js";
 
 /**
  * Streams response chunks from the model provider in real-time.
@@ -21,9 +22,9 @@ export async function streamTurnWithInterception(params: {
   if (!provider.streamChat) {
     const fullResponse = await provider.completeChat(messages, { model, onFinish });
     // Fallback: strip think wrapper (keep content) and action blocks, emit as text
-    const prose = fullResponse
+    const prose = stripNativeToolSyntax(fullResponse)
       .replace(/<think>([\s\S]*?)(<\/think>|$)/gi, "$1")
-      .replace(/<(edit|create|request_files|execute_command|call_tool|wholefile|tool_call|function)\b[\s\S]*?<\/\1>/gi, "")
+      .replace(/<(edit|create|request_files|execute_command|call_tool|wholefile)\b[\s\S]*?<\/\1>/gi, "")
       .trim();
     if (prose) {
       onChunk?.({ type: "text", content: prose });

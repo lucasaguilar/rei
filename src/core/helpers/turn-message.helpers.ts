@@ -280,10 +280,32 @@ export function stripThinkingBlock(text: string): string {
  * <think> independently (CLI buffer + stripThinkingBlock on yields), so
  * enabling this never leaks raw reasoning tags to the screen.
  */
+/**
+ * Strips native function-call syntax (`<tool_call>`, `<function>`) that tool-trained
+ * models (e.g. qwen-coding) leak as TEXT on the XML (ask/planning) path. These are NOT
+ * REI tags: REI never parses them into actions — it discards them. They must never reach
+ * the visible answer, the saved history, or the model on the next turn, because tool-aware
+ * chat templates (notably Ollama serving a `-coding` model) try to JSON-parse them and fail
+ * with "Value looks like object, but can't find closing '}' symbol" (400). Real prose and
+ * REI's own action tags (`<execute_command>`, `<edit>`, …) are left untouched.
+ *
+ * Single source of truth — reused by token-streamer, input-turn, stripAllActionTags and
+ * cleanResponseForHistory.
+ */
+export function stripNativeToolSyntax(text: string): string {
+  return text
+    .replace(/<tool_call\b[\s\S]*?<\/tool_call>/gi, "")
+    .replace(/<function\b[\s\S]*?<\/function>/gi, "");
+}
+
 export function cleanResponseForHistory(content: string): string {
+  // Always strip leaked native tool-call syntax — even with preserve-thinking on. It carries
+  // zero information (the real intent already lives in REI's XML tags) and poisons tool-aware
+  // templates on the NEXT turn. Preserving reasoning must never mean preserving broken tool calls.
+  const clean = stripNativeToolSyntax(content);
   if (process.env.REI_PRESERVE_THINKING === "true") {
-    return content;
+    return clean;
   }
-  return stripThinkingBlock(content);
+  return stripThinkingBlock(clean);
 }
 

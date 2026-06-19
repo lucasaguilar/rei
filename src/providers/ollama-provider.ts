@@ -231,7 +231,7 @@ export class OllamaProvider implements ModelProvider {
       },
       body: JSON.stringify({
         model: resolvedModel,
-        messages: messages.map(toApiMessage),
+        messages: messages.map(toApiMessage).map(toOllamaNativeToolArgs),
         stream,
         keep_alive: this.keepAlive,
         // temperature + repetition penalties live inside ollamaOptions now.
@@ -299,6 +299,37 @@ function parseOllamaLine(line: string): OllamaChatResponse {
   } catch {
     throw new Error("Ollama stream returned invalid JSON line");
   }
+}
+
+/**
+ * Ollama's NATIVE /api/chat expects `tool_calls[].function.arguments` as a JSON OBJECT,
+ * whereas toApiMessage emits the OpenAI-compatible JSON STRING (correct for the /v1 path
+ * and for LM Studio/Groq/OpenRouter). Sending the string to /api/chat makes Ollama's
+ * parser fail with "Value looks like object, but can't find closing '}' symbol" (400).
+ * Parse any string arguments into objects before hitting the native endpoint.
+ */
+function toOllamaNativeToolArgs(
+  msg: Record<string, unknown>,
+): Record<string, unknown> {
+  const toolCalls = msg.tool_calls;
+  if (!Array.isArray(toolCalls)) return msg;
+  return {
+    ...msg,
+    tool_calls: toolCalls.map((tc) => {
+      const call = tc as {
+        function?: { name?: string; arguments?: unknown };
+      };
+      const args = call.function?.arguments;
+      if (typeof args !== "string") return tc;
+      let parsed: unknown = {};
+      try {
+        parsed = JSON.parse(args || "{}");
+      } catch {
+        parsed = {};
+      }
+      return { ...call, function: { ...call.function, arguments: parsed } };
+    }),
+  };
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
