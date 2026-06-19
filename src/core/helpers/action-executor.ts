@@ -11,16 +11,13 @@ import {
   formatWeatherOutput,
 } from "../../tools/weather-tool.js";
 import { searchWeb } from "../../tools/search-tool.js";
-<<<<<<< HEAD
 import {
   loadSkills,
   skillsForMode,
   findSkill,
   type SkillMode,
 } from "../../skills/skill-loader.js";
-=======
 import { withToolSpan } from "../../telemetry/spans.js";
->>>>>>> julian/feature/multiagent-a2a-otel-rebased
 import type { AgentLogger } from "../logger.js";
 import type { ModelProvider } from "../../providers/model-provider.js";
 import type { BatchPatchApplyResult } from "../../tools/patch-applier.js";
