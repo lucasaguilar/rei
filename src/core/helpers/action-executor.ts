@@ -11,12 +11,16 @@ import {
   formatWeatherOutput,
 } from "../../tools/weather-tool.js";
 import { searchWeb } from "../../tools/search-tool.js";
+<<<<<<< HEAD
 import {
   loadSkills,
   skillsForMode,
   findSkill,
   type SkillMode,
 } from "../../skills/skill-loader.js";
+=======
+import { withToolSpan } from "../../telemetry/spans.js";
+>>>>>>> julian/feature/multiagent-a2a-otel-rebased
 import type { AgentLogger } from "../logger.js";
 import type { ModelProvider } from "../../providers/model-provider.js";
 import type { BatchPatchApplyResult } from "../../tools/patch-applier.js";
@@ -71,12 +75,16 @@ async function dispatchXmlToolCall(
       return `\n### 🧩 Skill: ${skill.name}\n${skill.body}\n`;
     }
     if (call.name === "weather") {
-      const weatherRes = await getWeather(call.args.location as string);
-      return `\n### 🌤️ Weather: ${call.args.location}\n${formatWeatherOutput(weatherRes)}\n`;
+      return withToolSpan("weather", call.args, async () => {
+        const weatherRes = await getWeather(call.args.location as string);
+        return `\n### 🌤️ Weather: ${call.args.location}\n${formatWeatherOutput(weatherRes)}\n`;
+      });
     }
     if (call.name === "search") {
-      const searchRes = await searchWeb(call.args.query as string, provider);
-      return `\n### 🔍 Search Results: ${call.args.query}\n${searchRes}\n`;
+      return withToolSpan("search", call.args, async () => {
+        const searchRes = await searchWeb(call.args.query as string, provider);
+        return `\n### 🔍 Search Results: ${call.args.query}\n${searchRes}\n`;
+      });
     }
     // Resolve the MCP tool name leniently: the registry key is "server/tool".
     // A "mcp:" prefix routes directly; but models frequently DROP the prefix

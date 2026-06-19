@@ -2,6 +2,7 @@ import { spawn, execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { withToolSpan } from "../telemetry/spans.js";
 
 export interface CommandResult {
   stdout: string;
@@ -616,7 +617,21 @@ async function executeStatement(
  * and output redirection (`2>/dev/null`, `2>&1`, `>file`, `>>file`, `&>file`).
  * `cd` carries across both `&&`/`||` segments and `;` statements.
  */
+/**
+ * Public entry point. Wraps the run in a `tool.run_command` span (Laminar `spanType: "TOOL"`)
+ * so every command — from any of rei's dispatch paths — shows up under the active Turn/Step in
+ * the unified trace. The span is a no-op when telemetry isn't initialized.
+ */
 export async function executeCommand(
+  commandLine: string,
+  workspacePath: string,
+): Promise<CommandResult> {
+  return withToolSpan("run_command", { command: commandLine }, () =>
+    executeCommandImpl(commandLine, workspacePath),
+  );
+}
+
+async function executeCommandImpl(
   commandLine: string,
   workspacePath: string,
 ): Promise<CommandResult> {

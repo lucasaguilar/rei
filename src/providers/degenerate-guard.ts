@@ -91,5 +91,17 @@ export function withDegenerateGuard(provider: ModelProvider): ModelProvider {
     };
   }
 
+  // Forward optional ModelLifecycle methods. The `{ ...provider }` spread above copies only
+  // own-enumerable props, so prototype methods like loadModel/unloadModel/isModelLoaded would
+  // otherwise be dropped here — silently breaking model swapping downstream (C6).
+  for (const m of ["loadModel", "unloadModel", "isModelLoaded"] as const) {
+    const fn = (provider as unknown as Record<string, unknown>)[m];
+    if (typeof fn === "function") {
+      (wrapped as unknown as Record<string, unknown>)[m] = (
+        fn as (...args: unknown[]) => unknown
+      ).bind(provider);
+    }
+  }
+
   return wrapped;
 }
