@@ -122,7 +122,8 @@ export function finalizeOutcome(
   const rejectedCount = Math.max(0, generatedPatchCount - validCount);
   // Prefer the explicit final-verify result; fall back to the legacy heuristic
   // only when no final verify ran (e.g. turns that produced no edits).
-  const sandboxVerified = outcome.verified ?? (!outcome.failed && validCount > 0);
+  const sandboxVerified =
+    outcome.verified ?? (!outcome.failed && validCount > 0);
 
   logger.logPatchOutcome({
     validCount,
@@ -190,12 +191,19 @@ export async function validateProposedPatches(params: {
   feedback: string | null;
   mismatchOnly: boolean;
   applyErrors: string[];
+  extraFilesNeeded: string[];
 }> {
   const { workspacePath, edits, loopCount, logger } = params;
   const valResult = await applyVirtualBatch(workspacePath, edits);
 
   if (valResult.success) {
-    return { success: true, feedback: null, mismatchOnly: false, applyErrors: [] };
+    return {
+      success: true,
+      feedback: null,
+      mismatchOnly: false,
+      applyErrors: [],
+      extraFilesNeeded: [],
+    };
   }
 
   const files = [...new Set(edits.map((edit) => edit.file))];
@@ -246,11 +254,23 @@ export async function validateProposedPatches(params: {
     }
   }
 
+  // Identify files referenced in compile errors that the model didn't include in its edit set.
+  // These are dependency files that the model's edits broke — the model needs to see them to fix them.
+  const editedFilePaths = new Set(edits.map((e) => e.file));
+  const extraFilesNeeded = [
+    ...new Set(
+      valResult.diagnostics
+        .map((d) => d.filePath)
+        .filter((f) => f && !editedFilePaths.has(f)),
+    ),
+  ];
+
   return {
     success: false,
     feedback,
     mismatchOnly,
     applyErrors: valResult.applyErrors,
+    extraFilesNeeded,
   };
 }
 
@@ -262,7 +282,10 @@ export async function validateProposedPatches(params: {
  */
 export function stripAllActionTags(text: string): string {
   return stripNativeToolSyntax(text)
-    .replace(/<(edit|create|request_files|execute_command|call_tool|wholefile)\b[\s\S]*?<\/\1>/gi, "")
+    .replace(
+      /<(edit|create|request_files|execute_command|call_tool|wholefile)\b[\s\S]*?<\/\1>/gi,
+      "",
+    )
     .trim();
 }
 

@@ -59,12 +59,36 @@ export async function applySREditBatchFS(
 
       await fs.writeFile(absPath, res.newContent!, "utf-8");
 
-      results.push({
-        file,
-        applied: true,
-        skipped: false,
-        validationErrors: [],
-      });
+      // Verification: re-read file and confirm replacement text is present
+      const verifyContent = await fs.readFile(absPath, "utf-8");
+      const verificationErrors: string[] = [];
+
+      for (const edit of fileEdits) {
+        if (!verifyContent.includes(edit.replace)) {
+          verificationErrors.push(
+            `⚠️ Edit verification failed: replacement text not found in file after write. ` +
+            `Expected to find: "${edit.replace.slice(0, 100)}...". ` +
+            `File may be unchanged. Use rewrite_file instead.`
+          );
+        }
+      }
+
+      if (verificationErrors.length > 0) {
+        results.push({
+          file,
+          applied: false,
+          skipped: false,
+          validationErrors: verificationErrors,
+        });
+        allSuccess = false;
+      } else {
+        results.push({
+          file,
+          applied: true,
+          skipped: false,
+          validationErrors: [],
+        });
+      }
     } catch (err) {
       allSuccess = false;
       results.push({
