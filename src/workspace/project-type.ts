@@ -28,9 +28,9 @@ const SKIP_VERIFY = "echo ok";
  */
 function isWorkspaceEmpty(workspacePath: string): boolean {
   try {
-    const entries = fs.readdirSync(workspacePath).filter(
-      (f) => !f.startsWith(".") && f !== "node_modules",
-    );
+    const entries = fs
+      .readdirSync(workspacePath)
+      .filter((f) => !f.startsWith(".") && f !== "node_modules");
     if (entries.length === 0) return true;
     // Only .rei directory → still empty from a project perspective
     if (entries.length === 1 && entries[0] === ".rei") return true;
@@ -55,7 +55,9 @@ export function detectProjectType(workspacePath: string): ProjectDetection {
   const hasExt = (ext: string): boolean => {
     try {
       return fs.readdirSync(workspacePath).some((f) => f.endsWith(ext));
-    } catch { return false; }
+    } catch {
+      return false;
+    }
   };
 
   let type: ProjectType = "unknown";
@@ -73,7 +75,13 @@ export function detectProjectType(workspacePath: string): ProjectDetection {
       : "npx ngc --noEmit";
   } else if (has("tsconfig.json")) {
     type = "typescript";
-    command = "npx tsc --noEmit --pretty false";
+    // Use tsconfig.build.json (excludes test files) if present, otherwise use default tsconfig.json.
+    // This prevents test files from causing validation failures in the agent sandbox when their
+    // imports reference symbols the agent just modified/removed in production code.
+    const tsconfigPath = has("tsconfig.build.json")
+      ? "tsconfig.build.json"
+      : "tsconfig.json";
+    command = `npx tsc -p ${tsconfigPath} --noEmit --pretty false`;
   } else if (has("package.json") || has("index.js") || has("index.mjs")) {
     type = "javascript";
     command = "node --check index.js 2>/dev/null || echo ok";
@@ -84,9 +92,15 @@ export function detectProjectType(workspacePath: string): ProjectDetection {
   ) {
     type = "csharp";
     command = "dotnet build";
-  } else if (has("requirements.txt") || has("pyproject.toml") || has("setup.py") || hasExt(".py")) {
+  } else if (
+    has("requirements.txt") ||
+    has("pyproject.toml") ||
+    has("setup.py") ||
+    hasExt(".py")
+  ) {
     type = "python";
-    command = "python3 -m py_compile $(find . -name '*.py' -not -path './.rei/*' | head -20) && echo ok";
+    command =
+      "python3 -m py_compile $(find . -name '*.py' -not -path './.rei/*' | head -20) && echo ok";
   } else if (has("go.mod") || hasExt(".go")) {
     type = "go";
     command = "go build ./...";
@@ -95,7 +109,8 @@ export function detectProjectType(workspacePath: string): ProjectDetection {
     command = "cargo check";
   } else if (has("composer.json") || hasExt(".php")) {
     type = "php";
-    command = "php -l $(find . -name '*.php' -not -path './.rei/*' | head -20) && echo ok";
+    command =
+      "php -l $(find . -name '*.php' -not -path './.rei/*' | head -20) && echo ok";
   } else if (has("pom.xml") || has("build.gradle") || hasExt(".java")) {
     type = "java";
     command = has("pom.xml") ? "mvn compile -q" : "gradle compileJava -q";
@@ -106,11 +121,15 @@ export function detectProjectType(workspacePath: string): ProjectDetection {
     const pkgPath = path.join(workspacePath, "package.json");
     if (has("package.json")) {
       try {
-        const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8")) as { scripts?: Record<string, string> };
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8")) as {
+          scripts?: Record<string, string>;
+        };
         if (pkg.scripts?.test) {
           command = `${command} && npm run test`;
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
   }
 

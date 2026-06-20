@@ -62,15 +62,20 @@ describe("telemetry span helpers", () => {
 });
 
 describe("initTelemetry", () => {
-  const original = process.env.LMNR_PROJECT_API_KEY;
+  const originalApiKey = process.env.LMNR_PROJECT_API_KEY;
+  const originalTelemetryDisabled = process.env.REI_TELEMETRY_DISABLED;
 
   beforeEach(() => {
     delete process.env.LMNR_PROJECT_API_KEY;
+    delete process.env.REI_TELEMETRY_DISABLED;
   });
 
   afterEach(() => {
-    if (original === undefined) delete process.env.LMNR_PROJECT_API_KEY;
-    else process.env.LMNR_PROJECT_API_KEY = original;
+    if (originalApiKey === undefined) delete process.env.LMNR_PROJECT_API_KEY;
+    else process.env.LMNR_PROJECT_API_KEY = originalApiKey;
+    if (originalTelemetryDisabled === undefined)
+      delete process.env.REI_TELEMETRY_DISABLED;
+    else process.env.REI_TELEMETRY_DISABLED = originalTelemetryDisabled;
   });
 
   it("without an API key: warns once, no-ops, and does not throw", () => {

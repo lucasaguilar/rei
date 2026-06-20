@@ -16,17 +16,37 @@ import { Laminar } from "@lmnr-ai/lmnr";
 
 let initialized = false;
 
+/** Whether Laminar has been successfully initialized. */
+export function isTelemetryInitialized(): boolean {
+  return initialized;
+}
+
+/** Reset internal state — used by tests to re-initialize between runs. */
+export function resetTelemetry(): void {
+  initialized = false;
+}
+
 /**
  * Bootstrap Laminar tracing. Idempotent — safe to call from multiple entry points.
  * If `LMNR_PROJECT_API_KEY` is absent, telemetry is disabled (warn + no-op) so rei
  * still runs normally without a Laminar backend.
+ *
+ * Respects `REI_TELEMETRY_DISABLED=true` to skip initialization entirely (useful when
+ * Laminar is not installed locally and its import-time warnings are undesirable).
  */
 export function initTelemetry(): void {
   if (initialized) return;
 
+  // Explicit opt-out: skip Laminar entirely, no imports, no warnings.
+  if (process.env.REI_TELEMETRY_DISABLED === "true") {
+    return;
+  }
+
   const projectApiKey = process.env.LMNR_PROJECT_API_KEY;
   if (!projectApiKey) {
-    console.warn("[telemetry] LMNR_PROJECT_API_KEY not set — telemetry disabled.");
+    console.warn(
+      "[telemetry] LMNR_PROJECT_API_KEY not set — telemetry disabled.",
+    );
     return;
   }
 

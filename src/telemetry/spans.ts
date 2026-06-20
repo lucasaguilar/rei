@@ -19,12 +19,14 @@
 
 import { observe, Laminar } from "@lmnr-ai/lmnr";
 import { SpanName } from "../contracts/execution-contract.js";
+import { isTelemetryInitialized } from "./init.js";
 
 /** Root span for one non-streaming Turn — `rei.turn`. `input` is the user prompt. */
 export async function withTurnSpan<T>(
   input: string,
   fn: () => Promise<T>,
 ): Promise<T> {
+  if (!isTelemetryInitialized()) return fn();
   const span = Laminar.startActiveSpan({
     name: SpanName.turn,
     input,
@@ -48,6 +50,10 @@ export async function* withTurnSpanStream(
   input: string,
   fn: () => AsyncIterable<string>,
 ): AsyncIterable<string> {
+  if (!isTelemetryInitialized()) {
+    yield* fn();
+    return;
+  }
   const span = Laminar.startActiveSpan({
     name: SpanName.turn,
     input,
@@ -67,7 +73,9 @@ export async function* withTurnSpanStream(
 
 /** Per-loop-iteration Step span — `step-N`. Nests under the active Turn. */
 export const withStepSpan = <T>(n: number, fn: () => Promise<T>): Promise<T> =>
-  observe({ name: `${SpanName.step}-${n}` }, fn);
+  isTelemetryInitialized()
+    ? observe({ name: `${SpanName.step}-${n}` }, fn)
+    : fn();
 
 /**
  * Open a Step span (`step-N`) for one iteration of a *streaming* loop, whose body yields
@@ -76,6 +84,7 @@ export const withStepSpan = <T>(n: number, fn: () => Promise<T>): Promise<T> =>
  * across generator yields. Returns an `end` thunk the caller MUST invoke (in `finally`).
  */
 export function startStepSpan(n: number): () => void {
+  if (!isTelemetryInitialized()) return () => {};
   const span = Laminar.startActiveSpan({
     name: `${SpanName.step}-${n}`,
     global: true,
@@ -93,7 +102,9 @@ export const withToolSpan = <T>(
   input: Record<string, unknown>,
   fn: () => Promise<T>,
 ): Promise<T> =>
-  observe({ name: `${SpanName.tool}.${name}`, spanType: "TOOL", input }, fn);
+  isTelemetryInitialized()
+    ? observe({ name: `${SpanName.tool}.${name}`, spanType: "TOOL", input }, fn)
+    : fn();
 
 /**
  * Open a tool span (`tool.<name>`, `spanType: "TOOL"`) for code that mutates state across the
@@ -104,6 +115,7 @@ export function startToolSpan(
   name: string,
   input: Record<string, unknown>,
 ): () => void {
+  if (!isTelemetryInitialized()) return () => {};
   const span = Laminar.startActiveSpan({
     name: `${SpanName.tool}.${name}`,
     spanType: "TOOL",

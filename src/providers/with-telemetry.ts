@@ -17,6 +17,7 @@
 import { observe, Laminar, LaminarAttributes } from "@lmnr-ai/lmnr";
 import { SpanName } from "../contracts/execution-contract.js";
 import type { ModelProvider } from "./model-provider.js";
+import { isTelemetryInitialized } from "../telemetry/init.js";
 
 const LLM_METHODS = new Set([
   "complete",
@@ -46,6 +47,7 @@ export function withTelemetry(
   provider: ModelProvider,
   providerName: string,
 ): ModelProvider {
+  if (!isTelemetryInitialized()) return provider;
   return new Proxy(provider, {
     get(target, prop, receiver) {
       const orig = Reflect.get(target, prop, receiver);
@@ -113,8 +115,9 @@ export function withTelemetry(
 
       if (SWAP_METHODS.has(prop)) {
         return (model: string) =>
-          observe({ name: SpanName.modelSwap, input: { op: prop, model } }, () =>
-            fn.call(target, model),
+          observe(
+            { name: SpanName.modelSwap, input: { op: prop, model } },
+            () => fn.call(target, model),
           );
       }
 

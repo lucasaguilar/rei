@@ -17,8 +17,6 @@ export function isDegenerate(text: string): boolean {
     .replace(/\s+/g, " ")
     .trim();
 
-  return false;
-
   if (clean.length < 80) return false;
 
   // Split into word-based chunks of 3–8 words and count duplicates
