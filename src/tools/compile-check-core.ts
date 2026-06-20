@@ -51,6 +51,21 @@ export interface CompileAdapter {
   parseDiagnostics(workspacePath: string, output: string): GenericDiagnostic[];
   formatResult(result: GenericCompileCheckResult): string[];
   formatVirtualBatchResult(result: GenericVirtualBatchResult): string;
+  /**
+   * Given compile diagnostics, return workspace-relative paths of OTHER files the model
+   * likely needs to edit too — derived from each language's "missing symbol / missing module"
+   * errors (e.g. a consumer importing a not-yet-added export names its provider module in the
+   * error text). Lets the agent loop inject those files so the model fixes all interdependent
+   * files in ONE batch instead of looping one file at a time.
+   *
+   * Returns [] when the language can't map errors to editable files. The generic
+   * d.filePath-based fallback (files where errors APPEAR) is language-agnostic and handled
+   * by the caller — this method only adds the language-specific REFERENCED-module cases.
+   */
+  resolveReferencedFiles(
+    workspacePath: string,
+    diagnostics: GenericDiagnostic[],
+  ): string[];
 }
 
 /**

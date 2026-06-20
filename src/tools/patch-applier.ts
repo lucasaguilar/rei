@@ -44,6 +44,16 @@ export async function applySREditBatchFS(
     const absPath = path.join(workspacePath, file);
     try {
       const text = await fs.readFile(absPath, "utf-8");
+
+      // Idempotent apply: the agent tool-loop now persists validated edits on-green, so by
+      // the time this final apply runs the file may already equal the target (a single
+      // whole-file rewrite). Report it as applied — not a search-mismatch failure — so
+      // diffs/counts stay correct and re-applying an already-applied edit is a safe no-op.
+      if (fileEdits.length === 1 && text === fileEdits[0].replace) {
+        results.push({ file, applied: true, skipped: false, validationErrors: [] });
+        continue;
+      }
+
       const res = applyFileEdits(text, fileEdits);
 
       if (!res.success) {

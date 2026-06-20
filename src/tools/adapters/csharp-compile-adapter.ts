@@ -72,6 +72,17 @@ export class CSharpCompileAdapter implements CompileAdapter {
     return lines;
   }
 
+  resolveReferencedFiles(
+    _workspacePath: string,
+    _diagnostics: GenericDiagnostic[],
+  ): string[] {
+    // C# resolves symbols via namespaces (not relative file imports), so a "missing
+    // type/namespace" error (CS0246/CS0103) doesn't name an editable file path the way a
+    // TS "Cannot find module './x'" does. The caller's generic d.filePath fallback still
+    // applies. Implement namespace→file mapping here if C# cross-file edit loops appear.
+    return [];
+  }
+
   formatVirtualBatchResult(result: GenericVirtualBatchResult): string {
     const lines: string[] = [];
 

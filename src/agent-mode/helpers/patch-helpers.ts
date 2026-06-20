@@ -6,6 +6,7 @@ import { applyCreateFileBatchFS } from "../../tools/patch-applier.js";
 import {
   applyVirtualBatch,
   formatVirtualBatchResult,
+  resolveReferencedFiles,
 } from "../../tools/compile-check-factory.js";
 import { applyFileEdits } from "../../tools/search-replace.js";
 import { extractCreateFileRequests } from "../response-handler.js";
@@ -181,6 +182,7 @@ export async function handleCreateFileBlocks(params: {
 /**
  * Runs batch patch virtual sandbox verification and compiles detailed feedback.
  */
+
 export async function validateProposedPatches(params: {
   workspacePath: string;
   edits: AgentSREdit[];
@@ -259,9 +261,13 @@ export async function validateProposedPatches(params: {
   const editedFilePaths = new Set(edits.map((e) => e.file));
   const extraFilesNeeded = [
     ...new Set(
-      valResult.diagnostics
-        .map((d) => d.filePath)
-        .filter((f) => f && !editedFilePaths.has(f)),
+      [
+        // Files where errors APPEAR that the model didn't edit (broke a consumer).
+        ...valResult.diagnostics.map((d) => d.filePath),
+        // Modules REFERENCED by errors in edited files (the provider side: a consumer
+        // imports a symbol the model hasn't added there yet). Language-dispatched.
+        ...resolveReferencedFiles(workspacePath, valResult.diagnostics),
+      ].filter((f) => f && !editedFilePaths.has(f)),
     ),
   ];
 

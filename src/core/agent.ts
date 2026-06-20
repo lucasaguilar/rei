@@ -32,6 +32,7 @@ import {
   type FileMeta,
 } from "../workspace/workspace-scanner.js";
 import { applySREditBatchFS } from "../tools/patch-applier.js";
+import { detectProjectType } from "../workspace/project-type.js";
 import {
   extractCommandRequests,
   extractToolCalls,
@@ -838,6 +839,23 @@ export class Agent {
         this.mcpRegistry.getAvailableTools(),
       );
       if (mcpBlock) systemContent += `\n\n${mcpBlock}`;
+    }
+
+    // Surface the project's REAL verify command so the model self-verifies correctly instead of
+    // defaulting to a generic `tsc --noEmit` (which skips Angular templates, AOT/DI, and other
+    // framework checks). This is the SAME command REI runs as its final check — detected per
+    // project type. Only in agent mode (where edits happen) and when a real check exists.
+    if (session.mode === "agent") {
+      const { type, verifyCommand } = detectProjectType(this.workspacePath);
+      if (verifyCommand && verifyCommand !== "echo ok") {
+        systemContent +=
+          `\n\n## Verifying your changes\n` +
+          `This project's verify command (type: ${type}) is:\n\`\`\`\n${verifyCommand}\n\`\`\`\n` +
+          `Run it with run_command to check your work — it is the SAME check REI runs at the end. ` +
+          `Use THIS command, not a generic \`tsc --noEmit\`: for Angular it misses template/AOT ` +
+          `errors. For dynamic projects (Python/JS) also run the project's tests/linters ` +
+          `(e.g. \`npm test\`, \`pytest\`, \`mypy\`) when your change affects behavior.`;
+      }
     }
 
     if (session.messages.length > 0 && session.messages[0].role === "system") {
