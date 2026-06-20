@@ -9,6 +9,7 @@ import {
   withSandboxWorkspace,
   type GenericCompileCheckResult,
   type GenericVirtualBatchResult,
+  type GenericDiagnostic,
 } from "./compile-check-core.js";
 import { TypeScriptCompileAdapter } from "./adapters/typescript-compile-adapter.js";
 
@@ -137,4 +138,11 @@ export async function applyVirtualBatch(
 
 export function formatVirtualBatchResult(result: VirtualBatchResult): string {
   return adapter.formatVirtualBatchResult(result as GenericVirtualBatchResult);
+}
+
+export function resolveReferencedFiles(
+  workspacePath: string,
+  diagnostics: GenericDiagnostic[],
+): string[] {
+  return adapter.resolveReferencedFiles(workspacePath, diagnostics);
 }

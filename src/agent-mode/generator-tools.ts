@@ -12,6 +12,7 @@ import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
 import type { McpRegistry } from "../tools/mcp/mcp-registry.js";
 import { AGENT_TOOLS, mcpToolsToDefinitions } from "../contracts/tool-definitions.js";
 import { executeCommand, limitCommandOutput } from "../tools/command-executor.js";
+import { applyFileEdits } from "../tools/search-replace.js";
 import { startStepSpan, startToolSpan } from "../telemetry/spans.js";
 import {
   searchMcpTools,
@@ -137,6 +138,9 @@ export async function executeAgentTurnWithTools(params: {
   // self-correction before giving up (and applying with a not-verified warning).
   let verifyRetries = 0;
   const MAX_VERIFY_RETRIES = 2;
+  // Caps how many times a turn that truncated mid-output (hit the output-token cap before
+  // emitting a tool call — common with thinking models) is continued back into the loop.
+  let truncationContinuations = 0;
   // Tracks consecutive search-block mismatches (edit_file whose <search> text is
   // not found verbatim in the file). Two-tier escalation, since a weak local model
   // often can't reproduce exact search text even with the file in front of it:
@@ -161,10 +165,54 @@ export async function executeAgentTurnWithTools(params: {
     );
   };
 
-  // Edits accumulate ACROSS iterations so the model can fix multiple files in one
-  // turn (read → edit fileA → edit fileB → … → done). They are applied by the caller
-  // only when the model finishes (emits a plain-text answer, no more tool calls).
-  const pendingEdits: AgentSREdit[] = [];
+  // Virtual working tree: file (workspace-relative) → its CURRENT edited content. Edits
+  // accumulate here across turns WITHOUT touching disk; we validate the whole tree on every
+  // edit and write it to disk only at the end. This lets interdependent files (e.g. an Angular
+  // component's .ts and its .html template) be validated TOGETHER, instead of validating each
+  // turn's edits one-against-disk — which made cross-file edits split across turns impossible
+  // to satisfy and sent the model into edit loops.
+  const virtualFiles = new Map<string, string>();
+  const diskCache = new Map<string, string>();
+  // Disk is never mutated during the loop, so the original content is stable to cache.
+  const readDisk = async (file: string): Promise<string> => {
+    if (!diskCache.has(file)) {
+      diskCache.set(
+        file,
+        await fs.readFile(path.join(workspacePath, file), "utf-8").catch(() => ""),
+      );
+    }
+    return diskCache.get(file)!;
+  };
+  // What the model is actually editing/should see: its own pending content if any, else disk.
+  const currentContent = async (file: string): Promise<string> =>
+    virtualFiles.has(file) ? virtualFiles.get(file)! : await readDisk(file);
+  // Express the virtual tree as whole-file rewrites from disk (search = exact disk content, so
+  // the sandbox apply NEVER mismatches; replace = accumulated content). Used for both the
+  // cumulative validation and the final apply that the caller writes to disk.
+  const virtualEdits = async (): Promise<AgentSREdit[]> => {
+    const out: AgentSREdit[] = [];
+    for (const [file, content] of virtualFiles) {
+      out.push({ file, search: await readDisk(file), replace: content });
+    }
+    return out;
+  };
+  // Write the given files' current virtual content to disk.
+  const persistToDisk = async (files: string[]): Promise<void> => {
+    for (const f of files) {
+      const abs = path.join(workspacePath, f);
+      await fs.mkdir(path.dirname(abs), { recursive: true });
+      await fs.writeFile(abs, virtualFiles.get(f)!, "utf-8");
+    }
+  };
+
+  // Edit mode. DEFAULT = `direct`: work like a human/CLI agent — apply edits straight to disk
+  // with NO per-edit sandbox compile-check; the model self-verifies via run_command (sees real
+  // disk) and REI runs ONE final verify at the end. Lighter (no per-edit sandbox copies) and
+  // avoids the reject-per-edit loop that saturates local models, at the cost of leaving partial
+  // edits on disk if the task aborts (recoverable via git).
+  // Opt into the stricter `REI_EDIT_MODE=sandbox` to validate the cumulative virtual tree per
+  // edit and persist only green state (never leaves broken code on disk; heavier).
+  const directMode = process.env.REI_EDIT_MODE !== "sandbox";
 
   while (loopCount < MAX_TURNS) {
     loopCount++;
@@ -210,34 +258,48 @@ export async function executeAgentTurnWithTools(params: {
       onChunk?.({ type: "thinking", content: result.reasoning.trim() + "\n" });
     }
 
-    // Auto-continue if truncated (no tool calls and output was cut off)
+    // Truncated mid-output with no tool call yet — hit the output-token cap before acting.
+    // Common with thinking models that spend the budget on <think> reasoning. Instead of
+    // accumulating text and ending the turn with ZERO edits (the old behavior, which made the
+    // model "talk and never act"), preserve the partial output, nudge it to continue, and
+    // RE-ENTER the loop so the continuation's TOOL CALLS get processed normally. Bounded by a
+    // per-turn counter so a model that keeps truncating can't spin forever.
     if (result.finishReason === "length" && result.toolCalls.length === 0) {
-      let accumulated = result.content;
-      let truncationCount = 0;
-      let lastReason = result.finishReason;
-
-      while (lastReason === "length" && truncationCount < MAX_TRUNCATION_CONTINUATIONS) {
-        truncationCount++;
-        logger.logInfo(`[truncation] tools response cut off (${truncationCount}/${MAX_TRUNCATION_CONTINUATIONS}), continuing...`);
-        currentMessages = [
-          ...currentMessages,
-          { role: "assistant", content: accumulated },
-          { role: "user", content: TRUNCATION_CONTINUATION },
-        ];
-        const cont = await provider.completeChatWithTools!(
-          currentMessages,
-          AGENT_TOOLS,
-          { model: modelOverride },
+      if (truncationContinuations < MAX_TRUNCATION_CONTINUATIONS) {
+        truncationContinuations++;
+        logger.logInfo(
+          `[truncation] response cut off (${truncationContinuations}/${MAX_TRUNCATION_CONTINUATIONS}) — continuing into the loop`,
         );
-        accumulated = accumulated + cont.content;
-        lastReason = cont.finishReason;
-        currentMessages = currentMessages.slice(0, currentMessages.length - 2);
+        emitStatus("⏳  [REI] Response hit the output limit — continuing");
+        currentMessages.push(
+          {
+            role: "assistant",
+            content: result.content,
+            ...(result.reasoning ? { reasoning_content: result.reasoning } : {}),
+          },
+          { role: "user", content: TRUNCATION_CONTINUATION },
+        );
+        continue;
       }
-
-      return finalizeOutcome(logger, {
-        response: appendCreatedSummary(firstTurnExplanation || accumulated),
-        validProposedPatches: [],
-      }, 0, 0);
+      // Exhausted continuations. Apply whatever was validated on-green and report honestly
+      // (raising REI_MAX_OUTPUT_TOKENS is the real fix for a model that keeps truncating).
+      logger.logInfo(
+        `[truncation] gave up after ${MAX_TRUNCATION_CONTINUATIONS} continuations — output cap too low for this model?`,
+      );
+      const truncEdits = await virtualEdits();
+      return finalizeOutcome(
+        logger,
+        {
+          response: appendCreatedSummary(
+            firstTurnExplanation ||
+              "⚠️ The model kept hitting the output-token limit before finishing. " +
+                "Increase REI_MAX_OUTPUT_TOKENS (thinking models need room for reasoning + the tool call).",
+          ),
+          validProposedPatches: truncEdits,
+        },
+        truncEdits.length,
+        truncEdits.length,
+      );
     }
 
     // Capture text explanation from first turn
@@ -280,10 +342,13 @@ export async function executeAgentTurnWithTools(params: {
       // create_file content that no per-batch check covered). If it fails and we
       // still have budget, bounce the diagnostics back for one more self-correction.
       let finalVerified: boolean | undefined = undefined;
-      if (pendingEdits.length > 0) {
+      const finalEdits = await virtualEdits();
+      if (finalEdits.length > 0) {
         const finalCheck = await validateProposedPatches({
           workspacePath,
-          edits: pendingEdits,
+          // direct mode already wrote edits to disk → verify the workspace as-is (empty edit
+          // set = sandbox copy of current disk). sandbox mode applies the virtual tree.
+          edits: directMode ? [] : finalEdits,
           loopCount,
           logger,
         });
@@ -315,11 +380,11 @@ export async function executeAgentTurnWithTools(params: {
         logger,
         {
           response: appendCreatedSummary(response),
-          validProposedPatches: pendingEdits,
+          validProposedPatches: finalEdits,
           verified: finalVerified,
         },
-        pendingEdits.length,
-        pendingEdits.length,
+        finalEdits.length,
+        finalEdits.length,
       );
     }
 
@@ -339,6 +404,8 @@ export async function executeAgentTurnWithTools(params: {
     interface EditTask {
       callId: string;
       edit: AgentSREdit;
+      // rewrite_file: `edit.replace` is the authoritative full content (no search matching).
+      wholeFile?: boolean;
     }
     const editTasks: EditTask[] = [];
     const toolResultsMap = new Map<string, string>();
@@ -365,7 +432,17 @@ export async function executeAgentTurnWithTools(params: {
             const paths = (args.paths as string[]) ?? [];
             logger.logInfo(`[tools] read_files: ${paths.join(", ")}`);
             emitStatus(`🔍  [REI] Reading: ${paths.join(", ") || "(none)"}`);
-            toolResult = await buildFileContextMessage(workspacePath, paths);
+            // Reflect the model's own pending (virtual) edits so re-reads show the WORKING
+            // state, not stale disk — this keeps subsequent edit_file search blocks matching.
+            const parts: string[] = [];
+            for (const f of paths) {
+              if (virtualFiles.has(f)) {
+                parts.push(`--- File: ${f} ---\n\`\`\`\n${virtualFiles.get(f)}\n\`\`\``);
+              } else {
+                parts.push((await buildFileContextMessage(workspacePath, [f])).trimStart());
+              }
+            }
+            toolResult = "\n" + parts.join("\n\n");
             toolResultsMap.set(call.id, toolResult);
             break;
           }
@@ -434,20 +511,13 @@ export async function executeAgentTurnWithTools(params: {
               createdFiles.push(file);
               toolResultsMap.set(call.id, `OK: ${file} created`);
             } else {
-              // Authoritative overwrite: drop any partial edits to this file already
-              // queued this turn. They're superseded by the full rewrite, and would
-              // otherwise conflict at final apply (their search no longer matches once
-              // the file is replaced). `search` = exact current disk content → matches.
-              const superseded = pendingEdits.filter((e) => e.file === file).length;
-              if (superseded > 0) {
-                for (let i = pendingEdits.length - 1; i >= 0; i--) {
-                  if (pendingEdits[i].file === file) pendingEdits.splice(i, 1);
-                }
-                logger.logInfo(`[tools] rewrite_file superseded ${superseded} queued edit(s) for ${file}`);
-              }
+              // Authoritative whole-file overwrite. In the virtual tree this simply REPLACES
+              // the file's accumulated content (superseding any prior edits to it) — no search
+              // matching needed, so it can't "poison" later edits.
               editTasks.push({
                 callId: call.id,
                 edit: { file, search: current, replace: newContent },
+                wholeFile: true,
               });
             }
             break;
@@ -511,55 +581,102 @@ export async function executeAgentTurnWithTools(params: {
       }
     }
 
-    // Validate ONLY this turn's batch, against the on-disk file content — which is
-    // exactly what the model sees (queued pendingEdits are NOT written to disk during
-    // the loop). Validating the cumulative set here was wrong: it enforced a sandbox
-    // state the model can't observe, so any further edit to an already-edited file
-    // mismatched ("poisoned file"), and even rewrite_file broke. The combined set is
-    // still checked once at the end by the final verify (C2).
-    // After repeated search mismatches, hold the affected files + escalation mode
-    // here so we can act AFTER the tool results are fed back.
+    // Apply this turn's edits onto the CURRENT virtual content (cumulative), per file & in
+    // order; then validate the WHOLE virtual tree. This catches cross-file breakage (e.g. an
+    // Angular template referencing a member added in its .ts) while letting interdependent
+    // files be fixed across turns. Search blocks are matched against the working content the
+    // model is shown, so already-edited files don't "poison" later edits.
+    // After repeated search mismatches, hold the affected files + escalation mode here so we
+    // can act AFTER the tool results are fed back.
     let mismatchEscalation: { files: string[]; mode: "inject" | "wholefile" } | null = null;
     if (editTasks.length > 0) {
-      const batchEdits = editTasks.map((t) => t.edit);
-      const validation = await validateProposedPatches({
-        workspacePath,
-        edits: batchEdits,
-        loopCount,
-        logger,
-      });
+      const candidate = new Map(virtualFiles);
+      let mismatchFile: string | null = null;
+      let mismatchError: string | null = null;
+      for (const task of editTasks) {
+        const f = task.edit.file;
+        if (task.wholeFile) {
+          candidate.set(f, task.edit.replace); // rewrite_file: authoritative content
+          continue;
+        }
+        const base = candidate.has(f) ? candidate.get(f)! : await readDisk(f);
+        const res = applyFileEdits(base, [task.edit]);
+        if (!res.success) {
+          mismatchFile = f;
+          mismatchError = res.error ?? `Could not apply edit to ${f}`;
+          break;
+        }
+        candidate.set(f, res.newContent!);
+      }
 
-      if (validation.success) {
+      if (mismatchFile) {
+        // Search block didn't match the working content → mismatch death-loop tracking.
+        hasToolFailure = true;
+        consecutiveSearchMismatchFailures += 1;
+        for (const task of editTasks) {
+          toolResultsMap.set(task.callId, `ERROR: ${mismatchError}`);
+        }
+        const files = [mismatchFile];
+        if (consecutiveSearchMismatchFailures >= MISMATCH_WHOLEFILE_AT) {
+          mismatchEscalation = { files, mode: "wholefile" };
+        } else if (consecutiveSearchMismatchFailures === MISMATCH_INJECT_AT) {
+          mismatchEscalation = { files, mode: "inject" };
+        }
+      } else if (directMode) {
+        // DIRECT mode: apply to disk immediately with NO per-edit compile-check. The model
+        // verifies via run_command (it sees the real disk) and REI does ONE final verify when
+        // the model finishes. Lighter and loop-free; partial edits persist if the task aborts.
         consecutiveSearchMismatchFailures = 0;
-        pendingEdits.push(...batchEdits);
+        for (const [f, c] of candidate) virtualFiles.set(f, c);
+        await persistToDisk([...new Set(editTasks.map((t) => t.edit.file))]);
         for (const task of editTasks) {
           toolResultsMap.set(
             task.callId,
-            `OK: edit to ${task.edit.file} validated and queued. ` +
-              `If OTHER files still need changes for this task, edit them now too. ` +
+            `OK: edit to ${task.edit.file} applied to disk. ` +
+              `Edit any other files this task needs (you can run_command to verify). ` +
               `When ALL changes are done, reply with a brief summary (no tool call).`,
           );
         }
       } else {
-        hasToolFailure = true;
-        // Count a search-mismatch streak; a compile error (not a mismatch) resets it.
-        consecutiveSearchMismatchFailures = validation.mismatchOnly
-          ? consecutiveSearchMismatchFailures + 1
-          : 0;
-        for (const task of editTasks) {
-          toolResultsMap.set(
-            task.callId,
-            `ERROR: ${validation.feedback ?? "compilation or search block mismatch in batch"}`
-          );
+        // SANDBOX mode (default): validate the CUMULATIVE virtual tree (compile check),
+        // expressed as whole-file rewrites from disk (search = exact disk content, never
+        // mismatches in the sandbox). Persist only the green state.
+        const candidateEdits: AgentSREdit[] = [];
+        for (const [f, c] of candidate) {
+          candidateEdits.push({ file: f, search: await readDisk(f), replace: c });
         }
-        // Escalate the mismatch death-loop. Counter does NOT reset here (only on
-        // success), so it climbs through both tiers.
-        if (validation.mismatchOnly) {
-          const files = [...new Set(batchEdits.map((e) => e.file))];
-          if (consecutiveSearchMismatchFailures >= MISMATCH_WHOLEFILE_AT) {
-            mismatchEscalation = { files, mode: "wholefile" };
-          } else if (consecutiveSearchMismatchFailures === MISMATCH_INJECT_AT) {
-            mismatchEscalation = { files, mode: "inject" };
+        const validation = await validateProposedPatches({
+          workspacePath,
+          edits: candidateEdits,
+          loopCount,
+          logger,
+        });
+
+        if (validation.success) {
+          consecutiveSearchMismatchFailures = 0;
+          for (const [f, c] of candidate) virtualFiles.set(f, c); // commit to virtual tree
+          // Persist on-green so the model's OWN run_command (ngc/head/tests) sees its work.
+          // Queued edits are otherwise invisible to disk-reading commands, which makes the
+          // model believe its edits "didn't apply" (it even theorizes a hook is reverting
+          // them) and spiral. Disk now always reflects the last validated state.
+          await persistToDisk([...new Set(editTasks.map((t) => t.edit.file))]);
+          for (const task of editTasks) {
+            toolResultsMap.set(
+              task.callId,
+              `OK: edit to ${task.edit.file} validated and applied. ` +
+                `If OTHER files still need changes for this task, edit them now too. ` +
+                `When ALL changes are done, reply with a brief summary (no tool call).`,
+            );
+          }
+        } else {
+          hasToolFailure = true;
+          // Compile error (not a search mismatch) → reset the mismatch streak.
+          consecutiveSearchMismatchFailures = 0;
+          for (const task of editTasks) {
+            toolResultsMap.set(
+              task.callId,
+              `ERROR: ${validation.feedback ?? "combined changes do not compile"}`,
+            );
           }
         }
       }
@@ -586,7 +703,15 @@ export async function executeAgentTurnWithTools(params: {
           `[tools] auto-injecting file context after repeated search mismatches: ${files.join(", ")}`,
         );
         emitStatus(`📄  [REI] Re-sending exact file content so edits match: ${files.join(", ")}`);
-        const contextMessage = await buildFileContextMessage(workspacePath, files);
+        // Show the WORKING content (pending virtual edits if any), not stale disk, so the
+        // model's next search block matches the state its edits will actually apply against.
+        const contextMessage =
+          "\n" +
+          (
+            await Promise.all(
+              files.map(async (f) => `--- File: ${f} ---\n\`\`\`\n${await currentContent(f)}\n\`\`\``),
+            )
+          ).join("\n\n");
         currentMessages.push({
           role: "user",
           content:
@@ -617,8 +742,8 @@ export async function executeAgentTurnWithTools(params: {
     // Do NOT return here just because we have valid edits — keep looping so the
     // model can edit additional files in the same task. We apply everything once
     // the model signals completion (a plain-text response, handled above, which
-    // returns `validProposedPatches: pendingEdits`). Reads, commands, queued edits
-    // and failures all simply continue the loop.
+    // returns the accumulated virtual tree as `validProposedPatches`). Reads, commands,
+    // queued edits and failures all simply continue the loop.
     } finally {
       endStep();
     }
@@ -627,10 +752,11 @@ export async function executeAgentTurnWithTools(params: {
   // Hit the turn limit. If the model queued edits along the way, apply them rather
   // than discard the work; otherwise report the failure with guidance. No budget
   // left to self-correct, but still run a final verify so `verified` is honest.
-  if (pendingEdits.length > 0) {
+  const limitEdits = await virtualEdits();
+  if (limitEdits.length > 0) {
     const finalCheck = await validateProposedPatches({
       workspacePath,
-      edits: pendingEdits,
+      edits: directMode ? [] : limitEdits,
       loopCount,
       logger,
     });
@@ -639,13 +765,13 @@ export async function executeAgentTurnWithTools(params: {
       {
         response: appendCreatedSummary(
           firstTurnExplanation ||
-            `Applied ${pendingEdits.length} edit(s); stopped at the ${MAX_TURNS}-turn limit (there may be more to do).`,
+            `Applied ${limitEdits.length} edit(s); stopped at the ${MAX_TURNS}-turn limit (there may be more to do).`,
         ),
-        validProposedPatches: pendingEdits,
+        validProposedPatches: limitEdits,
         verified: finalCheck.success,
       },
-      pendingEdits.length,
-      pendingEdits.length,
+      limitEdits.length,
+      limitEdits.length,
     );
   }
 

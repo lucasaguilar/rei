@@ -69,6 +69,38 @@ export class TypeScriptCompileAdapter implements CompileAdapter {
     return lines;
   }
 
+  resolveReferencedFiles(
+    workspacePath: string,
+    diagnostics: GenericDiagnostic[],
+  ): string[] {
+    // TS error codes whose message names an importable module specifier (the provider side
+    // of a consumer→provider edit): 2305/2614/2724 "Module 'X' has no exported member 'Y'",
+    // 2307 "Cannot find module 'X'".
+    const MODULE_REF_CODES = new Set([2305, 2307, 2614, 2724]);
+    const found = new Set<string>();
+    for (const d of diagnostics) {
+      const code = typeof d.code === "string" ? parseInt(d.code, 10) : d.code;
+      if (!Number.isNaN(code) && !MODULE_REF_CODES.has(code)) continue;
+      // First quoted RELATIVE specifier in the message (handles TS's nested quoting, e.g. '"./x"').
+      const spec = d.message.match(/['"]+(\.[^'"\s]+?)['"]+/)?.[1];
+      if (!spec) continue;
+      const fromDir = path.dirname(path.resolve(workspacePath, d.filePath));
+      const base = path.resolve(fromDir, spec);
+      // Import specifiers use `.js`/no extension; the real source is `.ts`/`.tsx` (or an index file).
+      const candidates = [
+        `${base}.ts`,
+        `${base}.tsx`,
+        base.replace(/\.jsx?$/, ".ts"),
+        base.replace(/\.jsx?$/, ".tsx"),
+        path.join(base, "index.ts"),
+        path.join(base, "index.tsx"),
+      ];
+      const hit = candidates.find((p) => fs.existsSync(p));
+      if (hit) found.add(path.relative(workspacePath, hit).replace(/\\/g, "/"));
+    }
+    return [...found];
+  }
+
   formatVirtualBatchResult(result: GenericVirtualBatchResult): string {
     const lines: string[] = [];
 

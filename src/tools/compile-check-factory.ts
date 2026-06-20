@@ -2,7 +2,10 @@ import { detectProjectType } from "../workspace/project-type.js";
 import * as tsCheck from "./typescript-compile-check.js";
 import * as csCheck from "./csharp-compile-check.js";
 import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
-import type { GenericVirtualBatchResult } from "./compile-check-core.js";
+import type {
+  GenericVirtualBatchResult,
+  GenericDiagnostic,
+} from "./compile-check-core.js";
 
 export async function applyVirtualBatch(
   workspacePath: string,
@@ -29,4 +32,23 @@ export function formatVirtualBatchResult(
   }
 
   return tsCheck.formatVirtualBatchResult(result as any);
+}
+
+/**
+ * Language-dispatched companion to the generic d.filePath check: returns workspace-relative
+ * paths of files REFERENCED by compile errors (the provider side of a consumer→provider edit)
+ * so the agent loop can inject them and force a single coherent batch. Each adapter knows its
+ * own error codes + import/file mapping; non-mappable languages return [].
+ */
+export function resolveReferencedFiles(
+  workspacePath: string,
+  diagnostics: GenericDiagnostic[],
+): string[] {
+  const { type } = detectProjectType(workspacePath);
+
+  if (type === "csharp") {
+    return csCheck.resolveReferencedFiles(workspacePath, diagnostics);
+  }
+
+  return tsCheck.resolveReferencedFiles(workspacePath, diagnostics);
 }
