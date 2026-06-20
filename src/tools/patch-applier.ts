@@ -59,26 +59,20 @@ export async function applySREditBatchFS(
 
       await fs.writeFile(absPath, res.newContent!, "utf-8");
 
-      // Verification: re-read file and confirm replacement text is present
+      // Verification: compare file hash before/after to detect no-op writes
+      // (simpler than string matching which breaks with multi-edit context changes)
       const verifyContent = await fs.readFile(absPath, "utf-8");
-      const verificationErrors: string[] = [];
 
-      for (const edit of fileEdits) {
-        if (!verifyContent.includes(edit.replace)) {
-          verificationErrors.push(
-            `⚠️ Edit verification failed: replacement text not found in file after write. ` +
-            `Expected to find: "${edit.replace.slice(0, 100)}...". ` +
-            `File may be unchanged. Use rewrite_file instead.`
-          );
-        }
-      }
-
-      if (verificationErrors.length > 0) {
+      if (verifyContent === text) {
+        // File unchanged after write - edit was a no-op (likely search mismatch that applyFileEdits missed)
         results.push({
           file,
           applied: false,
           skipped: false,
-          validationErrors: verificationErrors,
+          validationErrors: [
+            `⚠️ Edit verification failed: file content unchanged after write. ` +
+            `The edit may not have matched the file. Use rewrite_file instead.`
+          ],
         });
         allSuccess = false;
       } else {
@@ -120,14 +114,40 @@ export async function applyWholeFileBatchFS(
   for (const edit of edits) {
     const absPath = path.join(workspacePath, edit.file);
     try {
+      // Read original content before writing (for verification)
+      let originalContent = "";
+      try {
+        originalContent = await fs.readFile(absPath, "utf-8");
+      } catch {
+        // File doesn't exist yet - that's OK for wholefile
+      }
+
       await fs.mkdir(path.dirname(absPath), { recursive: true });
       await fs.writeFile(absPath, edit.content, "utf-8");
-      results.push({
-        file: edit.file,
-        applied: true,
-        skipped: false,
-        validationErrors: [],
-      });
+
+      // Verification: re-read and confirm file changed
+      const verifyContent = await fs.readFile(absPath, "utf-8");
+
+      if (verifyContent === originalContent && originalContent !== "") {
+        // File unchanged after write - the write was a no-op
+        results.push({
+          file: edit.file,
+          applied: false,
+          skipped: false,
+          validationErrors: [
+            `⚠️ Rewrite verification failed: file content unchanged after write. ` +
+            `The file may be locked or the write failed silently.`
+          ],
+        });
+        allSuccess = false;
+      } else {
+        results.push({
+          file: edit.file,
+          applied: true,
+          skipped: false,
+          validationErrors: [],
+        });
+      }
     } catch (err) {
       allSuccess = false;
       results.push({
