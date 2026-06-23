@@ -16,27 +16,50 @@ const underline = (s: string): string => `\x1b[4;34m${s}\x1b[0m`;
  * Formats a code difference between search and replace blocks.
  * Uses ANSI color codes to highlight additions (green) and deletions (red).
  */
+// Unchanged lines kept around each change, git-style. Whole-file rewrites (the agent loop's
+// direct-mode edits) otherwise diff the ENTIRE file; this keeps the output to just the hunks.
+const DIFF_CONTEXT_LINES = 3;
+
 export function formatCodeDiff(search: string, replace: string): string {
   const diff = diffLines(search, replace);
-  const formattedLines: string[] = [];
+  const out: string[] = [];
 
-  diff.forEach((part) => {
-    const prefix = part.added ? '+' : part.removed ? '-' : ' ';
-    const color = part.added ? '\x1b[32m' : part.removed ? '\x1b[31m' : '';
-    const reset = '\x1b[0m';
+  const toLines = (value: string): string[] => {
+    const lines = value.split('\n');
+    // Remove trailing empty string caused by split on a trailing newline.
+    if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+    return lines;
+  };
 
-    const lines = part.value.split('\n');
-    // Remove trailing empty string caused by split on trailing newline
-    if (lines.length > 0 && lines[lines.length - 1] === '') {
-      lines.pop();
+  diff.forEach((part, i) => {
+    const lines = toLines(part.value);
+
+    if (part.added || part.removed) {
+      const color = part.added ? '\x1b[32m' : '\x1b[31m';
+      const prefix = part.added ? '+' : '-';
+      lines.forEach((line) => out.push(`${color}${prefix} ${line}\x1b[0m`));
+      return;
     }
 
-    lines.forEach((line) => {
-      formattedLines.push(`${color}${prefix} ${line}${reset}`);
-    });
+    // Unchanged block: show only DIFF_CONTEXT_LINES next to an adjacent change and collapse
+    // the rest, so a whole-file rewrite stays focused on what actually changed.
+    const prevChanged = i > 0 && (diff[i - 1].added || diff[i - 1].removed);
+    const nextChanged =
+      i < diff.length - 1 && (diff[i + 1].added || diff[i + 1].removed);
+    const top = prevChanged ? DIFF_CONTEXT_LINES : 0;
+    const bottom = nextChanged ? DIFF_CONTEXT_LINES : 0;
+
+    if (top + bottom >= lines.length) {
+      lines.forEach((line) => out.push(`  ${line}`));
+      return;
+    }
+    for (let k = 0; k < top; k++) out.push(`  ${lines[k]}`);
+    const hidden = lines.length - top - bottom;
+    out.push(`\x1b[90m    … ${hidden} unchanged line${hidden === 1 ? '' : 's'} …\x1b[0m`);
+    for (let k = lines.length - bottom; k < lines.length; k++) out.push(`  ${lines[k]}`);
   });
 
-  return formattedLines.join('\n');
+  return out.join('\n');
 }
 
 /**

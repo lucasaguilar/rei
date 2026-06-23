@@ -355,7 +355,7 @@ export class Agent {
             (r) => r.file === edit.file && r.applied,
           );
           if (applied) {
-            yield `\n\x1b[1mArchivo:\x1b[0m ${edit.file}\n${formatCodeDiff(edit.search, edit.replace)}`;
+            yield `\n\x1b[1mArchivo:\x1b[0m ${edit.file}\n\`\`\`diff\n${formatCodeDiff(edit.search, edit.replace)}\n\`\`\``;
           }
         }
 
@@ -1169,7 +1169,7 @@ export class Agent {
           )
           .map(
             (edit) =>
-              `\n\x1b[1mArchivo:\x1b[0m ${edit.file}\n${formatCodeDiff(edit.search, edit.replace)}`,
+              `\n\x1b[1mArchivo:\x1b[0m ${edit.file}\n\`\`\`diff\n${formatCodeDiff(edit.search, edit.replace)}\n\`\`\``,
           )
           .join("");
         return outcome.response + msg + diffs;
@@ -1223,7 +1223,7 @@ export class Agent {
         )
         .map(
           (edit) =>
-            `\n\x1b[1mArchivo:\x1b[0m ${edit.file}\n${formatCodeDiff(edit.search, edit.replace)}`,
+            `\n\x1b[1mArchivo:\x1b[0m ${edit.file}\n\`\`\`diff\n${formatCodeDiff(edit.search, edit.replace)}\n\`\`\``,
         )
         .join("");
       return (explanation ? explanation + "\n\n" : "") + msg + diffs;

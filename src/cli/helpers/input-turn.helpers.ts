@@ -8,6 +8,21 @@ import { estimateMessagesTokens } from "../../chat/helpers/token-estimator.js";
 import { stripNativeToolSyntax } from "../../core/helpers/turn-message.helpers.js";
 
 /**
+ * Strips ANSI codes OUTSIDE fenced code blocks, but PRESERVES them inside ``` fences.
+ * Colored diffs are emitted as ANSI inside a ```diff fence; marked-terminal passes ANSI
+ * through code blocks verbatim, so keeping it there is what makes the rendered diff show
+ * red/green (while the rest of the message stays clean of stray escape codes).
+ */
+function stripAnsiKeepingFences(text: string): string {
+  const ansi = /\x1b\[[0-9;]*m/g;
+  // Odd-indexed segments are fenced blocks (kept); even are outside (ANSI stripped).
+  return text
+    .split(/(```[\s\S]*?```)/g)
+    .map((seg, i) => (i % 2 === 1 ? seg : seg.replace(ansi, "")))
+    .join("");
+}
+
+/**
  * Resolves the active model label and maps it to its corresponding brand icon or emoji
  * (e.g. 🦙 for Ollama, 🧠 for OpenRouter, ⚡ for Groq, ♊ for Gemini, 💻 for LM Studio).
  * Supports dedicated agent provider resolution in multi-provider environments.
@@ -230,8 +245,7 @@ export async function handleInputTurn(
       cleanBuffer = cleanBuffer.replace(liveDisplayedFeedback, "");
     }
     const finalContent = stripNativeToolSyntax(
-      cleanBuffer
-        .replace(/\x1b\[[0-9;]*m/g, "") // strip ANSI (e.g. from patch result)
+      stripAnsiKeepingFences(cleanBuffer) // strip ANSI except inside ``` fences (colored diffs)
         .replace(/<think>[\s\S]*?<\/think>/gi, "") // safety strip
         .replace(/<edit[\s\S]*?<\/edit>/gi, "")
         .replace(/<wholefile[\s\S]*?<\/wholefile>/gi, "")
