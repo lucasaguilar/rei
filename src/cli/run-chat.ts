@@ -5,6 +5,8 @@ import type { TurnStatus } from "../core/models/agent.types.js";
 import type { ChatSession } from "../chat/types.js";
 
 import { getWelcomeMessage } from "./constants/chat.constants.js";
+import { formatContextGauge } from "./markdown-renderer.js";
+import { getContextWindow } from "../config/model-runtime.js";
 import {
   ChatRendererState,
   ChatUIState,
@@ -277,6 +279,14 @@ export async function runChat(
   } else {
     pushTranscript(getWelcomeMessage(session.mode));
   }
+
+  // Show the context gauge on startup too (not only after the first turn), so the user sees
+  // how full the assumed window already is from the resumed session / system prompt.
+  const startupTokens = Math.round(
+    session.messages.reduce((acc, m) => acc + (m.content?.length ?? 0), 0) / 4,
+  );
+  const startupGauge = formatContextGauge(startupTokens, getContextWindow());
+  if (startupGauge) pushTranscript(startupGauge);
 
   if (autoIndex && !hasRagIndex(workspacePath)) {
     pushTranscript(

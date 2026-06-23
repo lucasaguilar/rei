@@ -63,6 +63,23 @@ export function formatCodeDiff(search: string, replace: string): string {
 }
 
 /**
+ * One-line visual context-usage gauge (bar + %), or null when no window is configured.
+ * `promptTokens` = tokens sent (or about to be); `ctxWindow` = assumed context window.
+ * Color: green < 60%, yellow 60–85%, red > 85% (close to overflow).
+ */
+export function formatContextGauge(
+  promptTokens: number,
+  ctxWindow: number,
+): string | null {
+  if (ctxWindow <= 0) return null;
+  const pct = Math.min(100, Math.round((promptTokens / ctxWindow) * 100));
+  const filled = Math.max(0, Math.min(10, Math.round(pct / 10)));
+  const bar = "█".repeat(filled) + "░".repeat(10 - filled);
+  const color = pct >= 85 ? "\x1b[31m" : pct >= 60 ? "\x1b[33m" : "\x1b[32m";
+  return `${color}🧠 Context: ${promptTokens.toLocaleString()} / ${ctxWindow.toLocaleString()} tokens  [${bar}] ${pct}% used\x1b[0m`;
+}
+
+/**
  * Styles heading text that arrives with its "#" prefix already included
  * by marked-terminal (showSectionPrefix: true by default).
  *   H1 → firstHeading()
