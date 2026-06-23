@@ -3,8 +3,9 @@ import { renderMarkdown } from "../markdown-renderer.js";
 import type { InputHandlerContext } from "../models/input-handler.types.js";
 import { saveSession } from "../../chat/session-store.js";
 import { extractSREdits } from "../../agent-mode/response-handler.js";
-import { formatCodeDiff } from "../markdown-renderer.js";
+import { formatCodeDiff, formatContextGauge } from "../markdown-renderer.js";
 import { estimateMessagesTokens } from "../../chat/helpers/token-estimator.js";
+import { getContextWindow } from "../../config/model-runtime.js";
 import { stripNativeToolSyntax } from "../../core/helpers/turn-message.helpers.js";
 
 /**
@@ -303,8 +304,13 @@ export async function handleInputTurn(
     const outputNote = recTokens <= 2 ? " | Note: very short output" : "";
     const activeModel = resolveActiveModelLabel(session.mode);
 
+    // Visual context-usage gauge: how much of the assumed window the prompt consumed this turn.
+    // Helps spot when history/files are about to overflow (and explains slow prefill).
+    const gauge = formatContextGauge(sentTokens, getContextWindow());
+    if (gauge) actions.pushTranscript(`\n${gauge}`);
+
     actions.pushTranscript(
-      `\n\x1b[90m⏱️ Prep: ${(prepMs / 1000).toFixed(2)}s | TTFT(model): ${(ttftMs / 1000).toFixed(2)}s | Speed: ${speedText} | Tokens: ~${sentTokens} tok in, ~${recTokens} tok out | Model: ${activeModel}${outputNote}\x1b[0m`,
+      `${gauge ? "" : "\n"}\x1b[90m⏱️ Prep: ${(prepMs / 1000).toFixed(2)}s | TTFT(model): ${(ttftMs / 1000).toFixed(2)}s | Speed: ${speedText} | Tokens: ~${sentTokens} tok in, ~${recTokens} tok out | Model: ${activeModel}${outputNote}\x1b[0m`,
     );
     actions.pushTranscript("");
   } catch (err: unknown) {
