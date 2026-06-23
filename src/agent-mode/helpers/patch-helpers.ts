@@ -1,5 +1,4 @@
 import * as fs from "fs/promises";
-import * as path from "path";
 import type { AgentSREdit } from "../../contracts/agent-interaction.types.js";
 import type { AgentLogger } from "../../core/logger.js";
 import { applyCreateFileBatchFS } from "../../tools/patch-applier.js";
@@ -11,6 +10,7 @@ import {
 import { applyFileEdits } from "../../tools/search-replace.js";
 import { extractCreateFileRequests } from "../response-handler.js";
 import { stripNativeToolSyntax } from "../../core/helpers/turn-message.helpers.js";
+import { resolveWorkspacePath } from "../../workspace/file-security.js";
 
 const SEARCH_MISMATCH_HINT = "Could not find exact match for search block in";
 
@@ -42,7 +42,7 @@ export async function buildFileContextMessage(
 ): Promise<string> {
   const fileContents = [];
   for (const f of files) {
-    const absPath = path.join(workspacePath, f);
+    const absPath = resolveWorkspacePath(f, workspacePath);
     try {
       const content = await fs.readFile(absPath, "utf-8");
       fileContents.push(`--- File: ${f} ---\n\`\`\`\n${content}\n\`\`\``);
@@ -79,7 +79,7 @@ export async function buildPerEditMismatchDetails(
   }
 
   for (const [file, fileEdits] of byFile) {
-    const absPath = path.join(workspacePath, file);
+    const absPath = resolveWorkspacePath(file, workspacePath);
     let text: string;
     try {
       text = await fs.readFile(absPath, "utf-8");

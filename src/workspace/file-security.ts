@@ -198,6 +198,40 @@ export function validateFileTarget(
 }
 
 /**
+ * Resolve a model-supplied file path to an ABSOLUTE on-disk path inside the workspace.
+ *
+ * Accepts either a workspace-relative path ("django/forms.py") OR an absolute path
+ * that already points inside the workspace ("/testbed/django/forms.py"). Using
+ * `path.join(workspacePath, file)` is WRONG for the absolute case:
+ *   path.join("/testbed", "/testbed/django/forms.py") === "/testbed/testbed/django/forms.py"
+ * i.e. a phantom nested path — the write silently misses the real file. `path.resolve`
+ * collapses an absolute second argument to itself, so both forms land on the same file.
+ */
+export function resolveWorkspacePath(
+  filePath: string,
+  workspacePath: string,
+): string {
+  return path.isAbsolute(filePath)
+    ? path.resolve(filePath)
+    : path.resolve(workspacePath, filePath);
+}
+
+/**
+ * Canonical workspace-relative form (forward slashes, no leading "./") of a
+ * model-supplied path, whether it arrives relative or as an absolute in-workspace
+ * path. Used as the stable key for the in-memory edit tree so the SAME file can't be
+ * tracked under two different keys (e.g. "django/forms.py" vs "/testbed/django/forms.py").
+ */
+export function toWorkspaceRelative(
+  filePath: string,
+  workspacePath: string,
+): string {
+  const abs = resolveWorkspacePath(filePath, workspacePath);
+  const rel = path.relative(path.resolve(workspacePath), abs);
+  return rel.split(path.sep).join("/");
+}
+
+/**
  * Check if a path is within workspace and doesn't escape via path traversal.
  *
  * @param absPath absolute path to check

@@ -7,6 +7,7 @@ import type {
   AgentWholeFileEdit,
 } from "../contracts/agent-interaction.types.js";
 import { applyFileEdits } from "./search-replace.js";
+import { resolveWorkspacePath } from "../workspace/file-security.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -41,7 +42,7 @@ export async function applySREditBatchFS(
   let allSuccess = true;
 
   for (const [file, fileEdits] of editsByFile.entries()) {
-    const absPath = path.join(workspacePath, file);
+    const absPath = resolveWorkspacePath(file, workspacePath);
     try {
       const text = await fs.readFile(absPath, "utf-8");
 
@@ -122,7 +123,7 @@ export async function applyWholeFileBatchFS(
   let allSuccess = true;
 
   for (const edit of edits) {
-    const absPath = path.join(workspacePath, edit.file);
+    const absPath = resolveWorkspacePath(edit.file, workspacePath);
     try {
       // Read original content before writing (for verification)
       let originalContent = "";
@@ -223,7 +224,7 @@ export async function applyCreateFileBatchFS(
   const results: BatchPatchApplyItemResult[] = [];
   let allSuccess = true;
   for (const { file, content } of creates) {
-    const absPath = path.join(workspacePath, file);
+    const absPath = resolveWorkspacePath(file, workspacePath);
     try {
       // Check if file exists
       await fs

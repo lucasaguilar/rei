@@ -35,6 +35,11 @@ import {
   skillsForMode,
 } from "../skills/skill-loader.js";
 import {
+  resolveWorkspacePath,
+  toWorkspaceRelative,
+  isWithinWorkspace,
+} from "../workspace/file-security.js";
+import {
   buildFileContextMessage,
   finalizeOutcome,
   validateProposedPatches,
@@ -205,13 +210,33 @@ export async function executeAgentTurnWithTools(params: {
   // re-dumping a file whose content hasn't changed since — it's still in the conversation
   // history, so re-reading just burns tokens/turns (a common model habit).
   const alreadyProvided = new Map<string, string>();
+  // Normalize a model-supplied path to a canonical workspace-relative key. Accepts both
+  // relative ("django/forms.py") and absolute in-workspace ("/testbed/django/forms.py") forms —
+  // the latter is common when the workspace itself is an absolute path (e.g. SWE-bench's
+  // /testbed root) and would otherwise be mangled into a phantom nested path. Used as the key
+  // for the virtual tree / dedup so absolute and relative refs to the same file collapse.
+  const toRel = (raw: string): string => toWorkspaceRelative(raw, workspacePath);
+  // Same normalization, but enforces workspace containment — throws (→ ERROR tool result) for a
+  // missing arg or a path that escapes the working directory. Used for writes.
+  const resolveTarget = (raw: unknown): string => {
+    if (!raw || typeof raw !== "string") {
+      throw new Error("Missing required 'file' argument.");
+    }
+    const abs = resolveWorkspacePath(raw, workspacePath);
+    if (!isWithinWorkspace(abs, workspacePath)) {
+      throw new Error(
+        `Path "${raw}" is outside the working directory. Use a path inside it.`,
+      );
+    }
+    return toWorkspaceRelative(raw, workspacePath);
+  };
   // Disk is never mutated during the loop, so the original content is stable to cache.
   const readDisk = async (file: string): Promise<string> => {
     if (!diskCache.has(file)) {
       diskCache.set(
         file,
         await fs
-          .readFile(path.join(workspacePath, file), "utf-8")
+          .readFile(resolveWorkspacePath(file, workspacePath), "utf-8")
           .catch(() => ""),
       );
     }
@@ -233,7 +258,7 @@ export async function executeAgentTurnWithTools(params: {
   // Write the given files' current virtual content to disk.
   const persistToDisk = async (files: string[]): Promise<void> => {
     for (const f of files) {
-      const abs = path.join(workspacePath, f);
+      const abs = resolveWorkspacePath(f, workspacePath);
       await fs.mkdir(path.dirname(abs), { recursive: true });
       await fs.writeFile(abs, virtualFiles.get(f)!, "utf-8");
     }
@@ -537,7 +562,8 @@ export async function executeAgentTurnWithTools(params: {
               // Dedup: if a file's content is unchanged since we last showed it, point the model
               // back to it instead of re-dumping the whole thing (it's still in history).
               const parts: string[] = [];
-              for (const f of paths) {
+              for (const raw of paths) {
+                const f = toRel(raw); // normalize absolute in-workspace paths to the virtual-tree key
                 const cur = await currentContent(f);
                 if (cur !== "" && alreadyProvided.get(f) === cur) {
                   parts.push(
@@ -602,7 +628,7 @@ export async function executeAgentTurnWithTools(params: {
             // ── edit_file ────────────────────────────────────────────────
             case "edit_file": {
               const edit: AgentSREdit = {
-                file: args.file as string,
+                file: resolveTarget(args.file),
                 search: args.search as string,
                 replace: args.replace as string,
               };
@@ -618,9 +644,9 @@ export async function executeAgentTurnWithTools(params: {
             // this sidesteps the search-mismatch problem entirely. The edit still goes
             // through the normal validation pipeline as a search→replace.
             case "rewrite_file": {
-              const file = args.file as string;
+              const file = resolveTarget(args.file);
               const newContent = (args.content as string) ?? "";
-              const absPath = path.join(workspacePath, file);
+              const absPath = resolveWorkspacePath(file, workspacePath);
               const current = await fs
                 .readFile(absPath, "utf-8")
                 .catch(() => null);
@@ -647,20 +673,21 @@ export async function executeAgentTurnWithTools(params: {
 
             // ── create_file ──────────────────────────────────────────────
             case "create_file": {
-              const filePath = path.join(workspacePath, args.file as string);
+              const file = resolveTarget(args.file);
+              const filePath = resolveWorkspacePath(file, workspacePath);
               const exists = await fs
                 .stat(filePath)
                 .then(() => true)
                 .catch(() => false);
-              emitStatus(`📂  [REI] Creating: ${args.file}`);
+              emitStatus(`📂  [REI] Creating: ${file}`);
               if (exists) {
-                toolResult = `SKIPPED: ${args.file} already exists — use edit_file to modify it (or rewrite_file to overwrite it entirely)`;
+                toolResult = `SKIPPED: ${file} already exists — use edit_file to modify it (or rewrite_file to overwrite it entirely)`;
               } else {
                 await fs.mkdir(path.dirname(filePath), { recursive: true });
                 await fs.writeFile(filePath, args.content as string, "utf-8");
-                logger.logInfo(`[tools] create_file: ${args.file}`);
-                createdFiles.push(args.file as string);
-                toolResult = `OK: ${args.file} created`;
+                logger.logInfo(`[tools] create_file: ${file}`);
+                createdFiles.push(file);
+                toolResult = `OK: ${file} created`;
               }
               toolResultsMap.set(call.id, toolResult);
               break;
