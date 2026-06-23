@@ -3,6 +3,9 @@ import type { InputHandlerContext } from "../models/input-handler.types.js";
 import { createModelProvider } from "../../providers/provider-factory.js";
 import { Agent } from "../../core/agent.js";
 import { handleInputTurn } from "./input-turn.helpers.js";
+import { grabClipboardImage } from "../../tools/clipboard-image.js";
+import { extractImagePaths } from "../../tools/vision-sidecar.js";
+import * as fs from "fs";
 
 export async function handleInputCommand(
   trimmed: string,
@@ -15,6 +18,41 @@ export async function handleInputCommand(
     actions.draw();
     state.running = false;
     return true;
+  }
+
+  // /paste-image [text]: grab an image from the clipboard (macOS) into a temp file,
+  // then run a normal turn referencing it so the vision sidecar describes it.
+  if (trimmed === "/paste-image" || trimmed.startsWith("/paste-image ")) {
+    const extra = trimmed.slice("/paste-image".length).trim();
+    const grab = await grabClipboardImage();
+    if (!grab.ok || !grab.filePath) {
+      actions.pushTranscript(
+        `\x1b[33m⚠️  ${grab.error ?? "Could not read image from clipboard."}\x1b[0m`,
+      );
+      actions.draw();
+      return true;
+    }
+    const prompt = extra ? `${extra} ${grab.filePath}` : grab.filePath;
+    const displayText = extra ? `📋🖼️  ${extra}` : "📋🖼️  (pasted image)";
+    try {
+      await handleInputTurn(prompt, ctx, { displayText });
+    } finally {
+      // Temp clipboard capture is only needed for this turn's description.
+      try {
+        fs.unlinkSync(grab.filePath);
+      } catch {
+        /* best-effort cleanup */
+      }
+    }
+    return true;
+  }
+
+  // A dragged-in image path is absolute (starts with "/" on macOS/Linux) and would
+  // otherwise be misread as an unknown slash-command. If the input references an
+  // existing image file, it's not a command — let it flow to the turn so the vision
+  // sidecar describes it.
+  if (extractImagePaths(trimmed, ctx.workspacePath).length > 0) {
+    return false;
   }
 
   // Delegate to the centralized command processor

@@ -7,6 +7,7 @@ import type {
 } from "./model-provider.js";
 import { openaiCompleteChatWithTools, toApiMessage } from "./openai-tool-caller.js";
 import { getMaxOutputTokens } from "../config/model-runtime.js";
+import { fetchWithRetry } from "./fetch-retry.js";
 
 interface LlmStudioChatChoice {
   message?: {
@@ -287,8 +288,6 @@ export class LlmStudioProvider implements ModelProvider {
     modelOverride?: string;
   }): Promise<Response> {
     const { messages, stream, modelOverride } = params;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
 
     const requestBody: Record<string, unknown> = {
       model: modelOverride ?? this.model,
@@ -304,15 +303,20 @@ export class LlmStudioProvider implements ModelProvider {
       requestBody.repeat_penalty = this.repeatPenalty;
     }
 
-    return fetch(`${this.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.apiKey}`,
+    // Retry transient connection drops (LM Studio idle-evict / OOM-restart / socket
+    // reset surface as "fetch failed") so one blip doesn't abort the whole turn.
+    return fetchWithRetry(
+      `${this.baseUrl}/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify(requestBody),
       },
-      body: JSON.stringify(requestBody),
-      signal: controller.signal,
-    }).finally(() => clearTimeout(timeout));
+      { timeoutMs: this.requestTimeoutMs },
+    );
   }
 }
 

@@ -6,6 +6,7 @@ import type {
   CompletionOptions,
 } from "./model-provider.js";
 import { getMaxOutputTokens } from "../config/model-runtime.js";
+import { fetchWithRetry } from "./fetch-retry.js";
 
 interface OpenAIToolCallResponse {
   choices?: Array<{
@@ -81,23 +82,23 @@ export async function openaiCompleteChatWithTools(params: {
   // narration/loops. Falls back to the unified REI_MAX_OUTPUT_TOKENS.
   const maxTokens = params.maxTokens ?? getMaxOutputTokens();
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...headers },
-    body: JSON.stringify({
-      model: options?.model ?? model,
-      messages: messages.map(toApiMessage),
-      tools,
-      tool_choice: "auto",
-      temperature: 0,
-      max_tokens: maxTokens,
-      stream: false,
-    }),
-    signal: controller.signal,
-  }).finally(() => clearTimeout(timeout));
+  const response = await fetchWithRetry(
+    `${baseUrl}/chat/completions`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify({
+        model: options?.model ?? model,
+        messages: messages.map(toApiMessage),
+        tools,
+        tool_choice: "auto",
+        temperature: 0,
+        max_tokens: maxTokens,
+        stream: false,
+      }),
+    },
+    { timeoutMs },
+  );
 
   if (!response.ok) {
     const details = await response.text().catch(() => "");

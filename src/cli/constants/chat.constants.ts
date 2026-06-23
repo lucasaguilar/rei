@@ -73,6 +73,7 @@ export const COMMANDS: Array<{
   { command: "/compact", description: "manually compact conversation memory" },
   { command: "/provider", description: "show or switch the active LLM provider" },
   { command: "/model", description: "show or switch the active LLM model" },
+  { command: "/paste-image", description: "analyze an image from the clipboard (macOS/Windows/Linux)" },
 ];
 
 // NOTE: Global regex to match and strip standard ANSI console escape sequences

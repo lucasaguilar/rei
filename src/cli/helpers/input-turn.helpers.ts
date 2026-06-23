@@ -7,6 +7,7 @@ import { formatCodeDiff, formatContextGauge } from "../markdown-renderer.js";
 import { estimateMessagesTokens } from "../../chat/helpers/token-estimator.js";
 import { getContextWindow } from "../../config/model-runtime.js";
 import { stripNativeToolSyntax } from "../../core/helpers/turn-message.helpers.js";
+import { describeAttachedImages } from "../../tools/vision-sidecar.js";
 
 /**
  * Strips ANSI codes OUTSIDE fenced code blocks, but PRESERVES them inside ``` fences.
@@ -142,6 +143,44 @@ export async function handleInputTurn(
   actions.pushTranscript("");
   actions.draw();
 
+  // Mark the turn busy BEFORE any async work (the vision sidecar below is a network call
+  // that can take a while). submitInput() bails when state.busy is true, so setting it
+  // synchronously here — before the first await — prevents a second prompt from starting
+  // concurrently and interleaving turns. There is no command queue yet.
+  state.busy = true;
+  state.activeStatus = "building_context";
+  state.spinnerIndex = 0;
+  actions.startSpinner();
+  actions.draw();
+
+  // Vision sidecar: if the user attached image(s) (dragged/pasted a path), describe
+  // them with a vision model in a separate call and inject the text into the prompt.
+  // Keeps the pipeline string-based; only the description is persisted, never base64.
+  let promptForModel = trimmed;
+  try {
+    const vision = await describeAttachedImages(
+      trimmed,
+      ctx.workspacePath,
+      (message) => {
+        actions.pushTranscript(`\x1b[2m${message}\x1b[0m`);
+        actions.draw();
+      },
+    );
+    if (vision) {
+      promptForModel = vision.augmentedPrompt;
+      actions.pushTranscript(
+        `\x1b[2m🖼️  ${vision.images.length} image(s) analyzed; visual description added to context.\x1b[0m`,
+      );
+      actions.pushTranscript("");
+      actions.draw();
+    }
+  } catch (err) {
+    actions.pushTranscript(
+      `\x1b[33m⚠️  Vision sidecar error: ${err instanceof Error ? err.message : String(err)}\x1b[0m`,
+    );
+    actions.draw();
+  }
+
   const estimatedTokens = estimateMessagesTokens(session.messages);
   if (estimatedTokens > 20000) {
     actions.pushTranscript(
@@ -173,7 +212,7 @@ export async function handleInputTurn(
     let chunkCount = 0;
     const startTime = Date.now();
 
-    for await (const token of agent.streamTurn(session, trimmed, {
+    for await (const token of agent.streamTurn(session, promptForModel, {
       onStatus: (status) => {
         if (lastStatus === status) return;
         if (status === "producing_response") return;
