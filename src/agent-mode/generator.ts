@@ -134,6 +134,10 @@ export async function executeAgentTurn(params: {
   let currentMessages = [...messagesForModel];
   let loopCount = 0;
   let truncationCount = 0;
+  // Files already shown to the model (path → content shown). Skips re-serving an unchanged
+  // file on <request_files> — it's still in history, so re-reading just burns tokens.
+  // (Parity with the native path's read dedup.)
+  const alreadyProvided = new Map<string, string>();
 
   // Track last known state for failure recovery
   let lastRawResponse = "";
@@ -297,10 +301,23 @@ export async function executeAgentTurn(params: {
       const fileRequests = extractFileRequests(rawResponse);
       if (fileRequests.length > 0) {
         logger.logInfo(`Agent requested files: ${fileRequests.join(", ")}`);
-        const contextMessage = await buildFileContextMessage(
-          workspacePath,
-          fileRequests,
-        );
+        // Dedup: if a file's content is unchanged since we last served it, point the model
+        // back to it instead of re-dumping the whole thing (it's still in history).
+        const parts: string[] = [];
+        for (const f of fileRequests) {
+          const block = (
+            await buildFileContextMessage(workspacePath, [f])
+          ).trimStart();
+          if (alreadyProvided.get(f) === block) {
+            parts.push(
+              `--- File: ${f} ---\n(unchanged since you last read it above — reuse that content; do not re-read)`,
+            );
+            continue;
+          }
+          alreadyProvided.set(f, block);
+          parts.push(block);
+        }
+        const contextMessage = "\n" + parts.join("\n\n");
 
         const rfId = generateXmlToolCallId("request_files");
         currentMessages.push({
@@ -1104,9 +1121,20 @@ export async function executeAgentTurnWholefile(params: {
         loopCount,
         rawResponsePreview: rawResponse.substring(0, 200),
       });
+      // Cartel: the model produced edit-looking text (a code block, or a malformed/partial
+      // <edit>/<create>) but nothing parsed into a real action, so NOTHING was applied. Warn
+      // loudly so the user is never misled into thinking the change was made. (Parity with the
+      // native path's "NO FILE WAS CHANGED" guard.)
+      let textOnlyResponse = getFinalResponse(rawResponse);
+      if (/```|<edit\b|<create\b|<wholefile\b/i.test(rawResponse)) {
+        textOnlyResponse =
+          `\x1b[1m\x1b[33m⚠️  NO FILE WAS CHANGED.\x1b[0m The model described an edit but did not ` +
+          `emit a valid <edit>/<create> block, so nothing was applied to disk. Re-run or rephrase.\n\n` +
+          textOnlyResponse;
+      }
       return finalizeOutcome(
         logger,
-        { response: getFinalResponse(rawResponse), validProposedPatches: [] },
+        { response: textOnlyResponse, validProposedPatches: [] },
         0,
         0,
       );

@@ -352,11 +352,21 @@ export async function processMenuCommand(
       new Set(targetContent.match(fileRegex) || []),
     );
 
+    // Forces EXECUTION on /runplan: the model otherwise reads "Execute Stage N" + a plan and
+    // narrates/re-plans instead of calling edit_file (it stays in the SDD planning cycle and
+    // applies nothing). This directive snaps it into acting.
+    const EXECUTE_DIRECTIVE =
+      "\n\n⚙️ EXECUTE NOW — this is EXECUTION, not planning. Apply the change by emitting " +
+      "edit_file / create_file tool calls for the file(s) above. Do NOT write a plan, a spec, " +
+      "or a prose description, and do NOT load planning skills — make the actual edits, then " +
+      "verify with the project's verify command.";
+
     if (files.length === 0) {
       // No target files — action-only stage (e.g. "run npm install")
-      const planPrompt = stageNum
-        ? `[RUNPLAN STAGE ${stageNum}] Execute Stage ${stageNum} of the implementation plan.\n\nSUB-PLAN:\n${targetContent}`
-        : `Execute the following plan:\n\nPLAN:\n${planContent}`;
+      const planPrompt =
+        (stageNum
+          ? `[RUNPLAN STAGE ${stageNum}] Execute Stage ${stageNum} of the implementation plan.\n\nSUB-PLAN:\n${targetContent}`
+          : `Execute the following plan:\n\nPLAN:\n${planContent}`) + EXECUTE_DIRECTIVE;
 
       const responseMsg = stageNum
         ? `[REI] Switching to AGENT mode to execute stage ${stageNum}. No target files detected (action-only stage).`
@@ -379,9 +389,11 @@ export async function processMenuCommand(
       };
     }
 
-    const planPrompt = stageNum
-      ? `[RUNPLAN STAGE ${stageNum}] Execute Stage ${stageNum} of the implementation plan.\n\nSUB-PLAN:\n${targetContent}\n\nFILES TO MODIFY:\n${files.join(", ")}`
-      : `Execute the following plan over these files:\n\nPLAN:\n${planContent}\n\nFILES:\n${files.join(", ")}`;
+    const planPrompt =
+      (stageNum
+        ? `[RUNPLAN STAGE ${stageNum}] Execute Stage ${stageNum} of the implementation plan.\n\nSUB-PLAN:\n${targetContent}\n\nFILES TO MODIFY:\n${files.join(", ")}`
+        : `Execute the following plan over these files:\n\nPLAN:\n${planContent}\n\nFILES:\n${files.join(", ")}`) +
+      EXECUTE_DIRECTIVE;
 
     const responseMsg = stageNum
       ? `[REI] Switching to AGENT mode to execute stage ${stageNum}. Target files: ${files.join(", ")}`
