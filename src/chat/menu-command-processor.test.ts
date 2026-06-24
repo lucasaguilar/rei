@@ -185,7 +185,8 @@ describe("menu-command-processor /provider and /model commands", () => {
     expect(setResult.success).toBe(true);
     expect(setResult.recreateAgent).toBe(true);
     expect(process.env.OLLAMA_MODEL).toBe("codegemma");
-    expect(process.env.OLLAMA_MODEL_ASK).toBe("codegemma");
+    // Deprecated per-mode var is no longer written (uniform: ask/planning use OLLAMA_MODEL).
+    expect(process.env.OLLAMA_MODEL_ASK).not.toBe("codegemma");
   });
 
   it("handles /provider agent command correctly", async () => {

@@ -12,12 +12,16 @@ import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
 import type { McpRegistry } from "../tools/mcp/mcp-registry.js";
 import {
   AGENT_TOOLS,
+  WEB_SEARCH_TOOL,
+  WEATHER_TOOL,
   mcpToolsToDefinitions,
 } from "../contracts/tool-definitions.js";
 import {
   executeCommand,
   limitCommandOutput,
 } from "../tools/command-executor.js";
+import { searchWeb } from "../tools/search-tool.js";
+import { getWeather, formatWeatherOutput } from "../tools/weather-tool.js";
 import { applyFileEdits } from "../tools/search-replace.js";
 import { startStepSpan, startToolSpan } from "../telemetry/spans.js";
 import {
@@ -154,7 +158,11 @@ export async function executeAgentTurnWithTools(params: {
     const mcp = mcpToolsToDefinitions(
       allMcpTools.filter((t) => activeMcp.has(t.name)),
     );
-    const tools = [...AGENT_TOOLS, ...mcp];
+    // Expose the built-in web_search + weather tools on the native path too. They live
+    // in UTILITY_TOOLS (ask/planning) but the native agent array previously only had
+    // AGENT_TOOLS + MCP, so a "search the web" request had no REI tool to call and the
+    // model would grab a Google MCP or do nothing. This is explicit-trigger only.
+    const tools = [...AGENT_TOOLS, WEB_SEARCH_TOOL, WEATHER_TOOL, ...mcp];
     if (useToolSearch) tools.push(SEARCH_TOOLS_DEF);
     if (useSkillTool) tools.push(useSkillTool);
     return tools;
@@ -604,6 +612,28 @@ export async function executeAgentTurnWithTools(params: {
                     .map((t) => `- ${t.name}: ${t.description ?? ""}`)
                     .join("\n")
                 : `No tools matched "${q}". Try different keywords.`;
+              toolResultsMap.set(call.id, toolResult);
+              break;
+            }
+
+            // ── web_search (built-in) ────────────────────────────────────
+            case "web_search": {
+              const query = (args.query as string) ?? "";
+              logger.logInfo(`[tools] web_search: "${query}"`);
+              emitStatus(`🔍  [REI] Searching the web: ${query}`);
+              const results = await searchWeb(query, provider);
+              toolResult = `\n### 🔍 Search Results: ${query}\n${results}\n`;
+              toolResultsMap.set(call.id, toolResult);
+              break;
+            }
+
+            // ── weather (built-in) ───────────────────────────────────────
+            case "weather": {
+              const location = (args.location as string) ?? "";
+              logger.logInfo(`[tools] weather: "${location}"`);
+              emitStatus(`🌤️  [REI] Weather: ${location}`);
+              const weatherRes = await getWeather(location);
+              toolResult = `\n### 🌤️ Weather: ${location}\n${formatWeatherOutput(weatherRes)}\n`;
               toolResultsMap.set(call.id, toolResult);
               break;
             }

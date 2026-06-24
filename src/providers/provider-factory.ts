@@ -77,49 +77,54 @@ export function createProviderForMode(
   return createModelProvider(agentProviderName);
 }
 
+/** Env-var prefix per provider. Not uniform (HF, LLM_STUDIO), so it's mapped explicitly. */
+const PROVIDER_ENV_PREFIX: Record<string, string> = {
+  ollama: "OLLAMA",
+  openrouter: "OPENROUTER",
+  groq: "GROQ",
+  gemini: "GEMINI",
+  huggingface: "HF",
+  llmstudio: "LLM_STUDIO",
+};
+
+/** Trims a value and treats "" / whitespace as unset (so empty env vars fall back). */
+function cleanEnvModel(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 /**
- * Resolves the model name for a given session mode.
+ * Resolves the model name for a given session mode — uniformly across ALL providers:
+ *   - ask / planning → `<PROVIDER>_MODEL`
+ *   - agent          → `<PROVIDER>_MODEL_AGENT` (falls back to `<PROVIDER>_MODEL`)
  *
- * - Agent mode with AGENT_MODEL_PROVIDER: reads <PROVIDER>_MODEL_AGENT
- *   (e.g. OPENROUTER_MODEL_AGENT) and falls back to the provider default.
- * - Ollama single-provider: reads OLLAMA_MODEL_{AGENT|ASK|PLANNING}.
- * - All other providers: returns undefined (provider uses its own default).
+ * Agent mode may target a dedicated provider via AGENT_MODEL_PROVIDER; ask/planning
+ * always use MODEL_PROVIDER. Returns undefined for unknown providers, so the provider
+ * falls back to its own constructor default.
+ *
+ * Note: OLLAMA_MODEL_ASK / OLLAMA_MODEL_PLANNING are deprecated (Ollama used to be the
+ * only provider with per-mode overrides) — ask/planning now use OLLAMA_MODEL like the rest.
  */
 export function resolveModelForMode(mode: SessionMode): string | undefined {
-  const primaryProvider = (process.env.MODEL_PROVIDER ?? "llmstudio").toLowerCase().trim();
-  const agentProvider = (process.env.AGENT_MODEL_PROVIDER || primaryProvider).toLowerCase().trim();
+  const primaryProvider = (process.env.MODEL_PROVIDER ?? "llmstudio")
+    .toLowerCase()
+    .trim();
+  const provider =
+    mode === "agent"
+      ? (process.env.AGENT_MODEL_PROVIDER || primaryProvider)
+          .toLowerCase()
+          .trim()
+      : primaryProvider;
 
-  // Agent mode resolves its corresponding _AGENT or default model variable depending on active agent provider.
+  const prefix = PROVIDER_ENV_PREFIX[provider];
+  if (!prefix) return undefined;
+
+  // Treat empty/whitespace env values as unset so an empty <PREFIX>_MODEL_AGENT (e.g.
+  // written by the config wizard when no dedicated agent model is chosen) falls back to
+  // <PREFIX>_MODEL instead of sending an empty model name to the backend.
+  const base = cleanEnvModel(process.env[`${prefix}_MODEL`]);
   if (mode === "agent") {
-    switch (agentProvider) {
-      case "openrouter":
-        return process.env.OPENROUTER_MODEL_AGENT ?? process.env.OPENROUTER_MODEL;
-      case "ollama":
-        return process.env.OLLAMA_MODEL_AGENT ?? process.env.OLLAMA_MODEL;
-      case "groq":
-        return process.env.GROQ_MODEL_AGENT ?? process.env.GROQ_MODEL;
-      case "gemini":
-        return process.env.GEMINI_MODEL_AGENT ?? process.env.GEMINI_MODEL;
-      case "huggingface":
-        return process.env.HF_MODEL_AGENT ?? process.env.HF_MODEL;
-      case "llmstudio":
-        return process.env.LLM_STUDIO_MODEL_AGENT ?? process.env.LLM_STUDIO_MODEL;
-      default:
-        return undefined;
-    }
+    return cleanEnvModel(process.env[`${prefix}_MODEL_AGENT`]) ?? base;
   }
-
-  // Single-provider setup: only Ollama supports specific per-mode model overrides (like OLLAMA_MODEL_ASK, OLLAMA_MODEL_PLANNING).
-  if (primaryProvider === "ollama") {
-    switch (mode) {
-      case "ask":
-        return process.env.OLLAMA_MODEL_ASK ?? process.env.OLLAMA_MODEL;
-      case "planning":
-        return process.env.OLLAMA_MODEL_PLANNING ?? process.env.OLLAMA_MODEL;
-      default:
-        return process.env.OLLAMA_MODEL;
-    }
-  }
-
-  return undefined;
+  return base;
 }

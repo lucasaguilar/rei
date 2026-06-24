@@ -251,30 +251,26 @@ async function main() {
         // Explicitly clear AGENT_MODEL_PROVIDER to prevent .env bleed-through in single provider mode
         envVars.AGENT_MODEL_PROVIDER = '';
 
-        // Ollama: optionally set different models per mode
-        if (provider === 'ollama') {
-            const perMode = await confirm({
-                message: 'Use different models per mode (ask/planning vs agent)?',
-                initialValue: last.ollamaPerMode ?? false,
-            });
-            if (isCancel(perMode)) { cancel('Cancelled'); process.exit(0); }
+        // Uniform across providers: <PREFIX>_MODEL (set above) covers ask + planning AND
+        // agent (agent falls back to it). Optionally pick a different/heavier agent model
+        // on the same provider — written to <PREFIX>_MODEL_AGENT.
+        const perMode = await confirm({
+            message: 'Use a different model for agent mode (vs ask/planning)?',
+            initialValue: last.singlePerMode ?? false,
+        });
+        if (isCancel(perMode)) { cancel('Cancelled'); process.exit(0); }
 
-            if (perMode) {
-                note('ask + planning will use the first model.\nagent will use the second.', 'Per-mode models');
-                const askModel   = await pickModel('ollama', 'Model for ask + planning:', last.ollamaAskModel ?? model);
-                const agentModel = await pickModel('ollama', 'Model for agent:', last.ollamaAgentModel ?? model);
-                envVars.OLLAMA_MODEL_ASK      = askModel;
-                envVars.OLLAMA_MODEL_PLANNING = askModel;
-                envVars.OLLAMA_MODEL_AGENT    = agentModel;
-                Object.assign(config, { ollamaPerMode: true, ollamaAskModel: askModel, ollamaAgentModel: agentModel });
-            } else {
-                // Single provider without per-mode overrides: override all modes to the selected model
-                // to prevent falling back to values in .env
-                envVars.OLLAMA_MODEL_ASK      = model;
-                envVars.OLLAMA_MODEL_PLANNING = model;
-                envVars.OLLAMA_MODEL_AGENT    = model;
-                Object.assign(config, { ollamaPerMode: false });
-            }
+        if (perMode) {
+            note('ask + planning use the model selected above.\nagent will use this second model.', 'Per-mode models');
+            const agentModel = await pickModel(provider, 'Model for agent:', last.singleAgentModel ?? model);
+            envVars[`${prefix}_MODEL_AGENT`] = agentModel;
+            Object.assign(config, { singlePerMode: true, singleAgentModel: agentModel });
+        } else {
+            // No dedicated agent model: write the SAME model (never an empty string — an
+            // empty <PREFIX>_MODEL_AGENT would be sent as a blank model name → 400). This
+            // also overwrites any stale value already in the .env.
+            envVars[`${prefix}_MODEL_AGENT`] = model;
+            Object.assign(config, { singlePerMode: false });
         }
 
     } else {
@@ -293,15 +289,11 @@ async function main() {
         const askPrefix = getEnvPrefix(askProvider);
         const agentPrefix = getEnvPrefix(agentProvider);
         
+        // ask/planning → <askPrefix>_MODEL; agent → <agentPrefix>_MODEL_AGENT. Uniform
+        // across providers, so ask/planning never inherit the agent model.
         envVars[`${askPrefix}_MODEL`]              = askModel;
-        envVars.AGENT_MODEL_PROVIDER                               = agentProvider;
+        envVars.AGENT_MODEL_PROVIDER               = agentProvider;
         envVars[`${agentPrefix}_MODEL_AGENT`]      = agentModel;
-
-        // Explicitly set per-mode vars so ask/planning don't inherit the agent model
-        if (askProvider === 'ollama') {
-            envVars.OLLAMA_MODEL_ASK      = askModel;
-            envVars.OLLAMA_MODEL_PLANNING = askModel;
-        }
     }
 
     // ── Step 5: Context & token budget (unified) ───────────────────────────

@@ -3,6 +3,30 @@ import { createKnowledgeSummarizer } from "../knowledge/summarizer/summarize-kno
 import { ModelProvider } from "../providers/model-provider.js";
 
 /**
+ * Builds a verbatim, numbered "Sources" list from raw search results so the agent always
+ * has the REAL URLs to cite. The summarizer condenses results into prose and can drop the
+ * links, which makes models fabricate plausible-but-fake URLs when asked for "links to dig
+ * deeper" — appending the untouched sources guarantees real links regardless of the summary.
+ * Dedupes by URL and skips entries without one. Returns "" when there are no usable URLs.
+ */
+export function formatSourcesList(
+  results: Array<{ title?: string; url?: string }>,
+): string {
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  for (const r of results) {
+    const url = r.url?.trim();
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    const title = r.title?.trim() || url;
+    lines.push(`${lines.length + 1}. ${title} — ${url}`);
+  }
+  return lines.length
+    ? `Sources (verbatim — cite these exact URLs; do NOT invent or alter links):\n${lines.join("\n")}`
+    : "";
+}
+
+/**
  * Searches the web using DuckDuckGo Lite and summarizes the results for LLM ingestion.
  *
  * @param query The search query.
@@ -40,7 +64,11 @@ export async function searchWeb(query: string, provider: ModelProvider): Promise
       .join("\n\n");
 
     const summary = await summarizer(cleanQuery, combinedContent);
-    return summary;
+
+    // Append the real source URLs verbatim — the summarizer can drop them, and without
+    // them the model invents links when asked to provide sources.
+    const sources = formatSourcesList(results);
+    return sources ? `${summary}\n\n${sources}` : summary;
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     throw new Error(`Error searching web for "${query}": ${msg}`);

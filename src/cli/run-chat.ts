@@ -281,10 +281,13 @@ export async function runChat(
   }
 
   // Show the context gauge on startup too (not only after the first turn), so the user sees
-  // how full the assumed window already is from the resumed session / system prompt.
-  const startupTokens = Math.round(
+  // how full the assumed window already is from the resumed session / system prompt + the
+  // function-calling tools array (built-in + MCP schemas), which isn't in the history.
+  const startupHistoryTokens = Math.round(
     session.messages.reduce((acc, m) => acc + (m.content?.length ?? 0), 0) / 4,
   );
+  const startupTokens =
+    startupHistoryTokens + agent.estimateActiveToolsTokens(session.mode);
   const startupGauge = formatContextGauge(startupTokens, getContextWindow());
   if (startupGauge) pushTranscript(startupGauge);
 

@@ -8,6 +8,8 @@ import { estimateMessagesTokens } from "../../chat/helpers/token-estimator.js";
 import { getContextWindow } from "../../config/model-runtime.js";
 import { stripNativeToolSyntax } from "../../core/helpers/turn-message.helpers.js";
 import { describeAttachedImages } from "../../tools/vision-sidecar.js";
+import { resolveModelForMode } from "../../providers/provider-factory.js";
+import type { SessionMode } from "../../chat/types.js";
 
 /**
  * Strips ANSI codes OUTSIDE fenced code blocks, but PRESERVES them inside ``` fences.
@@ -38,61 +40,10 @@ function resolveActiveModelLabel(mode?: string): string {
       ? agentProvider
       : (process.env.MODEL_PROVIDER ?? "").trim().toLowerCase();
 
-  const getModelName = (prov: string): string => {
-    switch (prov) {
-      case "ollama":
-        if (isAgentMode) {
-          return (
-            process.env.OLLAMA_MODEL_AGENT?.trim() ||
-            process.env.OLLAMA_MODEL?.trim() ||
-            "default"
-          );
-        }
-        const modeKey = mode ? `OLLAMA_MODEL_${mode.toUpperCase()}` : undefined;
-        const modeSpecific = modeKey ? process.env[modeKey]?.trim() : undefined;
-        return (modeSpecific ?? process.env.OLLAMA_MODEL?.trim()) || "default";
-      case "openrouter":
-        return (
-          (isAgentMode
-            ? process.env.OPENROUTER_MODEL_AGENT
-            : undefined
-          )?.trim() ||
-          process.env.OPENROUTER_MODEL?.trim() ||
-          "default"
-        );
-      case "groq":
-        return (
-          (isAgentMode ? process.env.GROQ_MODEL_AGENT : undefined)?.trim() ||
-          process.env.GROQ_MODEL?.trim() ||
-          "default"
-        );
-      case "gemini":
-        return (
-          (isAgentMode ? process.env.GEMINI_MODEL_AGENT : undefined)?.trim() ||
-          process.env.GEMINI_MODEL?.trim() ||
-          "default"
-        );
-      case "huggingface":
-        return (
-          (isAgentMode ? process.env.HF_MODEL_AGENT : undefined)?.trim() ||
-          process.env.HF_MODEL?.trim() ||
-          "default"
-        );
-      case "llmstudio":
-        return (
-          (isAgentMode
-            ? process.env.LLM_STUDIO_MODEL_AGENT
-            : undefined
-          )?.trim() ||
-          process.env.LLM_STUDIO_MODEL?.trim() ||
-          "default"
-        );
-      default:
-        return "default";
-    }
-  };
-
-  const modelName = getModelName(provider);
+  // Use the same resolver the agent uses so the label always matches the model that
+  // actually runs (ask/planning → <PROVIDER>_MODEL, agent → <PROVIDER>_MODEL_AGENT).
+  const modelName =
+    resolveModelForMode((mode as SessionMode) ?? "ask") ?? "default";
 
   const emoji: Record<string, string> = {
     ollama: "🦙",
@@ -327,7 +278,12 @@ export async function handleInputTurn(
     // Approximate token counts (1 token ~= 4 chars in mixed code/text prompts)
     const inputMsgs = session.messages.slice(0, -1);
     const inputChars = inputMsgs.reduce((acc, m) => acc + m.content.length, 0);
-    const sentTokens = Math.round(inputChars / 4);
+    const historyTokens = Math.round(inputChars / 4);
+    // The function-calling tools array (built-in + MCP schemas) is sent on every agent
+    // request but is NOT in the message history — include it so the gauge reflects real
+    // context usage. Large MCP servers can occupy a big share of the window invisibly.
+    const toolsTokens = agent.estimateActiveToolsTokens(session.mode);
+    const sentTokens = historyTokens + toolsTokens;
 
     const recTokens = Math.max(1, Math.round(totalOutputChars / 4));
 

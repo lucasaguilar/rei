@@ -667,9 +667,9 @@ export async function processMenuCommand(
         if (isAgentTarget) {
           process.env.OLLAMA_MODEL_AGENT = requested;
         } else {
+          // Uniform with all providers: ask/planning use OLLAMA_MODEL. The per-mode
+          // OLLAMA_MODEL_ASK/PLANNING vars are deprecated and no longer read.
           process.env.OLLAMA_MODEL = requested;
-          process.env.OLLAMA_MODEL_ASK = requested;
-          process.env.OLLAMA_MODEL_PLANNING = requested;
         }
         break;
       case "openrouter":

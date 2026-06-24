@@ -377,14 +377,11 @@ GROQ_MODEL=deepseek-r1-distill-llama-70b
 # ------------------------------------------------------------------------------
 
 # --- Ollama Configuration ---
-# Default model used as fallback for all modes using Ollama
-OLLAMA_MODEL=qwen2.5-coder:7b
-
-# Mode-specific overrides (optional). If not set, falls back to OLLAMA_MODEL.
-# Highly recommended: use the ultra-fast local model qwen/qwen3.6-35b-a3b (via Ollama / LM Studio)
-OLLAMA_MODEL_ASK=qwen/qwen3.6-35b-a3b
-OLLAMA_MODEL_PLANNING=qwen/qwen3.6-35b-a3b
+# Model for ask + planning modes (uniform across all providers).
+OLLAMA_MODEL=qwen/qwen3.6-35b-a3b
+# Dedicated agent-mode model (optional). Falls back to OLLAMA_MODEL.
 # OLLAMA_MODEL_AGENT=qwen3.6:27b-coding-nvfp4
+# DEPRECATED (ignored): OLLAMA_MODEL_ASK / OLLAMA_MODEL_PLANNING — ask/planning use OLLAMA_MODEL.
 
 # --- LM Studio Configuration (llmstudio) ---
 # Supports qwen/qwen3.6-35b-a3b for fast offline reasoning with GPU offloading

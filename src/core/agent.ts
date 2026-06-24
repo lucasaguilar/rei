@@ -788,6 +788,22 @@ export class Agent {
     return typeof agentProvider.completeChatWithTools === "function";
   }
 
+  /**
+   * Estimates the tokens consumed by the function-calling `tools` array sent on every
+   * agent tools-path request (built-in AGENT_TOOLS + connected MCP tool schemas). This
+   * is NOT part of the message history, so the context gauge would otherwise under-report
+   * usage — large MCP servers can silently occupy a big share of the window. Returns 0
+   * when tools aren't sent (non-agent mode, or a provider without tool-calling).
+   */
+  public estimateActiveToolsTokens(mode: string): number {
+    if (mode !== "agent" || !this.useToolCalling) return 0;
+    const toolDefs = [
+      ...AGENT_TOOLS,
+      ...mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools()),
+    ];
+    return estimateToolsTokens(toolDefs);
+  }
+
   private async updateSystemContextWithRepoMap(
     session: ChatSession,
     userInput?: string,
