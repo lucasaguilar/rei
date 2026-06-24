@@ -113,6 +113,7 @@ export class LlmStudioProvider implements ModelProvider {
       messages,
       stream: false,
       modelOverride: options?.model,
+      reasoningEffort: options?.reasoningEffort,
     });
 
     if (!response.ok) {
@@ -149,6 +150,7 @@ export class LlmStudioProvider implements ModelProvider {
       messages,
       stream: true,
       modelOverride: options?.model,
+      reasoningEffort: options?.reasoningEffort,
     });
 
     if (!response.ok) {
@@ -286,8 +288,9 @@ export class LlmStudioProvider implements ModelProvider {
     messages: ChatMessage[];
     stream: boolean;
     modelOverride?: string;
+    reasoningEffort?: string;
   }): Promise<Response> {
-    const { messages, stream, modelOverride } = params;
+    const { messages, stream, modelOverride, reasoningEffort } = params;
 
     const requestBody: Record<string, unknown> = {
       model: modelOverride ?? this.model,
@@ -301,6 +304,10 @@ export class LlmStudioProvider implements ModelProvider {
     // Only override LM Studio's own repeat_penalty when explicitly configured.
     if (this.repeatPenalty !== undefined) {
       requestBody.repeat_penalty = this.repeatPenalty;
+    }
+    // Per-mode reasoning budget ("none" disables thinking). Omitted when unset.
+    if (reasoningEffort) {
+      requestBody.reasoning_effort = reasoningEffort;
     }
 
     // Retry transient connection drops (LM Studio idle-evict / OOM-restart / socket

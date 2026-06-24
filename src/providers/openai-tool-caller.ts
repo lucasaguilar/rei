@@ -95,6 +95,9 @@ export async function openaiCompleteChatWithTools(params: {
         temperature: 0,
         max_tokens: maxTokens,
         stream: false,
+        ...(options?.reasoningEffort
+          ? { reasoning_effort: options.reasoningEffort }
+          : {}),
       }),
     },
     { timeoutMs },

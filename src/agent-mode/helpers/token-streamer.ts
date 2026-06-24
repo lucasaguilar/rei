@@ -1,6 +1,7 @@
 import type { ModelProvider } from "../../providers/model-provider.js";
 import type { ChatMessage } from "../../chat/types.js";
 import { stripNativeToolSyntax } from "../../core/helpers/turn-message.helpers.js";
+import { resolveReasoningEffort } from "../../config/model-runtime.js";
 
 /**
  * Streams response chunks from the model provider in real-time.
@@ -18,9 +19,15 @@ export async function streamTurnWithInterception(params: {
   onFinish?: (reason: string) => void;
 }): Promise<string> {
   const { provider, messages, model, mode, onChunk, onFinish } = params;
+  // Per-mode reasoning budget (e.g. ask/planning → "none" for snappy replies).
+  const reasoningEffort = resolveReasoningEffort(mode);
 
   if (!provider.streamChat) {
-    const fullResponse = await provider.completeChat(messages, { model, onFinish });
+    const fullResponse = await provider.completeChat(messages, {
+      model,
+      reasoningEffort,
+      onFinish,
+    });
     // Fallback: strip think wrapper (keep content) and action blocks, emit as text
     const prose = stripNativeToolSyntax(fullResponse)
       .replace(/<think>([\s\S]*?)(<\/think>|$)/gi, "$1")
@@ -49,7 +56,11 @@ export async function streamTurnWithInterception(params: {
     if (content) onChunk?.({ type: insideThink ? "thinking" : "text", content });
   };
 
-  const stream = provider.streamChat(messages, { model, onFinish });
+  const stream = provider.streamChat(messages, {
+    model,
+    reasoningEffort,
+    onFinish,
+  });
   for await (const token of stream) {
     accumulated += token;
 

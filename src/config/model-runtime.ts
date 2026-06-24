@@ -46,3 +46,23 @@ export function getMaxOutputTokens(): number {
 export function getMaxTurns(): number {
   return positiveInt(process.env.REI_MAX_TURNS, 12);
 }
+
+const REASONING_EFFORTS = new Set(["none", "low", "medium", "high"]);
+
+/**
+ * Resolves the per-mode `reasoning_effort` from `REI_REASONING_EFFORT_<MODE>`
+ * (e.g. REI_REASONING_EFFORT_ASK=none, REI_REASONING_EFFORT_AGENT=medium).
+ *
+ * This is the OpenAI-standard knob LM Studio honors to cap/disable a reasoning model's
+ * thinking phase ("none" disables it entirely). Lets you keep agent turns thinking while
+ * making ask/planning snappy, without flipping LM Studio's global toggle. Returns
+ * undefined when unset/invalid, so the request omits the field and the model uses its own
+ * default. Models/backends that don't support the param simply ignore it.
+ */
+export function resolveReasoningEffort(mode?: string): string | undefined {
+  if (!mode) return undefined;
+  const raw = process.env[`REI_REASONING_EFFORT_${mode.toUpperCase()}`]
+    ?.trim()
+    .toLowerCase();
+  return raw && REASONING_EFFORTS.has(raw) ? raw : undefined;
+}

@@ -2,6 +2,10 @@ import type { ChatMessage } from "../chat/types.js";
 
 export interface CompletionOptions {
   model?: string;
+  /** OpenAI-standard reasoning budget ("none" | "low" | "medium" | "high"). Sent to
+   *  backends that support it (e.g. LM Studio) to cap/disable a reasoning model's
+   *  thinking phase; omitted when undefined. */
+  reasoningEffort?: string;
   /** Called when generation finishes. reason is "stop", "length" (truncated), "tool_calls", etc. */
   onFinish?: (reason: string) => void;
 }

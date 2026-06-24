@@ -93,6 +93,8 @@ export async function executeAgentTurnWithTools(params: {
   workspacePath: string;
   logger: AgentLogger;
   modelOverride?: string;
+  /** Per-mode reasoning budget ("none" disables thinking). Forwarded to the provider. */
+  reasoningEffort?: string;
   /** Connected MCP registry. When provided, MCP tools are merged into the tool list. */
   mcpRegistry?: McpRegistry;
   /** Live progress callback — emits "status" chunks as each tool runs so the
@@ -110,6 +112,7 @@ export async function executeAgentTurnWithTools(params: {
     workspacePath,
     logger,
     modelOverride,
+    reasoningEffort,
     mcpRegistry,
     onChunk,
     userQuery,
@@ -309,7 +312,7 @@ export async function executeAgentTurnWithTools(params: {
       const result = await provider.completeChatWithTools(
         currentMessages,
         buildTools(),
-        { model: modelOverride },
+        { model: modelOverride, reasoningEffort },
       );
 
       logger.logInfo("[tools] Response", {

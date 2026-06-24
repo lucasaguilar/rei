@@ -52,8 +52,21 @@ export async function compactSession(params: {
   ];
 
   try {
-    const summary = await provider.completeChat(sumMessages, { model: modelOverride });
-    
+    let summary: string;
+    try {
+      summary = await provider.completeChat(sumMessages, { model: modelOverride });
+    } catch (err) {
+      // COMPACTOR_MODEL may be invalid for the ACTIVE provider (e.g. an Ollama-style tag
+      // like "qwen3:4b" while running on LM Studio → "No models loaded"). Fall back to the
+      // provider's default model before giving up, so a bad override doesn't break compaction.
+      if (!modelOverride) throw err;
+      const reason = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[COMPACTOR] COMPACTOR_MODEL="${modelOverride}" failed (${reason}); retrying with the provider's default model.`,
+      );
+      summary = await provider.completeChat(sumMessages, {});
+    }
+
     const summaryMessage: ChatMessage = {
       role: "user",
       content: `[CONVERSATION SUMMARY — DO NOT SUMMARIZE AGAIN]\n\n${summary}`
@@ -61,8 +74,10 @@ export async function compactSession(params: {
 
     return systemMessage ? [systemMessage, summaryMessage, ...verbatim] : [summaryMessage, ...verbatim];
   } catch (error) {
-    // If summarization fails, keep the original messages to avoid data loss
-    console.warn("[COMPACTOR] Failed to generate summary:", error);
+    // Non-fatal: keep the full history (uncompacted) so the turn proceeds. Log a single
+    // clean line — never dump the raw error/stack, which would corrupt the live TUI.
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn(`[COMPACTOR] Skipped — keeping full history: ${reason}`);
     return messages;
   }
 }

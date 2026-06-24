@@ -87,6 +87,7 @@ import {
   getContextWindow,
   getMaxOutputTokens,
   getMaxTurns,
+  resolveReasoningEffort,
 } from "../config/model-runtime.js";
 import { estimateTokens } from "../chat/helpers/token-estimator.js";
 import {
@@ -273,6 +274,7 @@ export class Agent {
               workspacePath: this.workspacePath,
               logger: this.logger,
               modelOverride: resolveModelForMode("agent"),
+              reasoningEffort: resolveReasoningEffort("agent"),
               mcpRegistry: this.mcpRegistry,
               onChunk,
               userQuery: userInput,
