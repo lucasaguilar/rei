@@ -72,6 +72,7 @@ import {
 import {
   isDegenerate,
   buildCommandSignature,
+  degenerateNotice,
 } from "../agent-mode/helpers/loop-guard.js";
 import {
   stripAllActionTags,
@@ -588,8 +589,7 @@ export class Agent {
             "[loop-guard] Degenerate response detected, breaking loop",
           );
           yield `\n\x1b[31m⚠️  [REI] Degenerate response detected (repetitive text). ` +
-            `The model entered a generation loop. ` +
-            `Try: /session new, reducing the context, or increasing OLLAMA_NUM_CTX.\x1b[0m\n`;
+            `The model entered a generation loop. ${degenerateNotice()}\x1b[0m\n`;
           hasMoreCommands = false;
           break;
         }

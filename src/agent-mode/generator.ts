@@ -14,7 +14,7 @@ import {
 } from "./response-handler.js";
 import { executeToolCallsFromResponse } from "../core/helpers/action-executor.js";
 import type { McpRegistry } from "../tools/mcp/mcp-registry.js";
-import { isDegenerate, buildCommandSignature } from "./helpers/loop-guard.js";
+import { isDegenerate, buildCommandSignature, degenerateNotice } from "./helpers/loop-guard.js";
 import {
   executeCommand,
   limitCommandOutput,
@@ -235,8 +235,7 @@ export async function executeAgentTurn(params: {
           {
             response:
               "⚠️ REI detected a degenerate response (the model entered a text generation loop). " +
-              "This usually happens when the context is saturated or the model is confused. " +
-              "Try: /session new, reducing the context, increasing OLLAMA_NUM_CTX, or using a different model.",
+              degenerateNotice(),
             validProposedPatches: [],
           },
           0,
