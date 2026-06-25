@@ -3,6 +3,7 @@ import { compressSkeletonMap } from "./helpers/compression.js";
 import type { AgentEditFormat } from "../prompts/prompt-builder.js";
 import type { ChatMessage, SessionMode } from "./types.js";
 import { estimateTokens } from "./helpers/token-estimator.js";
+import { getContextWindow, getMaxOutputTokens } from "../config/model-runtime.js";
 
 function isEnrichedTurnMessage(content: string): boolean {
   return content.includes("Task:") && content.includes("Repository summary:");
@@ -113,8 +114,15 @@ export function buildMessagesForModel(
     },
   );
 
-  // Keep only the tail of the conversation under our token budget (18,000 tokens)
-  const MAX_TOKEN_BUDGET = 18000;
+  // Keep the tail of the conversation under a token budget that SCALES WITH the context
+  // window (was a hardcoded 18000 that silently dropped older history on large-window cloud /
+  // big-local models → "I don't remember what we were doing"). Reserve room for output;
+  // when the window is unknown (0 = no-trim, e.g. cloud) keep a large amount.
+  const ctxWindow = getContextWindow();
+  const MAX_TOKEN_BUDGET =
+    ctxWindow > 0
+      ? Math.max(8000, Math.floor((ctxWindow - getMaxOutputTokens()) * 0.85))
+      : 100000;
   let accumulatedTokens = 0;
   const budgetedMessages: ChatMessage[] = [];
 

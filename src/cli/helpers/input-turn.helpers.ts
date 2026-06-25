@@ -252,7 +252,9 @@ export async function handleInputTurn(
       if (liveContentShown) {
         actions.streamText("\n");
       }
-      actions.pushTranscript(`\x1b[1;32mREI: \x1b[0m${rendered}`);
+      // Distinct badge so the user instantly spots REI's actual answer (vs thinking/status/
+      // diffs). White-bold on magenta background — visually unmistakable.
+      actions.pushTranscript(`\x1b[1;97;45m REI \x1b[0m ${rendered}`);
     }
 
     // Display formatted S&R diffs (ANSI diff, already styled by formatCodeDiff)

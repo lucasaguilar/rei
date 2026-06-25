@@ -1,8 +1,16 @@
 import type { ChatMessage, SessionMode } from './types.js';
 import type { ModelProvider } from '../providers/model-provider.js';
+import { getContextWindow, getMaxOutputTokens } from '../config/model-runtime.js';
+import { estimateTokens } from './helpers/token-estimator.js';
 
-const COMPACT_THRESHOLD = 20; // Number of non-system messages before auto-compacting
 const VERBATIM_KEEP = 8;      // Number of recent non-system messages to keep verbatim
+// Compaction triggers when the conversation grows large RELATIVE TO the context window —
+// NOT at a fixed message count. A fixed count (was 20) summarized work prematurely on
+// large-window models (cloud 128K, or big local), losing recall ("I don't remember what we
+// were doing"). Now it scales: small local windows compact sooner, cloud almost never.
+const COMPACT_TOKEN_FRACTION = 0.65; // compact once history > 65% of the usable window
+const COMPACT_MIN_MSGS = 12;         // never compact a small conversation
+const COMPACT_MSG_HARD_CAP = 80;     // safety net when the window is unknown (0 = no-trim)
 
 const COMPACTION_PROMPT = `Summarize this conversation for a coding agent's persistent memory. 
 Focus on:
@@ -18,7 +26,7 @@ Format the summary as a single "assistant" message content.`;
  * Summarizes the conversation using a cheaper model if configured.
  * Replaces older messages with a summary, keeping the most recent turns verbatim.
  *
- * @param force - When true, bypasses the COMPACT_THRESHOLD check (used for manual /compact).
+ * @param force - When true, bypasses the needsCompaction check (used for manual /compact).
  */
 export async function compactSession(params: {
   messages: ChatMessage[];
@@ -31,7 +39,8 @@ export async function compactSession(params: {
   const systemMessage = messages.length > 0 && messages[0].role === "system" ? messages[0] : undefined;
   const nonSystem = systemMessage ? messages.slice(1) : messages;
 
-  if (!force && nonSystem.length <= COMPACT_THRESHOLD) {
+  // Gate on the same window-aware check as auto-compaction (manual /compact passes force).
+  if (!force && !needsCompaction(messages)) {
     return messages;
   }
 
@@ -87,5 +96,15 @@ export async function compactSession(params: {
  */
 export function needsCompaction(messages: ChatMessage[]): boolean {
   const nonSystem = messages.filter(m => m.role !== 'system');
-  return nonSystem.length > COMPACT_THRESHOLD;
+  if (nonSystem.length <= COMPACT_MIN_MSGS) return false;
+
+  const window = getContextWindow();
+  if (window <= 0) {
+    // Unknown / no-trim window (e.g. cloud with REI_CONTEXT_WINDOW unset): don't summarize
+    // by tokens — only the hard message cap guards against unbounded growth.
+    return nonSystem.length > COMPACT_MSG_HARD_CAP;
+  }
+  const tokens = estimateTokens(messages.map(m => m.content).join('\n'));
+  const usable = Math.max(1, window - getMaxOutputTokens());
+  return tokens > usable * COMPACT_TOKEN_FRACTION;
 }

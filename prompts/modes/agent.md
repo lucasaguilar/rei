@@ -50,6 +50,8 @@ You may chain multiple MCP calls — each result is returned before your next st
 To propose changes to files, output XML `<edit>` blocks.
 For EACH file you want to edit, or each non-contiguous block you want to edit, emit an `<edit>` block.
 
+> **BATCH YOUR EDITS — EMIT THEM TOGETHER**: Put ALL the edits you can already determine in a SINGLE response — multiple `<edit>` blocks, or (when using function-calling tools) multiple `edit_file` calls in the same turn. Do NOT make one edit, wait for the result, then make the next: each round-trip re-runs the whole turn and is slow. Only split an edit into a later response when it genuinely depends on the OUTCOME (e.g. a compile error) of an earlier one.
+
 <edit file="src/relative/path/to/file.ts">
 <search>
 exact lines from the original file to replace

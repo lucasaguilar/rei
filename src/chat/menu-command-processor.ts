@@ -429,7 +429,19 @@ export async function processMenuCommand(
       let messages = [...session.messages];
 
       if (previousMode === "agent" && newMode !== "agent") {
-        messages = messages.filter((m) => m.role === "system");
+        // Leaving agent mode: drop ONLY the tool-calling plumbing — role:"tool" results and
+        // the assistant messages that carry tool_calls (the ask/planning XML path can't
+        // consume those and their request/result pairing breaks). KEEP the conversation
+        // prose so the session/context SURVIVES the switch (previously this filtered down to
+        // the system message, silently wiping everything the user had been working on).
+        messages = messages
+          .filter((m) => m.role !== "tool")
+          .map((m) =>
+            m.role === "assistant" && m.tool_calls
+              ? { ...m, tool_calls: undefined }
+              : m,
+          )
+          .filter((m) => !(m.role === "assistant" && !m.content.trim()));
       }
 
       saveSession(

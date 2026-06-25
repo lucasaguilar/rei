@@ -3,6 +3,28 @@ import { applySearchReplace, applyFileEdits } from "./search-replace.js";
 import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
 
 describe("search-replace", () => {
+  describe("malformed edits (regression: undefined.replace crash)", () => {
+    it("returns a clean failure when search is missing instead of throwing", () => {
+      const edit = { file: "a.ts", replace: "x" } as unknown as AgentSREdit;
+      const res = applySearchReplace("content", edit);
+      expect(res.success).toBe(false);
+      expect(res.error).toMatch(/missing/i);
+    });
+
+    it("returns a clean failure when replace is missing instead of throwing", () => {
+      const edit = { file: "a.ts", search: "content" } as unknown as AgentSREdit;
+      const res = applySearchReplace("content", edit);
+      expect(res.success).toBe(false);
+    });
+
+    it("applyFileEdits surfaces the failure without crashing", () => {
+      const edits = [{ file: "a.ts", replace: "x" }] as unknown as AgentSREdit[];
+      const res = applyFileEdits("content", edits);
+      expect(res.success).toBe(false);
+      expect(res.error).toMatch(/missing/i);
+    });
+  });
+
   describe("applySearchReplace", () => {
     it("should correctly replace an exact string match", () => {
       const content = `function add(a, b) {\n  return a + b;\n}`;

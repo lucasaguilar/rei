@@ -38,22 +38,31 @@ describe("message-builder - buildMessagesForModel", () => {
     expect(result[2].role).toBe("assistant");
   });
 
-  it("should discard older history when estimated tokens exceed budget (18000 tokens)", () => {
-    const messages: ChatMessage[] = [
-      { role: "system", content: "System content" },
-      { role: "user", content: "a".repeat(37000) }, // ~10,000 tokens (will be kept as it is the latest turn)
-      { role: "assistant", content: "b".repeat(37000) }, // ~10,000 tokens
-      { role: "user", content: "c".repeat(18500) }, // ~5,000 tokens (this is the actual latest message)
-    ];
-    // History backwards from latest (c):
-    // c: ~5,000 tokens (kept)
-    // b: ~10,000 tokens (kept, total 15,000)
-    // a: ~10,000 tokens (exceeds budget 18000, discarded)
-    const result = buildMessagesForModel(messages, "ask");
-    expect(result).toHaveLength(4); // [system, user (placeholder), assistant (b), user (c)]
-    expect(result[1].role).toBe("user");
-    expect(result[1].content).toBe("Initialize conversation.");
-    expect(result[2].content).toBe("b".repeat(37000));
-    expect(result[3].content).toBe("c".repeat(18500));
+  it("discards older history once it exceeds the window-derived token budget", () => {
+    // Budget now SCALES with the context window: (window - output) * 0.85.
+    // Pick env so the budget is ~15300 → oldest (a) is dropped, b + c kept.
+    const savedW = process.env.REI_CONTEXT_WINDOW;
+    const savedO = process.env.REI_MAX_OUTPUT_TOKENS;
+    process.env.REI_CONTEXT_WINDOW = "26000";
+    process.env.REI_MAX_OUTPUT_TOKENS = "8000"; // budget = (26000-8000)*0.85 = 15300
+    try {
+      const messages: ChatMessage[] = [
+        { role: "system", content: "System content" },
+        { role: "user", content: "a".repeat(37000) }, // ~9250 tok — oldest, discarded
+        { role: "assistant", content: "b".repeat(37000) }, // ~9250 tok — kept
+        { role: "user", content: "c".repeat(18500) }, // ~4625 tok — latest, always kept
+      ];
+      const result = buildMessagesForModel(messages, "ask");
+      expect(result).toHaveLength(4); // [system, user placeholder, assistant (b), user (c)]
+      expect(result[1].role).toBe("user");
+      expect(result[1].content).toBe("Initialize conversation.");
+      expect(result[2].content).toBe("b".repeat(37000));
+      expect(result[3].content).toBe("c".repeat(18500));
+    } finally {
+      if (savedW === undefined) delete process.env.REI_CONTEXT_WINDOW;
+      else process.env.REI_CONTEXT_WINDOW = savedW;
+      if (savedO === undefined) delete process.env.REI_MAX_OUTPUT_TOKENS;
+      else process.env.REI_MAX_OUTPUT_TOKENS = savedO;
+    }
   });
 });

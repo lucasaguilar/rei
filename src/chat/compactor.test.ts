@@ -1,7 +1,58 @@
-import { describe, it, expect, vi } from "vitest";
-import { compactSession } from "./compactor.js";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { compactSession, needsCompaction } from "./compactor.js";
 import type { ModelProvider } from "../providers/model-provider.js";
 import type { ChatMessage } from "./types.js";
+
+describe("needsCompaction (window-aware)", () => {
+  const saved = {
+    REI_CONTEXT_WINDOW: process.env.REI_CONTEXT_WINDOW,
+    REI_MAX_OUTPUT_TOKENS: process.env.REI_MAX_OUTPUT_TOKENS,
+    MODEL_PROVIDER: process.env.MODEL_PROVIDER,
+    OLLAMA_NUM_CTX: process.env.OLLAMA_NUM_CTX,
+  };
+  beforeEach(() => {
+    delete process.env.OLLAMA_NUM_CTX;
+    process.env.MODEL_PROVIDER = "llmstudio";
+    process.env.REI_MAX_OUTPUT_TOKENS = "8192";
+  });
+  afterEach(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  const msgs = (n: number, chars = 40): ChatMessage[] => {
+    const out: ChatMessage[] = [{ role: "system", content: "sys" }];
+    for (let i = 0; i < n; i++)
+      out.push({ role: i % 2 === 0 ? "user" : "assistant", content: "x".repeat(chars) });
+    return out;
+  };
+
+  it("never compacts a small conversation", () => {
+    process.env.REI_CONTEXT_WINDOW = "32768";
+    expect(needsCompaction(msgs(6))).toBe(false);
+  });
+
+  it("does NOT compact prematurely when well under the window (the bug)", () => {
+    // 16 messages but only a few K tokens, 32K window → must NOT compact.
+    process.env.REI_CONTEXT_WINDOW = "32768";
+    expect(needsCompaction(msgs(16, 200))).toBe(false);
+  });
+
+  it("compacts once tokens exceed ~65% of the usable window", () => {
+    process.env.REI_CONTEXT_WINDOW = "32768"; // usable = 32768-8192 = 24576; 65% ≈ 16000 tok
+    // ~20 messages × ~4000 chars = ~20000 tokens → over threshold
+    expect(needsCompaction(msgs(20, 4000))).toBe(true);
+  });
+
+  it("large cloud window keeps far more history before compacting", () => {
+    process.env.MODEL_PROVIDER = "openrouter"; // getContextWindow → 128000 default
+    delete process.env.REI_CONTEXT_WINDOW;
+    // Same 20×4000-char history that compacted on 32K → on 128K it does NOT.
+    expect(needsCompaction(msgs(20, 4000))).toBe(false);
+  });
+});
 
 function makeMessages(): ChatMessage[] {
   const msgs: ChatMessage[] = [{ role: "system", content: "sys" }];

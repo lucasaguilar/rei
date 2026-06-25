@@ -40,9 +40,18 @@ describe("resolveReasoningEffort", () => {
     expect(resolveReasoningEffort("planning")).toBe("high");
   });
 
-  it("ignores invalid values", () => {
-    process.env.REI_REASONING_EFFORT_AGENT = "ultra";
-    expect(resolveReasoningEffort("agent")).toBeUndefined();
+  it("accepts the full OpenAI-compatible set (incl. minimal/xhigh)", () => {
+    for (const v of ["none", "minimal", "low", "medium", "high", "xhigh"]) {
+      process.env.REI_REASONING_EFFORT_ASK = v;
+      expect(resolveReasoningEffort("ask")).toBe(v);
+    }
+  });
+
+  it("rejects values the API doesn't accept (on/off/garbage)", () => {
+    for (const v of ["on", "off", "ultra"]) {
+      process.env.REI_REASONING_EFFORT_AGENT = v;
+      expect(resolveReasoningEffort("agent")).toBeUndefined();
+    }
   });
 
   it("returns undefined for an undefined mode", () => {

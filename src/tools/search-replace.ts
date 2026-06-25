@@ -11,6 +11,16 @@ export interface SRExecutionResult {
  * Looks for exact string matches.
  */
 export function applySearchReplace(originalContent: string, edit: AgentSREdit): SRExecutionResult {
+  // Defensive: a malformed edit (model omitted "search"/"replace") must not crash the turn
+  // with `undefined.replace`. Return a clean failure so the caller surfaces it to the model.
+  if (typeof edit.search !== "string" || typeof edit.replace !== "string") {
+    return {
+      success: false,
+      error:
+        `edit for ${edit.file ?? "(unknown file)"} is missing the "search" and/or "replace" text — ` +
+        `both must be strings. Re-send this edit_file call with both fields filled in.`,
+    };
+  }
   const searchNormalized = edit.search.replace(/\r\n/g, "\n");
   const contentNormalized = originalContent.replace(/\r\n/g, "\n");
   

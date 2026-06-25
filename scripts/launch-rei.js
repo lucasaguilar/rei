@@ -402,9 +402,13 @@ async function main() {
     console.log(`\nLaunching REI [${modeLabel}] [${providerLabel}] → ${project}\n`);
 
     const projectArg = projectPath.includes(' ') ? `"${projectPath}"` : projectPath;
+    // Launch the COMPILED build (dist), not tsx/src: faster startup (no per-launch
+    // TypeScript transpilation) and consistent with the plain `rei` command. Requires
+    // `npm run build` (the installer does this). Devs editing source can switch back to
+    // `npm run dev -- ...` / `npm run server:dev`.
     const cmd = isServer
-        ? 'npm run server:dev'
-        : `npm run dev -- --workspace ${projectArg} chat`;
+        ? 'node dist/server.js'
+        : `node dist/main.js --workspace ${projectArg} chat`;
 
     const child = spawn(cmd, {
         cwd: ROOT,

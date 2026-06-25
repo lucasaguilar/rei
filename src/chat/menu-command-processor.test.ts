@@ -25,6 +25,28 @@ describe("menu-command-processor session commands", () => {
     await fs.rm(tmpWorkspace, { recursive: true, force: true });
   });
 
+  it("/mode agent->ask KEEPS the conversation (drops only tool plumbing)", async () => {
+    const session: ChatSession = {
+      mode: "agent",
+      messages: [
+        { role: "system", content: "sys" },
+        { role: "user", content: "align the icons" },
+        { role: "assistant", content: "", tool_calls: [{ id: "c1", type: "function", function: { name: "edit_file", arguments: "{}" } }] },
+        { role: "tool", content: "OK applied", tool_call_id: "c1" },
+        { role: "assistant", content: "Done — aligned the icons in 3 files." },
+      ],
+    };
+    const result = await processMenuCommand("/mode ask", session, tmpWorkspace, provider);
+    expect(result.success).toBe(true);
+    const kept = result.newSession!.messages;
+    // Conversation prose survives:
+    expect(kept.some((m) => m.role === "user" && m.content === "align the icons")).toBe(true);
+    expect(kept.some((m) => m.content.includes("aligned the icons in 3 files"))).toBe(true);
+    // Tool plumbing is gone:
+    expect(kept.some((m) => m.role === "tool")).toBe(false);
+    expect(kept.some((m) => m.tool_calls)).toBe(false);
+  });
+
   it("starts a new session without sending /session new to the model", async () => {
     const session: ChatSession = {
       mode: "ask",
@@ -83,7 +105,8 @@ describe("menu-command-processor session commands", () => {
 
     const archived = listSessions(tmpWorkspace);
     expect(archived).toHaveLength(1);
-    expect(archived[0].id).toBe("agregar-login-social");
+    // Now always prefixed with the archive timestamp, then the custom name.
+    expect(archived[0].id).toMatch(/^\d{4}-\d{2}-\d{2}-\d{6}-agregar-login-social$/);
   });
 
   it("archives session with a custom name via /session archive", async () => {
@@ -103,7 +126,7 @@ describe("menu-command-processor session commands", () => {
 
     const archived = listSessions(tmpWorkspace);
     expect(archived).toHaveLength(1);
-    expect(archived[0].id).toBe("fix-bug-123");
+    expect(archived[0].id).toMatch(/^\d{4}-\d{2}-\d{2}-\d{6}-fix-bug-123$/);
   });
 
   it("handles name collisions by appending a numeric suffix", async () => {
@@ -125,12 +148,12 @@ describe("menu-command-processor session commands", () => {
     const result2 = await processMenuCommand("/session new my-feature", session2, tmpWorkspace, provider);
 
     expect(result2.success).toBe(true);
-    expect(result2.response).toContain("my-feature-1.json");
 
     const archived = listSessions(tmpWorkspace);
     expect(archived).toHaveLength(2);
-    const ids = archived.map((s) => s.id).sort();
-    expect(ids).toEqual(["my-feature", "my-feature-1"]);
+    // Both carry the timestamp prefix + name; same-second archives get a -N collision suffix.
+    expect(archived.every((s) => /^\d{4}-\d{2}-\d{2}-\d{6}.*my-feature/.test(s.id))).toBe(true);
+    expect(new Set(archived.map((s) => s.id)).size).toBe(2); // distinct files
   });
 });
 

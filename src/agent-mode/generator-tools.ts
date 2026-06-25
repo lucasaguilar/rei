@@ -83,6 +83,95 @@ function looksLikeAttemptedToolCall(content: string): boolean {
   );
 }
 
+interface EditTask {
+  callId: string;
+  edit: AgentSREdit;
+  // rewrite_file: `edit.replace` is the authoritative full content (no search matching).
+  wholeFile?: boolean;
+}
+
+// Beyond this size we don't inline a file's updated content back to the model (avoids
+// bloating the tool result); the model can re-read it if it truly needs the exact state.
+const MAX_INLINE_EDIT_RESULT_CHARS = 24000;
+
+/**
+ * After a successful apply, build each edit's tool result INCLUDING the file's updated
+ * content, so the model can compose further edits without re-reading it. This kills the
+ * read-after-edit churn (edit → read same file → edit → read again …) that multiplies
+ * model calls and dominates agent-turn latency. `alreadyProvided` is refreshed so that if
+ * the model re-reads anyway, the read dedup short-circuits to "unchanged since shown".
+ * Each file's content is inlined once per batch; oversized files are confirmed but not inlined.
+ */
+export function setEditResults(
+  editTasks: EditTask[],
+  candidate: Map<string, string>,
+  toolResultsMap: Map<string, string>,
+  alreadyProvided: Map<string, string>,
+): void {
+  const inlined = new Set<string>();
+  for (const task of editTasks) {
+    const f = task.edit.file;
+    const updated = candidate.get(f) ?? "";
+    if (inlined.has(f)) {
+      toolResultsMap.set(
+        task.callId,
+        `OK: another edit to ${f} applied (its updated content is shown above — do not re-read it).`,
+      );
+      continue;
+    }
+    inlined.add(f);
+    if (updated.length <= MAX_INLINE_EDIT_RESULT_CHARS) {
+      // The model now has the post-edit content → a re-read is deduped to "reuse what you saw".
+      alreadyProvided.set(f, updated);
+      toolResultsMap.set(
+        task.callId,
+        `OK: edit to ${f} applied. The file now contains exactly:\n\`\`\`\n${updated}\n\`\`\`\n` +
+          `You already have ${f}'s current content above — do NOT call read_files on it again; ` +
+          `compose any further edits against this content. Apply MULTIPLE edits at once by emitting ` +
+          `several edit_file calls in ONE response (don't do one per turn). When ALL changes for the ` +
+          `task are done, reply with a brief summary (no tool call).`,
+      );
+    } else {
+      // Too large to inline; do NOT refresh alreadyProvided (model hasn't seen the new state).
+      toolResultsMap.set(
+        task.callId,
+        `OK: edit to ${f} applied to disk. (File is large — not inlined.) Avoid re-reading it ` +
+          `unless you genuinely need its exact current state for another edit. When done, reply ` +
+          `with a brief summary (no tool call).`,
+      );
+    }
+  }
+}
+
+/**
+ * Prepends a focused native-tools directive. REI's shared mode prompt is XML-centric
+ * ("emit an <edit> block per file"), which on the function-calling path buries the batching
+ * guidance and nudges one-tool-call-per-response — each response re-processes the whole
+ * growing conversation, so a multi-edit task balloons to N slow round-trips. Empirically the
+ * model DOES emit several edit_file calls in one response when told this directly (verified
+ * via curl). Placed right after the leading system message(s) so it's high-priority.
+ */
+export function withNativeToolsDirective(messages: ChatMessage[]): ChatMessage[] {
+  const directive: ChatMessage = {
+    role: "system",
+    content:
+      "TOOL-CALLING EFFICIENCY (function-calling path — you use tools like edit_file / " +
+      "read_files, NOT XML blocks): Apply ALL independent edits in ONE response by emitting " +
+      "multiple edit_file tool calls together — never one edit per response when several are " +
+      "already known. Read multiple files in a single read_files call (pass all paths at once). " +
+      "Only split work across responses when a step genuinely depends on the OUTCOME of a " +
+      "previous one (e.g. fixing a reported compile error). Every extra response re-processes the " +
+      "entire conversation and is slow.\n" +
+      "ALWAYS PREFER edit_file (small, targeted search/replace) for changes — it is cheap. Use " +
+      "rewrite_file ONLY to restructure most of a file or after edit_file has repeatedly failed " +
+      "to match. Rewriting an entire file just to change a few lines (e.g. an icon or a class) is " +
+      "very slow and error-prone — do NOT do it.",
+  };
+  const firstNonSystem = messages.findIndex((m) => m.role !== "system");
+  const at = firstNonSystem === -1 ? messages.length : firstNonSystem;
+  return [...messages.slice(0, at), directive, ...messages.slice(at)];
+}
+
 /**
  * Executes an agent turn using native function/tool calling instead of XML parsing.
  * Returns the same ExecutionResult shape as the XML generator so callers are interchangeable.
@@ -171,7 +260,9 @@ export async function executeAgentTurnWithTools(params: {
     return tools;
   };
 
-  let currentMessages: ChatMessage[] = [...messagesForModel];
+  let currentMessages: ChatMessage[] = withNativeToolsDirective([
+    ...messagesForModel,
+  ]);
   let loopCount = 0;
   let firstTurnExplanation = "";
   // Caps the number of format-correction nudges when the model emits a tool call
@@ -467,28 +558,33 @@ export async function executeAgentTurnWithTools(params: {
         // This gives the user a natural explanation of what changed and why, the same way
         // capable hosted agents always close with a recap.
         const modifiedFiles = [...virtualFiles.keys()];
+        const hasChanges = modifiedFiles.length > 0 || createdFiles.length > 0;
         let finalResponse = response.trim();
-        if (
-          !finalResponse &&
-          (modifiedFiles.length > 0 || createdFiles.length > 0)
-        ) {
+        // Request an explicit recap when the model applied changes but didn't explain them
+        // clearly — EMPTY content (common when thinking is on: narration goes to `reasoning`)
+        // OR a too-terse reply ("ok"/"done"/"listo") that isn't a real summary. Capable agents
+        // always close with a clear recap of WHAT changed and WHY.
+        if (hasChanges && finalResponse.length < 40) {
           emitStatus("📋  [REI] Generating summary...");
+          const fileList = [...new Set([...modifiedFiles, ...createdFiles])];
           const summaryMessages: ChatMessage[] = [
             ...currentMessages,
             { role: "assistant", content: result.content },
             {
               role: "user",
               content:
-                "Task complete. Write a concise summary of what you changed and why, " +
-                "mentioning the specific files modified. Plain text only — no tool calls.",
+                "Task complete. Write a concise recap for the user, plain text only (no tool " +
+                "calls): for EACH file you changed, one line — `<file>: <what you changed and why>`. " +
+                `Files changed this turn: ${fileList.join(", ")}.`,
             },
           ];
-          finalResponse = await provider
+          const generated = await provider
             .completeChat(summaryMessages, { model: modelOverride })
-            .catch(
-              () =>
-                `Done. Changes applied to:\n${modifiedFiles.map((f) => `- ${f}`).join("\n")}`,
-            );
+            .catch(() => "");
+          // Always guarantee a file list, even if the model's recap is weak/failed.
+          finalResponse =
+            generated.trim() ||
+            `Done. Changes applied to:\n${fileList.map((f) => `- ${f}`).join("\n")}`;
         }
 
         // Safety net against "said it did something but didn't": the turn applied NOTHING, yet
@@ -534,12 +630,6 @@ export async function executeAgentTurnWithTools(params: {
       let hasToolFailure = false;
 
       // Track edit tasks and all tool results by call ID to preserve correct response order
-      interface EditTask {
-        callId: string;
-        edit: AgentSREdit;
-        // rewrite_file: `edit.replace` is the authoritative full content (no search matching).
-        wholeFile?: boolean;
-      }
       const editTasks: EditTask[] = [];
       const toolResultsMap = new Map<string, string>();
 
@@ -660,10 +750,34 @@ export async function executeAgentTurnWithTools(params: {
 
             // ── edit_file ────────────────────────────────────────────────
             case "edit_file": {
+              const file = resolveTarget(args.file);
+              // Validate args up front: a missing search/replace would otherwise crash the
+              // apply with `undefined.replace`. Return a precise error so the model retries
+              // with both fields (common when it batches many edits and drops one).
+              if (
+                typeof args.search !== "string" ||
+                typeof args.replace !== "string"
+              ) {
+                const missing = [
+                  typeof args.search !== "string" ? "search" : null,
+                  typeof args.replace !== "string" ? "replace" : null,
+                ]
+                  .filter(Boolean)
+                  .join(" and ");
+                toolResultsMap.set(
+                  call.id,
+                  `ERROR: edit_file to ${file} is missing the "${missing}" argument. ` +
+                    `Both "search" (exact text to find) and "replace" (new text) are required strings. ` +
+                    `Re-send this edit_file call with both fields filled in (keep using edit_file — ` +
+                    `do NOT switch to rewriting the whole file).`,
+                );
+                hasToolFailure = true;
+                break;
+              }
               const edit: AgentSREdit = {
-                file: resolveTarget(args.file),
-                search: args.search as string,
-                replace: args.replace as string,
+                file,
+                search: args.search,
+                replace: args.replace,
               };
               logger.logInfo(`[tools] edit_file: ${edit.file}`);
               emitStatus(`🛠️  [REI] Editing: ${edit.file}`);
@@ -818,14 +932,7 @@ export async function executeAgentTurnWithTools(params: {
           consecutiveSearchMismatchFailures = 0;
           for (const [f, c] of candidate) virtualFiles.set(f, c);
           await persistToDisk([...new Set(editTasks.map((t) => t.edit.file))]);
-          for (const task of editTasks) {
-            toolResultsMap.set(
-              task.callId,
-              `OK: edit to ${task.edit.file} applied to disk. ` +
-                `Edit any other files this task needs (you can run_command to verify). ` +
-                `When ALL changes are done, reply with a brief summary (no tool call).`,
-            );
-          }
+          setEditResults(editTasks, candidate, toolResultsMap, alreadyProvided);
         } else {
           // SANDBOX mode (default): validate the CUMULATIVE virtual tree (compile check),
           // expressed as whole-file rewrites from disk (search = exact disk content, never
@@ -855,14 +962,7 @@ export async function executeAgentTurnWithTools(params: {
             await persistToDisk([
               ...new Set(editTasks.map((t) => t.edit.file)),
             ]);
-            for (const task of editTasks) {
-              toolResultsMap.set(
-                task.callId,
-                `OK: edit to ${task.edit.file} validated and applied. ` +
-                  `If OTHER files still need changes for this task, edit them now too. ` +
-                  `When ALL changes are done, reply with a brief summary (no tool call).`,
-              );
-            }
+            setEditResults(editTasks, candidate, toolResultsMap, alreadyProvided);
           } else {
             hasToolFailure = true;
             // Compile error (not a search mismatch) → reset the mismatch streak.

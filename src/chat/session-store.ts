@@ -69,27 +69,24 @@ export function archiveCurrentSession(workspacePath: string, customName?: string
 
   try {
     const raw = fs.readFileSync(src, 'utf8');
-    const data = JSON.parse(raw) as PersistedSession;
-    
-    let archiveName: string;
-    if (customName) {
-      const sanitized = customName
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-        .slice(0, 60);
-      if (!sanitized) {
-        const dateStr = (data.createdAt ?? new Date().toISOString()).slice(0, 10);
-        const suffix = Date.now().toString(36).slice(-4);
-        archiveName = `${dateStr}-${suffix}.json`;
-      } else {
-        archiveName = `${sanitized}.json`;
-      }
-    } else {
-      const dateStr = (data.createdAt ?? new Date().toISOString()).slice(0, 10);
-      const suffix = Date.now().toString(36).slice(-4);
-      archiveName = `${dateStr}-${suffix}.json`;
-    }
+    JSON.parse(raw); // validate it's a well-formed session before archiving
+
+    // ALWAYS prefix with the archive timestamp (local YYYY-MM-DD-HHMMSS) so sessions stay
+    // chronologically ordered, then append the optional custom name. Previously a custom
+    // name REPLACED the date prefix (losing the ordering), and the no-name branch used the
+    // session's createdAt — which is stale for long-lived sessions, so files showed the wrong
+    // date. Using `now` (the moment of archiving) fixes both.
+    const ts = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const prefix =
+      `${ts.getFullYear()}-${pad(ts.getMonth() + 1)}-${pad(ts.getDate())}` +
+      `-${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}`;
+    const sanitized = (customName ?? '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60);
+    const archiveName = sanitized ? `${prefix}-${sanitized}.json` : `${prefix}.json`;
 
     const dest = path.join(sessionsDir(workspacePath), archiveName);
     
