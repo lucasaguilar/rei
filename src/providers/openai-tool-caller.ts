@@ -5,7 +5,7 @@ import type {
   ChatCompletionWithTools,
   CompletionOptions,
 } from "./model-provider.js";
-import { getMaxOutputTokens } from "../config/model-runtime.js";
+import { getMaxOutputTokens, resolveAgentSampling } from "../config/model-runtime.js";
 import { fetchWithRetry } from "./fetch-retry.js";
 
 interface OpenAIToolCallResponse {
@@ -82,6 +82,13 @@ export async function openaiCompleteChatWithTools(params: {
   // narration/loops. Falls back to the unified REI_MAX_OUTPUT_TOKENS.
   const maxTokens = params.maxTokens ?? getMaxOutputTokens();
 
+  // Sampling for the tools path. Was hardcoded `temperature: 0` (greedy) — the #1 cause of
+  // repetition loops on local models, and the agent is exactly where those loops hit. Now
+  // provider-agnostic and configurable (REI_AGENT_*), defaulting to a mild temperature +
+  // repetition penalties to prevent loops at the source. Penalties are only sent when > 0
+  // (REI's "only when provided" convention), so REI_AGENT_*_PENALTY=0 omits them entirely.
+  const sampling = resolveAgentSampling();
+
   const response = await fetchWithRetry(
     `${baseUrl}/chat/completions`,
     {
@@ -92,7 +99,13 @@ export async function openaiCompleteChatWithTools(params: {
         messages: messages.map(toApiMessage),
         tools,
         tool_choice: "auto",
-        temperature: 0,
+        temperature: sampling.temperature,
+        ...(sampling.frequencyPenalty > 0
+          ? { frequency_penalty: sampling.frequencyPenalty }
+          : {}),
+        ...(sampling.presencePenalty > 0
+          ? { presence_penalty: sampling.presencePenalty }
+          : {}),
         max_tokens: maxTokens,
         stream: false,
         ...(options?.reasoningEffort

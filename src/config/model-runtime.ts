@@ -111,8 +111,65 @@ const REASONING_EFFORTS = new Set([
  */
 export function resolveReasoningEffort(mode?: string): string | undefined {
   if (!mode) return undefined;
+  // Defensive: tolerate a trailing inline comment (" #...") that a naive .env loader may
+  // have left in the value (e.g. the bash wrapper used to export `none   # note` verbatim,
+  // which failed the set check → reasoning silently stayed ON). reasoning_effort values
+  // never contain '#', so splitting on it is safe.
   const raw = process.env[`REI_REASONING_EFFORT_${mode.toUpperCase()}`]
-    ?.trim()
+    ?.split("#")[0]
+    .trim()
     .toLowerCase();
   return raw && REASONING_EFFORTS.has(raw) ? raw : undefined;
+}
+
+function floatInRange(
+  value: string | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const n = parseFloat(value ?? "");
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+export interface AgentSampling {
+  temperature: number;
+  frequencyPenalty: number;
+  presencePenalty: number;
+}
+
+/**
+ * Sampling parameters for the agent/tools path (the shared OpenAI-compatible
+ * `completeChatWithTools`). Provider-agnostic — it serves Ollama, OpenRouter, LM Studio
+ * and Groq, so it is NOT coupled to any provider's own env names.
+ *
+ * The tools path historically hardcoded `temperature: 0` (greedy). Greedy decoding is the
+ * #1 cause of repetition loops on local models — REI's own non-tools chat path already
+ * avoids it (mild temperature + repetition penalties). The agent is exactly where loops
+ * bite, yet it was decoding greedily. Defaults here add a mild temperature + frequency /
+ * presence penalties to break those loops at the source (complementing the degenerate-guard,
+ * which only catches a loop AFTER it starts).
+ *
+ * Override per knob:
+ *   REI_AGENT_TEMPERATURE         (default 0.3; set 0 for deterministic tool-calls, e.g. cloud)
+ *   REI_AGENT_FREQUENCY_PENALTY   (default 0.3)
+ *   REI_AGENT_PRESENCE_PENALTY    (default 0.3)
+ */
+export function resolveAgentSampling(): AgentSampling {
+  return {
+    temperature: floatInRange(process.env.REI_AGENT_TEMPERATURE, 0.3, 0, 2),
+    frequencyPenalty: floatInRange(
+      process.env.REI_AGENT_FREQUENCY_PENALTY,
+      0.3,
+      0,
+      2,
+    ),
+    presencePenalty: floatInRange(
+      process.env.REI_AGENT_PRESENCE_PENALTY,
+      0.3,
+      0,
+      2,
+    ),
+  };
 }

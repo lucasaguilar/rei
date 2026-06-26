@@ -70,7 +70,13 @@ load_env_file() {
     val="${val#\"}"
     val="${val%\'}"
     val="${val#\'}"
-    
+    # Strip inline comments (" #...") + trailing whitespace, matching dotenv. Without this,
+    # "KEY=value  # note" exports the comment as part of the value — silently breaking string
+    # vars like REI_REASONING_EFFORT_AGENT (numeric vars survive via parseInt). dotenv strips
+    # them in node, but this wrapper exports the var FIRST and dotenv won't override it.
+    val="${val%%[[:space:]]#*}"
+    val="${val%"${val##*[![:space:]]}"}"
+
     if [[ "$val" == *"_here"* || "$val" == "your_"* || "$val" == *"placeholder"* || -z "$val" ]]; then
       continue
     fi

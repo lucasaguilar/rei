@@ -30,3 +30,6 @@ scripts/launch-rei.config.js
 
 rei.config.json
 rei.config-backup-all.json
+
+# OpenCode
+opencode.json

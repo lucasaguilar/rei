@@ -57,4 +57,12 @@ describe("resolveReasoningEffort", () => {
   it("returns undefined for an undefined mode", () => {
     expect(resolveReasoningEffort(undefined)).toBeUndefined();
   });
+
+  it("tolerates a trailing inline comment left by a naive .env loader", () => {
+    // The bash wrapper used to export `none   # 27b binario...` verbatim, which failed the
+    // set check → reasoning silently stayed ON. The value must still resolve to "none".
+    process.env.REI_REASONING_EFFORT_AGENT =
+      "none   # 27b binario: none=off (rápido). off NO es válido.";
+    expect(resolveReasoningEffort("agent")).toBe("none");
+  });
 });
