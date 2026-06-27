@@ -31,6 +31,25 @@ describe("isDegenerate", () => {
     expect(isDegenerate(spec)).toBe(false);
   });
 
+  it("does NOT flag an ASCII-art / text logo (the false positive)", () => {
+    const logo =
+      "Acá tu logo en texto:\n\n" +
+      "██████╗ ███████╗██╗\n" +
+      "██╔══██╗██╔════╝██║\n" +
+      "██████╔╝█████╗  ██║\n" +
+      "██╔══██╗██╔══╝  ██║\n" +
+      "██║  ██║███████╗██║\n" +
+      "╚═╝  ╚═╝╚══════╝╚═╝\n";
+    expect(isDegenerate(logo)).toBe(false);
+  });
+
+  it("does NOT flag a box-drawing table", () => {
+    const table =
+      "| col a | col b |\n|-------|-------|\n| 1 | 2 |\n| 3 | 4 |\n| 5 | 6 |\n| 7 | 8 |\n" +
+      "═══════════════════════════════════════════════════════════════════════";
+    expect(isDegenerate(table)).toBe(false);
+  });
+
   it("does NOT flag normal varied prose", () => {
     const prose =
       "The dashboard renders a header with the title and an info icon. " +

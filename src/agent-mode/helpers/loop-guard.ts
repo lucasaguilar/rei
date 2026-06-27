@@ -26,7 +26,11 @@ export function isDegenerate(text: string): boolean {
 
   if (clean.length < 80) return false;
 
-  const words = clean.split(" ").filter(Boolean);
+  // Only count WORD tokens (containing a letter). ASCII art / box-drawing logos, diagrams and
+  // tables legitimately repeat SYMBOLS (█ ═ ╗ # = …), which is not a generation loop — a real
+  // loop repeats actual words, which survive this filter. (Symbol-heavy art falls below the
+  // word-count floor and is skipped.)
+  const words = clean.split(" ").filter((w) => /\p{L}/u.test(w));
   if (words.length < 12) return false;
 
   // Sliding window: check 4- and 6-word n-grams. Record every position an n-gram
