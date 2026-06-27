@@ -36,14 +36,14 @@ describe("prepareExtractedText", () => {
     expect(r.inject).toBe("short text");
   });
 
-  it("saves a large doc INSIDE the workspace (.rei/ocr), not next to the source", async () => {
+  it("saves a large doc INSIDE the workspace (visible ocr/), not next to the source", async () => {
     const ws = path.join(tmpDir, "workspace");
     fs.mkdirSync(ws);
     const big = "A".repeat(500);
     const r = await prepareExtractedText(src, big, 84, { workspacePath: ws });
     expect(r.truncated).toBe(true);
-    // file lives under <workspace>/.rei/ocr, NOT next to the source (tmpDir)
-    expect(r.savedPath).toBe(path.join(ws, ".rei", "ocr", "doc.ocr.md"));
+    // file lives under <workspace>/ocr (VISIBLE → @-referenceable), NOT next to the source
+    expect(r.savedPath).toBe(path.join(ws, "ocr", "doc.ocr.md"));
     expect(fs.existsSync(path.join(tmpDir, "doc.ocr.md"))).toBe(false);
     // injected text is the preview (<= threshold) + a TRUNCATED note, NOT the whole thing
     expect(r.inject.length).toBeLessThan(big.length);

@@ -5,6 +5,7 @@ import { Agent } from "../../core/agent.js";
 import { handleInputTurn } from "./input-turn.helpers.js";
 import { grabClipboardImage } from "../../tools/clipboard-image.js";
 import { extractImagePaths, extractPdfPaths } from "../../tools/vision-sidecar.js";
+import { saveSession } from "../../chat/session-store.js";
 import * as fs from "fs";
 
 export async function handleInputCommand(
@@ -58,16 +59,29 @@ export async function handleInputCommand(
     return false;
   }
 
-  // Delegate to the centralized command processor
+  // Delegate to the centralized command processor. The onStatus callback streams live progress
+  // (e.g. /ask-document indexing) to the transcript so slow commands don't look frozen.
   const result = await processMenuCommand(
     trimmed,
     session,
     ctx.workspacePath,
     agent.provider,
+    (message: string) => {
+      actions.pushTranscript(`\x1b[2m${message}\x1b[0m`);
+      actions.draw();
+    },
   );
 
   if (result.success) {
     actions.pushTranscript(result.response);
+
+    // Persist commands that asked to be recorded (e.g. /ask-document) into the session so the
+    // Q&A is part of the conversation history — enabling follow-ups and recall, and not lost.
+    if (result.recordInSession && !result.newSession) {
+      session.messages.push({ role: "user", content: trimmed });
+      session.messages.push({ role: "assistant", content: result.response });
+      saveSession(ctx.workspacePath, session.messages, session.mode);
+    }
 
     if (result.recreateAgent) {
       // Tear down the old agent's MCP connections before swapping in a new one,

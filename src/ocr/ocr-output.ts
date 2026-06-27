@@ -59,11 +59,12 @@ export async function prepareExtractedText(
 }
 
 /**
- * Resolves the output directory for OCR text. Stays INSIDE the workspace — never writes next
- * to the source (which may live in ~/Downloads etc.), so the file is @-referenceable and REI
- * doesn't touch dirs outside the project. Default: `<workspace>/.rei/ocr` (gitignored, same
- * convention as sessions/logs). Override with REI_OCR_OUT_DIR (absolute, or relative to the
- * workspace). Falls back to the source dir only when the workspace is unknown.
+ * Resolves the output directory for OCR text. Stays INSIDE the workspace — never next to the
+ * source (which may live in ~/Downloads etc.). Default: a VISIBLE `<workspace>/ocr/` folder so
+ * the file is `@`-referenceable (the workspace scanner that powers `@` excludes hidden dirs like
+ * `.rei`, so `.rei/ocr` would be unreachable). Override with REI_OCR_OUT_DIR (absolute, or
+ * relative to the workspace; e.g. `.rei/ocr` if you don't need `@` and prefer it hidden/tidy).
+ * Falls back to the source dir only when the workspace is unknown.
  */
 function resolveOutDir(sourcePath: string, workspacePath?: string): string {
   const configured = process.env.REI_OCR_OUT_DIR;
@@ -72,7 +73,7 @@ function resolveOutDir(sourcePath: string, workspacePath?: string): string {
       ? configured
       : path.resolve(workspacePath ?? process.cwd(), configured);
   }
-  if (workspacePath) return path.join(workspacePath, ".rei", "ocr");
+  if (workspacePath) return path.join(workspacePath, "ocr");
   return path.dirname(sourcePath);
 }
 

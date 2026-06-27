@@ -210,11 +210,12 @@ An 84-page PDF's text can't fit a local context window. `src/ocr/ocr-output.ts`
 `prepareExtractedText()` handles this: when the extracted text exceeds
 `REI_OCR_INLINE_MAX_CHARS` (or `REI_OCR_SAVE=1`), the **FULL** text is written to a file and the
 prompt gets a **preview + pointer** instead of a silent truncation — so the whole document lives
-on disk and is queried in pieces (`@.rei/ocr/<file>.ocr.md`) or with a large-window cloud model.
-Applies to both digital extraction and scanned-page OCR. **Output stays INSIDE the workspace** —
-default `<workspace>/.rei/ocr/<base>.ocr.md` (same convention as sessions/logs, @-referenceable,
-not next to the source which may be in ~/Downloads). Override with `REI_OCR_OUT_DIR` (absolute,
-or relative to the workspace). *Pending:* page-range selection in the prompt ("pp. 20-40").
+on disk and is queried in pieces (`@ocr/<file>.ocr.md`) or with a large-window cloud model.
+Applies to both digital extraction and scanned-page OCR. **Output stays INSIDE the workspace, in
+a VISIBLE folder** — default `<workspace>/ocr/<base>.ocr.md`. It must be visible (not `.rei/`)
+because the workspace scanner that powers `@` excludes hidden dirs — so `.rei/ocr` would not be
+`@`-referenceable, defeating the purpose. Override with `REI_OCR_OUT_DIR` (absolute, or relative
+to the workspace; e.g. `.rei/ocr` if you don't need `@`). *Pending:* page-range ("pp. 20-40").
 
 ## Risks
 - Vision models are non-deterministic → single-char errors in dense alphanumerics (passport

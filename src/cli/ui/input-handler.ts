@@ -118,7 +118,17 @@ export class InputHandler {
     }
 
     actions.rememberHistory(submittedInput);
-    const wasCommand = await handleInputCommand(trimmed, ctx);
+    // Block concurrent input while a command runs. Most commands are instant, but some are slow
+    // and async (e.g. /ask-document indexes + embeds a whole document) — without this guard the
+    // user could submit more inputs that interleave with the in-flight command and clobber its
+    // session save. handleInputTurn manages its own busy flag; this covers the command path.
+    state.busy = true;
+    let wasCommand: boolean;
+    try {
+      wasCommand = await handleInputCommand(trimmed, ctx);
+    } finally {
+      state.busy = false;
+    }
     actions.draw();
     if (!state.running || wasCommand) {
       return;

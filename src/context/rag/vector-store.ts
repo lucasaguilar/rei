@@ -1,6 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { existsSync } from "node:fs";
+import { getEmbedderId } from "./embedder.js";
+
+// Indexes built before the embedder was parametrizable were bare record arrays produced by the
+// Xenova MiniLM default — treat a legacy (array) file as having this id.
+const LEGACY_EMBEDDER_ID = "xenova:Xenova/all-MiniLM-L6-v2";
 
 export interface VectorMetadata {
   id: string; // identifcador único (ej. filePath + nodeName)
@@ -48,8 +53,26 @@ export class VectorStore {
   async load(): Promise<void> {
     try {
       if (existsSync(this.storePath)) {
-        const data = await fs.readFile(this.storePath, "utf8");
-        this.records = JSON.parse(data);
+        const data = JSON.parse(await fs.readFile(this.storePath, "utf8"));
+        let storedId: string;
+        if (Array.isArray(data)) {
+          // Legacy format: bare records array (pre-parametrizable embedder).
+          storedId = LEGACY_EMBEDDER_ID;
+          this.records = data;
+        } else {
+          storedId = data.embedderId ?? LEGACY_EMBEDDER_ID;
+          this.records = data.records ?? [];
+        }
+        // The index is tied to the embedder that built it (model → vector dim/space). If the
+        // active embedder changed, the cached vectors are incompatible → drop them to reindex.
+        const currentId = getEmbedderId();
+        if (storedId !== currentId) {
+          console.warn(
+            `[RAG] Embedder changed (${storedId} → ${currentId}); clearing the index to ` +
+              `reindex — vector spaces don't align across models.`,
+          );
+          this.records = [];
+        }
       }
     } catch (err) {
       console.warn(`[RAG] Error loading vector store from ${this.storePath}`);
@@ -61,9 +84,14 @@ export class VectorStore {
    */
   async save(): Promise<void> {
     try {
-      // Escribir en un temp y luego renombrar previene corrupción
+      // Escribir en un temp y luego renombrar previene corrupción. Stamp the embedder id so a
+      // later embedder change invalidates this index (see load()).
       const tmpPath = `${this.storePath}.tmp`;
-      await fs.writeFile(tmpPath, JSON.stringify(this.records), "utf8");
+      const payload = JSON.stringify({
+        embedderId: getEmbedderId(),
+        records: this.records,
+      });
+      await fs.writeFile(tmpPath, payload, "utf8");
       await fs.rename(tmpPath, this.storePath);
     } catch (err) {
       console.error(

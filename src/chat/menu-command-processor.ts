@@ -29,6 +29,34 @@ import {
   loadSpecFromFile,
   isSpecMessage,
 } from "./spec-tracker.js";
+import { askDocument } from "../skills/ask-document/index.js";
+import type { AskResult } from "../skills/ask-document/index.js";
+
+/** Renders an ask-document result: answer + per-claim citations (✅ verified / ≈ fuzzy / ⚠️ unverified). */
+function formatAskResult(r: AskResult): string {
+  const lines: string[] = [r.answer.trim()];
+  if (r.claims.length > 0) {
+    lines.push("", "Citas:");
+    for (const c of r.claims) {
+      if (c.status === "fabricated") {
+        lines.push(`- ⚠️  ${c.text}${c.page ? ` (p.${c.page}?)` : ""} — NO verificado en el texto`);
+      } else {
+        const mark = c.status === "verified" ? "✅" : "≈";
+        const q = c.quote ? `"${c.quote.slice(0, 280)}"` : c.text;
+        lines.push(`- ${mark} ${q}${c.page ? ` (p.${c.page})` : ""}`);
+      }
+    }
+    lines.push(
+      "",
+      `Fidelidad: ${r.faithfulness.verified}/${r.faithfulness.total} afirmaciones verificadas` +
+        `${r.sources.length ? ` · páginas consultadas: ${r.sources.join(", ")}` : ""}.`,
+    );
+  } else if (r.notFound) {
+    lines.push("", "(No se encontró respuesta en el texto recuperado.)");
+  }
+  // Same magenta "REI" badge as a normal answer so it reads as REI's response, not plain output.
+  return `\x1b[1;97;45m REI \x1b[0m ${lines.join("\n")}`;
+}
 
 export interface CommandResult {
   success: boolean;
@@ -44,8 +72,37 @@ export async function processMenuCommand(
   session: ChatSession,
   workspacePath: string,
   provider: ModelProvider,
+  onStatus?: (message: string) => void,
 ): Promise<CommandResult> {
   const trimmed = command.trim();
+
+  // /ask-document <file> <question> — grounded Q&A over a document with verified citations.
+  const askDocMatch = trimmed.match(/^\/(?:ask-document|askdoc)\s+(\S+)\s+([\s\S]+)$/);
+  if (askDocMatch) {
+    const fileArg = askDocMatch[1].replace(/^@/, "");
+    const question = askDocMatch[2].trim();
+    const filePath = path.isAbsolute(fileArg)
+      ? fileArg
+      : path.resolve(workspacePath, fileArg);
+    if (!fs.existsSync(filePath)) {
+      return { success: false, response: `[REI] File not found: ${fileArg}` };
+    }
+    try {
+      const result = await askDocument({
+        filePath,
+        question,
+        provider,
+        workspacePath,
+        onStatus,
+      });
+      return { success: true, response: formatAskResult(result), recordInSession: true };
+    } catch (err) {
+      return {
+        success: false,
+        response: `[REI] ask-document failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
 
   if (trimmed === "/session") {
     const nonSystem = session.messages.filter((m) => m.role !== "system");
