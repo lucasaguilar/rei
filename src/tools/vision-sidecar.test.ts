@@ -4,9 +4,11 @@ import * as os from "os";
 import * as path from "path";
 import {
   extractImagePaths,
+  extractPdfPaths,
   imageMimeType,
   getVisionConfig,
   isImageOnlyInput,
+  isAttachmentOnlyInput,
 } from "./vision-sidecar.js";
 
 describe("imageMimeType", () => {
@@ -24,6 +26,39 @@ describe("imageMimeType", () => {
     expect(imageMimeType("a.txt")).toBeUndefined();
     expect(imageMimeType("a.ts")).toBeUndefined();
     expect(imageMimeType("noext")).toBeUndefined();
+  });
+});
+
+describe("extractPdfPaths", () => {
+  let tmpDir: string;
+  let plainPdf: string;
+  let spacedPdf: string;
+
+  beforeAll(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rei-pdf-test-"));
+    plainPdf = path.join(tmpDir, "report.pdf");
+    spacedPdf = path.join(tmpDir, "Mi Documento.pdf");
+    fs.writeFileSync(plainPdf, "fake");
+    fs.writeFileSync(spacedPdf, "fake");
+  });
+  afterAll(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+
+  it("detects a bare absolute pdf path", () => {
+    expect(extractPdfPaths(`extract data from ${plainPdf}`, tmpDir)).toEqual([plainPdf]);
+  });
+
+  it("detects a quoted pdf path with spaces", () => {
+    expect(extractPdfPaths(`'${spacedPdf}'`, tmpDir)).toEqual([spacedPdf]);
+  });
+
+  it("does NOT match image extensions or non-existent pdfs", () => {
+    expect(extractPdfPaths("look at shot.png", tmpDir)).toEqual([]);
+    expect(extractPdfPaths("see /nope/ghost.pdf", tmpDir)).toEqual([]);
+  });
+
+  it("isAttachmentOnlyInput is true for a lone pdf, false with a question", () => {
+    expect(isAttachmentOnlyInput(plainPdf, tmpDir)).toBe(true);
+    expect(isAttachmentOnlyInput(`${plainPdf} is this Argentine?`, tmpDir)).toBe(false);
   });
 });
 

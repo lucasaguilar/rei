@@ -2,6 +2,9 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { fetchWithRetry } from "../providers/fetch-retry.js";
+import { extractPdfText } from "../ocr/pdf-text.js";
+import { renderPdfPages } from "../ocr/pdf-render.js";
+import { prepareExtractedText } from "../ocr/ocr-output.js";
 
 /**
  * Vision sidecar (Phase 1).
@@ -22,13 +25,19 @@ import { fetchWithRetry } from "../providers/fetch-retry.js";
  */
 
 const IMAGE_EXT = /\.(png|jpe?g|webp|gif|bmp)$/i;
+// Regex alternations reused to build the path-detection patterns per attachment kind.
+const IMAGE_EXT_ALT = "png|jpe?g|webp|gif|bmp";
+const PDF_EXT_ALT = "pdf";
+// Any OCR-able attachment (images + pdf) — used for the "attachment-only input" check.
+const ATTACH_EXT = /\.(png|jpe?g|webp|gif|bmp|pdf)$/i;
 
 const DEFAULT_VISION_PROMPT =
-  "You are assisting a software engineer. Describe this image precisely and " +
-  "objectively. If it is a screenshot of a UI, terminal, code editor, error, or " +
-  "diagram, transcribe all visible text verbatim (commands, file paths, error " +
-  "messages, labels, code) and describe the layout/structure. Do not speculate " +
-  "about anything not visible. Be thorough but factual.";
+  "You are an OCR and visual-analysis assistant. Transcribe ALL visible text VERBATIM " +
+  "(do not paraphrase, translate, or omit) and preserve the structure in markdown: use " +
+  "headings and lists, and render any tables as GitHub markdown tables. For a screenshot " +
+  "of a UI, terminal, code editor, error, or diagram, also describe the layout/structure. " +
+  "For a form, ID document, invoice, or receipt, extract every field with its label. Do " +
+  "not speculate about anything not visible. Be exhaustive and factual.";
 
 const DEFAULT_VISION_TIMEOUT_MS = 120_000;
 
@@ -116,25 +125,33 @@ function unescapeShellPath(p: string): string {
 }
 
 /**
- * Extracts image file paths referenced in the user's input that actually exist on disk.
- * Handles quoted paths, backslash-escaped paths (spaces), bare paths, and @-prefixed
- * paths. Relative paths resolve against the workspace; "~" expands to the home dir.
- * Only existing files are returned, which avoids false positives on arbitrary text.
+ * Generalized path detection shared by images and PDFs. `extAlt` is a regex alternation of
+ * extensions (e.g. "png|jpe?g|webp|gif|bmp" or "pdf"). Handles quoted, backslash-escaped
+ * (spaces), bare, @-prefixed, whole-input, and leading-path-then-text (macOS unicode-space)
+ * cases. Relative paths resolve against the workspace; "~" expands to home. Only paths that
+ * exist on disk are returned, avoiding false positives on arbitrary text.
  */
-export function extractImagePaths(text: string, workspacePath: string): string[] {
+export function extractFilePaths(
+  text: string,
+  workspacePath: string,
+  extAlt: string,
+): string[] {
+  const fullExt = new RegExp(`\\.(?:${extAlt})$`, "i");
+  const bareRe = new RegExp(`@?((?:[^\\s'"\\\\]|\\\\.)+\\.(?:${extAlt}))`, "gi");
+  const extRe = new RegExp(`\\.(?:${extAlt})\\b`, "gi");
+
   const candidates: string[] = [];
 
   // 1. Quoted paths: '...'  or  "..."
   const quoteRe = /(['"])((?:\\.|(?!\1).)*?)\1/g;
   let m: RegExpExecArray | null;
   while ((m = quoteRe.exec(text)) !== null) {
-    if (IMAGE_EXT.test(m[2])) candidates.push(unescapeShellPath(m[2]));
+    if (fullExt.test(m[2])) candidates.push(unescapeShellPath(m[2]));
   }
 
   // 2. Bare or backslash-escaped paths (may contain "\ "), optionally @-prefixed.
   //    Scan the text with quoted segments blanked out to avoid double-matching.
   const stripped = text.replace(quoteRe, " ");
-  const bareRe = /@?((?:[^\s'"\\]|\\.)+\.(?:png|jpe?g|webp|gif|bmp))/gi;
   while ((m = bareRe.exec(stripped)) !== null) {
     candidates.push(unescapeShellPath(m[1]));
   }
@@ -144,18 +161,17 @@ export function extractImagePaths(text: string, workspacePath: string): string[]
   //    that break the token scan above. Test the full string as a single path too; the
   //    existence check below filters it out if it isn't a real file.
   const whole = unescapeShellPath(text.trim());
-  if (IMAGE_EXT.test(whole)) candidates.push(whole);
+  if (fullExt.test(whole)) candidates.push(whole);
 
   // 4. Leading dragged path FOLLOWED by text (and/or with unicode spaces). macOS
   //    screenshot names contain U+202F narrow no-break spaces in the time ("10.48 a. m.")
   //    which terminals do NOT escape, so neither the token scan nor the whole-input
   //    fallback can tell where the path ends and the user's question begins. When the
-  //    input starts with an absolute/home path, probe prefixes ending at each image
+  //    input starts with an absolute/home path, probe prefixes ending at each
   //    extension against the filesystem (the disk is the ground truth) and keep the
   //    longest one that exists.
   const head = whole;
   if (head.startsWith("/") || head.startsWith("~")) {
-    const extRe = /\.(?:png|jpe?g|webp|gif|bmp)\b/gi;
     let extMatch: RegExpExecArray | null;
     let longestExisting: string | null = null;
     while ((extMatch = extRe.exec(head)) !== null) {
@@ -183,38 +199,87 @@ export function extractImagePaths(text: string, workspacePath: string): string[]
   return resolved;
 }
 
+/** Image paths (png/jpg/webp/gif/bmp) referenced in the input that exist on disk. */
+export function extractImagePaths(text: string, workspacePath: string): string[] {
+  return extractFilePaths(text, workspacePath, IMAGE_EXT_ALT);
+}
+
+/** PDF paths referenced in the input that exist on disk. */
+export function extractPdfPaths(text: string, workspacePath: string): string[] {
+  return extractFilePaths(text, workspacePath, PDF_EXT_ALT);
+}
+
 /**
  * Returns true when the user's input is *only* image reference(s) with no accompanying
  * question/instruction (e.g. they just dragged a file and hit enter). In that case the
  * main model needs a default task injected, otherwise it has a description but nothing
  * to do and tends to drift back to the previous topic.
  */
-export function isImageOnlyInput(userText: string, workspacePath: string): boolean {
-  // Case 1: the entire input is a single existing image path (handles names with
+function onlyAttachmentInput(
+  userText: string,
+  workspacePath: string,
+  extTest: RegExp,
+  extAlt: string,
+): boolean {
+  // Case 1: the entire input is a single existing attachment path (handles names with
   // unescaped spaces, e.g. macOS screenshots, which the token scan can't bound).
   const whole = expandHome(unescapeShellPath(userText.trim()));
   const abs = path.isAbsolute(whole) ? whole : path.resolve(workspacePath, whole);
   try {
-    if (IMAGE_EXT.test(abs) && fs.statSync(abs).isFile()) return true;
+    if (extTest.test(abs) && fs.statSync(abs).isFile()) return true;
   } catch {
     // Not a single path — fall through to the token-strip check.
   }
 
-  // Case 2: strip quoted / bare / escaped image-path tokens and any path separators;
-  // if no real words remain, it was just (possibly multiple) image references.
+  // Case 2: strip quoted / bare / escaped attachment-path tokens and any path separators;
+  // if no real words remain, it was just (possibly multiple) attachment references.
   const stripped = userText
     .replace(/(['"])((?:\\.|(?!\1).)*?)\1/g, " ")
-    .replace(/@?(?:[^\s'"\\]|\\.)+\.(?:png|jpe?g|webp|gif|bmp)/gi, " ")
+    .replace(new RegExp(`@?(?:[^\\s'"\\\\]|\\\\.)+\\.(?:${extAlt})`, "gi"), " ")
     .replace(/[\\/]/g, " ");
   return !/[a-zA-Z]{2,}/.test(stripped);
 }
 
+export function isImageOnlyInput(userText: string, workspacePath: string): boolean {
+  return onlyAttachmentInput(userText, workspacePath, IMAGE_EXT, IMAGE_EXT_ALT);
+}
+
+/** True when the input is only image/PDF attachment reference(s) with no question. */
+export function isAttachmentOnlyInput(
+  userText: string,
+  workspacePath: string,
+): boolean {
+  return onlyAttachmentInput(
+    userText,
+    workspacePath,
+    ATTACH_EXT,
+    `${IMAGE_EXT_ALT}|${PDF_EXT_ALT}`,
+  );
+}
+
 /**
  * Sends a single image to the configured vision model and returns its text description.
- * Uses the OpenAI-compatible chat/completions endpoint with an inline base64 data URL.
+ * Reads the file, builds an inline base64 data URL, and delegates to describeImageDataUrl.
  */
 export async function describeImage(
   imagePath: string,
+  opts?: { prompt?: string; config?: VisionConfig; timeoutMs?: number },
+): Promise<string> {
+  const mime = imageMimeType(imagePath);
+  if (!mime) {
+    throw new Error(`Unsupported image type: ${path.basename(imagePath)}`);
+  }
+  const base64 = (await fs.promises.readFile(imagePath)).toString("base64");
+  return describeImageDataUrl(`data:${mime};base64,${base64}`, opts);
+}
+
+/**
+ * Sends an inline base64 image data URL to the configured vision model and returns its text.
+ * Uses the OpenAI-compatible chat/completions endpoint. Exposed so callers that already have
+ * an in-memory image (e.g. rendered PDF pages) can OCR it without writing a temp file.
+ */
+export async function describeImageDataUrl(
+  dataUrl: string,
   opts?: { prompt?: string; config?: VisionConfig; timeoutMs?: number },
 ): Promise<string> {
   const config = opts?.config ?? getVisionConfig();
@@ -224,13 +289,6 @@ export async function describeImage(
     );
   }
 
-  const mime = imageMimeType(imagePath);
-  if (!mime) {
-    throw new Error(`Unsupported image type: ${path.basename(imagePath)}`);
-  }
-
-  const base64 = (await fs.promises.readFile(imagePath)).toString("base64");
-  const dataUrl = `data:${mime};base64,${base64}`;
   const prompt = opts?.prompt ?? DEFAULT_VISION_PROMPT;
 
   const res = await fetchWithRetry(
@@ -283,69 +341,157 @@ export async function describeImage(
 }
 
 export interface VisionAugmentation {
-  /** The user's original text plus the appended visual description(s). */
+  /** The user's original text plus the appended visual description(s) and/or PDF text. */
   augmentedPrompt: string;
   /** Per-image results that succeeded. */
   images: Array<{ path: string; description: string }>;
+  /** Per-PDF text extractions (digital → text layer; scanned → page-by-page vision OCR). */
+  documents: Array<{ path: string; text: string; pages: number }>;
 }
 
 /**
- * Detects images attached in the user's input, describes each via the vision sidecar,
- * and returns the original prompt augmented with their text descriptions.
+ * Renders a scanned PDF's pages to images (pdf-parse getScreenshot) and OCRs each via the
+ * vision model, returning the combined text with `--- Page N ---` markers. The page budget
+ * (REI_OCR_PDF_MAX_PAGES) bounds the number of vision calls; a truncation note is appended.
+ */
+async function ocrScannedPdf(
+  pdfPath: string,
+  config: VisionConfig,
+  name: string,
+  onStatus?: (message: string) => void,
+): Promise<{ text: string; pages: number }> {
+  const render = await renderPdfPages(pdfPath);
+  const parts: string[] = [];
+  for (const pg of render.pages) {
+    onStatus?.(
+      `🔎 OCR page ${pg.pageNumber}/${render.pages.length} of ${name} with ${config.model}…`,
+    );
+    try {
+      const text = await describeImageDataUrl(pg.dataUrl, { config });
+      parts.push(`--- Page ${pg.pageNumber} ---\n${text}`);
+    } catch (err) {
+      onStatus?.(
+        `⚠️  OCR failed on page ${pg.pageNumber} of ${name}: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    }
+  }
+  if (render.truncated) {
+    parts.push(
+      `[Note: only the first ${render.pages.length} of ${render.total} pages were OCR'd ` +
+        `(REI_OCR_PDF_MAX_PAGES). Raise it to process more.]`,
+    );
+  }
+  return { text: parts.join("\n\n"), pages: render.total };
+}
+
+/**
+ * Detects images AND PDFs attached in the user's input, extracts their text (images via the
+ * vision sidecar/OCR, digital PDFs via pdf-parse, scanned PDFs via page-render + vision OCR),
+ * and returns the prompt augmented with it.
  *
- * Returns null when there are no images, no vision model is configured, or every
- * image failed — callers then proceed with the unmodified prompt. Progress/errors
- * are surfaced via the optional onStatus callback.
+ * Returns null when there are no attachments, or every attachment failed — callers then
+ * proceed with the unmodified prompt. Progress/errors are surfaced via the optional onStatus
+ * callback. (Name kept for the established call site; it now handles documents too.)
  */
 export async function describeAttachedImages(
   userText: string,
   workspacePath: string,
   onStatus?: (message: string) => void,
 ): Promise<VisionAugmentation | null> {
-  const paths = extractImagePaths(userText, workspacePath);
-  if (paths.length === 0) return null;
+  const imagePaths = extractImagePaths(userText, workspacePath);
+  const pdfPaths = extractPdfPaths(userText, workspacePath);
+  if (imagePaths.length === 0 && pdfPaths.length === 0) return null;
 
   const config = getVisionConfig();
-  if (!config) {
-    onStatus?.(
-      `⚠️  Detected ${paths.length} image(s) but no vision model is configured ` +
-        `(set REI_VISION_MODEL). Skipping visual analysis.`,
-    );
-    return null;
-  }
 
-  const images: Array<{ path: string; description: string }> = [];
-  for (const imagePath of paths) {
-    onStatus?.(`🖼️  Analyzing ${path.basename(imagePath)} with ${config.model}…`);
+  // --- PDFs: digital → text layer (pdf-parse); scanned → render pages → OCR via vision. ---
+  const documents: Array<{ path: string; text: string; pages: number }> = [];
+  for (const pdfPath of pdfPaths) {
+    const name = path.basename(pdfPath);
+    onStatus?.(`📄 Reading ${name}…`);
     try {
-      const description = await describeImage(imagePath, { config });
-      images.push({ path: imagePath, description });
+      const res = await extractPdfText(pdfPath);
+      if (res.hasTextLayer) {
+        const prepared = await prepareExtractedText(pdfPath, res.text, res.pages);
+        if (prepared.savedPath) {
+          onStatus?.(
+            `💾 ${prepared.truncated ? `${name} is large (${res.pages} pages) — full text` : "Full text"} ` +
+              `saved → ${prepared.savedPath}`,
+          );
+        }
+        documents.push({ path: pdfPath, text: prepared.inject, pages: res.pages });
+      } else if (config) {
+        // No text layer → scanned: rasterize pages and OCR each with the vision model.
+        onStatus?.(`🧾 ${name} looks scanned — rendering pages for OCR…`);
+        const ocr = await ocrScannedPdf(pdfPath, config, name, onStatus);
+        if (ocr.text) {
+          const prepared = await prepareExtractedText(pdfPath, ocr.text, ocr.pages);
+          if (prepared.savedPath) {
+            onStatus?.(
+              `💾 ${prepared.truncated ? "Large doc — full OCR" : "Full OCR"} saved → ${prepared.savedPath}`,
+            );
+          }
+          documents.push({ path: pdfPath, text: prepared.inject, pages: ocr.pages });
+        } else onStatus?.(`⚠️  Could not OCR any page of ${name}.`);
+      } else {
+        onStatus?.(
+          `⚠️  ${name} is scanned (no text layer) and no vision model is configured ` +
+            `(set REI_VISION_MODEL) to OCR it.`,
+        );
+      }
     } catch (err) {
       onStatus?.(
-        `⚠️  Could not analyze ${path.basename(imagePath)}: ` +
+        `⚠️  Could not read ${name}: ` +
           (err instanceof Error ? err.message : String(err)),
       );
     }
   }
 
-  if (images.length === 0) return null;
+  // --- Images: transcribe/describe via the vision model. ---
+  const images: Array<{ path: string; description: string }> = [];
+  if (imagePaths.length > 0) {
+    if (!config) {
+      onStatus?.(
+        `⚠️  Detected ${imagePaths.length} image(s) but no vision model is configured ` +
+          `(set REI_VISION_MODEL). Skipping visual analysis.`,
+      );
+    } else {
+      for (const imagePath of imagePaths) {
+        onStatus?.(`🖼️  Analyzing ${path.basename(imagePath)} with ${config.model}…`);
+        try {
+          const description = await describeImage(imagePath, { config });
+          images.push({ path: imagePath, description });
+        } catch (err) {
+          onStatus?.(
+            `⚠️  Could not analyze ${path.basename(imagePath)}: ` +
+              (err instanceof Error ? err.message : String(err)),
+          );
+        }
+      }
+    }
+  }
 
-  const sections = images
-    .map((img) => `--- Image: ${img.path} ---\n${img.description}`)
-    .join("\n\n");
+  if (images.length === 0 && documents.length === 0) return null;
 
-  // If the user only attached image(s) with no question, give the model an explicit
-  // task so it acts on this turn instead of drifting back to the prior topic.
-  const imageOnly = isImageOnlyInput(userText, workspacePath);
-  const augmentedPrompt = imageOnly
-    ? `[The user attached the image(s) below with no other text. A vision model ` +
-      `(${config.model}) produced the description(s). Summarize what the image shows ` +
-      `and any details relevant to the project, then ask what they'd like to do with ` +
-      `it.]\n\n${sections}`
+  const imageSections = images.map(
+    (img) => `--- Image: ${img.path} ---\n${img.description}`,
+  );
+  const docSections = documents.map(
+    (d) => `--- PDF: ${d.path} (${d.pages} page${d.pages === 1 ? "" : "s"}) ---\n${d.text}`,
+  );
+  const sections = [...imageSections, ...docSections].join("\n\n");
+
+  // If the user only attached file(s) with no question, give the model an explicit task so
+  // it acts on this turn instead of drifting back to the prior topic.
+  const attachmentOnly = isAttachmentOnlyInput(userText, workspacePath);
+  const augmentedPrompt = attachmentOnly
+    ? `[The user attached the document(s)/image(s) below with no other text. The text was ` +
+      `extracted via OCR / PDF parsing. Summarize the content and any relevant details, then ` +
+      `ask what they'd like to do with it.]\n\n${sections}`
     : `${userText}\n\n` +
-      `[Visual context — the user attached image(s); a vision model (${config.model}) ` +
-      `produced the description(s) below. Treat them as a faithful account of what the ` +
-      `image(s) show.]\n\n${sections}`;
+      `[Attached context — the user referenced the document(s)/image(s) below; the text was ` +
+      `extracted via OCR / PDF parsing. Treat it as a faithful transcription.]\n\n${sections}`;
 
-  return { augmentedPrompt, images };
+  return { augmentedPrompt, images, documents };
 }

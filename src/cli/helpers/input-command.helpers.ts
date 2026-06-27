@@ -4,7 +4,7 @@ import { createModelProvider } from "../../providers/provider-factory.js";
 import { Agent } from "../../core/agent.js";
 import { handleInputTurn } from "./input-turn.helpers.js";
 import { grabClipboardImage } from "../../tools/clipboard-image.js";
-import { extractImagePaths } from "../../tools/vision-sidecar.js";
+import { extractImagePaths, extractPdfPaths } from "../../tools/vision-sidecar.js";
 import * as fs from "fs";
 
 export async function handleInputCommand(
@@ -47,11 +47,14 @@ export async function handleInputCommand(
     return true;
   }
 
-  // A dragged-in image path is absolute (starts with "/" on macOS/Linux) and would
-  // otherwise be misread as an unknown slash-command. If the input references an
-  // existing image file, it's not a command — let it flow to the turn so the vision
-  // sidecar describes it.
-  if (extractImagePaths(trimmed, ctx.workspacePath).length > 0) {
+  // A dragged-in attachment path is absolute (starts with "/" on macOS/Linux) and would
+  // otherwise be misread as an unknown slash-command. If the input references an existing
+  // image OR pdf file, it's not a command — let it flow to the turn so the OCR/vision
+  // sidecar handles it.
+  if (
+    extractImagePaths(trimmed, ctx.workspacePath).length > 0 ||
+    extractPdfPaths(trimmed, ctx.workspacePath).length > 0
+  ) {
     return false;
   }
 

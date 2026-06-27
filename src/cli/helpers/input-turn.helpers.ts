@@ -119,8 +119,11 @@ export async function handleInputTurn(
     );
     if (vision) {
       promptForModel = vision.augmentedPrompt;
+      const parts: string[] = [];
+      if (vision.images.length > 0) parts.push(`${vision.images.length} image(s)`);
+      if (vision.documents.length > 0) parts.push(`${vision.documents.length} PDF(s)`);
       actions.pushTranscript(
-        `\x1b[2m🖼️  ${vision.images.length} image(s) analyzed; visual description added to context.\x1b[0m`,
+        `\x1b[2m🖼️  ${parts.join(" + ")} analyzed; extracted text added to context.\x1b[0m`,
       );
       actions.pushTranscript("");
       actions.draw();
