@@ -59,10 +59,6 @@ export async function handleInputCommand(
     return false;
   }
 
-  // Echo the command so the transcript shows what the user typed — same "You:" line a normal
-  // turn renders (handleInputTurn). Without it, command responses appear with no visible prompt.
-  actions.pushTranscript(`\x1b[1;36mYou: ${trimmed}\x1b[0m`);
-
   // Delegate to the centralized command processor. The onStatus callback streams live progress
   // (e.g. /ask-document indexing) to the transcript so slow commands don't look frozen.
   const result = await processMenuCommand(
@@ -77,6 +73,13 @@ export async function handleInputCommand(
   );
 
   if (result.success) {
+    // Echo the command (like a normal turn's "You:") so the response has a visible prompt —
+    // UNLESS it delegates to handleInputTurn (autoExecute), which renders its own "You:".
+    // (Normal non-command input never reaches here — it returns false below and handleInputTurn
+    // echoes it, so this avoids the double-echo bug.)
+    if (!result.autoExecute) {
+      actions.pushTranscript(`\x1b[1;36mYou: ${trimmed}\x1b[0m`);
+    }
     actions.pushTranscript(result.response);
 
     // Persist commands that asked to be recorded (e.g. /ask-document) into the session so the
@@ -122,6 +125,7 @@ export async function handleInputCommand(
   // Any slash-prefixed input is treated as a command. If it fails,
   // surface the command error and do not fall through to model execution.
   if (trimmed.startsWith("/")) {
+    actions.pushTranscript(`\x1b[1;36mYou: ${trimmed}\x1b[0m`);
     actions.pushTranscript(result.response);
     return true;
   }
