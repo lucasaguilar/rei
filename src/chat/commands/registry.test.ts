@@ -11,8 +11,8 @@ const ctx = (command: string) => ({
 });
 
 describe("dispatchCommand (registry)", () => {
-  it("returns null for commands not yet migrated → legacy fallback", async () => {
-    expect(await dispatchCommand(ctx("/compact"))).toBeNull(); // still in the legacy if/else
+  it("returns null for unknown / non-command input (→ legacy 'Unknown command')", async () => {
+    expect(await dispatchCommand(ctx("/notarealcommand"))).toBeNull(); // no handler owns it
     expect(await dispatchCommand(ctx("just a normal prompt"))).toBeNull();
     // Inexact /session inputs must NOT be claimed by the handler (stay behavior-preserving).
     expect(await dispatchCommand(ctx("/session badsubcommand"))).toBeNull();

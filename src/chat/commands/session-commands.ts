@@ -10,20 +10,86 @@ import {
   clearCurrentPlan,
   restoreCurrentPlanFromSession,
 } from "../plan-tracker.js";
+import { compactSession } from "../compactor.js";
 
 /**
- * `/session` group: show info · new · archive · list · load.
+ * Session lifecycle: `/session` (info · new · archive · list · load) and `/compact`.
  * Extracted verbatim from menu-command-processor (Phase 1 of the refactor — no behavior change).
  */
 export const sessionCommands: CommandHandler = {
   match: (c) =>
     c === "/session" ||
     c === "/session list" ||
+    c === "/compact" ||
     /^\/session\s+new(?:\s+.+)?$/.test(c) ||
     /^\/session\s+archive(?:\s+.+)?$/.test(c) ||
     /^\/session\s+load\s+\S+$/.test(c),
 
-  run: ({ command: trimmed, session, workspacePath }): CommandResult => {
+  run: async ({ command: trimmed, session, workspacePath, provider }): Promise<CommandResult> => {
+    if (trimmed === "/compact") {
+      const nonSystem = session.messages.filter((m) => m.role !== "system");
+      if (nonSystem.length < 2) {
+        return {
+          success: false,
+          response: "[REI] Session is too short to compact (nothing to summarize).",
+        };
+      }
+
+      const compactorModel = process.env.COMPACTOR_MODEL;
+
+      // Warn if the model name looks like OpenRouter format but the provider is Ollama.
+      const providerName = (process.env.MODEL_PROVIDER ?? "").toLowerCase();
+      const modelWarning =
+        compactorModel && providerName === "ollama" && compactorModel.includes("/")
+          ? `\n⚠️  COMPACTOR_MODEL="${compactorModel}" looks like OpenRouter format. ` +
+            `For Ollama use the local name (e.g. qwen3:4b). ` +
+            `Run \`ollama pull qwen3:4b\` and set COMPACTOR_MODEL=qwen3:4b.`
+          : "";
+
+      try {
+        const beforeCount = nonSystem.length;
+        const compactedMessages = await compactSession({
+          messages: session.messages,
+          provider,
+          modelOverride: compactorModel,
+          force: true, // manual /compact always bypasses the auto-threshold
+        });
+        const afterCount = compactedMessages.filter((m) => m.role !== "system").length;
+
+        saveSession(
+          workspacePath,
+          compactedMessages,
+          session.mode,
+          session.summary,
+          session.createdAt,
+        );
+
+        const modelLabel = compactorModel ? ` (model: ${compactorModel})` : "";
+        return {
+          success: true,
+          response:
+            `[REI] Session compacted${modelLabel}. ` +
+            `${beforeCount} → ${afterCount} messages. ` +
+            `Older turns were summarized to preserve context window.` +
+            modelWarning,
+          newSession: { ...session, messages: compactedMessages },
+        };
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const hint =
+          compactorModel && errMsg.toLowerCase().includes("not found")
+            ? `\nHint: model "${compactorModel}" was not found. ` +
+              (providerName === "ollama"
+                ? `Run \`ollama pull ${compactorModel}\` or fix COMPACTOR_MODEL in your .env.`
+                : `Check COMPACTOR_MODEL in your .env.`)
+            : "";
+        return {
+          success: false,
+          response: `[REI] Error compacting session: ${errMsg}${hint}`,
+        };
+      }
+    }
+
     if (trimmed === "/session") {
       const nonSystem = session.messages.filter((m) => m.role !== "system");
       const turns = Math.floor(nonSystem.length / 2);

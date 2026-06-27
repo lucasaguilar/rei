@@ -20,6 +20,7 @@ export const miscCommands: CommandHandler = {
     c === "/tdd" ||
     c === "/index" ||
     c === "/help" ||
+    c === "/env" ||
     MODE_RE.test(c),
 
   run: ({ command: trimmed, session, workspacePath }): CommandResult => {
@@ -131,6 +132,21 @@ export const miscCommands: CommandHandler = {
 
     if (trimmed === "/help") {
       return { success: true, response: `[REI] Available commands:\n${getHelpText()}` };
+    }
+
+    if (trimmed === "/env") {
+      const ollamaVars = Object.entries(process.env)
+        .filter(([key]) => key.startsWith("OLLAMA"))
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, value]) => `${key}=${value ?? ""}`);
+
+      if (ollamaVars.length === 0) {
+        return { success: true, response: "[REI] No OLLAMA environment variables found." };
+      }
+      return {
+        success: true,
+        response: `[REI] OLLAMA environment variables:\n${ollamaVars.join("\n")}`,
+      };
     }
 
     // Unreachable: match() guarantees one of the branches above handled it.
