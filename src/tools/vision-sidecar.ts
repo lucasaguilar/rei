@@ -413,7 +413,9 @@ export async function describeAttachedImages(
     try {
       const res = await extractPdfText(pdfPath);
       if (res.hasTextLayer) {
-        const prepared = await prepareExtractedText(pdfPath, res.text, res.pages);
+        const prepared = await prepareExtractedText(pdfPath, res.text, res.pages, {
+          workspacePath,
+        });
         if (prepared.savedPath) {
           onStatus?.(
             `💾 ${prepared.truncated ? `${name} is large (${res.pages} pages) — full text` : "Full text"} ` +
@@ -426,7 +428,9 @@ export async function describeAttachedImages(
         onStatus?.(`🧾 ${name} looks scanned — rendering pages for OCR…`);
         const ocr = await ocrScannedPdf(pdfPath, config, name, onStatus);
         if (ocr.text) {
-          const prepared = await prepareExtractedText(pdfPath, ocr.text, ocr.pages);
+          const prepared = await prepareExtractedText(pdfPath, ocr.text, ocr.pages, {
+            workspacePath,
+          });
           if (prepared.savedPath) {
             onStatus?.(
               `💾 ${prepared.truncated ? "Large doc — full OCR" : "Full OCR"} saved → ${prepared.savedPath}`,
