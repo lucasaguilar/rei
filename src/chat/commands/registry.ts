@@ -4,6 +4,7 @@ import { documentCommands } from "./document-commands.js";
 import { miscCommands } from "./misc-commands.js";
 import { specCommands } from "./spec-commands.js";
 import { runPlanCommand, planFileCommands } from "./plan-commands.js";
+import { providerCommands } from "./provider-commands.js";
 
 /**
  * The command registry. Commands are migrated out of menu-command-processor's big if/else into
@@ -17,6 +18,7 @@ const COMMAND_HANDLERS = [
   specCommands,
   runPlanCommand,
   planFileCommands,
+  providerCommands,
 ];
 
 /** Runs the first handler that owns the input, or null when none does (→ legacy fallback). */
