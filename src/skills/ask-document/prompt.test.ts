@@ -38,4 +38,12 @@ describe("parseGroundedResponse", () => {
     const p = parseGroundedResponse(r);
     expect(p.answer).toBe("A");
   });
+
+  it("rescues the answer from TRUNCATED JSON (cut mid-object) instead of dumping raw JSON", () => {
+    // The model hit the output cap mid-claims → no closing brace → JSON.parse fails.
+    const r = '{"answer":"La IA es un agente autónomo.","claims":[{"text":"x","page":12,"quo';
+    const p = parseGroundedResponse(r);
+    expect(p.answer).toBe("La IA es un agente autónomo.");
+    expect(p.answer).not.toContain('"answer"');
+  });
 });

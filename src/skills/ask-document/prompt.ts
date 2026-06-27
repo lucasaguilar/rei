@@ -52,8 +52,10 @@ export function parseGroundedResponse(response: string): ParsedGrounded {
     .replace(/<think>[\s\S]*$/i, "")
     .trim();
 
+  // Fallback already tries to rescue the "answer" field, so a truncated JSON with NO closing
+  // brace (early-return path) still shows prose instead of raw JSON.
   const fallback: ParsedGrounded = {
-    answer: (cleaned || response).trim(),
+    answer: extractAnswerField(cleaned) ?? (cleaned || response).trim(),
     claims: [],
     notFound: false,
   };
@@ -76,6 +78,19 @@ export function parseGroundedResponse(response: string): ParsedGrounded {
       notFound: obj.notFound === true,
     };
   } catch {
+    // Truncated/invalid JSON: fallback already rescued the "answer" string (claims dropped —
+    // can't verify a partial), so the user sees prose, not raw JSON.
     return fallback;
+  }
+}
+
+/** Best-effort extraction of the "answer" string from malformed/truncated grounded JSON. */
+function extractAnswerField(text: string): string | undefined {
+  const m = text.match(/"answer"\s*:\s*"((?:\\.|[^"\\])*)"/);
+  if (!m) return undefined;
+  try {
+    return JSON.parse(`"${m[1]}"`);
+  } catch {
+    return m[1];
   }
 }

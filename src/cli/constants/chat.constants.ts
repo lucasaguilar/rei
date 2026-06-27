@@ -64,6 +64,7 @@ export const COMMANDS: Array<{
   { command: "/savespec <name>", description: "save the write-spec spec to disk as .rei/specs/<name>.md" },
   { command: "/loadspec <name>", description: "load a spec from disk into the session for decomposition" },
   { command: "/ask-document <file> <question>", description: "grounded Q&A over a document with verified page citations" },
+  { command: "/read-document <file> [pp.N-M]", description: "print a literal page-range slice of a large document" },
   { command: "/tdd", description: "toggle TDD mode (run tests in sandbox)" },
   { command: "/index", description: "regenerate repository skeleton map" },
   { command: "/session", description: "show current session info" },

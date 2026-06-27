@@ -302,9 +302,18 @@ export function cleanResponseForHistory(content: string): string {
   // Always strip leaked native tool-call syntax — even with preserve-thinking on. It carries
   // zero information (the real intent already lives in REI's XML tags) and poisons tool-aware
   // templates on the NEXT turn. Preserving reasoning must never mean preserving broken tool calls.
-  const clean = stripNativeToolSyntax(content);
+  let clean = stripNativeToolSyntax(content);
+  // Also strip EXECUTION request tags (request_files / execute_command / call_tool): they were
+  // already acted upon this turn (the fetched file / command output is appended separately), so
+  // keeping the raw tag only leaks it into the saved/visible answer and wastes context next turn.
+  // (Agent file-op tags <edit>/<create>/<wholefile> are intentionally NOT stripped — message-builder
+  // relies on them to classify agent messages.)
+  clean = clean
+    .replace(/<request_files>[\s\S]*?(<\/request_files>|$)/gi, "")
+    .replace(/<execute_command>[\s\S]*?(<\/execute_command>|$)/gi, "")
+    .replace(/<call_tool\b[\s\S]*?(<\/call_tool>|$)/gi, "");
   if (process.env.REI_PRESERVE_THINKING === "true") {
-    return clean;
+    return clean.trim();
   }
   return stripThinkingBlock(clean);
 }

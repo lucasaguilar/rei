@@ -46,7 +46,12 @@ export async function askDocument(params: {
 
   onStatus?.(`🔎 Retrieved ${top.length} passages (pages ${[...new Set(top.map((c) => c.page))].join(", ")})…`);
 
-  const response = await provider.completeChat(buildGroundedMessages(question, top), {});
+  // reasoningEffort:none — the grounded answer is STRUCTURED JSON; the model's <think> phase just
+  // eats the output-token budget and risks truncating the JSON mid-object (→ parse fails). Off is
+  // faster and keeps the whole cap for the answer + citations.
+  const response = await provider.completeChat(buildGroundedMessages(question, top), {
+    reasoningEffort: "none",
+  });
   const parsed = parseGroundedResponse(response);
 
   // Deterministic faithfulness check: verify each claim's quote actually exists in the source.

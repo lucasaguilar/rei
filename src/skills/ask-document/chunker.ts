@@ -10,7 +10,7 @@ function intEnv(name: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-interface PageRegion {
+export interface PageRegion {
   page: number;
   text: string;
 }
@@ -21,7 +21,7 @@ interface PageRegion {
  *  - scanned page OCR:   `--- Page N ---` … text  (marker BEFORE the page's text)
  * Falls back to a single page 0 when there are no markers.
  */
-function splitIntoPages(text: string): PageRegion[] {
+export function splitIntoPages(text: string): PageRegion[] {
   const trailing = /\n?\s*--\s*(\d+)\s+of\s+\d+\s*--\s*\n?/gi; // pdf-parse
   const leading = /\n?\s*---\s*Page\s+(\d+)\s*---\s*\n?/gi; // scanned OCR
 

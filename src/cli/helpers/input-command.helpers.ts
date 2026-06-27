@@ -59,6 +59,10 @@ export async function handleInputCommand(
     return false;
   }
 
+  // Echo the command so the transcript shows what the user typed — same "You:" line a normal
+  // turn renders (handleInputTurn). Without it, command responses appear with no visible prompt.
+  actions.pushTranscript(`\x1b[1;36mYou: ${trimmed}\x1b[0m`);
+
   // Delegate to the centralized command processor. The onStatus callback streams live progress
   // (e.g. /ask-document indexing) to the transcript so slow commands don't look frozen.
   const result = await processMenuCommand(
