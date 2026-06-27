@@ -21,7 +21,7 @@
     "rei": "./bin/rei.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "dev": "tsx src/main.ts",
     "check": "tsc --noEmit",
     "log:viewer": "node tools/log-viewer/server.mjs",
