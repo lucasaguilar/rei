@@ -23,35 +23,7 @@ import {
   loadSpecFromFile,
   isSpecMessage,
 } from "./spec-tracker.js";
-import { askDocument, sliceDocument, parsePageSpec } from "../skills/ask-document/index.js";
-import type { AskResult } from "../skills/ask-document/index.js";
 import { dispatchCommand } from "./commands/registry.js";
-
-/** Renders an ask-document result: answer + per-claim citations (✅ verified / ≈ fuzzy / ⚠️ unverified). */
-function formatAskResult(r: AskResult): string {
-  const lines: string[] = [r.answer.trim()];
-  if (r.claims.length > 0) {
-    lines.push("", "Citas:");
-    for (const c of r.claims) {
-      if (c.status === "fabricated") {
-        lines.push(`- ⚠️  ${c.text}${c.page ? ` (p.${c.page}?)` : ""} — NO verificado en el texto`);
-      } else {
-        const mark = c.status === "verified" ? "✅" : "≈";
-        const q = c.quote ? `"${c.quote.slice(0, 280)}"` : c.text;
-        lines.push(`- ${mark} ${q}${c.page ? ` (p.${c.page})` : ""}`);
-      }
-    }
-    lines.push(
-      "",
-      `Fidelidad: ${r.faithfulness.verified}/${r.faithfulness.total} afirmaciones verificadas` +
-        `${r.sources.length ? ` · páginas consultadas: ${r.sources.join(", ")}` : ""}.`,
-    );
-  } else if (r.notFound) {
-    lines.push("", "(No se encontró respuesta en el texto recuperado.)");
-  }
-  // Same magenta "REI" badge as a normal answer so it reads as REI's response, not plain output.
-  return `\x1b[1;97;45m REI \x1b[0m ${lines.join("\n")}`;
-}
 
 export interface CommandResult {
   success: boolean;
@@ -81,71 +53,6 @@ export async function processMenuCommand(
     onStatus,
   });
   if (dispatched) return dispatched;
-
-  // /read-document <file> [pp.N-M | p.N | first N] — print a literal slice of a large doc
-  // (its raw text for those pages) without dumping the whole file into the context window.
-  const readDocMatch = trimmed.match(/^\/(?:read-document|readdoc)\s+(\S+)(?:\s+([\s\S]+))?$/);
-  if (readDocMatch) {
-    const fileArg = readDocMatch[1].replace(/^@/, "");
-    const rangeText = readDocMatch[2]?.trim() ?? "";
-    const filePath = path.isAbsolute(fileArg)
-      ? fileArg
-      : path.resolve(workspacePath, fileArg);
-    if (!fs.existsSync(filePath)) {
-      return { success: false, response: `[REI] File not found: ${fileArg}` };
-    }
-    try {
-      const raw = fs.readFileSync(filePath, "utf-8");
-      const slice = sliceDocument(raw, rangeText ? parsePageSpec(rangeText) : undefined);
-      if (!slice.text) {
-        return {
-          success: false,
-          response: `[REI] No pages matched "${rangeText || "(default)"}" in ${path.basename(filePath)}.`,
-        };
-      }
-      const where = slice.pages.some((p) => p > 0)
-        ? `pág. ${slice.pages.join(", ")}`
-        : "documento";
-      return {
-        success: true,
-        response: `\x1b[1;97;45m REI \x1b[0m ${path.basename(filePath)} — ${where}:\n\n${slice.text}`,
-        recordInSession: true,
-      };
-    } catch (err) {
-      return {
-        success: false,
-        response: `[REI] read-document failed: ${err instanceof Error ? err.message : String(err)}`,
-      };
-    }
-  }
-
-  // /ask-document <file> <question> — grounded Q&A over a document with verified citations.
-  const askDocMatch = trimmed.match(/^\/(?:ask-document|askdoc)\s+(\S+)\s+([\s\S]+)$/);
-  if (askDocMatch) {
-    const fileArg = askDocMatch[1].replace(/^@/, "");
-    const question = askDocMatch[2].trim();
-    const filePath = path.isAbsolute(fileArg)
-      ? fileArg
-      : path.resolve(workspacePath, fileArg);
-    if (!fs.existsSync(filePath)) {
-      return { success: false, response: `[REI] File not found: ${fileArg}` };
-    }
-    try {
-      const result = await askDocument({
-        filePath,
-        question,
-        provider,
-        workspacePath,
-        onStatus,
-      });
-      return { success: true, response: formatAskResult(result), recordInSession: true };
-    } catch (err) {
-      return {
-        success: false,
-        response: `[REI] ask-document failed: ${err instanceof Error ? err.message : String(err)}`,
-      };
-    }
-  }
 
   if (trimmed === "/reloadprompts") {
     clearPromptCache();
