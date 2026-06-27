@@ -3,7 +3,7 @@ import { sessionCommands } from "./session-commands.js";
 import { documentCommands } from "./document-commands.js";
 import { miscCommands } from "./misc-commands.js";
 import { specCommands } from "./spec-commands.js";
-import { runPlanCommand } from "./plan-commands.js";
+import { runPlanCommand, planFileCommands } from "./plan-commands.js";
 
 /**
  * The command registry. Commands are migrated out of menu-command-processor's big if/else into
@@ -16,6 +16,7 @@ const COMMAND_HANDLERS = [
   miscCommands,
   specCommands,
   runPlanCommand,
+  planFileCommands,
 ];
 
 /** Runs the first handler that owns the input, or null when none does (→ legacy fallback). */

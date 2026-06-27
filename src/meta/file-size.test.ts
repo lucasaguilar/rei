@@ -12,7 +12,8 @@ const ALLOWLIST = new Set<string>([
   "src/core/agent.ts",
   "src/agent-mode/generator.ts",
   "src/agent-mode/generator-tools.ts",
-  "src/chat/menu-command-processor.ts",
+  // src/chat/menu-command-processor.ts — REMOVED from the backlog 🎉 (Phase 1 command-registry
+  // migration brought it from 1030 → ~343 lines; it must now stay ≤ 400 like any other file).
   "src/tools/command-executor.ts",
   "src/tools/repo-map-generator.ts",
   "src/tools/vision-sidecar.ts",

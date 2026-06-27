@@ -4,12 +4,6 @@ import type { ChatSession, SessionMode } from "./types.js";
 import { saveSession } from "./session-store.js";
 import { compactSession } from "./compactor.js";
 import type { ModelProvider } from "../providers/model-provider.js";
-import {
-  saveCurrentPlanContent,
-  savePlanToFile,
-  loadPlanFromFile,
-  isPlanMessage,
-} from "./plan-tracker.js";
 import { dispatchCommand } from "./commands/registry.js";
 
 export interface CommandResult {
@@ -321,91 +315,6 @@ export async function processMenuCommand(
       response: `[REI] ${modeLabel} model changed to: '${requested}' (provider: '${targetProvider}'). Agent recreated successfully.`,
       recreateAgent: true,
     };
-  }
-
-  if (trimmed.startsWith("/saveplan")) {
-    const saveMatch = trimmed.match(/^\/saveplan\s+(\S+)$/i);
-    if (!saveMatch) {
-      return {
-        success: false,
-        response: "[REI] Invalid format. Use: /saveplan <name>",
-      };
-    }
-
-    const planName = saveMatch[1];
-    const lastPlanMsg = [...session.messages]
-      .reverse()
-      .find(
-        (m) =>
-          m.role === "assistant" &&
-          m.content &&
-          isPlanMessage(m.content),
-      );
-
-    if (!lastPlanMsg || !lastPlanMsg.content) {
-      return {
-        success: false,
-        response: "[REI] No plan was found in this session to save.",
-      };
-    }
-
-    try {
-      const savedPath = savePlanToFile(workspacePath, planName, lastPlanMsg.content);
-      return {
-        success: true,
-        response: `[REI] Full plan saved successfully to: ${savedPath}`,
-      };
-    } catch (err) {
-      return {
-        success: false,
-        response: `[REI] Error saving plan: ${err instanceof Error ? err.message : String(err)}`,
-      };
-    }
-  }
-
-  if (trimmed.startsWith("/loadplan")) {
-    const loadMatch = trimmed.match(/^\/loadplan\s+(\S+)$/i);
-    if (!loadMatch) {
-      return {
-        success: false,
-        response: "[REI] Invalid format. Use: /loadplan <name>",
-      };
-    }
-
-    const planName = loadMatch[1];
-    try {
-      const planContent = loadPlanFromFile(workspacePath, planName);
-      
-      // Ingest the loaded plan as a planning-mode assistant message so /runplan
-      // picks it up as the SOURCE (latest planning plan in the session).
-      const updatedMessages = [...session.messages, {
-        role: "assistant" as const,
-        content: planContent,
-        sourceMode: "planning" as const,
-      }];
-
-      saveSession(
-        workspacePath,
-        updatedMessages,
-        session.mode,
-        session.summary,
-        session.createdAt,
-      );
-
-      // Persist it as the cross-session SOURCE fallback too.
-      saveCurrentPlanContent(workspacePath, planContent);
-
-      return {
-        success: true,
-        response: `[REI] Plan '${planName}' loaded into the session. Run it with /runplan or /runplan stage <n>.`,
-        newSession: { ...session, messages: updatedMessages },
-      };
-    } catch (err) {
-      return {
-        success: false,
-        response: `[REI] Error loading plan: ${err instanceof Error ? err.message : String(err)}`,
-      };
-    }
   }
 
   if (trimmed === "/env") {
