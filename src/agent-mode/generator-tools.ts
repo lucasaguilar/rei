@@ -24,7 +24,6 @@ import { getMaxTurns } from "../config/model-runtime.js";
 import { findSkill } from "../skills/skill-loader.js";
 import { resolveWorkspacePath } from "../workspace/file-security.js";
 import {
-  buildFileContextMessage,
   finalizeOutcome,
   validateProposedPatches,
   CREATED_FILES_MARKER,
@@ -33,6 +32,7 @@ import {
 import { setupToolSelection } from "./tools-loop/tool-selection.js";
 import { callModel } from "./tools-loop/call-model.js";
 import { createVirtualFileTree } from "./tools-loop/virtual-file-tree.js";
+import { handleReadFiles } from "./tools-loop/read-files-handler.js";
 
 const MAX_TURNS = getMaxTurns();
 const MAX_TRUNCATION_CONTINUATIONS = 3;
@@ -526,37 +526,15 @@ export async function executeAgentTurnWithTools(params: {
           switch (call.function.name) {
             // ── read_files ───────────────────────────────────────────────
             case "read_files": {
-              const paths = (args.paths as string[]) ?? [];
-              logger.logInfo(`[tools] read_files: ${paths.join(", ")}`);
-              emitStatus(`🔍  [REI] Reading: ${paths.join(", ") || "(none)"}`);
-              // Reflect the model's own pending (virtual) edits so re-reads show the WORKING
-              // state, not stale disk — this keeps subsequent edit_file search blocks matching.
-              // Dedup: if a file's content is unchanged since we last showed it, point the model
-              // back to it instead of re-dumping the whole thing (it's still in history).
-              const parts: string[] = [];
-              for (const raw of paths) {
-                const f = toRel(raw); // normalize absolute in-workspace paths to the virtual-tree key
-                const cur = await currentContent(f);
-                if (cur !== "" && alreadyProvided.get(f) === cur) {
-                  parts.push(
-                    `--- File: ${f} ---\n(unchanged since you last read it above — reuse that content; do not re-read)`,
-                  );
-                  continue;
-                }
-                if (virtualFiles.has(f)) {
-                  parts.push(
-                    `--- File: ${f} ---\n\`\`\`\n${virtualFiles.get(f)}\n\`\`\``,
-                  );
-                } else {
-                  parts.push(
-                    (
-                      await buildFileContextMessage(workspacePath, [f])
-                    ).trimStart(),
-                  );
-                }
-                if (cur !== "") alreadyProvided.set(f, cur);
-              }
-              toolResult = "\n" + parts.join("\n\n");
+              toolResult = await handleReadFiles((args.paths as string[]) ?? [], {
+                workspacePath,
+                logger,
+                emitStatus,
+                toRel,
+                currentContent,
+                virtualFiles,
+                alreadyProvided,
+              });
               toolResultsMap.set(call.id, toolResult);
               break;
             }
