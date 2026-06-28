@@ -22,11 +22,7 @@ import { startStepSpan, startToolSpan } from "../telemetry/spans.js";
 import { searchMcpTools, SEARCH_K } from "../tools/tool-retriever.js";
 import { getMaxTurns } from "../config/model-runtime.js";
 import { findSkill } from "../skills/skill-loader.js";
-import {
-  resolveWorkspacePath,
-  toWorkspaceRelative,
-  isWithinWorkspace,
-} from "../workspace/file-security.js";
+import { resolveWorkspacePath } from "../workspace/file-security.js";
 import {
   buildFileContextMessage,
   finalizeOutcome,
@@ -35,6 +31,8 @@ import {
   type ExecutionResult,
 } from "./helpers/patch-helpers.js";
 import { setupToolSelection } from "./tools-loop/tool-selection.js";
+import { callModel } from "./tools-loop/call-model.js";
+import { createVirtualFileTree } from "./tools-loop/virtual-file-tree.js";
 
 const MAX_TURNS = getMaxTurns();
 const MAX_TRUNCATION_CONTINUATIONS = 3;
@@ -251,65 +249,20 @@ export async function executeAgentTurnWithTools(params: {
   // component's .ts and its .html template) be validated TOGETHER, instead of validating each
   // turn's edits one-against-disk — which made cross-file edits split across turns impossible
   // to satisfy and sent the model into edit loops.
-  const virtualFiles = new Map<string, string>();
-  const diskCache = new Map<string, string>();
-  // Files already shown to the model (path → exact content shown). Lets read_files skip
-  // re-dumping a file whose content hasn't changed since — it's still in the conversation
-  // history, so re-reading just burns tokens/turns (a common model habit).
-  const alreadyProvided = new Map<string, string>();
-  // Normalize a model-supplied path to a canonical workspace-relative key. Accepts both
-  // relative ("django/forms.py") and absolute in-workspace ("/testbed/django/forms.py") forms —
-  // the latter is common when the workspace itself is an absolute path (e.g. SWE-bench's
-  // /testbed root) and would otherwise be mangled into a phantom nested path. Used as the key
-  // for the virtual tree / dedup so absolute and relative refs to the same file collapse.
-  const toRel = (raw: string): string => toWorkspaceRelative(raw, workspacePath);
-  // Same normalization, but enforces workspace containment — throws (→ ERROR tool result) for a
-  // missing arg or a path that escapes the working directory. Used for writes.
-  const resolveTarget = (raw: unknown): string => {
-    if (!raw || typeof raw !== "string") {
-      throw new Error("Missing required 'file' argument.");
-    }
-    const abs = resolveWorkspacePath(raw, workspacePath);
-    if (!isWithinWorkspace(abs, workspacePath)) {
-      throw new Error(
-        `Path "${raw}" is outside the working directory. Use a path inside it.`,
-      );
-    }
-    return toWorkspaceRelative(raw, workspacePath);
-  };
-  // Disk is never mutated during the loop, so the original content is stable to cache.
-  const readDisk = async (file: string): Promise<string> => {
-    if (!diskCache.has(file)) {
-      diskCache.set(
-        file,
-        await fs
-          .readFile(resolveWorkspacePath(file, workspacePath), "utf-8")
-          .catch(() => ""),
-      );
-    }
-    return diskCache.get(file)!;
-  };
-  // What the model is actually editing/should see: its own pending content if any, else disk.
-  const currentContent = async (file: string): Promise<string> =>
-    virtualFiles.has(file) ? virtualFiles.get(file)! : await readDisk(file);
-  // Express the virtual tree as whole-file rewrites from disk (search = exact disk content, so
-  // the sandbox apply NEVER mismatches; replace = accumulated content). Used for both the
-  // cumulative validation and the final apply that the caller writes to disk.
-  const virtualEdits = async (): Promise<AgentSREdit[]> => {
-    const out: AgentSREdit[] = [];
-    for (const [file, content] of virtualFiles) {
-      out.push({ file, search: await readDisk(file), replace: content });
-    }
-    return out;
-  };
-  // Write the given files' current virtual content to disk.
-  const persistToDisk = async (files: string[]): Promise<void> => {
-    for (const f of files) {
-      const abs = resolveWorkspacePath(f, workspacePath);
-      await fs.mkdir(path.dirname(abs), { recursive: true });
-      await fs.writeFile(abs, virtualFiles.get(f)!, "utf-8");
-    }
-  };
+  // The in-memory file state for this turn — virtualFiles/diskCache/alreadyProvided maps plus the
+  // read/resolve/persist helpers (extracted, Phase 2). The maps are mutated BY REFERENCE by the
+  // tool handlers below.
+  const {
+    virtualFiles,
+    diskCache,
+    alreadyProvided,
+    toRel,
+    resolveTarget,
+    readDisk,
+    currentContent,
+    virtualEdits,
+    persistToDisk,
+  } = createVirtualFileTree(workspacePath);
 
   // Edit mode. DEFAULT = `direct`: work like a human/CLI agent — apply edits straight to disk
   // with NO per-edit sandbox compile-check; the model self-verifies via run_command (sees real
@@ -329,43 +282,16 @@ export async function executeAgentTurnWithTools(params: {
     try {
       logger.logInfo(`[tools] Turn ${loopCount}/${MAX_TURNS}`);
 
-      // Observability for preserve-thinking: only log when it's actually ON and
-      // re-feeding reasoning — otherwise it's just noise (default is OFF).
-      if (process.env.REI_PRESERVE_THINKING === "true") {
-        const reasoningCarried = currentMessages.filter(
-          (m) => m.role === "assistant" && m.reasoning_content,
-        );
-        logger.logInfo("[tools] preserve-thinking", {
-          enabled: true,
-          assistantMsgsWithReasoning: reasoningCarried.length,
-          reasoningCharsResent: reasoningCarried.reduce(
-            (n, m) => n + (m.reasoning_content?.length ?? 0),
-            0,
-          ),
-        });
-      }
-
-      const result = await provider.completeChatWithTools(
-        currentMessages,
-        buildTools(),
-        { model: modelOverride, reasoningEffort },
-      );
-
-      logger.logInfo("[tools] Response", {
-        finishReason: result.finishReason,
-        toolCalls: result.toolCalls.map((tc) => tc.function.name),
-        contentPreview: result.content.slice(0, 120),
-        reasoningPreview: result.reasoning?.slice(0, 120),
+      // One model call: provider invocation + logging + live reasoning (extracted, Phase 2).
+      const result = await callModel({
+        provider,
+        messages: currentMessages,
+        tools: buildTools(),
+        modelOverride,
+        reasoningEffort,
+        logger,
+        onChunk,
       });
-
-      // Surface the model's reasoning live. In tool-calling turns, qwen3.6 puts its
-      // narration in `reasoning` while `content` is empty — without this it's invisible.
-      if (result.reasoning?.trim()) {
-        onChunk?.({
-          type: "thinking",
-          content: result.reasoning.trim() + "\n",
-        });
-      }
 
       // Truncated mid-output with no tool call yet — hit the output-token cap before acting.
       // Common with thinking models that spend the budget on <think> reasoning. Instead of
