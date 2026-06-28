@@ -11,8 +11,6 @@ import { mcpToolsToDefinitions } from "../contracts/tool-definitions.js";
 import { startStepSpan } from "../telemetry/spans.js";
 import { getMaxTurns } from "../config/model-runtime.js";
 import {
-  finalizeOutcome,
-  validateProposedPatches,
   CREATED_FILES_MARKER,
   type ExecutionResult,
 } from "./helpers/patch-helpers.js";
@@ -22,17 +20,16 @@ import { createVirtualFileTree } from "./tools-loop/virtual-file-tree.js";
 import { dispatchToolCalls } from "./tools-loop/dispatch-tool-calls.js";
 import { applyEditBatch, setEditResults } from "./tools-loop/apply-edit-batch.js";
 import { handleTextResponse } from "./tools-loop/handle-text-response.js";
+import {
+  handleTruncation,
+  buildTurnLimitOutcome,
+} from "./tools-loop/turn-outcomes.js";
 import { buildMismatchEscalationMessage } from "./tools-loop/mismatch-escalation.js";
 
 // Re-exported for back-compat (it moved into tools-loop/apply-edit-batch during the Phase 2 refactor).
 export { setEditResults };
 
 const MAX_TURNS = getMaxTurns();
-const MAX_TRUNCATION_CONTINUATIONS = 3;
-const TRUNCATION_CONTINUATION =
-  "Your previous response was cut off by the output token limit. " +
-  "Continue EXACTLY from where you left off — do NOT repeat, summarize, or restart. " +
-  "Just continue the text as one uninterrupted response.";
 
 /**
  * Prepends a focused native-tools directive. REI's shared mode prompt is XML-centric
@@ -206,49 +203,24 @@ export async function executeAgentTurnWithTools(params: {
       });
 
       // Truncated mid-output with no tool call yet — hit the output-token cap before acting.
-      // Common with thinking models that spend the budget on <think> reasoning. Instead of
-      // accumulating text and ending the turn with ZERO edits (the old behavior, which made the
-      // model "talk and never act"), preserve the partial output, nudge it to continue, and
-      // RE-ENTER the loop so the continuation's TOOL CALLS get processed normally. Bounded by a
-      // per-turn counter so a model that keeps truncating can't spin forever.
+      // Continue the partial output back into the loop (bounded) so its tool calls get processed,
+      // or finish honestly once the continuation budget is exhausted.
       if (result.finishReason === "length" && result.toolCalls.length === 0) {
-        if (truncationContinuations < MAX_TRUNCATION_CONTINUATIONS) {
-          truncationContinuations++;
-          logger.logInfo(
-            `[truncation] response cut off (${truncationContinuations}/${MAX_TRUNCATION_CONTINUATIONS}) — continuing into the loop`,
-          );
-          emitStatus("⏳  [REI] Response hit the output limit — continuing");
-          currentMessages.push(
-            {
-              role: "assistant",
-              content: result.content,
-              ...(result.reasoning
-                ? { reasoning_content: result.reasoning }
-                : {}),
-            },
-            { role: "user", content: TRUNCATION_CONTINUATION },
-          );
-          continue;
-        }
-        // Exhausted continuations. Apply whatever was validated on-green and report honestly
-        // (raising REI_MAX_OUTPUT_TOKENS is the real fix for a model that keeps truncating).
-        logger.logInfo(
-          `[truncation] gave up after ${MAX_TRUNCATION_CONTINUATIONS} continuations — output cap too low for this model?`,
-        );
-        const truncEdits = await virtualEdits();
-        return finalizeOutcome(
+        const outcome = await handleTruncation({
+          content: result.content,
+          reasoning: result.reasoning,
+          currentMessages,
+          truncationContinuations,
           logger,
-          {
-            response: appendCreatedSummary(
-              firstTurnExplanation ||
-                "⚠️ The model kept hitting the output-token limit before finishing. " +
-                  "Increase REI_MAX_OUTPUT_TOKENS (thinking models need room for reasoning + the tool call).",
-            ),
-            validProposedPatches: truncEdits,
-          },
-          truncEdits.length,
-          truncEdits.length,
-        );
+          emitStatus,
+          virtualEdits,
+          firstTurnExplanation,
+          appendCreatedSummary,
+        });
+        if (outcome.action === "finalize") return outcome.result;
+        currentMessages = outcome.messages;
+        truncationContinuations = outcome.truncationContinuations;
+        continue;
       }
 
       // Capture text explanation from first turn
@@ -379,49 +351,16 @@ export async function executeAgentTurnWithTools(params: {
     }
   }
 
-  // Hit the turn limit. If the model queued edits along the way, apply them rather
-  // than discard the work; otherwise report the failure with guidance. No budget
-  // left to self-correct, but still run a final verify so `verified` is honest.
-  const limitEdits = await virtualEdits();
-  if (limitEdits.length > 0) {
-    const finalCheck = await validateProposedPatches({
-      workspacePath,
-      edits: directMode ? [] : limitEdits,
-      loopCount,
-      logger,
-    });
-    return finalizeOutcome(
-      logger,
-      {
-        response: appendCreatedSummary(
-          firstTurnExplanation ||
-            `Applied ${limitEdits.length} edit(s); stopped at the ${MAX_TURNS}-turn limit (there may be more to do).`,
-        ),
-        validProposedPatches: limitEdits,
-        verified: finalCheck.success,
-      },
-      limitEdits.length,
-      limitEdits.length,
-    );
-  }
-
-  return finalizeOutcome(
+  // Hit the turn limit without the model signalling completion — apply any queued edits (with one
+  // honest final verify) or report the failure with guidance.
+  return buildTurnLimitOutcome({
+    loopCount,
+    maxTurns: MAX_TURNS,
+    workspacePath,
+    directMode,
     logger,
-    {
-      response: [
-        `⚠️ REI could not complete the task after ${loopCount} attempts.`,
-        "",
-        ...(firstTurnExplanation
-          ? ["**What was planned:**", firstTurnExplanation, ""]
-          : []),
-        "**What to try next:**",
-        '- Ask REI to re-read the files first: *"Read [file] and retry"*',
-        `- Increase the turn limit: set \`REI_MAX_TURNS=${MAX_TURNS + 3}\` in your .env`,
-      ].join("\n"),
-      validProposedPatches: [],
-      failed: true,
-    },
-    0,
-    0,
-  );
+    virtualEdits,
+    firstTurnExplanation,
+    appendCreatedSummary,
+  });
 }

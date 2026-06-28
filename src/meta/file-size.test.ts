@@ -11,7 +11,8 @@ const MAX_LINES = 400;
 const ALLOWLIST = new Set<string>([
   "src/core/agent.ts",
   "src/agent-mode/generator.ts",
-  "src/agent-mode/generator-tools.ts",
+  // src/agent-mode/generator-tools.ts — REMOVED from the backlog 🎉 (Phase 2 tools-loop extraction
+  // brought it from 1100 → 366 lines; it must now stay ≤ 400 like any other file).
   // src/chat/menu-command-processor.ts — REMOVED from the backlog 🎉 (Phase 1 command-registry
   // migration brought it from 1030 → ~343 lines; it must now stay ≤ 400 like any other file).
   "src/tools/command-executor.ts",
