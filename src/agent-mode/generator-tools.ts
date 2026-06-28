@@ -10,12 +10,7 @@ import type { ModelProvider } from "../providers/model-provider.js";
 import type { AgentLogger } from "../core/logger.js";
 import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
 import type { McpRegistry } from "../tools/mcp/mcp-registry.js";
-import {
-  AGENT_TOOLS,
-  WEB_SEARCH_TOOL,
-  WEATHER_TOOL,
-  mcpToolsToDefinitions,
-} from "../contracts/tool-definitions.js";
+import { mcpToolsToDefinitions } from "../contracts/tool-definitions.js";
 import {
   executeCommand,
   limitCommandOutput,
@@ -24,20 +19,9 @@ import { searchWeb } from "../tools/search-tool.js";
 import { getWeather, formatWeatherOutput } from "../tools/weather-tool.js";
 import { applyFileEdits } from "../tools/search-replace.js";
 import { startStepSpan, startToolSpan } from "../telemetry/spans.js";
-import {
-  searchMcpTools,
-  SEARCH_TOOLS_DEF,
-  MAX_UNFILTERED,
-  PRELOAD_K,
-  SEARCH_K,
-} from "../tools/tool-retriever.js";
+import { searchMcpTools, SEARCH_K } from "../tools/tool-retriever.js";
 import { getMaxTurns } from "../config/model-runtime.js";
-import {
-  loadSkills,
-  buildUseSkillTool,
-  findSkill,
-  skillsForMode,
-} from "../skills/skill-loader.js";
+import { findSkill } from "../skills/skill-loader.js";
 import {
   resolveWorkspacePath,
   toWorkspaceRelative,
@@ -50,6 +34,7 @@ import {
   CREATED_FILES_MARKER,
   type ExecutionResult,
 } from "./helpers/patch-helpers.js";
+import { setupToolSelection } from "./tools-loop/tool-selection.js";
 
 const MAX_TURNS = getMaxTurns();
 const MAX_TRUNCATION_CONTINUATIONS = 3;
@@ -57,14 +42,6 @@ const TRUNCATION_CONTINUATION =
   "Your previous response was cut off by the output token limit. " +
   "Continue EXACTLY from where you left off — do NOT repeat, summarize, or restart. " +
   "Just continue the text as one uninterrupted response.";
-
-/** Last user message text — fallback query for tool-RAG when userQuery isn't passed. */
-function lastUserText(messages: ChatMessage[]): string {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === "user") return messages[i].content;
-  }
-  return "";
-}
 
 /**
  * Detects when the model TRIED to call a tool but emitted it as text/XML instead
@@ -217,48 +194,16 @@ export async function executeAgentTurnWithTools(params: {
   const emitStatus = (msg: string) =>
     onChunk?.({ type: "status", content: `\n\x1b[33m${msg}\x1b[0m\n` });
 
-  // Tool selection: with large MCP servers (e.g. Google Workspace ~60-90 tools)
-  // sending every schema overflows local context. When there are many tools, expose
-  // only a best-effort pre-load + a `search_tools` meta-tool, and let the model load
-  // more on demand (model-driven, no embeddings). Small sets are sent in full.
-  const allMcpTools = mcpRegistry ? mcpRegistry.getAvailableTools() : [];
-  const query = userQuery ?? lastUserText(messagesForModel);
-  const useToolSearch =
-    allMcpTools.length > MAX_UNFILTERED && process.env.REI_TOOL_RAG !== "false";
-
-  // Names of MCP tools currently exposed to the model (grows as it searches).
-  const activeMcp = new Set<string>(
-    useToolSearch
-      ? searchMcpTools(query, allMcpTools, PRELOAD_K).map((t) => t.name)
-      : allMcpTools.map((t) => t.name),
-  );
-  if (useToolSearch) {
-    logger.logInfo("[tools] tool-search mode", {
-      total: allMcpTools.length,
-      preloaded: [...activeMcp],
-    });
-  }
-
-  // Skills: reusable task recipes loaded on demand. Only the catalog (name +
-  // description) rides in the `use_skill` tool; the full body is injected only
-  // when the model invokes it — so many skills cost almost no context.
-  const skills = skillsForMode(loadSkills(workspacePath), "agent");
-  const useSkillTool = buildUseSkillTool(skills);
-
-  // The tools array is rebuilt each turn so newly-searched tools become callable.
-  const buildTools = () => {
-    const mcp = mcpToolsToDefinitions(
-      allMcpTools.filter((t) => activeMcp.has(t.name)),
-    );
-    // Expose the built-in web_search + weather tools on the native path too. They live
-    // in UTILITY_TOOLS (ask/planning) but the native agent array previously only had
-    // AGENT_TOOLS + MCP, so a "search the web" request had no REI tool to call and the
-    // model would grab a Google MCP or do nothing. This is explicit-trigger only.
-    const tools = [...AGENT_TOOLS, WEB_SEARCH_TOOL, WEATHER_TOOL, ...mcp];
-    if (useToolSearch) tools.push(SEARCH_TOOLS_DEF);
-    if (useSkillTool) tools.push(useSkillTool);
-    return tools;
-  };
+  // Tool selection (built-in + web_search/weather + MCP with on-demand tool-search + skills) is
+  // extracted into setupToolSelection (Phase 2). `activeMcp` is returned MUTABLE so the
+  // search_tools handler below can grow it by reference.
+  const { buildTools, activeMcp, allMcpTools, useToolSearch, skills } = setupToolSelection({
+    mcpRegistry,
+    messagesForModel,
+    userQuery,
+    workspacePath,
+    logger,
+  });
 
   let currentMessages: ChatMessage[] = withNativeToolsDirective([
     ...messagesForModel,
