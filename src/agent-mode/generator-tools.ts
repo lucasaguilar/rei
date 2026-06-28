@@ -6,10 +6,8 @@
 import type { ChatMessage } from "../chat/types.js";
 import type { ModelProvider } from "../providers/model-provider.js";
 import type { AgentLogger } from "../core/logger.js";
-import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
 import type { McpRegistry } from "../tools/mcp/mcp-registry.js";
 import { mcpToolsToDefinitions } from "../contracts/tool-definitions.js";
-import { applyFileEdits } from "../tools/search-replace.js";
 import { startStepSpan, startToolSpan } from "../telemetry/spans.js";
 import { getMaxTurns } from "../config/model-runtime.js";
 import {
@@ -34,6 +32,10 @@ import {
   type EditTask,
 } from "./tools-loop/edit-handlers.js";
 import { handleSearchTools, handleUseSkill } from "./tools-loop/meta-handlers.js";
+import { applyEditBatch, setEditResults } from "./tools-loop/apply-edit-batch.js";
+
+// Re-exported for back-compat (it moved into tools-loop/apply-edit-batch during the Phase 2 refactor).
+export { setEditResults };
 
 const MAX_TURNS = getMaxTurns();
 const MAX_TRUNCATION_CONTINUATIONS = 3;
@@ -59,59 +61,6 @@ function looksLikeAttemptedToolCall(content: string): boolean {
   );
 }
 
-
-// Beyond this size we don't inline a file's updated content back to the model (avoids
-// bloating the tool result); the model can re-read it if it truly needs the exact state.
-const MAX_INLINE_EDIT_RESULT_CHARS = 24000;
-
-/**
- * After a successful apply, build each edit's tool result INCLUDING the file's updated
- * content, so the model can compose further edits without re-reading it. This kills the
- * read-after-edit churn (edit → read same file → edit → read again …) that multiplies
- * model calls and dominates agent-turn latency. `alreadyProvided` is refreshed so that if
- * the model re-reads anyway, the read dedup short-circuits to "unchanged since shown".
- * Each file's content is inlined once per batch; oversized files are confirmed but not inlined.
- */
-export function setEditResults(
-  editTasks: EditTask[],
-  candidate: Map<string, string>,
-  toolResultsMap: Map<string, string>,
-  alreadyProvided: Map<string, string>,
-): void {
-  const inlined = new Set<string>();
-  for (const task of editTasks) {
-    const f = task.edit.file;
-    const updated = candidate.get(f) ?? "";
-    if (inlined.has(f)) {
-      toolResultsMap.set(
-        task.callId,
-        `OK: another edit to ${f} applied (its updated content is shown above — do not re-read it).`,
-      );
-      continue;
-    }
-    inlined.add(f);
-    if (updated.length <= MAX_INLINE_EDIT_RESULT_CHARS) {
-      // The model now has the post-edit content → a re-read is deduped to "reuse what you saw".
-      alreadyProvided.set(f, updated);
-      toolResultsMap.set(
-        task.callId,
-        `OK: edit to ${f} applied. The file now contains exactly:\n\`\`\`\n${updated}\n\`\`\`\n` +
-          `You already have ${f}'s current content above — do NOT call read_files on it again; ` +
-          `compose any further edits against this content. Apply MULTIPLE edits at once by emitting ` +
-          `several edit_file calls in ONE response (don't do one per turn). When ALL changes for the ` +
-          `task are done, reply with a brief summary (no tool call).`,
-      );
-    } else {
-      // Too large to inline; do NOT refresh alreadyProvided (model hasn't seen the new state).
-      toolResultsMap.set(
-        task.callId,
-        `OK: edit to ${f} applied to disk. (File is large — not inlined.) Avoid re-reading it ` +
-          `unless you genuinely need its exact current state for another edit. When done, reply ` +
-          `with a brief summary (no tool call).`,
-      );
-    }
-  }
-}
 
 /**
  * Prepends a focused native-tools directive. REI's shared mode prompt is XML-centric
@@ -654,94 +603,25 @@ export async function executeAgentTurnWithTools(params: {
       // model is shown, so already-edited files don't "poison" later edits.
       // After repeated search mismatches, hold the affected files + escalation mode here so we
       // can act AFTER the tool results are fed back.
-      let mismatchEscalation: {
-        files: string[];
-        mode: "inject" | "wholefile";
-      } | null = null;
-      if (editTasks.length > 0) {
-        const candidate = new Map(virtualFiles);
-        let mismatchFile: string | null = null;
-        let mismatchError: string | null = null;
-        for (const task of editTasks) {
-          const f = task.edit.file;
-          if (task.wholeFile) {
-            candidate.set(f, task.edit.replace); // rewrite_file: authoritative content
-            continue;
-          }
-          const base = candidate.has(f) ? candidate.get(f)! : await readDisk(f);
-          const res = applyFileEdits(base, [task.edit]);
-          if (!res.success) {
-            mismatchFile = f;
-            mismatchError = res.error ?? `Could not apply edit to ${f}`;
-            break;
-          }
-          candidate.set(f, res.newContent!);
-        }
-
-        if (mismatchFile) {
-          // Search block didn't match the working content → mismatch death-loop tracking.
-          hasToolFailure = true;
-          consecutiveSearchMismatchFailures += 1;
-          for (const task of editTasks) {
-            toolResultsMap.set(task.callId, `ERROR: ${mismatchError}`);
-          }
-          const files = [mismatchFile];
-          if (consecutiveSearchMismatchFailures >= MISMATCH_WHOLEFILE_AT) {
-            mismatchEscalation = { files, mode: "wholefile" };
-          } else if (consecutiveSearchMismatchFailures === MISMATCH_INJECT_AT) {
-            mismatchEscalation = { files, mode: "inject" };
-          }
-        } else if (directMode) {
-          // DIRECT mode: apply to disk immediately with NO per-edit compile-check. The model
-          // verifies via run_command (it sees the real disk) and REI does ONE final verify when
-          // the model finishes. Lighter and loop-free; partial edits persist if the task aborts.
-          consecutiveSearchMismatchFailures = 0;
-          for (const [f, c] of candidate) virtualFiles.set(f, c);
-          await persistToDisk([...new Set(editTasks.map((t) => t.edit.file))]);
-          setEditResults(editTasks, candidate, toolResultsMap, alreadyProvided);
-        } else {
-          // SANDBOX mode (default): validate the CUMULATIVE virtual tree (compile check),
-          // expressed as whole-file rewrites from disk (search = exact disk content, never
-          // mismatches in the sandbox). Persist only the green state.
-          const candidateEdits: AgentSREdit[] = [];
-          for (const [f, c] of candidate) {
-            candidateEdits.push({
-              file: f,
-              search: await readDisk(f),
-              replace: c,
-            });
-          }
-          const validation = await validateProposedPatches({
-            workspacePath,
-            edits: candidateEdits,
-            loopCount,
-            logger,
-          });
-
-          if (validation.success) {
-            consecutiveSearchMismatchFailures = 0;
-            for (const [f, c] of candidate) virtualFiles.set(f, c); // commit to virtual tree
-            // Persist on-green so the model's OWN run_command (ngc/head/tests) sees its work.
-            // Queued edits are otherwise invisible to disk-reading commands, which makes the
-            // model believe its edits "didn't apply" (it even theorizes a hook is reverting
-            // them) and spiral. Disk now always reflects the last validated state.
-            await persistToDisk([
-              ...new Set(editTasks.map((t) => t.edit.file)),
-            ]);
-            setEditResults(editTasks, candidate, toolResultsMap, alreadyProvided);
-          } else {
-            hasToolFailure = true;
-            // Compile error (not a search mismatch) → reset the mismatch streak.
-            consecutiveSearchMismatchFailures = 0;
-            for (const task of editTasks) {
-              toolResultsMap.set(
-                task.callId,
-                `ERROR: ${validation.feedback ?? "combined changes do not compile"}`,
-              );
-            }
-          }
-        }
-      }
+      // Apply the queued edits to the virtual tree, then persist (direct) or validate-then-persist
+      // (sandbox). Mutates the maps by reference; returns the failure/escalation decisions.
+      const batch = await applyEditBatch(editTasks, {
+        workspacePath,
+        loopCount,
+        directMode,
+        mismatchStreak: consecutiveSearchMismatchFailures,
+        injectAt: MISMATCH_INJECT_AT,
+        wholefileAt: MISMATCH_WHOLEFILE_AT,
+        logger,
+        virtualFiles,
+        toolResultsMap,
+        alreadyProvided,
+        readDisk,
+        persistToDisk,
+      });
+      if (batch.failed) hasToolFailure = true;
+      consecutiveSearchMismatchFailures = batch.mismatchStreak;
+      const mismatchEscalation = batch.mismatchEscalation;
 
       // Feed back all tool results to model history in correct chronological order
       for (const call of result.toolCalls) {

@@ -160,6 +160,44 @@ describe("executeAgentTurnWithTools — characterization", () => {
     expect(typeof outcome.response).toBe("string");
   });
 
+  it("feeds back an ERROR and leaves the file untouched on a search-block mismatch", async () => {
+    const file = path.join(ws, "code.ts");
+    fs.writeFileSync(file, "const x = 1;\n");
+    let secondCallMessages: unknown;
+    const provider = {
+      completeChat: vi.fn(async () => "done"),
+      completeChatWithTools: vi
+        .fn()
+        // Turn 1: edit whose search text is NOT in the file → mismatch.
+        .mockImplementationOnce(async () =>
+          toolCall("edit_file", {
+            file: "code.ts",
+            search: "DOES NOT EXIST",
+            replace: "whatever",
+          }),
+        )
+        // Turn 2: capture what was fed back, then finish.
+        .mockImplementationOnce(async (messages: unknown) => {
+          secondCallMessages = messages;
+          return answer("ok");
+        }),
+    } as unknown as ModelProvider;
+
+    await executeAgentTurnWithTools({
+      provider,
+      messagesForModel: [{ role: "user", content: "edit" }],
+      workspacePath: ws,
+      logger: fakeLogger,
+    });
+
+    // File untouched, and a tool-role ERROR message was fed back for the model to retry.
+    expect(fs.readFileSync(file, "utf8")).toBe("const x = 1;\n");
+    const toolMsgs = (secondCallMessages as Array<{ role: string; content: string }>).filter(
+      (m) => m.role === "tool",
+    );
+    expect(toolMsgs.some((m) => m.content.startsWith("ERROR:"))).toBe(true);
+  });
+
   it("creates a new file via create_file (direct mode)", async () => {
     const provider = makeToolProvider([
       toolCall("create_file", { file: "new.ts", content: "export const hi = 1;\n" }),
