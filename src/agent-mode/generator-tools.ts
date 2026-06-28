@@ -33,6 +33,9 @@ import {
 } from "./tools-loop/edit-handlers.js";
 import { handleSearchTools, handleUseSkill } from "./tools-loop/meta-handlers.js";
 import { applyEditBatch, setEditResults } from "./tools-loop/apply-edit-batch.js";
+import { buildFinalResponse } from "./tools-loop/finalize-response.js";
+import { looksLikeAttemptedToolCall } from "./tools-loop/tool-call-detection.js";
+import { buildMismatchEscalationMessage } from "./tools-loop/mismatch-escalation.js";
 
 // Re-exported for back-compat (it moved into tools-loop/apply-edit-batch during the Phase 2 refactor).
 export { setEditResults };
@@ -43,24 +46,6 @@ const TRUNCATION_CONTINUATION =
   "Your previous response was cut off by the output token limit. " +
   "Continue EXACTLY from where you left off — do NOT repeat, summarize, or restart. " +
   "Just continue the text as one uninterrupted response.";
-
-/**
- * Detects when the model TRIED to call a tool but emitted it as text/XML instead
- * of using the native function-calling interface (e.g. `<read_files>`, `<edit_file>`,
- * or the legacy XML-path tags). Without this, such a turn is silently treated as a
- * plain-text final answer and nothing happens.
- */
-function looksLikeAttemptedToolCall(content: string): boolean {
-  if (!content) return false;
-  // Native tool names emitted as XML-ish tags, the legacy XML action tags, or the
-  // tell-tale `<parameter=` shape models use when faking function calls as text.
-  return (
-    /<\s*(read_files|edit_file|create_file|run_command|edit|create|wholefile|request_files|execute_command|call_tool)\b/i.test(
-      content,
-    ) || /<parameter\s*=/i.test(content)
-  );
-}
-
 
 /**
  * Prepends a focused native-tools directive. REI's shared mode prompt is XML-centric
@@ -363,62 +348,18 @@ export async function executeAgentTurnWithTools(params: {
           }
         }
 
-        const response =
-          firstTurnExplanation && result.content !== firstTurnExplanation
-            ? firstTurnExplanation + "\n\n" + result.content
-            : result.content;
-
-        // If the model finished without producing a text summary (applied edits and stopped),
-        // request one explicitly via a dedicated summary turn (no tools — pure text).
-        // This gives the user a natural explanation of what changed and why, the same way
-        // capable hosted agents always close with a recap.
-        const modifiedFiles = [...virtualFiles.keys()];
-        const hasChanges = modifiedFiles.length > 0 || createdFiles.length > 0;
-        let finalResponse = response.trim();
-        // Request an explicit recap when the model applied changes but didn't explain them
-        // clearly — EMPTY content (common when thinking is on: narration goes to `reasoning`)
-        // OR a too-terse reply ("ok"/"done"/"listo") that isn't a real summary. Capable agents
-        // always close with a clear recap of WHAT changed and WHY.
-        if (hasChanges && finalResponse.length < 40) {
-          emitStatus("📋  [REI] Generating summary...");
-          const fileList = [...new Set([...modifiedFiles, ...createdFiles])];
-          const summaryMessages: ChatMessage[] = [
-            ...currentMessages,
-            { role: "assistant", content: result.content },
-            {
-              role: "user",
-              content:
-                "Task complete. Write a concise recap for the user, plain text only (no tool " +
-                "calls): for EACH file you changed, one line — `<file>: <what you changed and why>`. " +
-                `Files changed this turn: ${fileList.join(", ")}.`,
-            },
-          ];
-          const generated = await provider
-            .completeChat(summaryMessages, { model: modelOverride })
-            .catch(() => "");
-          // Always guarantee a file list, even if the model's recap is weak/failed.
-          finalResponse =
-            generated.trim() ||
-            `Done. Changes applied to:\n${fileList.map((f) => `- ${f}`).join("\n")}`;
-        }
-
-        // Safety net against "said it did something but didn't": the turn applied NOTHING, yet
-        // the model wrote edit-like text (a fenced code block, an XML <edit>, or it kept failing
-        // to emit a real tool call). Without this the user reads the intent prose and assumes the
-        // change was made. Surface a loud, unmissable warning instead.
-        const appliedNothing =
-          modifiedFiles.length === 0 && createdFiles.length === 0;
-        const impliedEdits =
-          formatCorrections > 0 ||
-          looksLikeAttemptedToolCall(result.content) ||
-          /```/.test(result.content);
-        if (appliedNothing && impliedEdits) {
-          finalResponse =
-            `\x1b[1m\x1b[33m⚠️  NO FILE WAS CHANGED.\x1b[0m The model described an edit but never ` +
-            `emitted an \`edit_file\`/\`create_file\` tool call, so nothing was applied to disk. ` +
-            `Re-run the step or rephrase the request.\n\n` +
-            finalResponse;
-        }
+        // Build the final user-facing response: recap-if-terse + "nothing changed" safety net.
+        const finalResponse = await buildFinalResponse({
+          content: result.content,
+          firstTurnExplanation,
+          modifiedFiles: [...virtualFiles.keys()],
+          createdFiles,
+          currentMessages,
+          provider,
+          modelOverride,
+          formatCorrections,
+          emitStatus,
+        });
 
         return finalizeOutcome(
           logger,
@@ -637,55 +578,14 @@ export async function executeAgentTurnWithTools(params: {
 
       // Escalation against the SR mismatch death-loop.
       if (mismatchEscalation) {
-        const { files, mode } = mismatchEscalation;
-        if (mode === "inject") {
-          // Tier 1: hand the model the exact current content so it can copy the
-          // search block verbatim.
-          logger.logInfo(
-            `[tools] auto-injecting file context after repeated search mismatches: ${files.join(", ")}`,
-          );
-          emitStatus(
-            `📄  [REI] Re-sending exact file content so edits match: ${files.join(", ")}`,
-          );
-          // Show the WORKING content (pending virtual edits if any), not stale disk, so the
-          // model's next search block matches the state its edits will actually apply against.
-          const contextMessage =
-            "\n" +
-            (
-              await Promise.all(
-                files.map(
-                  async (f) =>
-                    `--- File: ${f} ---\n\`\`\`\n${await currentContent(f)}\n\`\`\``,
-                ),
-              )
-            ).join("\n\n");
-          currentMessages.push({
-            role: "user",
-            content:
-              "Your edit_file `search` blocks did NOT match the file content exactly. " +
-              "Below is the current, exact content of the file(s). Copy the `search` text " +
-              "VERBATIM from here (including indentation and whitespace), then retry edit_file:\n" +
-              contextMessage,
-          });
-        } else {
-          // Tier 2: it still can't match even with the file in hand. Stop using
-          // edit_file — instruct it to overwrite the whole file via rewrite_file,
-          // which has no exact-match requirement.
-          logger.logInfo(
-            `[tools] escalating to whole-file rewrite after persistent mismatches: ${files.join(", ")}`,
-          );
-          emitStatus(
-            `🔁  [REI] edit_file keeps failing — switching to whole-file rewrite: ${files.join(", ")}`,
-          );
-          currentMessages.push({
-            role: "user",
-            content:
-              `edit_file keeps failing to match the search block for ${files.join(", ")}. ` +
-              "STOP using edit_file for these file(s). Instead call `rewrite_file` with the " +
-              "file path and its COMPLETE corrected content — you do not need to match any " +
-              "search text. Use the exact file content shown above as your starting point.",
-          });
-        }
+        currentMessages.push({
+          role: "user",
+          content: await buildMismatchEscalationMessage(mismatchEscalation, {
+            logger,
+            emitStatus,
+            currentContent,
+          }),
+        });
       }
 
       // Do NOT return here just because we have valid edits — keep looping so the
