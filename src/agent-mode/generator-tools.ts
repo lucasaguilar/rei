@@ -3,26 +3,15 @@
  * Used when the active provider implements completeChatWithTools.
  * Falls back to the XML-based generator if not.
  */
-import * as fs from "fs/promises";
-import * as path from "path";
 import type { ChatMessage } from "../chat/types.js";
 import type { ModelProvider } from "../providers/model-provider.js";
 import type { AgentLogger } from "../core/logger.js";
 import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
 import type { McpRegistry } from "../tools/mcp/mcp-registry.js";
 import { mcpToolsToDefinitions } from "../contracts/tool-definitions.js";
-import {
-  executeCommand,
-  limitCommandOutput,
-} from "../tools/command-executor.js";
-import { searchWeb } from "../tools/search-tool.js";
-import { getWeather, formatWeatherOutput } from "../tools/weather-tool.js";
 import { applyFileEdits } from "../tools/search-replace.js";
 import { startStepSpan, startToolSpan } from "../telemetry/spans.js";
-import { searchMcpTools, SEARCH_K } from "../tools/tool-retriever.js";
 import { getMaxTurns } from "../config/model-runtime.js";
-import { findSkill } from "../skills/skill-loader.js";
-import { resolveWorkspacePath } from "../workspace/file-security.js";
 import {
   finalizeOutcome,
   validateProposedPatches,
@@ -33,6 +22,18 @@ import { setupToolSelection } from "./tools-loop/tool-selection.js";
 import { callModel } from "./tools-loop/call-model.js";
 import { createVirtualFileTree } from "./tools-loop/virtual-file-tree.js";
 import { handleReadFiles } from "./tools-loop/read-files-handler.js";
+import {
+  handleWebSearch,
+  handleWeather,
+  handleRunCommand,
+} from "./tools-loop/builtin-handlers.js";
+import {
+  handleEditFile,
+  handleRewriteFile,
+  handleCreateFile,
+  type EditTask,
+} from "./tools-loop/edit-handlers.js";
+import { handleSearchTools, handleUseSkill } from "./tools-loop/meta-handlers.js";
 
 const MAX_TURNS = getMaxTurns();
 const MAX_TRUNCATION_CONTINUATIONS = 3;
@@ -58,12 +59,6 @@ function looksLikeAttemptedToolCall(content: string): boolean {
   );
 }
 
-interface EditTask {
-  callId: string;
-  edit: AgentSREdit;
-  // rewrite_file: `edit.replace` is the authoritative full content (no search matching).
-  wholeFile?: boolean;
-}
 
 // Beyond this size we don't inline a file's updated content back to the model (avoids
 // bloating the tool result); the model can re-read it if it truly needs the exact state.
@@ -504,6 +499,16 @@ export async function executeAgentTurnWithTools(params: {
       const editTasks: EditTask[] = [];
       const toolResultsMap = new Map<string, string>();
 
+      // Shared context for the edit handlers (they push to editTasks/createdFiles by reference).
+      const editCtx = {
+        workspacePath,
+        logger,
+        emitStatus,
+        resolveTarget,
+        editTasks,
+        createdFiles,
+      };
+
       for (const call of result.toolCalls) {
         let toolResult: string;
 
@@ -541,167 +546,79 @@ export async function executeAgentTurnWithTools(params: {
 
             // ── search_tools (meta-tool) ─────────────────────────────────
             case "search_tools": {
-              const q = (args.query as string) ?? "";
-              const found = searchMcpTools(q, allMcpTools, SEARCH_K);
-              found.forEach((t) => activeMcp.add(t.name));
-              logger.logInfo(`[tools] search_tools: "${q}"`, {
-                found: found.map((t) => t.name),
+              toolResult = handleSearchTools((args.query as string) ?? "", {
+                logger,
+                emitStatus,
+                allMcpTools,
+                activeMcp,
               });
-              emitStatus(`🧰  [REI] Searching tools: ${q}`);
-              toolResult = found.length
-                ? "Loaded these tools — you can now call them directly:\n" +
-                  found
-                    .map((t) => `- ${t.name}: ${t.description ?? ""}`)
-                    .join("\n")
-                : `No tools matched "${q}". Try different keywords.`;
               toolResultsMap.set(call.id, toolResult);
               break;
             }
 
             // ── web_search (built-in) ────────────────────────────────────
             case "web_search": {
-              const query = (args.query as string) ?? "";
-              logger.logInfo(`[tools] web_search: "${query}"`);
-              emitStatus(`🔍  [REI] Searching the web: ${query}`);
-              const results = await searchWeb(query, provider);
-              toolResult = `\n### 🔍 Search Results: ${query}\n${results}\n`;
+              toolResult = await handleWebSearch((args.query as string) ?? "", {
+                logger,
+                emitStatus,
+                provider,
+              });
               toolResultsMap.set(call.id, toolResult);
               break;
             }
 
             // ── weather (built-in) ───────────────────────────────────────
             case "weather": {
-              const location = (args.location as string) ?? "";
-              logger.logInfo(`[tools] weather: "${location}"`);
-              emitStatus(`🌤️  [REI] Weather: ${location}`);
-              const weatherRes = await getWeather(location);
-              toolResult = `\n### 🌤️ Weather: ${location}\n${formatWeatherOutput(weatherRes)}\n`;
+              toolResult = await handleWeather((args.location as string) ?? "", {
+                logger,
+                emitStatus,
+              });
               toolResultsMap.set(call.id, toolResult);
               break;
             }
 
             // ── use_skill (meta-tool) ────────────────────────────────────
             case "use_skill": {
-              const skillName = (args.name as string) ?? "";
-              const skill = findSkill(skills, skillName);
-              logger.logInfo(`[tools] use_skill: "${skillName}"`, {
-                matched: skill?.name ?? null,
+              toolResult = handleUseSkill((args.name as string) ?? "", {
+                logger,
+                emitStatus,
+                skills,
               });
-              emitStatus(
-                `📘  [REI] Loading skill: ${skill?.name ?? skillName}`,
-              );
-              toolResult = skill
-                ? `Skill "${skill.name}" loaded — follow these steps:\n\n${skill.body}`
-                : `No skill named "${skillName}". Available: ${skills.map((s) => s.name).join(", ") || "(none)"}.`;
               toolResultsMap.set(call.id, toolResult);
               break;
             }
 
             // ── edit_file ────────────────────────────────────────────────
             case "edit_file": {
-              const file = resolveTarget(args.file);
-              // Validate args up front: a missing search/replace would otherwise crash the
-              // apply with `undefined.replace`. Return a precise error so the model retries
-              // with both fields (common when it batches many edits and drops one).
-              if (
-                typeof args.search !== "string" ||
-                typeof args.replace !== "string"
-              ) {
-                const missing = [
-                  typeof args.search !== "string" ? "search" : null,
-                  typeof args.replace !== "string" ? "replace" : null,
-                ]
-                  .filter(Boolean)
-                  .join(" and ");
-                toolResultsMap.set(
-                  call.id,
-                  `ERROR: edit_file to ${file} is missing the "${missing}" argument. ` +
-                    `Both "search" (exact text to find) and "replace" (new text) are required strings. ` +
-                    `Re-send this edit_file call with both fields filled in (keep using edit_file — ` +
-                    `do NOT switch to rewriting the whole file).`,
-                );
-                hasToolFailure = true;
-                break;
-              }
-              const edit: AgentSREdit = {
-                file,
-                search: args.search,
-                replace: args.replace,
-              };
-              logger.logInfo(`[tools] edit_file: ${edit.file}`);
-              emitStatus(`🛠️  [REI] Editing: ${edit.file}`);
-              editTasks.push({ callId: call.id, edit });
+              const r = handleEditFile(args, call.id, editCtx);
+              if (r.toolResult) toolResultsMap.set(call.id, r.toolResult);
+              if (r.failed) hasToolFailure = true;
               break;
             }
 
             // ── rewrite_file ─────────────────────────────────────────────
-            // Whole-file overwrite. REI fills in the `search` with the EXACT current
-            // file content (read from disk), so the model never has to reproduce it —
-            // this sidesteps the search-mismatch problem entirely. The edit still goes
-            // through the normal validation pipeline as a search→replace.
             case "rewrite_file": {
-              const file = resolveTarget(args.file);
-              const newContent = (args.content as string) ?? "";
-              const absPath = resolveWorkspacePath(file, workspacePath);
-              const current = await fs
-                .readFile(absPath, "utf-8")
-                .catch(() => null);
-              logger.logInfo(`[tools] rewrite_file: ${file}`);
-              emitStatus(`📝  [REI] Rewriting whole file: ${file}`);
-              if (current === null) {
-                // Doesn't exist yet — just write it (like create_file).
-                await fs.mkdir(path.dirname(absPath), { recursive: true });
-                await fs.writeFile(absPath, newContent, "utf-8");
-                createdFiles.push(file);
-                toolResultsMap.set(call.id, `OK: ${file} created`);
-              } else {
-                // Authoritative whole-file overwrite. In the virtual tree this simply REPLACES
-                // the file's accumulated content (superseding any prior edits to it) — no search
-                // matching needed, so it can't "poison" later edits.
-                editTasks.push({
-                  callId: call.id,
-                  edit: { file, search: current, replace: newContent },
-                  wholeFile: true,
-                });
-              }
+              const r = await handleRewriteFile(args, call.id, editCtx);
+              if (r.toolResult) toolResultsMap.set(call.id, r.toolResult);
+              if (r.failed) hasToolFailure = true;
               break;
             }
 
             // ── create_file ──────────────────────────────────────────────
             case "create_file": {
-              const file = resolveTarget(args.file);
-              const filePath = resolveWorkspacePath(file, workspacePath);
-              const exists = await fs
-                .stat(filePath)
-                .then(() => true)
-                .catch(() => false);
-              emitStatus(`📂  [REI] Creating: ${file}`);
-              if (exists) {
-                toolResult = `SKIPPED: ${file} already exists — use edit_file to modify it (or rewrite_file to overwrite it entirely)`;
-              } else {
-                await fs.mkdir(path.dirname(filePath), { recursive: true });
-                await fs.writeFile(filePath, args.content as string, "utf-8");
-                logger.logInfo(`[tools] create_file: ${file}`);
-                createdFiles.push(file);
-                toolResult = `OK: ${file} created`;
-              }
-              toolResultsMap.set(call.id, toolResult);
+              const r = await handleCreateFile(args, editCtx);
+              if (r.toolResult) toolResultsMap.set(call.id, r.toolResult);
+              if (r.failed) hasToolFailure = true;
               break;
             }
 
             // ── run_command ──────────────────────────────────────────────
             case "run_command": {
-              const cmd = args.command as string;
-              logger.logInfo(`[tools] run_command: ${cmd}`);
-              emitStatus(`💻  [REI] Running: ${cmd}`);
-              const cmdResult = await executeCommand(cmd, workspacePath);
-              logger.logCommandExecution(cmd, cmdResult);
-              const stdout = limitCommandOutput(cmdResult.stdout ?? "");
-              const stderr = limitCommandOutput(cmdResult.stderr ?? "");
-              toolResult =
-                `Exit: ${cmdResult.exitCode}\n` +
-                  (stdout ? `Stdout:\n${stdout}\n` : "") +
-                  (stderr ? `Stderr:\n${stderr}\n` : "") || "(no output)";
+              toolResult = await handleRunCommand(args.command as string, {
+                logger,
+                emitStatus,
+                workspacePath,
+              });
               toolResultsMap.set(call.id, toolResult);
               break;
             }
