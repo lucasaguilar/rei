@@ -38,13 +38,11 @@ import {
   CREATED_FILES_MARKER,
   type ExecutionResult,
 } from "./helpers/patch-helpers.js";
-import { streamTurnWithInterception } from "./helpers/token-streamer.js";
+import { streamWithContinuation } from "./helpers/stream-with-continuation.js";
+import { injectRequestedFiles } from "./helpers/inject-requested-files.js";
 import { getMaxTurns } from "../config/model-runtime.js";
 
 const MAX_TURNS = getMaxTurns();
-
-/** Max consecutive truncation continuations before giving up. */
-const MAX_TRUNCATION_CONTINUATIONS = 3;
 
 /**
  * Builds a human-readable failure report when the agent loop exhausts MAX_TURNS
@@ -95,12 +93,6 @@ function buildMaxTurnsFailureMessage(params: {
 
   return lines.join("\n");
 }
-
-/** Injected when the model's previous response was cut off by the token limit. */
-const TRUNCATION_CONTINUATION =
-  "Your previous response was cut off by the output token limit. " +
-  "Continue EXACTLY from where you left off — do NOT repeat, summarize, or restart. " +
-  "Just continue the text as one uninterrupted response.";
 
 export async function executeAgentTurn(params: {
   provider: ModelProvider;
@@ -181,46 +173,17 @@ export async function executeAgentTurn(params: {
     // the llm-call / tool spans created while this iteration runs nest under it.
     const endStep = startStepSpan(loopCount - 1);
     try {
-      // 1. Ask the LLM — accumulate continuations if truncated
-      let finishReason = "stop";
-      let rawResponse = await streamTurnWithInterception({
+      // 1. Ask the LLM — accumulate continuations if truncated (model hit output token limit)
+      const streamed = await streamWithContinuation({
         provider,
         messages: currentMessages,
-        model: modelOverride,
+        modelOverride,
         onChunk,
-        onFinish: (r) => {
-          finishReason = r;
-        },
+        logger,
+        truncationCount,
       });
-
-      // Auto-continue if truncated (model hit output token limit)
-      while (
-        finishReason === "length" &&
-        truncationCount < MAX_TRUNCATION_CONTINUATIONS
-      ) {
-        truncationCount++;
-        logger.logInfo(
-          `[truncation] Response cut off (attempt ${truncationCount}/${MAX_TRUNCATION_CONTINUATIONS}), continuing...`,
-        );
-        currentMessages = [
-          ...currentMessages,
-          { role: "assistant", content: cleanResponseForHistory(rawResponse) },
-          { role: "user", content: TRUNCATION_CONTINUATION },
-        ];
-        finishReason = "stop";
-        const continuation = await streamTurnWithInterception({
-          provider,
-          messages: currentMessages,
-          model: modelOverride,
-          onChunk,
-          onFinish: (r) => {
-            finishReason = r;
-          },
-        });
-        rawResponse = rawResponse + continuation;
-        // Remove the continuation messages we injected (keep history clean)
-        currentMessages = currentMessages.slice(0, currentMessages.length - 2);
-      }
+      const rawResponse = streamed.rawResponse;
+      truncationCount = streamed.truncationCount;
 
       lastRawResponse = rawResponse;
       logger.logInfo("Raw LLM Response", { rawResponse });
@@ -296,48 +259,16 @@ export async function executeAgentTurn(params: {
         continue;
       }
 
-      // 2. Did the model request more files?
+      // 2. Did the model request more files? (dedup unchanged files — still in history)
       const fileRequests = extractFileRequests(rawResponse);
       if (fileRequests.length > 0) {
-        logger.logInfo(`Agent requested files: ${fileRequests.join(", ")}`);
-        // Dedup: if a file's content is unchanged since we last served it, point the model
-        // back to it instead of re-dumping the whole thing (it's still in history).
-        const parts: string[] = [];
-        for (const f of fileRequests) {
-          const block = (
-            await buildFileContextMessage(workspacePath, [f])
-          ).trimStart();
-          if (alreadyProvided.get(f) === block) {
-            parts.push(
-              `--- File: ${f} ---\n(unchanged since you last read it above — reuse that content; do not re-read)`,
-            );
-            continue;
-          }
-          alreadyProvided.set(f, block);
-          parts.push(block);
-        }
-        const contextMessage = "\n" + parts.join("\n\n");
-
-        const rfId = generateXmlToolCallId("request_files");
-        currentMessages.push({
-          role: "assistant",
-          content: cleanResponseForHistory(rawResponse),
-          tool_calls: [
-            {
-              id: rfId,
-              type: "function",
-              function: {
-                name: "request_files",
-                arguments: JSON.stringify({ files: fileRequests }),
-              },
-            },
-          ],
-        });
-        currentMessages.push({
-          role: "tool",
-          tool_call_id: rfId,
-          name: "request_files",
-          content: contextMessage,
+        await injectRequestedFiles({
+          fileRequests,
+          rawResponse,
+          workspacePath,
+          currentMessages,
+          logger,
+          alreadyProvided,
         });
         continue;
       }
@@ -782,43 +713,16 @@ export async function executeAgentTurnWholefile(params: {
     // llm-call / tool spans created while this iteration runs nest under it.
     const endStep = startStepSpan(loopCount - 1);
     try {
-      let finishReason = "stop";
-      let rawResponse = await streamTurnWithInterception({
+      const streamed = await streamWithContinuation({
         provider,
         messages: currentMessages,
-        model: modelOverride,
+        modelOverride,
         onChunk,
-        onFinish: (r) => {
-          finishReason = r;
-        },
+        logger,
+        truncationCount,
       });
-
-      while (
-        finishReason === "length" &&
-        truncationCount < MAX_TRUNCATION_CONTINUATIONS
-      ) {
-        truncationCount++;
-        logger.logInfo(
-          `[truncation] Response cut off (attempt ${truncationCount}/${MAX_TRUNCATION_CONTINUATIONS}), continuing...`,
-        );
-        currentMessages = [
-          ...currentMessages,
-          { role: "assistant", content: cleanResponseForHistory(rawResponse) },
-          { role: "user", content: TRUNCATION_CONTINUATION },
-        ];
-        finishReason = "stop";
-        const continuation = await streamTurnWithInterception({
-          provider,
-          messages: currentMessages,
-          model: modelOverride,
-          onChunk,
-          onFinish: (r) => {
-            finishReason = r;
-          },
-        });
-        rawResponse = rawResponse + continuation;
-        currentMessages = currentMessages.slice(0, currentMessages.length - 2);
-      }
+      const rawResponse = streamed.rawResponse;
+      truncationCount = streamed.truncationCount;
 
       lastRawResponse = rawResponse;
       logger.logInfo("Raw LLM Response (wholefile mode)", { rawResponse });
@@ -848,34 +752,15 @@ export async function executeAgentTurnWholefile(params: {
         );
       }
 
-      // 1. <request_files> — inject file contents and continue
+      // 1. <request_files> — inject file contents and continue (no dedup in wholefile mode)
       const fileRequests = extractFileRequests(rawResponse);
       if (fileRequests.length > 0) {
-        logger.logInfo(`Agent requested files: ${fileRequests.join(", ")}`);
-        const contextMessage = await buildFileContextMessage(
-          workspacePath,
+        await injectRequestedFiles({
           fileRequests,
-        );
-        const rfId2 = generateXmlToolCallId("request_files");
-        currentMessages.push({
-          role: "assistant",
-          content: cleanResponseForHistory(rawResponse),
-          tool_calls: [
-            {
-              id: rfId2,
-              type: "function",
-              function: {
-                name: "request_files",
-                arguments: JSON.stringify({ files: fileRequests }),
-              },
-            },
-          ],
-        });
-        currentMessages.push({
-          role: "tool",
-          tool_call_id: rfId2,
-          name: "request_files",
-          content: contextMessage,
+          rawResponse,
+          workspacePath,
+          currentMessages,
+          logger,
         });
         continue;
       }
