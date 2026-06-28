@@ -39,7 +39,10 @@ describe("prepareExtractedText", () => {
   it("saves a large doc INSIDE the workspace (visible ocr/), not next to the source", async () => {
     const ws = path.join(tmpDir, "workspace");
     fs.mkdirSync(ws);
-    const big = "A".repeat(500);
+    // Well above the 100-char test threshold so the preview is genuinely a fraction of the
+    // full text (mirrors the real 40k threshold; a value near the threshold isn't representative
+    // because the fixed TRUNCATED-note overhead would dominate the injected length).
+    const big = "A".repeat(5000);
     const r = await prepareExtractedText(src, big, 84, { workspacePath: ws });
     expect(r.truncated).toBe(true);
     // file lives under <workspace>/ocr (VISIBLE → @-referenceable), NOT next to the source
