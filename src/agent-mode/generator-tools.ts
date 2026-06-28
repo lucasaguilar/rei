@@ -21,8 +21,7 @@ import { callModel } from "./tools-loop/call-model.js";
 import { createVirtualFileTree } from "./tools-loop/virtual-file-tree.js";
 import { dispatchToolCalls } from "./tools-loop/dispatch-tool-calls.js";
 import { applyEditBatch, setEditResults } from "./tools-loop/apply-edit-batch.js";
-import { buildFinalResponse } from "./tools-loop/finalize-response.js";
-import { looksLikeAttemptedToolCall } from "./tools-loop/tool-call-detection.js";
+import { handleTextResponse } from "./tools-loop/handle-text-response.js";
 import { buildMismatchEscalationMessage } from "./tools-loop/mismatch-escalation.js";
 
 // Re-exported for back-compat (it moved into tools-loop/apply-edit-batch during the Phase 2 refactor).
@@ -125,14 +124,10 @@ export async function executeAgentTurnWithTools(params: {
   ]);
   let loopCount = 0;
   let firstTurnExplanation = "";
-  // Caps the number of format-correction nudges when the model emits a tool call
-  // as text/XML instead of via the native function-calling interface.
+  // Format-correction nudges (model emitted a tool call as text/XML) and final-verify
+  // self-correction retries — both capped inside handleTextResponse, threaded across turns here.
   let formatCorrections = 0;
-  const MAX_FORMAT_CORRECTIONS = 2;
-  // Caps how many times we bounce a failing FINAL verify back to the model for
-  // self-correction before giving up (and applying with a not-verified warning).
   let verifyRetries = 0;
-  const MAX_VERIFY_RETRIES = 2;
   // Caps how many times a turn that truncated mid-output (hit the output-token cap before
   // emitting a tool call — common with thinking models) is continued back into the loop.
   let truncationContinuations = 0;
@@ -262,103 +257,33 @@ export async function executeAgentTurnWithTools(params: {
       }
 
       // ── No tool calls ──────────────────────────────────────────────────────
+      // The model returned plain text: either a faked-as-text tool call (nudge + continue), a
+      // completion that fails final verify (self-correct + continue), or a genuine finish.
       if (result.toolCalls.length === 0) {
-        // The model sometimes emits a tool call as TEXT/XML (e.g. "<read_files>...")
-        // instead of using the native function-calling interface. That would be lost
-        // as a plain-text answer. Nudge it back to the proper format and retry.
-        if (
-          looksLikeAttemptedToolCall(result.content) &&
-          formatCorrections < MAX_FORMAT_CORRECTIONS &&
-          loopCount < MAX_TURNS
-        ) {
-          formatCorrections++;
-          logger.logInfo("[tools] format-correction", {
-            attempt: formatCorrections,
-            contentPreview: result.content.slice(0, 120),
-          });
-          currentMessages = [
-            ...currentMessages,
-            { role: "assistant", content: result.content },
-            {
-              role: "user",
-              content:
-                "You emitted a tool call as text/XML, which is not executable. " +
-                "Do NOT write tool calls as text or XML tags. Use the native function-calling " +
-                "interface to invoke the tools (read_files, edit_file, create_file, run_command) directly. " +
-                "Retry the same action now using a proper tool call.",
-            },
-          ];
-          continue;
-        }
-
-        // Genuine plain-text response = the model is done. Before finishing, run a
-        // FINAL verify of the whole queued set (catches cross-edit breakage and any
-        // create_file content that no per-batch check covered). If it fails and we
-        // still have budget, bounce the diagnostics back for one more self-correction.
-        let finalVerified: boolean | undefined = undefined;
-        const finalEdits = await virtualEdits();
-        if (finalEdits.length > 0) {
-          const finalCheck = await validateProposedPatches({
-            workspacePath,
-            // direct mode already wrote edits to disk → verify the workspace as-is (empty edit
-            // set = sandbox copy of current disk). sandbox mode applies the virtual tree.
-            edits: directMode ? [] : finalEdits,
-            loopCount,
-            logger,
-          });
-          finalVerified = finalCheck.success;
-          if (
-            !finalCheck.success &&
-            verifyRetries < MAX_VERIFY_RETRIES &&
-            loopCount < MAX_TURNS
-          ) {
-            verifyRetries++;
-            logger.logInfo(
-              "[tools] final-verify failed — requesting self-correction",
-              {
-                attempt: verifyRetries,
-              },
-            );
-            emitStatus(
-              `🔁  [REI] Combined changes don't compile — asking the model to fix`,
-            );
-            currentMessages.push(
-              { role: "assistant", content: result.content },
-              {
-                role: "user",
-                content:
-                  "Before finishing: your combined changes do NOT compile.\n" +
-                  `${finalCheck.feedback ?? "(no diagnostics)"}\n` +
-                  "Fix the affected file(s) with edit_file, then finish with a brief summary.",
-              },
-            );
-            continue;
-          }
-        }
-
-        // Build the final user-facing response: recap-if-terse + "nothing changed" safety net.
-        const finalResponse = await buildFinalResponse({
+        const outcome = await handleTextResponse({
           content: result.content,
-          firstTurnExplanation,
-          modifiedFiles: [...virtualFiles.keys()],
-          createdFiles,
           currentMessages,
+          loopCount,
+          maxTurns: MAX_TURNS,
+          formatCorrections,
+          verifyRetries,
+          workspacePath,
+          directMode,
+          logger,
+          emitStatus,
           provider,
           modelOverride,
-          formatCorrections,
-          emitStatus,
+          firstTurnExplanation,
+          virtualFiles,
+          virtualEdits,
+          createdFiles,
+          appendCreatedSummary,
         });
-
-        return finalizeOutcome(
-          logger,
-          {
-            response: appendCreatedSummary(finalResponse),
-            validProposedPatches: finalEdits,
-            verified: finalVerified,
-          },
-          finalEdits.length,
-          finalEdits.length,
-        );
+        if (outcome.action === "finalize") return outcome.result;
+        currentMessages = outcome.messages;
+        formatCorrections = outcome.formatCorrections;
+        verifyRetries = outcome.verifyRetries;
+        continue;
       }
 
       // ── Process tool calls ─────────────────────────────────────────────────
