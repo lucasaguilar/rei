@@ -8,7 +8,7 @@ import type { ModelProvider } from "../providers/model-provider.js";
 import type { AgentLogger } from "../core/logger.js";
 import type { McpRegistry } from "../tools/mcp/mcp-registry.js";
 import { mcpToolsToDefinitions } from "../contracts/tool-definitions.js";
-import { startStepSpan, startToolSpan } from "../telemetry/spans.js";
+import { startStepSpan } from "../telemetry/spans.js";
 import { getMaxTurns } from "../config/model-runtime.js";
 import {
   finalizeOutcome,
@@ -19,19 +19,7 @@ import {
 import { setupToolSelection } from "./tools-loop/tool-selection.js";
 import { callModel } from "./tools-loop/call-model.js";
 import { createVirtualFileTree } from "./tools-loop/virtual-file-tree.js";
-import { handleReadFiles } from "./tools-loop/read-files-handler.js";
-import {
-  handleWebSearch,
-  handleWeather,
-  handleRunCommand,
-} from "./tools-loop/builtin-handlers.js";
-import {
-  handleEditFile,
-  handleRewriteFile,
-  handleCreateFile,
-  type EditTask,
-} from "./tools-loop/edit-handlers.js";
-import { handleSearchTools, handleUseSkill } from "./tools-loop/meta-handlers.js";
+import { dispatchToolCalls } from "./tools-loop/dispatch-tool-calls.js";
 import { applyEditBatch, setEditResults } from "./tools-loop/apply-edit-batch.js";
 import { buildFinalResponse } from "./tools-loop/finalize-response.js";
 import { looksLikeAttemptedToolCall } from "./tools-loop/tool-call-detection.js";
@@ -383,159 +371,27 @@ export async function executeAgentTurnWithTools(params: {
         ...(result.reasoning ? { reasoning_content: result.reasoning } : {}),
       });
 
-      let hasToolFailure = false;
-
-      // Track edit tasks and all tool results by call ID to preserve correct response order
-      const editTasks: EditTask[] = [];
-      const toolResultsMap = new Map<string, string>();
-
-      // Shared context for the edit handlers (they push to editTasks/createdFiles by reference).
-      const editCtx = {
-        workspacePath,
-        logger,
-        emitStatus,
-        resolveTarget,
-        editTasks,
-        createdFiles,
-      };
-
-      for (const call of result.toolCalls) {
-        let toolResult: string;
-
-        // `tool.<name>` span for each call. run_command and mcp:* tools are already traced at
-        // their executors (executeCommand / McpRegistry.dispatch), so skip them here to avoid
-        // double-wrapping; the inline built-ins have no shared executor and are traced here.
-        const endTool =
-          call.function.name === "run_command" ||
-          call.function.name.startsWith("mcp:")
-            ? null
-            : startToolSpan(call.function.name, {
-                arguments: call.function.arguments,
-              });
-        try {
-          const args = JSON.parse(call.function.arguments) as Record<
-            string,
-            unknown
-          >;
-
-          switch (call.function.name) {
-            // ── read_files ───────────────────────────────────────────────
-            case "read_files": {
-              toolResult = await handleReadFiles((args.paths as string[]) ?? [], {
-                workspacePath,
-                logger,
-                emitStatus,
-                toRel,
-                currentContent,
-                virtualFiles,
-                alreadyProvided,
-              });
-              toolResultsMap.set(call.id, toolResult);
-              break;
-            }
-
-            // ── search_tools (meta-tool) ─────────────────────────────────
-            case "search_tools": {
-              toolResult = handleSearchTools((args.query as string) ?? "", {
-                logger,
-                emitStatus,
-                allMcpTools,
-                activeMcp,
-              });
-              toolResultsMap.set(call.id, toolResult);
-              break;
-            }
-
-            // ── web_search (built-in) ────────────────────────────────────
-            case "web_search": {
-              toolResult = await handleWebSearch((args.query as string) ?? "", {
-                logger,
-                emitStatus,
-                provider,
-              });
-              toolResultsMap.set(call.id, toolResult);
-              break;
-            }
-
-            // ── weather (built-in) ───────────────────────────────────────
-            case "weather": {
-              toolResult = await handleWeather((args.location as string) ?? "", {
-                logger,
-                emitStatus,
-              });
-              toolResultsMap.set(call.id, toolResult);
-              break;
-            }
-
-            // ── use_skill (meta-tool) ────────────────────────────────────
-            case "use_skill": {
-              toolResult = handleUseSkill((args.name as string) ?? "", {
-                logger,
-                emitStatus,
-                skills,
-              });
-              toolResultsMap.set(call.id, toolResult);
-              break;
-            }
-
-            // ── edit_file ────────────────────────────────────────────────
-            case "edit_file": {
-              const r = handleEditFile(args, call.id, editCtx);
-              if (r.toolResult) toolResultsMap.set(call.id, r.toolResult);
-              if (r.failed) hasToolFailure = true;
-              break;
-            }
-
-            // ── rewrite_file ─────────────────────────────────────────────
-            case "rewrite_file": {
-              const r = await handleRewriteFile(args, call.id, editCtx);
-              if (r.toolResult) toolResultsMap.set(call.id, r.toolResult);
-              if (r.failed) hasToolFailure = true;
-              break;
-            }
-
-            // ── create_file ──────────────────────────────────────────────
-            case "create_file": {
-              const r = await handleCreateFile(args, editCtx);
-              if (r.toolResult) toolResultsMap.set(call.id, r.toolResult);
-              if (r.failed) hasToolFailure = true;
-              break;
-            }
-
-            // ── run_command ──────────────────────────────────────────────
-            case "run_command": {
-              toolResult = await handleRunCommand(args.command as string, {
-                logger,
-                emitStatus,
-                workspacePath,
-              });
-              toolResultsMap.set(call.id, toolResult);
-              break;
-            }
-
-            default: {
-              if (call.function.name.startsWith("mcp:") && mcpRegistry) {
-                // Strip the "mcp:" namespace prefix added by mcpToolsToDefinitions before
-                // dispatching — the registry key is "serverName/toolName" not "mcp:...".
-                const qualifiedName = call.function.name.slice(4);
-                logger.logInfo(`[tools] mcp: ${qualifiedName}`);
-                emitStatus(`🔧  [REI] Tool: ${qualifiedName}`);
-                toolResult = await mcpRegistry.dispatch(qualifiedName, args);
-              } else {
-                toolResult = `ERROR: Unknown tool "${call.function.name}"`;
-                hasToolFailure = true;
-              }
-              toolResultsMap.set(call.id, toolResult);
-            }
-          }
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          toolResultsMap.set(call.id, `ERROR: ${msg}`);
-          hasToolFailure = true;
-        } finally {
-          endTool?.();
-        }
-      }
+      // Execute every tool call in this turn (spans + arg-parse + dispatch to the extracted
+      // handlers). Edits are only QUEUED into editTasks here; we apply them as a batch below.
+      let { hasToolFailure, editTasks, toolResultsMap } = await dispatchToolCalls(
+        result.toolCalls,
+        {
+          workspacePath,
+          logger,
+          emitStatus,
+          provider,
+          mcpRegistry,
+          toRel,
+          currentContent,
+          virtualFiles,
+          alreadyProvided,
+          allMcpTools,
+          activeMcp,
+          skills,
+          resolveTarget,
+          createdFiles,
+        },
+      );
 
       // Apply this turn's edits onto the CURRENT virtual content (cumulative), per file & in
       // order; then validate the WHOLE virtual tree. This catches cross-file breakage (e.g. an
