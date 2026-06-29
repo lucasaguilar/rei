@@ -44,59 +44,10 @@ import {
 } from "./helpers/patch-helpers.js";
 import { streamWithContinuation } from "./helpers/stream-with-continuation.js";
 import { injectRequestedFiles } from "./helpers/inject-requested-files.js";
+import { buildMaxTurnsFailureMessage } from "./helpers/max-turns-failure.js";
 import { getMaxTurns } from "../config/model-runtime.js";
 
 const MAX_TURNS = getMaxTurns();
-
-/**
- * Builds a human-readable failure report when the agent loop exhausts MAX_TURNS
- * without producing valid edits. Explains what happened and gives actionable suggestions.
- */
-function buildMaxTurnsFailureMessage(params: {
-  loopCount: number;
-  firstTurnExplanation: string;
-  lastValidationError: string;
-  failedEdits: AgentSREdit[];
-}): string {
-  const { loopCount, firstTurnExplanation, lastValidationError, failedEdits } =
-    params;
-
-  const lines: string[] = [
-    `⚠️ REI could not complete the task after ${loopCount} attempts.`,
-    "",
-  ];
-
-  if (firstTurnExplanation) {
-    lines.push("**What was planned:**");
-    lines.push(firstTurnExplanation);
-    lines.push("");
-  }
-
-  if (lastValidationError) {
-    lines.push("**Why it failed:**");
-    lines.push(lastValidationError);
-    lines.push("");
-  }
-
-  if (failedEdits.length > 0) {
-    const files = [...new Set(failedEdits.map((e) => e.file))];
-    lines.push(`**Files involved:** ${files.join(", ")}`);
-    lines.push("");
-  }
-
-  lines.push("**What to try next:**");
-  lines.push('- Ask REI to re-read the files first: *"Read [file] and retry"*');
-  lines.push(
-    "- Switch to wholefile mode: set `AGENT_EDIT_FORMAT=wholefile` in your .env",
-  );
-  if (loopCount >= MAX_TURNS) {
-    lines.push(
-      `- Increase the turn limit: set \`REI_MAX_TURNS=${MAX_TURNS + 3}\` in your .env`,
-    );
-  }
-
-  return lines.join("\n");
-}
 
 export async function executeAgentTurn(params: {
   provider: ModelProvider;
@@ -366,6 +317,7 @@ export async function executeAgentTurn(params: {
                 {
                   response: buildMaxTurnsFailureMessage({
                     loopCount,
+                    maxTurns: MAX_TURNS,
                     firstTurnExplanation,
                     lastValidationError:
                       `⚠️ Loop detected: the same validation error repeated ${consecutiveIdenticalErrors} times without progress.\n\n` +
@@ -462,6 +414,7 @@ export async function executeAgentTurn(params: {
             {
               response: buildMaxTurnsFailureMessage({
                 loopCount,
+                maxTurns: MAX_TURNS,
                 firstTurnExplanation,
                 lastValidationError,
                 failedEdits: lastEdits,
@@ -656,6 +609,7 @@ export async function executeAgentTurn(params: {
     {
       response: buildMaxTurnsFailureMessage({
         loopCount,
+        maxTurns: MAX_TURNS,
         firstTurnExplanation,
         lastValidationError:
           lastValidationError ||
@@ -1041,6 +995,7 @@ export async function executeAgentTurnWholefile(params: {
     {
       response: buildMaxTurnsFailureMessage({
         loopCount,
+        maxTurns: MAX_TURNS,
         firstTurnExplanation,
         lastValidationError:
           "The agent loop exhausted all turns without writing files.",
