@@ -2,7 +2,6 @@ import type { ChatSession } from "../chat/types.js";
 import type { ModelProvider } from "../providers/model-provider.js";
 import type { FileMeta } from "../workspace/workspace-scanner.js";
 import type { AgentLogger } from "../core/logger.js";
-import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
 import { cleanResponseForHistory } from "../core/helpers/turn-message.helpers.js";
 import {
   extractFileRequests,
@@ -10,7 +9,6 @@ import {
   extractWholeFileEdits,
   extractCommandRequests,
   extractToolCalls,
-  formatSREditsForLog,
 } from "./response-handler.js";
 import { executeToolCallsFromResponse } from "../core/helpers/action-executor.js";
 import type { McpRegistry } from "../tools/mcp/mcp-registry.js";
@@ -31,12 +29,9 @@ import {
 } from "../tools/compile-check-core.js";
 
 // Helper imports
-import { findAdditionalCallerFiles } from "./helpers/contract-helper.js";
 import {
-  buildFileContextMessage,
   finalizeOutcome,
   handleCreateFileBlocks,
-  validateProposedPatches,
   stripAllActionTags,
   generateXmlToolCallId,
   CREATED_FILES_MARKER,
@@ -45,6 +40,10 @@ import {
 import { streamWithContinuation } from "./helpers/stream-with-continuation.js";
 import { injectRequestedFiles } from "./helpers/inject-requested-files.js";
 import { buildMaxTurnsFailureMessage } from "./helpers/max-turns-failure.js";
+import {
+  handleSrEdits,
+  createSrEditState,
+} from "./helpers/handle-sr-edits.js";
 import { getMaxTurns } from "../config/model-runtime.js";
 
 const MAX_TURNS = getMaxTurns();
@@ -87,16 +86,11 @@ export async function executeAgentTurn(params: {
 
   // Track last known state for failure recovery
   let lastRawResponse = "";
-  let lastEdits: AgentSREdit[] = [];
-  let lastValidationError = "";
-  // Track search mismatch failures per file (not globally) to detect when a specific file
-  // is stuck — after 2 consecutive failures in the same file, inject its full content.
-  const searchMismatchByFile = new Map<string, number>();
-  // Track consecutive identical validation errors → early termination after 3 identical failures
-  let consecutiveIdenticalErrors = 0;
-  let previousValidationError = "";
   let lastCmdSignature = "";
-  const autoInjectedCallerFiles = new Set<string>();
+  // Search/replace edit-handling state (last edits, validation-error streaks, per-file search
+  // mismatches, injected caller files). Mutated by handleSrEdits; lastEdits/lastValidationError are
+  // also read below to build the loop-exhausted failure message.
+  const srState = createSrEditState();
   let firstTurnExplanation = "";
   // Accumulates files created via <create> across loop iterations so we can
   // surface them to the user (otherwise successful creates are invisible).
@@ -229,219 +223,21 @@ export async function executeAgentTurn(params: {
       // 3. Did the model provide edits?
       const edits = extractSREdits(rawResponse);
       if (edits.length > 0) {
-        lastEdits = edits;
-        const previews = formatSREditsForLog(edits);
-        logger.logSREditsParsed({
-          turnLoop: loopCount,
-          count: edits.length,
-          files: [...new Set(edits.map((edit) => edit.file))],
-          previews,
-        });
-        logger.logInfo(
-          `Agent proposed ${edits.length} edits. Running sandbox validation...`,
-          { previews },
-        );
-
-        const { callerFiles, changedSymbols } = findAdditionalCallerFiles({
+        const outcome = await handleSrEdits({
+          edits,
+          rawResponse,
           workspacePath,
           scannedFiles,
-          edits,
-          alreadyInjectedFiles: autoInjectedCallerFiles,
-        });
-
-        if (callerFiles.length > 0) {
-          callerFiles.forEach((file) => autoInjectedCallerFiles.add(file));
-          logger.logInfo(
-            `Auto-injecting caller context for contract changes: ${callerFiles.join(", ")}`,
-            { changedSymbols },
-          );
-          const contextMessage = await buildFileContextMessage(
-            workspacePath,
-            callerFiles,
-          );
-
-          currentMessages.push({
-            role: "assistant",
-            content: cleanResponseForHistory(rawResponse),
-          });
-          currentMessages.push({
-            role: "user",
-            content:
-              `Your proposed edits change public method or function contracts (${changedSymbols.join(", ")}). ` +
-              `You must update known consumers before finalizing the patch.\n\n` +
-              `Here are caller files that reference those symbols:\n${contextMessage}\n\n` +
-              `Please reply with a complete set of corrected <edit> tags covering both the declaration changes and all affected consumers.`,
-          });
-          continue;
-        }
-
-        const valResult = await validateProposedPatches({
-          workspacePath,
-          edits,
           loopCount,
+          maxTurns: MAX_TURNS,
           logger,
+          currentMessages,
+          firstTurnExplanation,
+          getFinalResponse,
+          state: srState,
         });
-
-        if (!valResult.success) {
-          lastValidationError = valResult.feedback || "Validation failed";
-          const mismatchOnly = valResult.mismatchOnly;
-
-          // Track search mismatch failures per file (not globally). If mismatchOnly, increment
-          // counters for edited files; if compile error, reset them (different error type).
-          const editedFiles = [...new Set(edits.map((e) => e.file))];
-          if (mismatchOnly) {
-            editedFiles.forEach((file) => {
-              searchMismatchByFile.set(
-                file,
-                (searchMismatchByFile.get(file) ?? 0) + 1,
-              );
-            });
-          } else {
-            // Compile error (not search mismatch) → reset search mismatch counters
-            editedFiles.forEach((file) => searchMismatchByFile.delete(file));
-          }
-
-          // Early termination: if the SAME validation error occurs 3+ times consecutively, the
-          // model is stuck in a loop without making progress. Bail out instead of burning turns.
-          if (
-            lastValidationError === previousValidationError &&
-            previousValidationError
-          ) {
-            consecutiveIdenticalErrors++;
-            if (consecutiveIdenticalErrors >= 3) {
-              logger.logInfo(
-                `Early termination: identical validation error repeated ${consecutiveIdenticalErrors} times.`,
-              );
-              return finalizeOutcome(
-                logger,
-                {
-                  response: buildMaxTurnsFailureMessage({
-                    loopCount,
-                    maxTurns: MAX_TURNS,
-                    firstTurnExplanation,
-                    lastValidationError:
-                      `⚠️ Loop detected: the same validation error repeated ${consecutiveIdenticalErrors} times without progress.\n\n` +
-                      lastValidationError,
-                    failedEdits: lastEdits,
-                  }),
-                  validProposedPatches: [],
-                  failed: true,
-                  failedProposedPatches: lastEdits,
-                  lastValidationError,
-                },
-                lastEdits.length,
-                0,
-              );
-            }
-          } else {
-            consecutiveIdenticalErrors = 0;
-          }
-          previousValidationError = lastValidationError;
-
-          if (loopCount < MAX_TURNS) {
-            logger.logInfo(
-              `Virtual validation failed. Feeding back errors (Turn ${loopCount}/${MAX_TURNS}).`,
-            );
-            currentMessages.push({
-              role: "assistant",
-              content: cleanResponseForHistory(rawResponse),
-            });
-
-            // Find files that failed search mismatch 2+ times → inject their content + suggest rewrite_file
-            const stuckFiles = editedFiles.filter(
-              (f) => (searchMismatchByFile.get(f) ?? 0) >= 2,
-            );
-            if (stuckFiles.length > 0) {
-              logger.logInfo(
-                `Auto-injecting file context after repeated search mismatches in: ${stuckFiles.join(", ")}`,
-              );
-              const contextMessage = await buildFileContextMessage(
-                workspacePath,
-                stuckFiles,
-              );
-              currentMessages.push({
-                role: "user",
-                content:
-                  `${valResult.feedback}\n\n` +
-                  `The <search> blocks for [${stuckFiles.join(", ")}] failed to match 2+ times. ` +
-                  `Here are the full file contents:\n${contextMessage}\n\n` +
-                  `**Recommendation:** Use \`rewrite_file\` for these files instead of \`edit_file\` — ` +
-                  `it doesn't require exact search matching and will overwrite the entire file.\n\n` +
-                  `Please reply with corrected edits.`,
-              });
-              continue;
-            }
-
-            // Compile errors in files the model hasn't edited yet — inject them immediately so the
-            // model can write correct edits for ALL affected files in one response. Without the file
-            // content the model has no way to know the exact search block to target, so it loops.
-            const extraFiles = valResult.extraFilesNeeded ?? [];
-            if (!mismatchOnly && extraFiles.length > 0) {
-              const editedFileList = [
-                ...new Set(edits.map((e) => e.file)),
-              ].join(", ");
-              logger.logInfo(
-                `Auto-injecting broken dependency files: ${extraFiles.join(", ")}`,
-              );
-              const contextMessage = await buildFileContextMessage(
-                workspacePath,
-                extraFiles,
-              );
-              currentMessages.push({
-                role: "user",
-                content:
-                  `${valResult.feedback}\n\n` +
-                  `Your edits to [${editedFileList}] broke the following files that you haven't edited yet. ` +
-                  `You MUST fix ALL broken files in a SINGLE response — do not split them across turns.\n\n` +
-                  `Here are the files that need updating:\n${contextMessage}\n` +
-                  `Reply with a COMPLETE set of <edit> tags covering BOTH your original changes AND all broken files.`,
-              });
-              continue;
-            }
-
-            currentMessages.push({
-              role: "user",
-              content: `${valResult.feedback}\nPlease fix these issues and reply with corrected <edit> tags.`,
-            });
-            continue;
-          }
-
-          logger.logInfo(
-            `Max turns reached. Returning failed outcome with ${lastEdits.length} partial patches.`,
-          );
-          return finalizeOutcome(
-            logger,
-            {
-              response: buildMaxTurnsFailureMessage({
-                loopCount,
-                maxTurns: MAX_TURNS,
-                firstTurnExplanation,
-                lastValidationError,
-                failedEdits: lastEdits,
-              }),
-              validProposedPatches: [],
-              failed: true,
-              failedProposedPatches: lastEdits,
-              lastValidationError,
-            },
-            lastEdits.length,
-            0,
-          );
-        }
-
-        // Reached only after validateProposedPatches succeeded above: the full edit
-        // set compiled in the sandbox, so mark it explicitly verified (rather than
-        // relying on the legacy "not failed" heuristic). Mirrors the tools path.
-        return finalizeOutcome(
-          logger,
-          {
-            response: getFinalResponse(rawResponse),
-            validProposedPatches: edits,
-            verified: true,
-          },
-          edits.length,
-          edits.length,
-        );
+        if (outcome.action === "finalize") return outcome.result;
+        continue;
       }
 
       // 3b. Did the model request commands?
@@ -612,17 +408,18 @@ export async function executeAgentTurn(params: {
         maxTurns: MAX_TURNS,
         firstTurnExplanation,
         lastValidationError:
-          lastValidationError ||
+          srState.lastValidationError ||
           "No edits were produced within the turn limit.",
-        failedEdits: lastEdits,
+        failedEdits: srState.lastEdits,
       }),
       validProposedPatches: [],
       failed: true,
-      failedProposedPatches: lastEdits,
+      failedProposedPatches: srState.lastEdits,
       lastValidationError:
-        lastValidationError || "No edits were produced within the turn limit.",
+        srState.lastValidationError ||
+        "No edits were produced within the turn limit.",
     },
-    lastEdits.length,
+    srState.lastEdits.length,
     0,
   );
 }
