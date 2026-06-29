@@ -75,10 +75,13 @@ export async function buildFinalResponse(params: {
       `Done. Changes applied to:\n${fileList.map((f) => `- ${f}`).join("\n")}`;
   }
 
-  // SAFETY NET: "said it did something but didn't".
+  // SAFETY NET: "said it did something but didn't". Evidence the model MEANT to edit is a
+  // format-correction having fired, or content that looks like a faked tool call. NOTE: a mere
+  // ``` code fence is NOT evidence — an analysis/answer routinely contains code, and flagging it
+  // prepended a bogus "NO FILE WAS CHANGED" banner onto perfectly good replies.
   const appliedNothing = modifiedFiles.length === 0 && createdFiles.length === 0;
   const impliedEdits =
-    formatCorrections > 0 || looksLikeAttemptedToolCall(content) || /```/.test(content);
+    formatCorrections > 0 || looksLikeAttemptedToolCall(content);
   if (appliedNothing && impliedEdits) {
     finalResponse =
       `\x1b[1m\x1b[33m⚠️  NO FILE WAS CHANGED.\x1b[0m The model described an edit but never ` +

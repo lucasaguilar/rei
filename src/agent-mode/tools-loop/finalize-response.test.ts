@@ -66,11 +66,29 @@ describe("buildFinalResponse", () => {
     expect(out).toContain("new.ts");
   });
 
-  it("prepends a loud warning when nothing was applied but edits were implied", async () => {
+  it("prepends a loud warning when nothing was applied but a tool call was faked as text", async () => {
     const out = await buildFinalResponse({
       ...base,
-      content: "I'll edit it: ```ts\nconst x = 2;\n```",
+      content: "<create_file>new.ts</create_file>",
     });
     expect(out).toContain("NO FILE WAS CHANGED");
+  });
+
+  it("prepends the warning when a format-correction already fired but nothing applied", async () => {
+    const out = await buildFinalResponse({
+      ...base,
+      content: "Done.",
+      formatCorrections: 1,
+    });
+    expect(out).toContain("NO FILE WAS CHANGED");
+  });
+
+  it("does NOT warn on a normal answer that merely contains a code fence (the regression)", async () => {
+    const out = await buildFinalResponse({
+      ...base,
+      content: "Here's how it works:\n```ts\nconst x = 2;\n```\nThat's the gist.",
+    });
+    expect(out).not.toContain("NO FILE WAS CHANGED");
+    expect(out).toContain("That's the gist.");
   });
 });

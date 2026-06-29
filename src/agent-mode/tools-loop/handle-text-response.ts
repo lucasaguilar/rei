@@ -93,6 +93,11 @@ export async function handleTextResponse(params: {
       attempt: formatCorrections + 1,
       contentPreview: content.slice(0, 120),
     });
+    // Surface the recovery so the user knows why the turn took another round-trip (and, if the
+    // detector ever misfires, that it happened — they can re-ask). Subtle status, not an alarm.
+    emitStatus(
+      "↩️  [REI] Model wrote a tool call as text — asking it to retry as a real tool call",
+    );
     return {
       action: "continue",
       messages: [
