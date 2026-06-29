@@ -1,6 +1,7 @@
 import { diffLines } from 'diff';
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
+import Table from "cli-table3";
 
 // ANSI escape helpers
 const b = (s: string): string => `\x1b[1m${s}\x1b[0m`;        // bold
@@ -95,6 +96,91 @@ function styleHeading(s: string): string {
     : yellowBold(`${"#".repeat(level)} ${text}`);
 }
 
+/** Visible width of a string, ignoring ANSI color codes and counting code points (not UTF-16 units). */
+function visibleWidth(s: string): number {
+  return [...s.replace(/\x1b\[[0-9;]*m/g, "")].length;
+}
+
+/** Fallback terminal width when stdout isn't a TTY (piped output, tests). */
+const FALLBACK_COLS = 80;
+/** Never shrink a column below this many content chars, even on a very narrow terminal. */
+const MIN_COL_CONTENT = 6;
+
+/**
+ * Custom Markdown table renderer. marked-terminal sizes tables to their CONTENT with no cap, so a
+ * wide table (REI's technical comparisons) overflows the terminal — which then hard-wraps each
+ * line, shattering the box drawing. Here we only constrain when the natural table would overflow
+ * `process.stdout.columns`: distribute the available width across columns (proportional to content,
+ * min MIN_COL_CONTENT) and let cli-table3 word-wrap cells. Tables that already fit are left at their
+ * natural size, so the common case is unchanged. Read at render time so terminal resizes are honored.
+ */
+function renderTable(this: { parser: { parseInline(tokens: unknown): string } }, token: {
+  header: Array<{ tokens: unknown }>;
+  rows: Array<Array<{ tokens: unknown }>>;
+  align: Array<"left" | "center" | "right" | null>;
+}): string {
+  const inline = (cell: { tokens: unknown }) =>
+    this.parser.parseInline(cell.tokens).replace(/\n/g, " ");
+  const header = token.header.map(inline);
+  const rows = token.rows.map((r) => r.map(inline));
+  const n = header.length;
+  if (n === 0) return "";
+
+  const natural = header.map((h, i) =>
+    Math.max(visibleWidth(h), ...rows.map((r) => visibleWidth(r[i] ?? ""))),
+  );
+  // cli-table3 total width = sum(colWidths) + (n+1) borders; each colWidth = content + 2 padding.
+  const overhead = 3 * n + 1;
+  const naturalTotal = natural.reduce((a, b) => a + b, 0) + overhead;
+  const termWidth =
+    process.stdout.columns && process.stdout.columns > 0
+      ? process.stdout.columns
+      : FALLBACK_COLS;
+
+  const colAligns = token.align.map((a) => a ?? "left");
+  const opts: Table.TableConstructorOptions = {
+    head: header,
+    colAligns,
+    wordWrap: true,
+    wrapOnWordBoundary: true,
+  };
+
+  if (naturalTotal > termWidth) {
+    const avail = Math.max(termWidth - overhead, n * MIN_COL_CONTENT);
+    const totalContent = natural.reduce((a, b) => a + b, 0) || 1;
+    const raw = natural.map((w) => (w / totalContent) * avail);
+    const widths = raw.map((x) => Math.max(MIN_COL_CONTENT, Math.floor(x)));
+
+    // Balance to sum EXACTLY `avail` (so the table is exactly termWidth). Forcing narrow columns up
+    // to MIN_COL_CONTENT can overshoot, so we may need to give back as well as hand out.
+    let diff = avail - widths.reduce((a, b) => a + b, 0);
+    // Hand the rounding leftover to the columns that lost the most fractional width.
+    const byRemainder = raw
+      .map((x, i) => [x - Math.floor(x), i] as const)
+      .sort((a, b) => b[0] - a[0]);
+    for (let k = 0; diff > 0; k = (k + 1) % n, diff--) {
+      widths[byRemainder[k][1]]++;
+    }
+    // Overshot: shave from the widest columns that are still above the minimum.
+    while (diff < 0) {
+      let widest = -1;
+      for (let i = 0; i < n; i++) {
+        if (widths[i] > MIN_COL_CONTENT && (widest < 0 || widths[i] > widths[widest])) {
+          widest = i;
+        }
+      }
+      if (widest < 0) break; // everything already at the floor
+      widths[widest]--;
+      diff++;
+    }
+    opts.colWidths = widths.map((w) => w + 2);
+  }
+
+  const table = new Table(opts);
+  for (const r of rows) table.push(r);
+  return "\n" + table.toString() + "\n";
+}
+
 let initialized = false;
 
 function ensureInit(): void {
@@ -127,6 +213,12 @@ function ensureInit(): void {
     unescape: true,
     emoji: false,
   }) as any);
+
+  // Override marked-terminal's table renderer with our terminal-width-aware one (must come AFTER
+  // markedTerminal so it wins). Keeps cli-table3's look but reflows wide tables instead of letting
+  // the terminal hard-wrap and break the box drawing.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  marked.use({ renderer: { table: renderTable as any } });
 
   initialized = true;
 }
