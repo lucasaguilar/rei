@@ -62,6 +62,16 @@ function answer(text: string): ChatCompletionWithTools {
   } as unknown as ChatCompletionWithTools;
 }
 
+/** Shorthand for a response truncated by the output-token cap (no tool call emitted yet). */
+function truncated(text: string): ChatCompletionWithTools {
+  return {
+    content: text,
+    reasoning: "",
+    finishReason: "length",
+    toolCalls: [],
+  } as unknown as ChatCompletionWithTools;
+}
+
 describe("executeAgentTurnWithTools — characterization", () => {
   let ws: string;
   const savedEditMode = process.env.REI_EDIT_MODE;
@@ -196,6 +206,32 @@ describe("executeAgentTurnWithTools — characterization", () => {
       (m) => m.role === "tool",
     );
     expect(toolMsgs.some((m) => m.content.startsWith("ERROR:"))).toBe(true);
+  });
+
+  it("resets the truncation budget after a productive turn (consecutive, not lifetime, cap)", async () => {
+    // 4 truncations total (> the 3-cap) but never 3 in a row: a productive read_files turn in the
+    // middle resets the streak. With a lifetime cap the loop would bail early with the
+    // "kept hitting the output-token limit" finalize; with a per-streak reset it reaches the answer.
+    fs.writeFileSync(path.join(ws, "x.txt"), "hello");
+    const provider = makeToolProvider([
+      truncated("p1"),
+      truncated("p2"),
+      toolCall("read_files", { paths: ["x.txt"] }), // productive → resets the streak
+      truncated("p3"),
+      truncated("p4"),
+      answer("FINAL-ANSWER-OK"),
+    ]);
+    const outcome = await executeAgentTurnWithTools({
+      provider,
+      messagesForModel: [{ role: "user", content: "go" }],
+      workspacePath: ws,
+      logger: fakeLogger,
+    });
+    expect(outcome.response).toContain("FINAL-ANSWER-OK");
+    // All six responses were consumed (the loop never bailed on the truncation cap).
+    expect(
+      (provider.completeChatWithTools as ReturnType<typeof vi.fn>).mock.calls.length,
+    ).toBe(6);
   });
 
   it("creates a new file via create_file (direct mode)", async () => {

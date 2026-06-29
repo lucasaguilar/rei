@@ -14,7 +14,11 @@ import {
 } from "./response-handler.js";
 import { executeToolCallsFromResponse } from "../core/helpers/action-executor.js";
 import type { McpRegistry } from "../tools/mcp/mcp-registry.js";
-import { isDegenerate, buildCommandSignature, degenerateNotice } from "./helpers/loop-guard.js";
+import {
+  isDegenerate,
+  buildCommandSignature,
+  degenerateNotice,
+} from "./helpers/loop-guard.js";
 import {
   executeCommand,
   limitCommandOutput,
@@ -125,7 +129,6 @@ export async function executeAgentTurn(params: {
 
   let currentMessages = [...messagesForModel];
   let loopCount = 0;
-  let truncationCount = 0;
   // Files already shown to the model (path → content shown). Skips re-serving an unchanged
   // file on <request_files> — it's still in history, so re-reading just burns tokens.
   // (Parity with the native path's read dedup.)
@@ -173,17 +176,16 @@ export async function executeAgentTurn(params: {
     // the llm-call / tool spans created while this iteration runs nest under it.
     const endStep = startStepSpan(loopCount - 1);
     try {
-      // 1. Ask the LLM — accumulate continuations if truncated (model hit output token limit)
-      const streamed = await streamWithContinuation({
+      // 1. Ask the LLM. Each turn gets a FRESH 3-continuation truncation budget (start at 0) so a
+      // truncated early turn doesn't starve later ones; streamWithContinuation bounds it internally.
+      const { rawResponse } = await streamWithContinuation({
         provider,
         messages: currentMessages,
         modelOverride,
         onChunk,
         logger,
-        truncationCount,
+        truncationCount: 0,
       });
-      const rawResponse = streamed.rawResponse;
-      truncationCount = streamed.truncationCount;
 
       lastRawResponse = rawResponse;
       logger.logInfo("Raw LLM Response", { rawResponse });
@@ -338,7 +340,10 @@ export async function executeAgentTurn(params: {
           const editedFiles = [...new Set(edits.map((e) => e.file))];
           if (mismatchOnly) {
             editedFiles.forEach((file) => {
-              searchMismatchByFile.set(file, (searchMismatchByFile.get(file) ?? 0) + 1);
+              searchMismatchByFile.set(
+                file,
+                (searchMismatchByFile.get(file) ?? 0) + 1,
+              );
             });
           } else {
             // Compile error (not search mismatch) → reset search mismatch counters
@@ -347,7 +352,10 @@ export async function executeAgentTurn(params: {
 
           // Early termination: if the SAME validation error occurs 3+ times consecutively, the
           // model is stuck in a loop without making progress. Bail out instead of burning turns.
-          if (lastValidationError === previousValidationError && previousValidationError) {
+          if (
+            lastValidationError === previousValidationError &&
+            previousValidationError
+          ) {
             consecutiveIdenticalErrors++;
             if (consecutiveIdenticalErrors >= 3) {
               logger.logInfo(
@@ -388,7 +396,9 @@ export async function executeAgentTurn(params: {
             });
 
             // Find files that failed search mismatch 2+ times → inject their content + suggest rewrite_file
-            const stuckFiles = editedFiles.filter((f) => (searchMismatchByFile.get(f) ?? 0) >= 2);
+            const stuckFiles = editedFiles.filter(
+              (f) => (searchMismatchByFile.get(f) ?? 0) >= 2,
+            );
             if (stuckFiles.length > 0) {
               logger.logInfo(
                 `Auto-injecting file context after repeated search mismatches in: ${stuckFiles.join(", ")}`,
@@ -691,7 +701,6 @@ export async function executeAgentTurnWholefile(params: {
   } = params;
   let currentMessages = [...messagesForModel];
   let loopCount = 0;
-  let truncationCount = 0;
   let lastRawResponse = "";
   let firstTurnExplanation = "";
 
@@ -713,16 +722,16 @@ export async function executeAgentTurnWholefile(params: {
     // llm-call / tool spans created while this iteration runs nest under it.
     const endStep = startStepSpan(loopCount - 1);
     try {
-      const streamed = await streamWithContinuation({
+      // Each turn gets a FRESH 3-continuation truncation budget (start at 0) so a truncated early
+      // turn doesn't starve later ones; streamWithContinuation bounds it internally.
+      const { rawResponse } = await streamWithContinuation({
         provider,
         messages: currentMessages,
         modelOverride,
         onChunk,
         logger,
-        truncationCount,
+        truncationCount: 0,
       });
-      const rawResponse = streamed.rawResponse;
-      truncationCount = streamed.truncationCount;
 
       lastRawResponse = rawResponse;
       logger.logInfo("Raw LLM Response (wholefile mode)", { rawResponse });

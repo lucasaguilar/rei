@@ -149,7 +149,9 @@ export class Agent {
 
   /** One prompt = one `rei.turn` root span (IP-2). Wraps the non-streaming Turn. */
   async runTurn(session: ChatSession, userInput: string): Promise<string> {
-    return withTurnSpan(userInput, () => this.runTurnInternal(session, userInput));
+    return withTurnSpan(userInput, () =>
+      this.runTurnInternal(session, userInput),
+    );
   }
 
   private async runTurnInternal(
@@ -444,7 +446,6 @@ export class Agent {
       let currentMessages = [...messagesForModel];
       let hasMoreCommands = true;
       let depth = 0;
-      let truncationCount = 0;
       let lastCmdSignature = "";
       const maxDepth = getMaxTurns();
       // Pre-compute which tool names require their result fed back to the model
@@ -466,82 +467,22 @@ export class Agent {
       }
 
       while (hasMoreCommands && depth < maxDepth) {
+        // Reset truncation budget per turn — each turn gets its own 3-continuation allowance
+        // so a truncated early turn doesn't exhaust the budget for later turns.
+        let truncationCount = 0;
+
         // One `step-N` span per loop iteration (IP-3, ask/planning). Global-active so the
         // llm-call / tool spans created while this iteration streams nest under it.
         const endStep = startStepSpan(depth);
         try {
-        options?.onStatus?.("producing_response");
+          options?.onStatus?.("producing_response");
 
-        const chunksQueue: string[] = [];
-        let resolver: (() => void) | null = null;
-        let done = false;
-        let finishReason = "stop";
+          const chunksQueue: string[] = [];
+          let resolver: (() => void) | null = null;
+          let done = false;
+          let finishReason = "stop";
 
-        const onChunk = (chunk: {
-          type: "thinking" | "text" | "status";
-          content: string;
-        }) => {
-          const encoded =
-            chunk.type === "thinking"
-              ? `\x10${chunk.content}`
-              : chunk.type === "text"
-                ? `\x11${chunk.content}`
-                : chunk.content;
-          chunksQueue.push(encoded);
-          resolver?.();
-        };
-
-        const turnPromise = streamTurnWithInterception({
-          provider: this.provider,
-          messages: currentMessages,
-          model: resolveModelForMode(session.mode),
-          mode: session.mode,
-          onChunk,
-          onFinish: (r) => {
-            finishReason = r;
-          },
-        }).finally(() => {
-          done = true;
-          resolver?.();
-        });
-
-        // Stream thoughts and action statuses to the user in real-time
-        while (!done || chunksQueue.length > 0) {
-          if (chunksQueue.length > 0) {
-            yield chunksQueue.shift()!;
-          } else {
-            await new Promise<void>((resolve) => {
-              resolver = resolve;
-            });
-          }
-        }
-
-        let streamResponse = await turnPromise;
-
-        // Auto-continue if truncated
-        while (finishReason === "length" && truncationCount < 3) {
-          truncationCount++;
-          this.logger.logInfo(
-            `[truncation] ask/planning response cut off (${truncationCount}/3), continuing...`,
-          );
-          const contMessages = [
-            ...currentMessages,
-            {
-              role: "assistant" as const,
-              content: cleanResponseForHistory(streamResponse),
-            },
-            {
-              role: "user" as const,
-              content:
-                "Your previous response was cut off by the output token limit. Continue EXACTLY from where you left off — do NOT repeat, summarize, or restart.",
-            },
-          ];
-          const contChunksQueue: string[] = [];
-          let contResolver: (() => void) | null = null;
-          let contDone = false;
-          finishReason = "stop";
-
-          const contOnChunk = (chunk: {
+          const onChunk = (chunk: {
             type: "thinking" | "text" | "status";
             content: string;
           }) => {
@@ -551,170 +492,234 @@ export class Agent {
                 : chunk.type === "text"
                   ? `\x11${chunk.content}`
                   : chunk.content;
-            contChunksQueue.push(encoded);
-            contResolver?.();
+            chunksQueue.push(encoded);
+            resolver?.();
           };
 
-          const contPromise = streamTurnWithInterception({
+          const turnPromise = streamTurnWithInterception({
             provider: this.provider,
-            messages: contMessages,
+            messages: currentMessages,
             model: resolveModelForMode(session.mode),
             mode: session.mode,
-            onChunk: contOnChunk,
+            onChunk,
             onFinish: (r) => {
               finishReason = r;
             },
           }).finally(() => {
-            contDone = true;
-            contResolver?.();
+            done = true;
+            resolver?.();
           });
 
-          while (!contDone || contChunksQueue.length > 0) {
-            if (contChunksQueue.length > 0) {
-              yield contChunksQueue.shift()!;
+          // Stream thoughts and action statuses to the user in real-time
+          while (!done || chunksQueue.length > 0) {
+            if (chunksQueue.length > 0) {
+              yield chunksQueue.shift()!;
             } else {
               await new Promise<void>((resolve) => {
-                contResolver = resolve;
+                resolver = resolve;
               });
             }
           }
 
-          const contResponse = await contPromise;
-          streamResponse = streamResponse + contResponse;
-        }
+          let streamResponse = await turnPromise;
 
-        // ── Degenerate response detection ──────────────────────────────
-        if (isDegenerate(streamResponse)) {
-          this.logger.logInfo(
-            "[loop-guard] Degenerate response detected, breaking loop",
-          );
-          yield `\n\x1b[31m⚠️  [REI] Degenerate response detected (repetitive text). ` +
-            `The model entered a generation loop. ${degenerateNotice()}\x1b[0m\n`;
-          hasMoreCommands = false;
-          break;
-        }
-
-        const commands = extractCommandRequests(streamResponse);
-        const toolCalls = extractToolCalls(streamResponse);
-        const fileRequests = extractFileRequests(streamResponse);
-
-        this.logger.logInfo("Raw LLM Response (ask/planning)", {
-          finishReason,
-          commands: commands.length,
-          toolCalls: toolCalls.map((c) => c.name),
-          fileRequests: fileRequests.length,
-          contentPreview: stripThinkingBlock(streamResponse).slice(0, 200),
-        });
-
-        if (
-          commands.length > 0 ||
-          toolCalls.length > 0 ||
-          fileRequests.length > 0
-        ) {
-          // ── Command loop detection ────────────────────────────────────
-          const cmdSignature = buildCommandSignature(
-            commands,
-            toolCalls,
-            fileRequests,
-          );
-
-          // if (cmdSignature && cmdSignature === lastCmdSignature) {
-          //   this.logger.logInfo("[loop-guard] Repeated command signature detected, breaking loop", { cmdSignature });
-          //   yield `\n\x1b[31m⚠️  [REI] Loop detected: the model is repeating the same commands/tools. ` +
-          //     `Stopping execution to prevent an infinite loop.\x1b[0m\n`;
-          //   hasMoreCommands = false;
-          //   break;
-          // }
-          lastCmdSignature = cmdSignature;
-
-          depth++;
-          const { executionFeedback, userVisibleFeedback } =
-            await executeAndFormatTurnActions({
-              response: streamResponse,
-              workspacePath: this.workspacePath,
-              provider: this.provider,
-              logger: this.logger,
-              mcpRegistry: this.mcpRegistry,
-              mode: session.mode as SkillMode,
-            });
-
-          yield userVisibleFeedback;
-
-          // Commands and file requests always need model re-feed (the model must see
-          // the output to continue). For tool calls, only MCP tools need re-feed;
-          // fire-and-forget tools (weather, search) do not. Match leniently: models
-          // often drop the "mcp:" prefix, so also treat a bare connected MCP tool name
-          // as needing re-feed.
-          const mcpToolNames = new Set(
-            this.mcpRegistry.getAvailableTools().map((t) => t.name),
-          );
-          const hasFeedbackCall =
-            commands.length > 0 ||
-            fileRequests.length > 0 ||
-            toolCalls.some(
-              (c) =>
-                feedbackTools.has(c.name) ||
-                c.name.startsWith("mcp:") ||
-                mcpToolNames.has(c.name),
+          // Auto-continue if truncated
+          while (finishReason === "length" && truncationCount < 3) {
+            truncationCount++;
+            this.logger.logInfo(
+              `[truncation] ask/planning response cut off (${truncationCount}/3), continuing...`,
             );
-
-          if (hasFeedbackCall) {
-            const turnId = generateXmlToolCallId("turn");
-            const toolName =
-              commands.length > 0
-                ? "execute_command"
-                : fileRequests.length > 0
-                  ? "request_files"
-                  : toolCalls.map((c) => c.name).join(",") || "call_tool";
-            currentMessages = [
+            const contMessages = [
               ...currentMessages,
               {
-                role: "assistant",
+                role: "assistant" as const,
                 content: cleanResponseForHistory(streamResponse),
-                tool_calls: [
-                  {
-                    id: turnId,
-                    type: "function",
-                    function: { name: toolName, arguments: "{}" },
-                  },
-                ],
               },
               {
-                role: "tool",
-                tool_call_id: turnId,
-                name: toolName,
-                content: executionFeedback,
+                role: "user" as const,
+                content:
+                  "Your previous response was cut off by the output token limit. Continue EXACTLY from where you left off — do NOT repeat, summarize, or restart.",
               },
             ];
-          } else {
-            // Fire-and-forget: result already shown to user — end the turn here.
+            const contChunksQueue: string[] = [];
+            let contResolver: (() => void) | null = null;
+            let contDone = false;
+            finishReason = "stop";
+
+            const contOnChunk = (chunk: {
+              type: "thinking" | "text" | "status";
+              content: string;
+            }) => {
+              const encoded =
+                chunk.type === "thinking"
+                  ? `\x10${chunk.content}`
+                  : chunk.type === "text"
+                    ? `\x11${chunk.content}`
+                    : chunk.content;
+              contChunksQueue.push(encoded);
+              contResolver?.();
+            };
+
+            const contPromise = streamTurnWithInterception({
+              provider: this.provider,
+              messages: contMessages,
+              model: resolveModelForMode(session.mode),
+              mode: session.mode,
+              onChunk: contOnChunk,
+              onFinish: (r) => {
+                finishReason = r;
+              },
+            }).finally(() => {
+              contDone = true;
+              contResolver?.();
+            });
+
+            while (!contDone || contChunksQueue.length > 0) {
+              if (contChunksQueue.length > 0) {
+                yield contChunksQueue.shift()!;
+              } else {
+                await new Promise<void>((resolve) => {
+                  contResolver = resolve;
+                });
+              }
+            }
+
+            const contResponse = await contPromise;
+            streamResponse = streamResponse + contResponse;
+          }
+
+          // ── Degenerate response detection ──────────────────────────────
+          if (isDegenerate(streamResponse)) {
+            this.logger.logInfo(
+              "[loop-guard] Degenerate response detected, breaking loop",
+            );
+            yield `\n\x1b[31m⚠️  [REI] Degenerate response detected (repetitive text). ` +
+              `The model entered a generation loop. ${degenerateNotice()}\x1b[0m\n`;
             hasMoreCommands = false;
+            break;
+          }
+
+          const commands = extractCommandRequests(streamResponse);
+          const toolCalls = extractToolCalls(streamResponse);
+          const fileRequests = extractFileRequests(streamResponse);
+
+          this.logger.logInfo("Raw LLM Response (ask/planning)", {
+            finishReason,
+            commands: commands.length,
+            toolCalls: toolCalls.map((c) => c.name),
+            fileRequests: fileRequests.length,
+            contentPreview: stripThinkingBlock(streamResponse).slice(0, 200),
+          });
+
+          if (
+            commands.length > 0 ||
+            toolCalls.length > 0 ||
+            fileRequests.length > 0
+          ) {
+            // ── Command loop detection ────────────────────────────────────
+            const cmdSignature = buildCommandSignature(
+              commands,
+              toolCalls,
+              fileRequests,
+            );
+
+            // if (cmdSignature && cmdSignature === lastCmdSignature) {
+            //   this.logger.logInfo("[loop-guard] Repeated command signature detected, breaking loop", { cmdSignature });
+            //   yield `\n\x1b[31m⚠️  [REI] Loop detected: the model is repeating the same commands/tools. ` +
+            //     `Stopping execution to prevent an infinite loop.\x1b[0m\n`;
+            //   hasMoreCommands = false;
+            //   break;
+            // }
+            lastCmdSignature = cmdSignature;
+
+            depth++;
+            const { executionFeedback, userVisibleFeedback } =
+              await executeAndFormatTurnActions({
+                response: streamResponse,
+                workspacePath: this.workspacePath,
+                provider: this.provider,
+                logger: this.logger,
+                mcpRegistry: this.mcpRegistry,
+                mode: session.mode as SkillMode,
+              });
+
+            yield userVisibleFeedback;
+
+            // Commands and file requests always need model re-feed (the model must see
+            // the output to continue). For tool calls, only MCP tools need re-feed;
+            // fire-and-forget tools (weather, search) do not. Match leniently: models
+            // often drop the "mcp:" prefix, so also treat a bare connected MCP tool name
+            // as needing re-feed.
+            const mcpToolNames = new Set(
+              this.mcpRegistry.getAvailableTools().map((t) => t.name),
+            );
+            const hasFeedbackCall =
+              commands.length > 0 ||
+              fileRequests.length > 0 ||
+              toolCalls.some(
+                (c) =>
+                  feedbackTools.has(c.name) ||
+                  c.name.startsWith("mcp:") ||
+                  mcpToolNames.has(c.name),
+              );
+
+            if (hasFeedbackCall) {
+              const turnId = generateXmlToolCallId("turn");
+              const toolName =
+                commands.length > 0
+                  ? "execute_command"
+                  : fileRequests.length > 0
+                    ? "request_files"
+                    : toolCalls.map((c) => c.name).join(",") || "call_tool";
+              currentMessages = [
+                ...currentMessages,
+                {
+                  role: "assistant",
+                  content: cleanResponseForHistory(streamResponse),
+                  tool_calls: [
+                    {
+                      id: turnId,
+                      type: "function",
+                      function: { name: toolName, arguments: "{}" },
+                    },
+                  ],
+                },
+                {
+                  role: "tool",
+                  tool_call_id: turnId,
+                  name: toolName,
+                  content: executionFeedback,
+                },
+              ];
+            } else {
+              // Fire-and-forget: result already shown to user — end the turn here.
+              hasMoreCommands = false;
+              session.messages.push({
+                role: "assistant",
+                content: cleanResponseForHistory(streamResponse),
+                sourceMode: session.mode,
+              });
+            }
+          } else {
+            hasMoreCommands = false;
+
+            // Concat all assistant chunks for session storage
+            const allAssistantChunks = currentMessages
+              .slice(messagesForModel.length)
+              .filter((m) => m.role === "assistant")
+              .map((m) => m.content);
+
+            allAssistantChunks.push(streamResponse);
+
+            const finalContent = allAssistantChunks.join("\n\n");
+            const cleanAssistantContent = cleanResponseForHistory(finalContent);
+
             session.messages.push({
               role: "assistant",
-              content: cleanResponseForHistory(streamResponse),
+              content: cleanAssistantContent,
               sourceMode: session.mode,
             });
           }
-        } else {
-          hasMoreCommands = false;
-
-          // Concat all assistant chunks for session storage
-          const allAssistantChunks = currentMessages
-            .slice(messagesForModel.length)
-            .filter((m) => m.role === "assistant")
-            .map((m) => m.content);
-
-          allAssistantChunks.push(streamResponse);
-
-          const finalContent = allAssistantChunks.join("\n\n");
-          const cleanAssistantContent = cleanResponseForHistory(finalContent);
-
-          session.messages.push({
-            role: "assistant",
-            content: cleanAssistantContent,
-            sourceMode: session.mode,
-          });
-        }
         } finally {
           endStep();
         }

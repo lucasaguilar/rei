@@ -125,8 +125,9 @@ export async function executeAgentTurnWithTools(params: {
   // self-correction retries — both capped inside handleTextResponse, threaded across turns here.
   let formatCorrections = 0;
   let verifyRetries = 0;
-  // Caps how many times a turn that truncated mid-output (hit the output-token cap before
-  // emitting a tool call — common with thinking models) is continued back into the loop.
+  // Caps how many CONSECUTIVE times a turn that truncated mid-output (hit the output-token cap
+  // before emitting a tool call — common with thinking models) is continued back into the loop.
+  // Reset to 0 after any productive turn (see below), so an early streak doesn't starve later turns.
   let truncationContinuations = 0;
   // Tracks consecutive search-block mismatches (edit_file whose <search> text is
   // not found verbatim in the file). Two-tier escalation, since a weak local model
@@ -222,6 +223,13 @@ export async function executeAgentTurnWithTools(params: {
         truncationContinuations = outcome.truncationContinuations;
         continue;
       }
+
+      // Past the truncation guard ⇒ this turn produced usable output (tool calls or a complete
+      // answer), i.e. progress. Here the "continuation" is a re-entry of THIS loop (not a nested
+      // while like the XML/ask paths), so the counter must persist across iterations to stay
+      // bounded — but reset it on a productive turn so the cap is "consecutive truncations", not a
+      // lifetime total. Otherwise an early truncation streak would starve a later truncated turn.
+      truncationContinuations = 0;
 
       // Capture text explanation from first turn
       if (loopCount === 1 && result.content.trim()) {

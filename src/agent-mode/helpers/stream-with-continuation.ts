@@ -30,7 +30,7 @@ export async function streamWithContinuation(params: {
     content: string;
   }) => void;
   logger: AgentLogger;
-  /** Running count across the whole turn loop (bounds total continuations, not per-call). */
+  /** Running count for this turn (reset per turn; bounds continuations within a single turn). */
   truncationCount: number;
 }): Promise<{ rawResponse: string; truncationCount: number }> {
   const { provider, modelOverride, onChunk, logger } = params;
