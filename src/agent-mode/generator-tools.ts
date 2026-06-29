@@ -50,6 +50,11 @@ export function withNativeToolsDirective(messages: ChatMessage[]): ChatMessage[]
       "Only split work across responses when a step genuinely depends on the OUTCOME of a " +
       "previous one (e.g. fixing a reported compile error). Every extra response re-processes the " +
       "entire conversation and is slow.\n" +
+      "TO READ A REPO FILE, ALWAYS use read_files — it returns the WHOLE file and reflects your " +
+      "pending edits. NEVER read file contents with run_command (cat/head/tail/sed/less): that " +
+      "output is capped and the MIDDLE is dropped, so you only see the start and end and will think " +
+      "the file is truncated. Use run_command only for real commands (build, tests, search like " +
+      "grep/rg, git) — not for dumping a file you can read with read_files.\n" +
       "ALWAYS PREFER edit_file (small, targeted search/replace) for changes — it is cheap. Use " +
       "rewrite_file ONLY to restructure most of a file or after edit_file has repeatedly failed " +
       "to match. Rewriting an entire file just to change a few lines (e.g. an icon or a class) is " +

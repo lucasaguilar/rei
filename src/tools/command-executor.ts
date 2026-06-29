@@ -12,13 +12,27 @@ export interface CommandResult {
 }
 
 /**
+ * Cap (in chars) for a single command's stdout/stderr fed back to the model, protecting the
+ * context window. Env-overridable via REI_MAX_COMMAND_OUTPUT. The old 6000 was too small: it cut
+ * the MIDDLE out of even a medium source file, so `cat file.ts` showed only head+tail and the model
+ * concluded the file was "truncated for safety" and spun re-reading it. 24000 reads typical source
+ * files whole; for reading files prefer read_files (uncapped) — this is the safety net for commands.
+ */
+const DEFAULT_MAX_COMMAND_OUTPUT = 24000;
+
+function maxCommandOutputChars(): number {
+  const n = parseInt(process.env.REI_MAX_COMMAND_OUTPUT ?? "", 10);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_MAX_COMMAND_OUTPUT;
+}
+
+/**
  * Limits the length of a command output to prevent context window explosion.
  * Truncates from the middle, leaving the beginning (initial errors/output)
  * and the end (final status/summary) intact.
  */
 export function limitCommandOutput(
   output: string,
-  maxChars: number = 6000,
+  maxChars: number = maxCommandOutputChars(),
 ): string {
   if (output.length <= maxChars) {
     return output;

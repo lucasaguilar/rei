@@ -16,6 +16,14 @@ describe("withNativeToolsDirective", () => {
     expect(out[2].content).toBe("do the thing");
   });
 
+  it("tells the model to read repo files with read_files, not run_command (cat/head/sed)", () => {
+    const out = withNativeToolsDirective([{ role: "user", content: "hi" }]);
+    const directive = out[0].content as string;
+    expect(directive).toMatch(/read_files/);
+    expect(directive).toMatch(/cat\/head\/tail\/sed/);
+    expect(directive).toMatch(/capped/i);
+  });
+
   it("places the directive first when there is no system message", () => {
     const msgs: ChatMessage[] = [{ role: "user", content: "hi" }];
     const out = withNativeToolsDirective(msgs);

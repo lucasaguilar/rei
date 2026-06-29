@@ -2,7 +2,44 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { executeCommand } from "./command-executor.js";
+import { executeCommand, limitCommandOutput } from "./command-executor.js";
+
+describe("limitCommandOutput", () => {
+  const saved = process.env.REI_MAX_COMMAND_OUTPUT;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.REI_MAX_COMMAND_OUTPUT;
+    else process.env.REI_MAX_COMMAND_OUTPUT = saved;
+  });
+
+  it("passes output through untouched when under the default cap", () => {
+    delete process.env.REI_MAX_COMMAND_OUTPUT;
+    const out = "x".repeat(10000); // a medium source file — was truncated under the old 6000 cap
+    expect(limitCommandOutput(out)).toBe(out);
+  });
+
+  it("truncates the MIDDLE (keeps head + tail) past the cap, with a marker", () => {
+    delete process.env.REI_MAX_COMMAND_OUTPUT;
+    const out = "A".repeat(20000) + "B".repeat(20000); // 40k > 24k default
+    const limited = limitCommandOutput(out);
+    expect(limited.length).toBeLessThan(out.length);
+    expect(limited).toContain("Truncated");
+    expect(limited.startsWith("A")).toBe(true); // head kept
+    expect(limited.endsWith("B")).toBe(true); // tail kept
+  });
+
+  it("honors REI_MAX_COMMAND_OUTPUT", () => {
+    process.env.REI_MAX_COMMAND_OUTPUT = "100";
+    const out = "y".repeat(500);
+    const limited = limitCommandOutput(out);
+    expect(limited).toContain("Truncated");
+    expect(limited.length).toBeLessThan(out.length);
+  });
+
+  it("falls back to the default for an invalid env value", () => {
+    process.env.REI_MAX_COMMAND_OUTPUT = "not-a-number";
+    expect(limitCommandOutput("z".repeat(10000))).toBe("z".repeat(10000));
+  });
+});
 
 describe("command-executor: rm command security checks", () => {
   let tempWorkspace = "";
