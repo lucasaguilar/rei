@@ -22,9 +22,24 @@ function embedderModel(): string {
   return process.env.REI_EMBEDDER_MODEL || "";
 }
 
-/** Stable identity for the active embedder. Stamped into the index to invalidate it on change. */
+/** e5 models (intfloat/multilingual-e5-*, e5-*) are TRAINED with "query: " / "passage: " input
+ *  prefixes — using them is required for good retrieval. Other models (MiniLM, bge-m3, …) must NOT
+ *  be prefixed, so this is gated on the model name. */
+function isE5Model(): boolean {
+  return /e5-/i.test(embedderModel());
+}
+
+/** Prepends the e5 retrieval prefix for the given input role (no-op for non-e5 models). */
+function applyEmbedPrefix(text: string, kind: "query" | "passage"): string {
+  return isE5Model() ? `${kind}: ${text}` : text;
+}
+
+/** Stable identity for the active embedder. Stamped into the index to invalidate it on change.
+ *  The `+e5p` marker means the index was built WITH e5 prefixes, so toggling e5 (or the prefixing)
+ *  forces a reindex — querying a no-prefix index with prefixed queries (or vice-versa) misaligns. */
 export function getEmbedderId(): string {
-  return `${embedderProvider()}:${embedderModel()}`;
+  const base = `${embedderProvider()}:${embedderModel()}`;
+  return isE5Model() ? `${base}+e5p` : base;
 }
 
 // ── Xenova (in-process ONNX) ──────────────────────────────────────────────
@@ -105,18 +120,24 @@ async function embedOllama(text: string): Promise<number[]> {
 
 /**
  * Genera un vector (Embedding) para un texto dado, usando el backend configurado.
+ * @param kind  "passage" when embedding a document to index, "query" when embedding a search query.
+ *              Only affects e5 models (which require the prefix); a no-op for others.
  * @returns Un arreglo de números Float (dim depende del modelo: MiniLM 384, bge-m3 1024, …).
  */
-export async function generateEmbedding(text: string): Promise<number[]> {
+export async function generateEmbedding(
+  text: string,
+  kind: "query" | "passage" = "passage",
+): Promise<number[]> {
+  const input = applyEmbedPrefix(text, kind);
   switch (embedderProvider()) {
     case "ollama":
-      return embedOllama(text);
+      return embedOllama(input);
     case "llmstudio":
     case "lmstudio":
     case "openai":
-      return embedOpenAICompatible(text);
+      return embedOpenAICompatible(input);
     case "xenova":
     default:
-      return embedXenova(text);
+      return embedXenova(input);
   }
 }

@@ -37,7 +37,7 @@ describe("VectorStore — embedder-aware index invalidation (real disk)", () => 
     await s.save();
 
     const onDisk = JSON.parse(fs.readFileSync(indexFile(), "utf8"));
-    expect(onDisk.embedderId).toBe("xenova:Xenova/multilingual-e5-small");
+    expect(onDisk.embedderId).toBe("xenova:Xenova/multilingual-e5-small+e5p");
 
     const s2 = new VectorStore(ws);
     await s2.load();

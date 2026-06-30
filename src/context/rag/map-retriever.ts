@@ -31,7 +31,7 @@ export async function getRelevantMapContext(
 ): Promise<string> {
   if (!query) return "";
 
-  const queryVector = await generateEmbedding(query);
+  const queryVector = await generateEmbedding(query, "query");
   // Fetch a wider pool to allow adjacency boosting to pull in dependencies
   const rawResults = vectorStore.query(queryVector, topK * 3);
 

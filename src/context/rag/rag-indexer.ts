@@ -198,6 +198,6 @@ export async function searchRag(
   await store.load();
   if (store.getRecordCount() === 0) return [];
 
-  const queryVector = await generateEmbedding(query);
+  const queryVector = await generateEmbedding(query, "query");
   return store.query(queryVector, topK) as RagSearchResult[];
 }

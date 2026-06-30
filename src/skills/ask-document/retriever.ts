@@ -26,7 +26,7 @@ export async function retrieve(
   k = 6,
 ): Promise<RetrievedChunk[]> {
   if (index.chunks.length === 0) return [];
-  const queryVector = await generateEmbedding(query);
+  const queryVector = await generateEmbedding(query, "query");
   return index.chunks
     .map((c) => ({ ...c, score: cosine(queryVector, c.vector) }))
     .sort((a, b) => b.score - a.score)

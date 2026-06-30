@@ -22,9 +22,10 @@ afterEach(() => {
 });
 
 describe("getEmbedderId", () => {
-  it("defaults to the in-process Xenova MiniLM", () => {
+  it("defaults to the in-process Xenova multilingual-e5-small (with the e5-prefix marker)", () => {
     for (const k of KEYS) delete process.env[k];
-    expect(getEmbedderId()).toBe("xenova:Xenova/multilingual-e5-small");
+    // The `+e5p` marker is part of the id so toggling e5 prefixing invalidates the index.
+    expect(getEmbedderId()).toBe("xenova:Xenova/multilingual-e5-small+e5p");
   });
 
   it("reflects a configured server embedder (provider:model)", () => {
@@ -61,5 +62,27 @@ describe("generateEmbedding — OpenAI-compatible backend (LM Studio)", () => {
     process.env.REI_EMBEDDER_PROVIDER = "llmstudio";
     delete process.env.REI_EMBEDDER_MODEL;
     await expect(generateEmbedding("x")).rejects.toThrow(/REI_EMBEDDER_MODEL/);
+  });
+
+  it("prefixes the input with query:/passage: for an e5 model (and only e5)", async () => {
+    process.env.REI_EMBEDDER_PROVIDER = "llmstudio";
+    process.env.REI_EMBEDDER_MODEL = "intfloat/multilingual-e5-small";
+    process.env.REI_EMBEDDER_BASE_URL = "http://x/v1";
+
+    let body: Record<string, unknown> = {};
+    globalThis.fetch = vi.fn(async (_url: unknown, init: { body: string }) => {
+      body = JSON.parse(init.body);
+      return new Response(JSON.stringify({ data: [{ embedding: [0] }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await generateEmbedding("hola", "query");
+    expect(body.input).toBe("query: hola");
+
+    await generateEmbedding("mundo", "passage");
+    expect(body.input).toBe("passage: mundo");
+
+    // default kind is passage
+    await generateEmbedding("default");
+    expect(body.input).toBe("passage: default");
   });
 });
