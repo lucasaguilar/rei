@@ -90,6 +90,13 @@ export function withDegenerateGuard(provider: ModelProvider): ModelProvider {
       return provider.completeChatWithTools!(messages, tools, options);
     };
   }
+  // Same for the streaming tools path — without this the wrapper hides streamChatWithTools and the
+  // native loop falls back to non-streaming (the live-streaming spike never engages).
+  if (provider.streamChatWithTools) {
+    wrapped.streamChatWithTools = (messages, tools, onDelta, options) => {
+      return provider.streamChatWithTools!(messages, tools, onDelta, options);
+    };
+  }
 
   // Forward optional ModelLifecycle methods. The `{ ...provider }` spread above copies only
   // own-enumerable props, so prototype methods like loadModel/unloadModel/isModelLoaded would

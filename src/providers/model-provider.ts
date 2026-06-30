@@ -58,6 +58,12 @@ export interface ChatCompletionWithTools {
                           // even when content is empty (e.g. qwen3.6 in tool-calling mode)
 }
 
+/** A live fragment surfaced while streaming a tool-calling completion (see streamChatWithTools). */
+export interface ToolStreamDelta {
+  type: "text" | "reasoning";
+  content: string; // incremental fragment (not the accumulated buffer)
+}
+
 // ── Provider interface ───────────────────────────────────────────────────────
 
 export interface ModelProvider {
@@ -68,6 +74,17 @@ export interface ModelProvider {
   completeChatWithTools?(
     messages: ChatMessage[],
     tools: ToolDefinition[],
+    options?: CompletionOptions,
+  ): Promise<ChatCompletionWithTools>;
+  /**
+   * Streaming variant of completeChatWithTools: surfaces text/reasoning fragments live via
+   * `onDelta` while accumulating tool calls, then resolves to the SAME ChatCompletionWithTools as
+   * the non-streaming call. Optional — callers fall back to completeChatWithTools when absent.
+   */
+  streamChatWithTools?(
+    messages: ChatMessage[],
+    tools: ToolDefinition[],
+    onDelta: (delta: ToolStreamDelta) => void,
     options?: CompletionOptions,
   ): Promise<ChatCompletionWithTools>;
 }

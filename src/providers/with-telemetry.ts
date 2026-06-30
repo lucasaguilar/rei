@@ -23,6 +23,7 @@ const LLM_METHODS = new Set([
   "complete",
   "completeChat",
   "completeChatWithTools",
+  "streamChatWithTools",
   "streamChat",
 ]);
 const SWAP_METHODS = new Set(["loadModel", "unloadModel"]);

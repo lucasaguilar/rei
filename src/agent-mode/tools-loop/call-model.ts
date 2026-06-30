@@ -41,12 +41,51 @@ export async function callModel(params: {
     });
   }
 
-  const result = await provider.completeChatWithTools!(messages, tools, {
-    model: modelOverride,
-    reasoningEffort,
-  });
+  // Prefer the streaming tools path when the provider supports it: reasoning/text fragments surface
+  // LIVE via onDelta instead of landing all at once when the turn ends. Same return shape, so the
+  // rest of the loop is unchanged. (Spike — see docs/stream-tools-spike.md.) Text deltas are NOT
+  // forwarded: the loop builds the final response (recap/created-files) which the caller displays —
+  // forwarding text here would suppress that.
+  const opts = { model: modelOverride, reasoningEffort };
+  let result: ChatCompletionWithTools;
+  let streamed = false;
+  // Counts live fragments received — a high count over the turn is concrete proof the response
+  // arrived token-by-token (vs one big chunk), which is otherwise hard to tell visually.
+  let deltaCount = 0;
+  const firstDeltaAt = { t: 0 };
+  if (typeof provider.streamChatWithTools === "function") {
+    try {
+      result = await provider.streamChatWithTools(
+        messages,
+        tools,
+        (d) => {
+          deltaCount += 1;
+          if (firstDeltaAt.t === 0) firstDeltaAt.t = Date.now();
+          if (d.type === "reasoning") {
+            onChunk?.({ type: "thinking", content: d.content });
+          }
+        },
+        opts,
+      );
+      streamed = true;
+    } catch (err) {
+      // Runtime safety net: a streaming failure (server quirk, mid-stream drop) must not break the
+      // turn — fall back to the proven non-streaming call so the agent keeps working.
+      logger.logInfo("[tools] streaming failed — falling back to non-streaming", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      result = await provider.completeChatWithTools!(messages, tools, opts);
+    }
+  } else {
+    result = await provider.completeChatWithTools!(messages, tools, opts);
+  }
 
   logger.logInfo("[tools] Response", {
+    streamed,
+    // deltaCount >> 1 proves token-by-token streaming; streamMs = span from first to last fragment.
+    ...(streamed
+      ? { deltaCount, streamMs: firstDeltaAt.t ? Date.now() - firstDeltaAt.t : 0 }
+      : {}),
     finishReason: result.finishReason,
     toolCalls: result.toolCalls.map((tc) => tc.function.name),
     contentPreview: result.content.slice(0, 120),
@@ -54,8 +93,9 @@ export async function callModel(params: {
   });
 
   // Surface the model's reasoning live. In tool-calling turns, qwen3.6 puts its narration in
-  // `reasoning` while `content` is empty — without this it's invisible.
-  if (result.reasoning?.trim()) {
+  // `reasoning` while `content` is empty — without this it's invisible. When streamed, reasoning
+  // already arrived via onDelta above, so don't double-emit it here.
+  if (!streamed && result.reasoning?.trim()) {
     onChunk?.({ type: "thinking", content: result.reasoning.trim() + "\n" });
   }
 

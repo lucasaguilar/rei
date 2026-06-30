@@ -4,8 +4,13 @@ import type {
   CompletionOptions,
   ToolDefinition,
   ChatCompletionWithTools,
+  ToolStreamDelta,
 } from "./model-provider.js";
-import { openaiCompleteChatWithTools, toApiMessage } from "./openai-tool-caller.js";
+import {
+  openaiCompleteChatWithTools,
+  openaiStreamChatWithTools,
+  toApiMessage,
+} from "./openai-tool-caller.js";
 import { getMaxOutputTokens } from "../config/model-runtime.js";
 import { fetchWithRetry } from "./fetch-retry.js";
 
@@ -282,6 +287,29 @@ export class LlmStudioProvider implements ModelProvider {
       maxTokens: this.maxTokens,
       options,
     });
+  }
+
+  /** Streaming tools path (spike — see docs/stream-tools-spike.md). Same args/headers as the
+   *  non-streaming call, plus the live `onDelta` callback. */
+  async streamChatWithTools(
+    messages: ChatMessage[],
+    tools: ToolDefinition[],
+    onDelta: (delta: ToolStreamDelta) => void,
+    options?: CompletionOptions,
+  ): Promise<ChatCompletionWithTools> {
+    return openaiStreamChatWithTools(
+      {
+        baseUrl: this.baseUrl,
+        headers: { Authorization: `Bearer ${this.apiKey}` },
+        model: this.model,
+        messages,
+        tools,
+        timeoutMs: this.requestTimeoutMs,
+        maxTokens: this.maxTokens,
+        options,
+      },
+      onDelta,
+    );
   }
 
   private fetchChat(params: {
