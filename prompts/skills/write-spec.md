@@ -19,7 +19,7 @@ becomes "build an editable, localStorage-persisted config editor with caching". 
 
 ## Ground it first
 
-Read the relevant files (`<request_files>`) and explore (`<execute_command>`) BEFORE writing the spec,
+Read the relevant files (`read_files`) and explore (`run_command`) BEFORE writing the spec,
 exactly like planning. The spec must reflect the real codebase, not assumptions.
 
 ## Spec format — emit exactly these sections

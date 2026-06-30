@@ -442,13 +442,13 @@ export class Agent {
       return;
     }
 
-    // ── Native ask/planning (opt-in: REI_NATIVE_ASK=true) ─────────────────────
+    // ── Native ask/planning (DEFAULT; opt-out: REI_NATIVE_ASK=false) ──────────
     // Routes ask/planning through the SAME native function-calling loop as agent, gated to a
     // read-only tool profile (toolsForMode → read_files / run_command / git_changes + web/MCP/
-    // skills, NO edits). First step of collapsing the XML interception path onto one engine: the
-    // model investigates via real tool calls instead of emitting unreliable XML tags. Streams live
-    // through callModel's streamChatWithTools when present. Falls through to the XML streamChat loop
-    // when the flag is off or the provider can't do tool calls — no regression by default.
+    // skills, NO edits). Collapses the XML interception path onto one engine: the model investigates
+    // via real tool calls instead of emitting unreliable XML tags. Streams live through callModel's
+    // streamChatWithTools when present. Falls through to the legacy XML streamChat loop only when
+    // REI_NATIVE_ASK=false or the provider can't do tool calls.
     if (this.nativeToolsActive(session.mode)) {
       const askProvider = createProviderForMode(session.mode, this.provider);
       const chunksQueue: string[] = [];
@@ -865,15 +865,17 @@ export class Agent {
 
   /**
    * Whether THIS turn runs on the native function-calling loop for the given mode.
-   * agent → whenever its provider supports tool calls. ask/planning → only when opted in via
-   * REI_NATIVE_ASK and the provider supports tool calls (otherwise they stay on the XML path).
+   * agent → whenever its provider supports tool calls. ask/planning → now the DEFAULT whenever the
+   * provider supports tool calls; `REI_NATIVE_ASK=false` is the escape hatch back to the legacy XML
+   * path during the transition (removed once the XML path is deleted). Providers without tool
+   * calling fall through to the XML path automatically.
    * Single source of truth for prompt selection (native *-tools prompt), MCP-tools delivery
    * (API param vs prompt text), and the dispatch branch.
    */
   private nativeToolsActive(mode: ChatSession["mode"]): boolean {
     if (mode === "agent") return this.useToolCalling;
     return (
-      process.env.REI_NATIVE_ASK === "true" &&
+      process.env.REI_NATIVE_ASK !== "false" &&
       typeof this.provider.completeChatWithTools === "function"
     );
   }

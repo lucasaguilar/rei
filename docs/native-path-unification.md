@@ -91,6 +91,17 @@ Fix:
   read it with `read_files`; never run the exact same command twice.
 - Test in `dispatch-tool-calls.test.ts`.
 
+### Done (2026-06-30, fourth pass) — DEFAULT FLIPPED + skills verified
+- ask + planning both validated live (planning loop fixed). `nativeToolsActive` now defaults ask/
+  planning to the native loop whenever the provider supports tool calls; `REI_NATIVE_ASK=false` is
+  the escape hatch back to the XML path during the transition. Providers without tool calling still
+  fall through automatically.
+- **Skills on the native path: confirmed wired.** `setupToolSelection` exposes `use_skill` (native
+  tool) with the mode-scoped catalog (`skillsForMode(mode)`); planning sees `write-spec` +
+  `micro-task-decomposition`, agent sees its own. The recipe is fed back as a tool result. Only
+  residual was `prompts/skills/write-spec.md` referencing `<request_files>`/`<execute_command>` —
+  neutralized to `read_files`/`run_command`. Other skills were already XML-free.
+
 ### Next
 - **Validate live**: run REI in **ask** mode against LM Studio with `REI_NATIVE_ASK=true`; confirm
   (a) reasoning/text stream live, (b) the model investigates via `read_files`/`run_command` (not XML
