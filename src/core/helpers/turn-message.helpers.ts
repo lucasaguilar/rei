@@ -312,9 +312,10 @@ export function cleanResponseForHistory(content: string): string {
     .replace(/<request_files>[\s\S]*?(<\/request_files>|$)/gi, "")
     .replace(/<execute_command>[\s\S]*?(<\/execute_command>|$)/gi, "")
     .replace(/<call_tool\b[\s\S]*?(<\/call_tool>|$)/gi, "");
-  if (process.env.REI_PRESERVE_THINKING === "true") {
-    return clean.trim();
+  // Default ON: preserve thinking unless explicitly disabled with REI_PRESERVE_THINKING=false.
+  if (process.env.REI_PRESERVE_THINKING === "false") {
+    return stripThinkingBlock(clean);
   }
-  return stripThinkingBlock(clean);
+  return clean.trim();
 }
 

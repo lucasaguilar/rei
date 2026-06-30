@@ -26,8 +26,8 @@ export async function callModel(params: {
   const { provider, messages, tools, modelOverride, reasoningEffort, logger, onChunk } = params;
 
   // Observability for preserve-thinking: only log when it's actually ON and re-feeding
-  // reasoning — otherwise it's just noise (default is OFF).
-  if (process.env.REI_PRESERVE_THINKING === "true") {
+  // reasoning — otherwise it's just noise (default is ON since v0.14).
+  if (process.env.REI_PRESERVE_THINKING !== "false") {
     const reasoningCarried = messages.filter(
       (m) => m.role === "assistant" && m.reasoning_content,
     );

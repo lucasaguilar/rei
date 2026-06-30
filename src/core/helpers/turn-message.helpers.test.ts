@@ -31,8 +31,15 @@ describe("cleanResponseForHistory", () => {
     expect(cleanResponseForHistory(raw)).toContain("<edit>");
   });
 
-  it("strips <think> by default", () => {
+  it("preserves <think> by default", () => {
     delete process.env.REI_PRESERVE_THINKING;
+    const clean = cleanResponseForHistory("<think>reasoning</think>Answer.");
+    expect(clean).toContain("<think>");
+    expect(clean).toContain("Answer.");
+  });
+
+  it("strips <think> when REI_PRESERVE_THINKING is false", () => {
+    process.env.REI_PRESERVE_THINKING = "false";
     const clean = cleanResponseForHistory("<think>reasoning</think>Answer.");
     expect(clean).not.toContain("<think>");
     expect(clean).toContain("Answer.");

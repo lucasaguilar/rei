@@ -35,7 +35,8 @@ export function toApiMessage(msg: ChatMessage): Record<string, unknown> {
   // Re-send prior reasoning only when preservation is enabled. Reasoning models
   // (e.g. qwen3.6 "Preserve Thinking") return reasoning_content as a dedicated
   // field; carrying it back gives them their prior reasoning across turns.
-  const preserve = process.env.REI_PRESERVE_THINKING === "true";
+  // Default ON: preserve thinking unless explicitly disabled with REI_PRESERVE_THINKING=false.
+  const preserve = process.env.REI_PRESERVE_THINKING !== "false";
   const reasoningField =
     preserve && msg.role === "assistant" && msg.reasoning_content
       ? { reasoning_content: msg.reasoning_content }

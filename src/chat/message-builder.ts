@@ -3,7 +3,10 @@ import { compressSkeletonMap } from "./helpers/compression.js";
 import type { AgentEditFormat } from "../prompts/prompt-builder.js";
 import type { ChatMessage, SessionMode } from "./types.js";
 import { estimateTokens } from "./helpers/token-estimator.js";
-import { getContextWindow, getMaxOutputTokens } from "../config/model-runtime.js";
+import {
+  getContextWindow,
+  getMaxOutputTokens,
+} from "../config/model-runtime.js";
 
 function isEnrichedTurnMessage(content: string): boolean {
   return content.includes("Task:") && content.includes("Repository summary:");
@@ -128,7 +131,8 @@ export function buildMessagesForModel(
 
   // We always want to keep the latest message (which is the current user prompt)
   if (normalizedNonSystemMessages.length > 0) {
-    const latestMsg = normalizedNonSystemMessages[normalizedNonSystemMessages.length - 1];
+    const latestMsg =
+      normalizedNonSystemMessages[normalizedNonSystemMessages.length - 1];
     budgetedMessages.unshift(latestMsg);
     accumulatedTokens += estimateTokens(latestMsg.content);
 
@@ -144,19 +148,25 @@ export function buildMessagesForModel(
     }
   }
 
-  const finalNonSystem = budgetedMessages.length > 0 ? budgetedMessages : normalizedNonSystemMessages;
+  const finalNonSystem =
+    budgetedMessages.length > 0
+      ? budgetedMessages
+      : normalizedNonSystemMessages;
 
   // In agent mode, compact old assistant messages that have no XML action tags.
   // These come from ask/planning turns and contain "Direct Answer" / prose format
   // which causes small models to pattern-match to the wrong output format.
-  const modeNormalized =
-    mode === "agent"
-      ? finalNonSystem.map((message) =>
-          isNonAgentAssistantMessage(message)
-            ? { ...message, content: "[Previous response — different mode]" }
-            : message,
-        )
-      : finalNonSystem;
+
+  // NOTE: testing this!!! remove it if it's not good!
+  const modeNormalized = finalNonSystem;
+  // const modeNormalized =
+  //   mode === "agent"
+  //     ? finalNonSystem.map((message) =>
+  //         isNonAgentAssistantMessage(message)
+  //           ? { ...message, content: "[Previous response — different mode]" }
+  //           : message,
+  //       )
+  //     : finalNonSystem;
 
   // Aider-style system_reminder: append a format reminder to the LAST user message
   // in agent mode. Small models have recency bias — instructions near the generation
