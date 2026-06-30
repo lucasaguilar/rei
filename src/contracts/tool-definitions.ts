@@ -182,6 +182,30 @@ export const UTILITY_TOOLS: ToolDefinition[] = [
   WEB_SEARCH_TOOL,
 ];
 
+/**
+ * Read-only tool set for the ask/planning modes on the native function-calling path.
+ * Mirrors what those modes could already do via the XML interception path
+ * (`executeAndFormatTurnActions` handled file reads, commands and MCP/web calls — never
+ * edit/create/rewrite), so routing them through the native loop preserves their permissions:
+ * investigate (read_files / git_changes), run read-style commands (grep/rg/git/build), but NOT
+ * mutate files directly. `run_command` is intentionally included — it matches the XML path's
+ * `<execute_command>` capability.
+ */
+export const READONLY_TOOLS: ToolDefinition[] = [
+  READ_FILES_TOOL,
+  RUN_COMMAND_TOOL,
+  GIT_CHANGES_TOOL,
+];
+
+/**
+ * The base built-in tool set a mode is allowed to use. The native loop layers web_search/weather,
+ * MCP and skills on top of this; this only governs the file/command capabilities. agent → full
+ * (can edit); ask/planning → read-only (investigate + run commands, no direct file mutation).
+ */
+export function toolsForMode(mode: "agent" | "planning" | "ask"): ToolDefinition[] {
+  return mode === "agent" ? AGENT_TOOLS : READONLY_TOOLS;
+}
+
 /** All tools combined (agent + utility). */
 export const ALL_TOOLS: ToolDefinition[] = [...AGENT_TOOLS, ...UTILITY_TOOLS];
 

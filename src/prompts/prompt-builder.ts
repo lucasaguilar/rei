@@ -93,6 +93,14 @@ export function buildSystemMessage(
         sections.push(loadPrompt("formats/agent-format"));
       }
     }
+  } else if (useToolCalling) {
+    // ask/planning on the NATIVE function-calling path: use the *-tools mode prompt (native
+    // read_files/run_command, NO XML tags) so the model doesn't fall back to <request_files>/
+    // <execute_command>/<call_tool> and read files with capped `cat`/`sed`. The response-format
+    // prompt is tool-agnostic (just structure), so it's reused. Skills ride as the native
+    // `use_skill` tool (from setupToolSelection), so the XML <call_tool> skill catalog is omitted.
+    sections.push(loadPrompt(`modes/${mode}-tools`), "");
+    sections.push(loadPrompt(`formats/${mode}-format`));
   } else {
     sections.push(loadPrompt(`modes/${mode}`), "");
     sections.push(loadPrompt(`formats/${mode}-format`));

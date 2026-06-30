@@ -3,11 +3,12 @@ import type { ToolDefinition } from "../../providers/model-provider.js";
 import type { McpRegistry } from "../../tools/mcp/mcp-registry.js";
 import type { AgentLogger } from "../../core/logger.js";
 import {
-  AGENT_TOOLS,
+  toolsForMode,
   WEB_SEARCH_TOOL,
   WEATHER_TOOL,
   mcpToolsToDefinitions,
 } from "../../contracts/tool-definitions.js";
+import type { SkillMode } from "../../skills/skill-loader.js";
 import {
   searchMcpTools,
   SEARCH_TOOLS_DEF,
@@ -57,8 +58,17 @@ export function setupToolSelection(params: {
   userQuery?: string;
   workspacePath: string;
   logger: AgentLogger;
+  /** Mode whose tool-permission profile gates the built-in tools. Defaults to "agent". */
+  mode?: SkillMode;
 }): ToolSelection {
-  const { mcpRegistry, messagesForModel, userQuery, workspacePath, logger } = params;
+  const {
+    mcpRegistry,
+    messagesForModel,
+    userQuery,
+    workspacePath,
+    logger,
+    mode = "agent",
+  } = params;
 
   const allMcpTools = mcpRegistry ? mcpRegistry.getAvailableTools() : [];
   const query = userQuery ?? lastUserText(messagesForModel);
@@ -79,16 +89,20 @@ export function setupToolSelection(params: {
   }
 
   // Skills: reusable task recipes loaded on demand. Only the catalog (name + description) rides in
-  // the `use_skill` tool; the full body is injected only when the model invokes it.
-  const skills = skillsForMode(loadSkills(workspacePath), "agent");
+  // the `use_skill` tool; the full body is injected only when the model invokes it. Scoped to the
+  // active mode (ask/planning/agent each surface a different skill set).
+  const skills = skillsForMode(loadSkills(workspacePath), mode);
   const useSkillTool = buildUseSkillTool(skills);
+
+  // The built-in capability set for this mode (agent → full incl. edits; ask/planning → read-only).
+  const baseTools = toolsForMode(mode);
 
   // The tools array is rebuilt each turn so newly-searched tools become callable.
   const buildTools = (): ToolDefinition[] => {
     const mcp = mcpToolsToDefinitions(allMcpTools.filter((t) => activeMcp.has(t.name)));
     // Expose the built-in web_search + weather tools on the native path too (explicit-trigger
     // only) — otherwise a "search the web" request had no REI tool to call.
-    const tools = [...AGENT_TOOLS, WEB_SEARCH_TOOL, WEATHER_TOOL, ...mcp];
+    const tools = [...baseTools, WEB_SEARCH_TOOL, WEATHER_TOOL, ...mcp];
     if (useToolSearch) tools.push(SEARCH_TOOLS_DEF);
     if (useSkillTool) tools.push(useSkillTool);
     return tools;

@@ -38,6 +38,36 @@ describe("setupToolSelection", () => {
     expect(sel.useToolSearch).toBe(false);
   });
 
+  it("ask/planning modes get a READ-ONLY built-in set (no edit/create/rewrite)", () => {
+    for (const mode of ["ask", "planning"] as const) {
+      const names = setupToolSelection({ ...base, mode })
+        .buildTools()
+        .map((t) => t.function.name);
+      // Investigation + commands stay available...
+      expect(names).toContain("read_files");
+      expect(names).toContain("run_command");
+      expect(names).toContain("git_changes");
+      expect(names).toContain("web_search");
+      expect(names).toContain("weather");
+      // ...but the mutating tools are gated out.
+      expect(names).not.toContain("edit_file");
+      expect(names).not.toContain("create_file");
+      expect(names).not.toContain("rewrite_file");
+    }
+  });
+
+  it("defaults to the agent profile (edits allowed) when no mode is passed", () => {
+    const names = setupToolSelection(base)
+      .buildTools()
+      .map((t) => t.function.name);
+    expect(names).toContain("edit_file");
+    // Explicit mode: "agent" matches the default.
+    const agentNames = setupToolSelection({ ...base, mode: "agent" })
+      .buildTools()
+      .map((t) => t.function.name);
+    expect(agentNames).toContain("edit_file");
+  });
+
   it("buildTools reflects newly-activated MCP tools (activeMcp is mutable by reference)", () => {
     const mcpRegistry = {
       getAvailableTools: () => [

@@ -442,6 +442,74 @@ export class Agent {
       return;
     }
 
+    // ── Native ask/planning (opt-in: REI_NATIVE_ASK=true) ─────────────────────
+    // Routes ask/planning through the SAME native function-calling loop as agent, gated to a
+    // read-only tool profile (toolsForMode → read_files / run_command / git_changes + web/MCP/
+    // skills, NO edits). First step of collapsing the XML interception path onto one engine: the
+    // model investigates via real tool calls instead of emitting unreliable XML tags. Streams live
+    // through callModel's streamChatWithTools when present. Falls through to the XML streamChat loop
+    // when the flag is off or the provider can't do tool calls — no regression by default.
+    if (this.nativeToolsActive(session.mode)) {
+      const askProvider = createProviderForMode(session.mode, this.provider);
+      const chunksQueue: string[] = [];
+      let resolver: (() => void) | null = null;
+      let done = false;
+      let hasStreamedText = false;
+
+      const onChunk = (chunk: {
+        type: "thinking" | "text" | "status";
+        content: string;
+      }) => {
+        const encoded =
+          chunk.type === "thinking"
+            ? `\x10${chunk.content}`
+            : chunk.type === "text"
+              ? `\x11${chunk.content}`
+              : chunk.content;
+        if (chunk.type === "text") hasStreamedText = true;
+        chunksQueue.push(encoded);
+        resolver?.();
+      };
+
+      const turnPromise = executeAgentTurnWithTools({
+        provider: askProvider,
+        messagesForModel,
+        workspacePath: this.workspacePath,
+        logger: this.logger,
+        modelOverride: resolveModelForMode(session.mode),
+        reasoningEffort: resolveReasoningEffort(session.mode),
+        mcpRegistry: this.mcpRegistry,
+        onChunk,
+        userQuery: userInput,
+        mode: session.mode as SkillMode,
+      }).finally(() => {
+        done = true;
+        resolver?.();
+      });
+
+      while (!done || chunksQueue.length > 0) {
+        if (chunksQueue.length > 0) {
+          yield chunksQueue.shift()!;
+        } else {
+          await new Promise<void>((resolve) => {
+            resolver = resolve;
+          });
+        }
+      }
+
+      const outcome = await turnPromise;
+      session.messages.push({
+        role: "assistant",
+        content: cleanResponseForHistory(outcome.response),
+        sourceMode: session.mode,
+      });
+      options?.onStatus?.("producing_response");
+      // Only emit the response text if it wasn't already streamed live via onChunk.
+      const plainResponse = stripThinkingBlock(outcome.response);
+      if (!hasStreamedText) yield `\x11${plainResponse}`;
+      return;
+    }
+
     if (this.provider.streamChat) {
       let currentMessages = [...messagesForModel];
       let hasMoreCommands = true;
@@ -796,6 +864,21 @@ export class Agent {
   }
 
   /**
+   * Whether THIS turn runs on the native function-calling loop for the given mode.
+   * agent → whenever its provider supports tool calls. ask/planning → only when opted in via
+   * REI_NATIVE_ASK and the provider supports tool calls (otherwise they stay on the XML path).
+   * Single source of truth for prompt selection (native *-tools prompt), MCP-tools delivery
+   * (API param vs prompt text), and the dispatch branch.
+   */
+  private nativeToolsActive(mode: ChatSession["mode"]): boolean {
+    if (mode === "agent") return this.useToolCalling;
+    return (
+      process.env.REI_NATIVE_ASK === "true" &&
+      typeof this.provider.completeChatWithTools === "function"
+    );
+  }
+
+  /**
    * Estimates the tokens consumed by the function-calling `tools` array sent on every
    * agent tools-path request (built-in AGENT_TOOLS + connected MCP tool schemas). This
    * is NOT part of the message history, so the context gauge would otherwise under-report
@@ -847,7 +930,7 @@ export class Agent {
     const baseSystemContent = buildSystemMessage(
       session.mode,
       this.workspacePath,
-      session.mode === "agent" ? this.useToolCalling : false,
+      this.nativeToolsActive(session.mode),
     );
     let systemContent = baseSystemContent;
 
@@ -856,7 +939,7 @@ export class Agent {
     // The structured agent tools path already receives them via the API `tools`
     // param, so adding the text list there just DUPLICATES the token cost — which
     // is severe with large MCP servers (e.g. Google Workspace: dozens of tools).
-    const usesToolsApi = session.mode === "agent" && this.useToolCalling;
+    const usesToolsApi = this.nativeToolsActive(session.mode);
     if (this.mcpRegistry.hasTools() && !usesToolsApi) {
       const mcpBlock = formatMcpToolsForPrompt(
         this.mcpRegistry.getAvailableTools(),

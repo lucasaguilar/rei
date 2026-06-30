@@ -36,4 +36,23 @@ describe("withNativeToolsDirective", () => {
     withNativeToolsDirective(msgs);
     expect(msgs).toHaveLength(1);
   });
+
+  it("uses a READ-ONLY directive for ask/planning (no edit guidance; states it cannot edit)", () => {
+    for (const mode of ["ask", "planning"] as const) {
+      const directive = withNativeToolsDirective(
+        [{ role: "user", content: "hi" }],
+        mode,
+      )[0].content as string;
+      expect(directive).toMatch(/read_files/);
+      expect(directive).toMatch(/CANNOT edit files/i);
+      // No edit-batching guidance leaks into the read-only modes.
+      expect(directive).not.toMatch(/edit_file tool calls together/i);
+    }
+  });
+
+  it("defaults to the agent (edit-batching) directive", () => {
+    const directive = withNativeToolsDirective([{ role: "user", content: "hi" }])[0]
+      .content as string;
+    expect(directive).toMatch(/multiple edit_file tool calls together/i);
+  });
 });

@@ -25,45 +25,17 @@ import {
   buildTurnLimitOutcome,
 } from "./tools-loop/turn-outcomes.js";
 import { buildMismatchEscalationMessage } from "./tools-loop/mismatch-escalation.js";
+import { withNativeToolsDirective } from "./native-tools-directive.js";
+import type { SkillMode } from "../skills/skill-loader.js";
 
 // Re-exported for back-compat (it moved into tools-loop/apply-edit-batch during the Phase 2 refactor).
 export { setEditResults };
 
 const MAX_TURNS = getMaxTurns();
 
-/**
- * Prepends a focused native-tools directive. REI's shared mode prompt is XML-centric
- * ("emit an <edit> block per file"), which on the function-calling path buries the batching
- * guidance and nudges one-tool-call-per-response — each response re-processes the whole
- * growing conversation, so a multi-edit task balloons to N slow round-trips. Empirically the
- * model DOES emit several edit_file calls in one response when told this directly (verified
- * via curl). Placed right after the leading system message(s) so it's high-priority.
- */
-export function withNativeToolsDirective(messages: ChatMessage[]): ChatMessage[] {
-  const directive: ChatMessage = {
-    role: "system",
-    content:
-      "TOOL-CALLING EFFICIENCY (function-calling path — you use tools like edit_file / " +
-      "read_files, NOT XML blocks): Apply ALL independent edits in ONE response by emitting " +
-      "multiple edit_file tool calls together — never one edit per response when several are " +
-      "already known. Read multiple files in a single read_files call (pass all paths at once). " +
-      "Only split work across responses when a step genuinely depends on the OUTCOME of a " +
-      "previous one (e.g. fixing a reported compile error). Every extra response re-processes the " +
-      "entire conversation and is slow.\n" +
-      "TO READ A REPO FILE, ALWAYS use read_files — it returns the WHOLE file and reflects your " +
-      "pending edits. NEVER read file contents with run_command (cat/head/tail/sed/less): that " +
-      "output is capped and the MIDDLE is dropped, so you only see the start and end and will think " +
-      "the file is truncated. Use run_command only for real commands (build, tests, search like " +
-      "grep/rg, git) — not for dumping a file you can read with read_files.\n" +
-      "ALWAYS PREFER edit_file (small, targeted search/replace) for changes — it is cheap. Use " +
-      "rewrite_file ONLY to restructure most of a file or after edit_file has repeatedly failed " +
-      "to match. Rewriting an entire file just to change a few lines (e.g. an icon or a class) is " +
-      "very slow and error-prone — do NOT do it.",
-  };
-  const firstNonSystem = messages.findIndex((m) => m.role !== "system");
-  const at = firstNonSystem === -1 ? messages.length : firstNonSystem;
-  return [...messages.slice(0, at), directive, ...messages.slice(at)];
-}
+// The per-mode native-tools directive moved into its own module (SRP / file-size). Re-exported
+// here so existing importers (incl. native-tools-directive.test.ts) keep working unchanged.
+export { withNativeToolsDirective };
 
 /**
  * Executes an agent turn using native function/tool calling instead of XML parsing.
@@ -87,6 +59,8 @@ export async function executeAgentTurnWithTools(params: {
   }) => void;
   /** Raw user request, used by tool-RAG to select only relevant MCP tools. */
   userQuery?: string;
+  /** Mode whose tool-permission profile + directive govern this turn. Defaults to "agent". */
+  mode?: SkillMode;
 }): Promise<ExecutionResult> {
   const {
     provider,
@@ -98,6 +72,7 @@ export async function executeAgentTurnWithTools(params: {
     mcpRegistry,
     onChunk,
     userQuery,
+    mode = "agent",
   } = params;
 
   if (!provider.completeChatWithTools) {
@@ -119,11 +94,13 @@ export async function executeAgentTurnWithTools(params: {
     userQuery,
     workspacePath,
     logger,
+    mode,
   });
 
-  let currentMessages: ChatMessage[] = withNativeToolsDirective([
-    ...messagesForModel,
-  ]);
+  let currentMessages: ChatMessage[] = withNativeToolsDirective(
+    [...messagesForModel],
+    mode,
+  );
   let loopCount = 0;
   let firstTurnExplanation = "";
   // Format-correction nudges (model emitted a tool call as text/XML) and final-verify
@@ -147,6 +124,12 @@ export async function executeAgentTurnWithTools(params: {
   // Files created via create_file across the loop — surfaced to the user, since
   // the native tool path otherwise only reports creation back to the model.
   const createdFiles: string[] = [];
+
+  // run_command loop-guard state: command string → times executed. The dispatcher blocks an exact
+  // repeat with a nudge (re-running the same command makes no progress — the classic find/grep
+  // repetition loop on local models). Cleared after a turn that applies edits, so a legitimate
+  // post-edit re-verification (e.g. `npx tsc --noEmit`) is allowed to run again.
+  const commandHistory = new Map<string, number>();
 
   const appendCreatedSummary = (resp: string): string => {
     if (createdFiles.length === 0) return resp;
@@ -300,8 +283,14 @@ export async function executeAgentTurnWithTools(params: {
           skills,
           resolveTarget,
           createdFiles,
+          commandHistory,
         },
       );
+
+      // A turn that queued edits changed (or will change) disk state — drop the run_command
+      // history so a follow-up re-verification of the SAME command (e.g. `npx tsc --noEmit`)
+      // isn't mistaken for a no-progress loop.
+      if (editTasks.length > 0) commandHistory.clear();
 
       // Apply this turn's edits onto the CURRENT virtual content (cumulative), per file & in
       // order; then validate the WHOLE virtual tree. This catches cross-file breakage (e.g. an

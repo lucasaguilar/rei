@@ -37,6 +37,7 @@ describe("dispatchToolCalls", () => {
       skills: [],
       resolveTarget: tree.resolveTarget,
       createdFiles: [],
+      commandHistory: new Map<string, number>(),
     };
   });
   afterEach(() => fs.rmSync(ws, { recursive: true, force: true }));
@@ -88,6 +89,24 @@ describe("dispatchToolCalls", () => {
     const { hasToolFailure, toolResultsMap } = await dispatchToolCalls([bad], ctx);
     expect(hasToolFailure).toBe(true);
     expect(toolResultsMap.get("x")).toMatch(/^ERROR:/);
+  });
+
+  it("run_command loop-guard: blocks an exact repeat with a read_files nudge", async () => {
+    const cmd = "find . -name agent.ts";
+    // First run executes (echo is harmless and real).
+    await dispatchToolCalls([call("run_command", { command: "echo hi" }, "c1")], ctx);
+    expect(ctx.commandHistory.get("echo hi")).toBe(1);
+
+    // Same command twice in the SAME history → second is intercepted, not executed.
+    await dispatchToolCalls([call("run_command", { command: cmd }, "first")], ctx);
+    const { toolResultsMap } = await dispatchToolCalls(
+      [call("run_command", { command: cmd }, "repeat")],
+      ctx,
+    );
+    const nudge = toolResultsMap.get("repeat")!;
+    expect(nudge).toMatch(/already ran this exact command/i);
+    expect(nudge).toMatch(/read_files/);
+    expect(ctx.commandHistory.get(cmd)).toBe(2);
   });
 
   it("preserves order: one tool result per call", async () => {

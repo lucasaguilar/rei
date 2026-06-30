@@ -42,6 +42,10 @@ export interface DispatchContext {
   // edit handlers
   resolveTarget: (raw: unknown) => string;
   createdFiles: string[];
+  /** command string → times already executed THIS run, for the run_command loop-guard.
+   *  Mutated by reference; cleared by the loop after edits change disk state so a legit
+   *  post-edit re-verification (e.g. `npx tsc --noEmit`) is allowed to run again. */
+  commandHistory: Map<string, number>;
 }
 
 export interface DispatchResult {
@@ -79,6 +83,7 @@ export async function dispatchToolCalls(
     skills,
     resolveTarget,
     createdFiles,
+    commandHistory,
   } = ctx;
 
   let hasToolFailure = false;
@@ -202,7 +207,32 @@ export async function dispatchToolCalls(
 
         // ── run_command ──────────────────────────────────────────────
         case "run_command": {
-          toolResult = await handleRunCommand(args.command as string, {
+          const cmd = ((args.command as string) ?? "").trim();
+          const priorRuns = commandHistory.get(cmd) ?? 0;
+          commandHistory.set(cmd, priorRuns + 1);
+          // Loop-guard: re-running the EXACT same command returns the same output and makes no
+          // progress — a classic local-model repetition loop (e.g. running the same `find`/`grep`
+          // over and over instead of read_files). Intercept the repeat with a nudge instead of
+          // executing it. State-changing turns clear this history (see the loop), so a legit
+          // post-edit re-verification still runs.
+          if (cmd && priorRuns >= 1) {
+            logger.logInfo(`[tools] run_command loop-guard: blocked repeat`, {
+              command: cmd,
+              priorRuns,
+            });
+            emitStatus(`↩️  [REI] Comando repetido bloqueado: ${cmd}`);
+            toolResult =
+              `You already ran this exact command earlier this turn:\n  ${cmd}\n` +
+              `Its output is in the conversation above — re-running it returns the SAME result and ` +
+              `makes no progress. Do NOT run it again.\n` +
+              `• If you were locating a file, you already have its path: call read_files with that ` +
+              `path to read the WHOLE file.\n` +
+              `• If you already have enough information, STOP exploring and write your final ` +
+              `answer/plan now.`;
+            toolResultsMap.set(call.id, toolResult);
+            break;
+          }
+          toolResult = await handleRunCommand(cmd, {
             logger,
             emitStatus,
             workspacePath,

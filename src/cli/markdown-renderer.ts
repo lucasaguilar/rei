@@ -77,7 +77,7 @@ export function formatContextGauge(
   const filled = Math.max(0, Math.min(10, Math.round(pct / 10)));
   const bar = "█".repeat(filled) + "░".repeat(10 - filled);
   const color = pct >= 85 ? "\x1b[31m" : pct >= 60 ? "\x1b[33m" : "\x1b[32m";
-  return `${color}🧠 Context: ${promptTokens.toLocaleString()} / ${ctxWindow.toLocaleString()} tokens  [${bar}] ${pct}% used\x1b[0m`;
+  return `${color}⏳ Context: ${promptTokens.toLocaleString()} / ${ctxWindow.toLocaleString()} tokens  [${bar}] ${pct}% used\x1b[0m`;
 }
 
 /**
