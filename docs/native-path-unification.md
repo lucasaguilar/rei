@@ -102,6 +102,25 @@ Fix:
   residual was `prompts/skills/write-spec.md` referencing `<request_files>`/`<execute_command>` —
   neutralized to `read_files`/`run_command`. Other skills were already XML-free.
 
+### Done (2026-06-30, fifth pass) — repetition-loop root cause + guard
+Live agent + planning runs looped: the model re-issued the SAME command many times (21× `git diff`,
+7× `find|grep`) with identical reasoning. Two complementary fixes:
+
+1. **Root cause — preserve-thinking re-feed.** `REI_PRESERVE_THINKING` was defaulted ON (commit
+   7147a13). In the native tools loop each iteration's `reasoning_content` accumulates and is re-sent
+   every subsequent call (`toApiMessage`), so local models echo their own prior thoughts → the same
+   command again. Flipped DEFAULT BACK TO OFF via a single source of truth
+   `preserveThinkingEnabled()` in `config/model-runtime.ts` (`=== "true"`, opt-in), used by
+   `toApiMessage`, `cleanResponseForHistory`, and `call-model`'s logging. Re-feeding reasoning is
+   non-standard (thinking is normally ephemeral-per-turn); the continuity benefit was speculative,
+   the loop cost concrete.
+2. **Defense-in-depth — run_command loop-guard + escalation.** `dispatch-tool-calls.ts` intercepts an
+   EXACT repeat command with a read_files/stop nudge (`commandHistory`) instead of re-executing;
+   `blockedRepeatCount` is surfaced so `blocked-repeat-guard.ts` (`evaluateBlockedRepeats`) escalates:
+   a turn that was nothing-but-blocked-repeats injects a forceful STOP user message, and a 2nd in a
+   row abandons the turn (finalize) instead of spinning to MAX_TURNS. `commandHistory` clears after a
+   turn with edits so a legit post-edit `tsc` re-verify still runs.
+
 ### Next
 - **Validate live**: run REI in **ask** mode against LM Studio with `REI_NATIVE_ASK=true`; confirm
   (a) reasoning/text stream live, (b) the model investigates via `read_files`/`run_command` (not XML

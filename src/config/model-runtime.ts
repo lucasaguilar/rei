@@ -122,6 +122,20 @@ export function resolveReasoningEffort(mode?: string): string | undefined {
   return raw && REASONING_EFFORTS.has(raw) ? raw : undefined;
 }
 
+/**
+ * Whether to RE-SEND the model's prior `reasoning_content` back to it on later calls (and keep
+ * `<think>` blocks in stored history). Single source of truth for the whole pipeline.
+ *
+ * DEFAULT OFF (opt-in with REI_PRESERVE_THINKING=true). Re-feeding reasoning piles up near-identical
+ * prior thoughts inside the native tools loop and makes local models echo them → repetition loops
+ * (the same find/grep or git command re-issued many times). Industry-standard usage treats thinking
+ * as ephemeral-per-turn, not re-fed; the continuity benefit is speculative while the loop cost is
+ * concrete. Opt in only for a model that demonstrably benefits from seeing its prior reasoning.
+ */
+export function preserveThinkingEnabled(): boolean {
+  return process.env.REI_PRESERVE_THINKING === "true";
+}
+
 function floatInRange(
   value: string | undefined,
   fallback: number,

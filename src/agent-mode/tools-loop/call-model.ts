@@ -5,6 +5,7 @@ import type {
   ChatCompletionWithTools,
 } from "../../providers/model-provider.js";
 import type { AgentLogger } from "../../core/logger.js";
+import { preserveThinkingEnabled } from "../../config/model-runtime.js";
 
 /**
  * One model call in the native agent loop: invokes the provider's tool-calling completion,
@@ -26,8 +27,8 @@ export async function callModel(params: {
   const { provider, messages, tools, modelOverride, reasoningEffort, logger, onChunk } = params;
 
   // Observability for preserve-thinking: only log when it's actually ON and re-feeding
-  // reasoning — otherwise it's just noise (default is ON since v0.14).
-  if (process.env.REI_PRESERVE_THINKING !== "false") {
+  // reasoning — otherwise it's just noise (DEFAULT OFF; opt-in with REI_PRESERVE_THINKING=true).
+  if (preserveThinkingEnabled()) {
     const reasoningCarried = messages.filter(
       (m) => m.role === "assistant" && m.reasoning_content,
     );

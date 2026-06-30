@@ -6,7 +6,11 @@ import type {
   CompletionOptions,
   ToolStreamDelta,
 } from "./model-provider.js";
-import { getMaxOutputTokens, resolveAgentSampling } from "../config/model-runtime.js";
+import {
+  getMaxOutputTokens,
+  resolveAgentSampling,
+  preserveThinkingEnabled,
+} from "../config/model-runtime.js";
 import { fetchWithRetry } from "./fetch-retry.js";
 
 interface OpenAIToolCallResponse {
@@ -33,11 +37,10 @@ interface OpenAIToolCallResponse {
  * enabling role:"tool" + tool_call_id round-trips on the XML path.
  */
 export function toApiMessage(msg: ChatMessage): Record<string, unknown> {
-  // Re-send prior reasoning only when preservation is enabled. Reasoning models
-  // (e.g. qwen3.6 "Preserve Thinking") return reasoning_content as a dedicated
-  // field; carrying it back gives them their prior reasoning across turns.
-  // Default ON: preserve thinking unless explicitly disabled with REI_PRESERVE_THINKING=false.
-  const preserve = process.env.REI_PRESERVE_THINKING !== "false";
+  // Re-send prior reasoning only when preservation is enabled (DEFAULT OFF — see
+  // preserveThinkingEnabled). Re-feeding accumulated reasoning makes local models echo their prior
+  // thoughts inside the tools loop → repetition loops.
+  const preserve = preserveThinkingEnabled();
   const reasoningField =
     preserve && msg.role === "assistant" && msg.reasoning_content
       ? { reasoning_content: msg.reasoning_content }

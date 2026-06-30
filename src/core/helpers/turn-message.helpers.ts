@@ -2,6 +2,7 @@ import type {
   TurnContext,
   RagNodeSnippet,
 } from "../../context/context-builder.js";
+import { preserveThinkingEnabled } from "../../config/model-runtime.js";
 
 const FILE_TREE_HEADER = "### PROJECT FILE TREE";
 /** ~1500 tokens ≈ 6000 chars. Generous: a flat path list is cheap and deterministic. */
@@ -312,8 +313,8 @@ export function cleanResponseForHistory(content: string): string {
     .replace(/<request_files>[\s\S]*?(<\/request_files>|$)/gi, "")
     .replace(/<execute_command>[\s\S]*?(<\/execute_command>|$)/gi, "")
     .replace(/<call_tool\b[\s\S]*?(<\/call_tool>|$)/gi, "");
-  // Default ON: preserve thinking unless explicitly disabled with REI_PRESERVE_THINKING=false.
-  if (process.env.REI_PRESERVE_THINKING === "false") {
+  // DEFAULT OFF: strip the <think> block from stored history unless preservation is opted in.
+  if (!preserveThinkingEnabled()) {
     return stripThinkingBlock(clean);
   }
   return clean.trim();

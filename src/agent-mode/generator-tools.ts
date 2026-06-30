@@ -25,6 +25,10 @@ import {
   buildTurnLimitOutcome,
 } from "./tools-loop/turn-outcomes.js";
 import { buildMismatchEscalationMessage } from "./tools-loop/mismatch-escalation.js";
+import {
+  evaluateBlockedRepeats,
+  BLOCKED_REPEAT_STOP_MESSAGE,
+} from "./tools-loop/blocked-repeat-guard.js";
 import { withNativeToolsDirective } from "./native-tools-directive.js";
 import type { SkillMode } from "../skills/skill-loader.js";
 
@@ -125,11 +129,13 @@ export async function executeAgentTurnWithTools(params: {
   // the native tool path otherwise only reports creation back to the model.
   const createdFiles: string[] = [];
 
-  // run_command loop-guard state: command string → times executed. The dispatcher blocks an exact
-  // repeat with a nudge (re-running the same command makes no progress — the classic find/grep
-  // repetition loop on local models). Cleared after a turn that applies edits, so a legitimate
-  // post-edit re-verification (e.g. `npx tsc --noEmit`) is allowed to run again.
+  // run_command loop-guard: command → times executed. The dispatcher blocks an exact repeat (no
+  // progress — the classic find/grep loop). Cleared after a turn that edits, so a legit post-edit
+  // re-verification (`npx tsc --noEmit`) can run again.
   const commandHistory = new Map<string, number>();
+  // Streak of consecutive all-blocked-repeat turns; escalation policy lives in blocked-repeat-guard.
+  let consecutiveBlockedTurns = 0;
+  const MAX_BLOCKED_TURNS = 2;
 
   const appendCreatedSummary = (resp: string): string => {
     if (createdFiles.length === 0) return resp;
@@ -170,6 +176,20 @@ export async function executeAgentTurnWithTools(params: {
   // Opt into the stricter `REI_EDIT_MODE=sandbox` to validate the cumulative virtual tree per
   // edit and persist only green state (never leaves broken code on disk; heavier).
   const directMode = process.env.REI_EDIT_MODE !== "sandbox";
+
+  // Finalize with whatever was gathered (applies queued edits + one honest verify). Reused by the
+  // turn-limit exit and the loop-guard abandon path; reads loopCount at call time.
+  const finalizeAtLimit = () =>
+    buildTurnLimitOutcome({
+      loopCount,
+      maxTurns: MAX_TURNS,
+      workspacePath,
+      directMode,
+      logger,
+      virtualEdits,
+      firstTurnExplanation,
+      appendCreatedSummary,
+    });
 
   while (loopCount < MAX_TURNS) {
     loopCount++;
@@ -266,7 +286,8 @@ export async function executeAgentTurnWithTools(params: {
 
       // Execute every tool call in this turn (spans + arg-parse + dispatch to the extracted
       // handlers). Edits are only QUEUED into editTasks here; we apply them as a batch below.
-      let { hasToolFailure, editTasks, toolResultsMap } = await dispatchToolCalls(
+      let { hasToolFailure, editTasks, toolResultsMap, blockedRepeatCount } =
+        await dispatchToolCalls(
         result.toolCalls,
         {
           workspacePath,
@@ -343,6 +364,24 @@ export async function executeAgentTurnWithTools(params: {
         });
       }
 
+      // Loop-guard escalation: nudge (forceful STOP message) → abandon (finalize) on a 2nd
+      // all-blocked turn in a row. Policy in blocked-repeat-guard.
+      const guard = evaluateBlockedRepeats({
+        toolCallCount: result.toolCalls.length,
+        blockedRepeatCount,
+        consecutiveBlockedTurns,
+        maxBlockedTurns: MAX_BLOCKED_TURNS,
+      });
+      consecutiveBlockedTurns = guard.consecutiveBlockedTurns;
+      if (guard.action === "abandon") {
+        logger.logInfo("[tools] loop-guard: abandoning — repeated blocked commands, no progress");
+        emitStatus("⛔  [REI] Loop de comando repetido sin progreso — terminando el turno.");
+        return finalizeAtLimit();
+      }
+      if (guard.action === "nudge") {
+        currentMessages.push({ role: "user", content: BLOCKED_REPEAT_STOP_MESSAGE });
+      }
+
       // Do NOT return here just because we have valid edits — keep looping so the
       // model can edit additional files in the same task. We apply everything once
       // the model signals completion (a plain-text response, handled above, which
@@ -355,14 +394,5 @@ export async function executeAgentTurnWithTools(params: {
 
   // Hit the turn limit without the model signalling completion — apply any queued edits (with one
   // honest final verify) or report the failure with guidance.
-  return buildTurnLimitOutcome({
-    loopCount,
-    maxTurns: MAX_TURNS,
-    workspacePath,
-    directMode,
-    logger,
-    virtualEdits,
-    firstTurnExplanation,
-    appendCreatedSummary,
-  });
+  return finalizeAtLimit();
 }

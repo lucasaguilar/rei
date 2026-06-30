@@ -6,6 +6,10 @@ dist/
 .rei/
 *.tmp
 *.log
+
+# Debug / temp HTML artifacts
+.rei-debug.html
+
 coverage/
 scripts/launch-rei.config.js
 .aider*

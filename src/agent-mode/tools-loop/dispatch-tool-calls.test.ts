@@ -109,6 +109,14 @@ describe("dispatchToolCalls", () => {
     expect(ctx.commandHistory.get(cmd)).toBe(2);
   });
 
+  it("reports blockedRepeatCount so the loop can escalate", async () => {
+    const c = { command: "ls -la" };
+    const first = await dispatchToolCalls([call("run_command", c, "a")], ctx);
+    expect(first.blockedRepeatCount).toBe(0); // first run executes
+    const second = await dispatchToolCalls([call("run_command", c, "b")], ctx);
+    expect(second.blockedRepeatCount).toBe(1); // repeat is blocked + counted
+  });
+
   it("preserves order: one tool result per call", async () => {
     fs.writeFileSync(path.join(ws, "a.ts"), "A");
     fs.writeFileSync(path.join(ws, "b.ts"), "B");

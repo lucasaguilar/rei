@@ -55,6 +55,9 @@ export interface DispatchResult {
   editTasks: EditTask[];
   /** call id → tool result, fed back to the model in chronological order. */
   toolResultsMap: Map<string, string>;
+  /** run_command calls intercepted as exact repeats this turn (loop-guard). The loop uses this to
+   *  escalate/abandon when a turn does NOTHING but re-issue already-run commands. */
+  blockedRepeatCount: number;
 }
 
 /**
@@ -87,6 +90,7 @@ export async function dispatchToolCalls(
   } = ctx;
 
   let hasToolFailure = false;
+  let blockedRepeatCount = 0;
 
   // Track edit tasks and all tool results by call ID to preserve correct response order
   const editTasks: EditTask[] = [];
@@ -216,6 +220,7 @@ export async function dispatchToolCalls(
           // executing it. State-changing turns clear this history (see the loop), so a legit
           // post-edit re-verification still runs.
           if (cmd && priorRuns >= 1) {
+            blockedRepeatCount++;
             logger.logInfo(`[tools] run_command loop-guard: blocked repeat`, {
               command: cmd,
               priorRuns,
@@ -272,5 +277,5 @@ export async function dispatchToolCalls(
     }
   }
 
-  return { hasToolFailure, editTasks, toolResultsMap };
+  return { hasToolFailure, editTasks, toolResultsMap, blockedRepeatCount };
 }
