@@ -1,5 +1,8 @@
 import { buildTurnContext } from "../src/context/context-builder.js";
-import { searchRag, startIndexingWorker } from "../src/context/rag/rag-indexer.js";
+import {
+  searchRag,
+  startIndexingWorker,
+} from "../src/context/rag/rag-indexer.js";
 import { VectorStore } from "../src/context/rag/vector-store.js";
 import { generateEmbedding } from "../src/context/rag/embedder.js";
 import * as path from "path";
@@ -18,7 +21,7 @@ async function runDiagnostic() {
       },
       onProgress: (i, t) => {
         process.stdout.write(`\rProgress: ${i}/${t} files...`);
-      }
+      },
     });
   });
 
@@ -30,10 +33,8 @@ async function runDiagnostic() {
   );
 
   // 2. Test RAG Search Ranking
-  const testQueryEs =
-    "quisiera verificar porque no se ven los iconos que pusimos al label de model que me muestra en cada respuesta de REI";
-  const testQueryEn =
-    "how to resolve model active label and display icons";
+  const testQueryEs = "dónde armo el contexto";
+  const testQueryEn = "where do i assemble the context";
 
   console.log(`\n🔍 Searching RAG (Spanish) for: "${testQueryEs}"`);
   const ragResultsEs = await searchRag(workspacePath, testQueryEs, 10);

@@ -4,7 +4,7 @@ import { fetchWithRetry } from "../../providers/fetch-retry.js";
 // Permitimos descargar el modelo remoto la primera vez (Xenova).
 env.allowRemoteModels = true;
 
-const XENOVA_DEFAULT_MODEL = "Xenova/all-MiniLM-L6-v2";
+const XENOVA_DEFAULT_MODEL = "Xenova/multilingual-e5-small";
 
 // The embedder is now PARAMETRIZABLE. The default is the in-process Xenova MiniLM (zero-config,
 // English-centric, 384-dim). For multilingual docs (Spanish, etc.) point it at a server model

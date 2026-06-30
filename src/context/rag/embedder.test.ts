@@ -24,7 +24,7 @@ afterEach(() => {
 describe("getEmbedderId", () => {
   it("defaults to the in-process Xenova MiniLM", () => {
     for (const k of KEYS) delete process.env[k];
-    expect(getEmbedderId()).toBe("xenova:Xenova/all-MiniLM-L6-v2");
+    expect(getEmbedderId()).toBe("xenova:Xenova/multilingual-e5-small");
   });
 
   it("reflects a configured server embedder (provider:model)", () => {

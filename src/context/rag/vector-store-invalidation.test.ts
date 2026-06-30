@@ -37,7 +37,7 @@ describe("VectorStore — embedder-aware index invalidation (real disk)", () => 
     await s.save();
 
     const onDisk = JSON.parse(fs.readFileSync(indexFile(), "utf8"));
-    expect(onDisk.embedderId).toBe("xenova:Xenova/all-MiniLM-L6-v2");
+    expect(onDisk.embedderId).toBe("xenova:Xenova/multilingual-e5-small");
 
     const s2 = new VectorStore(ws);
     await s2.load();
@@ -45,6 +45,7 @@ describe("VectorStore — embedder-aware index invalidation (real disk)", () => 
   });
 
   it("keeps a legacy bare-array index when the embedder is still the default", async () => {
+    process.env.REI_EMBEDDER_MODEL = "Xenova/all-MiniLM-L6-v2";
     fs.writeFileSync(indexFile(), JSON.stringify([{ vector: [1, 0], metadata: meta("y") }]));
     const s = new VectorStore(ws);
     await s.load();
