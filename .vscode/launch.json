@@ -8,7 +8,7 @@
             "type": "node",
             "request": "launch",
             "name": "REI Interactive Launcher",
-            "program": "${workspaceFolder}/scripts/launch-rei.js",
+            "program": "${workspaceFolder}/scripts/launch-rei-only-for-debug.js",
             "console": "integratedTerminal",
             "skipFiles": ["<node_internals>/**"]
         },

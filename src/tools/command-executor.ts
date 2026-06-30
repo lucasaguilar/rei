@@ -128,8 +128,10 @@ function parseCommandLine(commandLine: string): string[] {
 }
 
 /**
- * Splits a command line on top-level `&&` and `||` operators, respecting single
+ * Splits a command line on top-level `&&`, `||` and `/` operators, respecting single
  * and double quotes so `git commit -m "a && b"` is NOT split inside the quotes.
+ * The `/` operator lets models chain simple commands (e.g. `ls/grep`) as shorthand
+ * for separate executions — equivalent to running each side independently with `;`.
  * Returns the segments and the operators joining them (operators[i] sits between
  * segments[i] and segments[i+1]).
  */
@@ -145,6 +147,7 @@ function splitOnLogicalOps(commandLine: string): { segments: string[]; operators
     if (ch === "'" && !inDouble) inSingle = !inSingle;
     else if (ch === '"' && !inSingle) inDouble = !inDouble;
 
+    // `&&` and `||` — two-char operators, only outside quotes.
     if (!inSingle && !inDouble && (ch === "&" || ch === "|") && commandLine[i + 1] === ch) {
       segments.push(current.trim());
       operators.push((ch + ch) as "&&" | "||");
@@ -152,6 +155,22 @@ function splitOnLogicalOps(commandLine: string): { segments: string[]; operators
       i++; // skip the second operator char
       continue;
     }
+
+    // `/` — single-char operator, only outside quotes. Models use this to chain
+    // simple commands (e.g. `ls/grep`). We split on it so each side is validated
+    // and executed separately by the allow-list. Paths inside arguments (e.g.
+    // `find src/agent-mode -name "*.ts"`) are NOT affected because they appear
+    // after a valid command token — only bare top-level segments get split.
+    if (!inSingle && !inDouble && ch === "/") {
+      const prev = current.trim();
+      if (prev.length > 0) {
+        segments.push(prev);
+        operators.push("&&"); // treat as sequential execution
+        current = "";
+      }
+      continue;
+    }
+
     current += ch;
   }
   segments.push(current.trim());

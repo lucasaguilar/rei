@@ -138,6 +138,8 @@ async function dispatchXmlToolCall(
 
 /**
  * Reads the contents of any <request_files> tags found in a response and returns formatted feedback.
+ * When files are not found, appends a strong hint telling the model to use
+ * <execute_command> (ls/grep) to discover the real paths.
  */
 export async function executeFileRequestsFromResponse(
   response: string,
@@ -148,17 +150,30 @@ export async function executeFileRequestsFromResponse(
   if (fileRequests.length === 0) return "";
 
   let feedback = "\n\n---\n**Requested Files Context:**\n";
+  let foundCount = 0;
+  let notFoundCount = 0;
+
   for (const f of fileRequests) {
     logger.logInfo(`Non-agent requested file: ${f}`);
     const absPath = path.join(workspacePath, f);
     try {
       const content = await fs.readFile(absPath, "utf-8");
       feedback += `\n### File: ${f}\n\`\`\`\n${content}\n\`\`\`\n`;
+      foundCount++;
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       feedback += `\n### File: ${f}\n(Could not read file: ${errorMsg})\n`;
+      notFoundCount++;
     }
   }
+
+  // If some (or all) files were not found, tell the model to use
+  // <execute_command> to discover the real paths instead of guessing.
+  if (notFoundCount > 0) {
+    feedback += `\n⚠️  [REI] ${notFoundCount} of ${fileRequests.length} requested file(s) could not be read — they likely do not exist at the specified paths. ` +
+      `Use <execute_command>ls</execute_command>, <execute_command>find . -name "PATTERN"</execute_command>, or <execute_command>grep -r "PATTERN" src/</execute_command> to discover the real file paths in the workspace.\n`;
+  }
+
   return feedback;
 }
 
@@ -291,10 +306,34 @@ export async function executeAndFormatTurnActions(params: {
       logger,
     );
     executionFeedback += fileFeedback;
-    userVisibleFeedback +=
-      `\n📂 **[REI] Injected ${fileRequests.length} requested file(s) into context:**\n` +
-      fileRequests.map((f) => `- \`${f}\``).join("\n") +
-      "\n";
+
+    // Count found vs not-found from the feedback to report accurately.
+    // The feedback contains "(Could not read file:" for each missing file.
+    const notFound = (fileFeedback.match(/\(Could not read file:/g) || [])
+      .length;
+    const found = fileRequests.length - notFound;
+
+    if (found > 0 && notFound > 0) {
+      userVisibleFeedback +=
+        `\n📂 **[REI] ${found} of ${fileRequests.length} requested file(s) found in context:**\n` +
+        fileRequests.map((f) => `- \`${f}\``).join("\n") +
+        (notFound > 0
+          ? `\n⚠️  ${notFound} file(s) not found — use <execute_command>ls</execute_command>, <execute_command>find . -name "PATTERN"</execute_command>, or <execute_command>grep -r "PATTERN" src/</execute_command> to discover real paths.`
+          : "") +
+        "\n";
+    } else if (found === fileRequests.length) {
+      userVisibleFeedback +=
+        `\n📂 **[REI] Injected ${fileRequests.length} requested file(s) into context:**\n` +
+        fileRequests.map((f) => `- \`${f}\``).join("\n") +
+        "\n";
+    } else {
+      // All files not found — report clearly.
+      userVisibleFeedback +=
+        `\n📂 **[REI] 0 of ${fileRequests.length} requested file(s) found.** ` +
+        `None of the specified paths exist. Use <execute_command>ls</execute_command> or <execute_command>find/grep</execute_command> to discover the real paths.\n` +
+        fileRequests.map((f) => `- \`${f}\``).join("\n") +
+        "\n";
+    }
   }
 
   if (commands.length > 0) {
