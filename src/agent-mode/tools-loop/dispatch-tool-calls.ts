@@ -9,6 +9,7 @@ import {
   handleWebSearch,
   handleWeather,
   handleRunCommand,
+  handleGitChanges,
 } from "./builtin-handlers.js";
 import {
   handleEditFile,
@@ -206,6 +207,13 @@ export async function dispatchToolCalls(
             emitStatus,
             workspacePath,
           });
+          toolResultsMap.set(call.id, toolResult);
+          break;
+        }
+
+        // ── git_changes (built-in) ───────────────────────────────────
+        case "git_changes": {
+          toolResult = await handleGitChanges({ logger, emitStatus, workspacePath });
           toolResultsMap.set(call.id, toolResult);
           break;
         }

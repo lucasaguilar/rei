@@ -11,8 +11,15 @@ vi.mock("../../tools/command-executor.js", () => ({
   executeCommand: vi.fn(async () => ({ exitCode: 0, stdout: "hello", stderr: "" })),
   limitCommandOutput: vi.fn((s: string) => s),
 }));
+vi.mock("../../workspace/git-changes.js", () => ({
+  detectGitChanges: vi.fn(async () => [
+    { filePath: "src/file1.ts", status: "modified" },
+    { filePath: "src/file2.ts", status: "added" },
+  ]),
+  getGitStatus: vi.fn(async () => ["src/file1.ts", "src/file2.ts"]),
+}));
 
-import { handleWebSearch, handleWeather, handleRunCommand } from "./builtin-handlers.js";
+import { handleWebSearch, handleWeather, handleRunCommand, handleGitChanges } from "./builtin-handlers.js";
 import { searchWeb } from "../../tools/search-tool.js";
 import { executeCommand } from "../../tools/command-executor.js";
 import type { ModelProvider } from "../../providers/model-provider.js";
@@ -42,5 +49,12 @@ describe("builtin handlers", () => {
     expect(executeCommand).toHaveBeenCalledWith("npm test", "/ws");
     expect(out).toContain("Exit: 0");
     expect(out).toContain("hello");
+  });
+
+  it("handleGitChanges detects and formats git changes", async () => {
+    const out = await handleGitChanges({ ...statusCtx, workspacePath: "/ws" });
+    expect(out).toContain("Uncommitted Changes Detected");
+    expect(out).toContain("[M] src/file1.ts");
+    expect(out).toContain("[A] src/file2.ts");
   });
 });

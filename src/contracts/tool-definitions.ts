@@ -151,6 +151,19 @@ export const WEB_SEARCH_TOOL: ToolDefinition = {
   },
 };
 
+export const GIT_CHANGES_TOOL: ToolDefinition = {
+  type: "function",
+  function: {
+    name: "git_changes",
+    description: "Detect uncommitted changes in the workspace Git repository (added, modified, deleted files). Useful for understanding what has been changed before editing.",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+  },
+};
+
 // ── Tool sets ────────────────────────────────────────────────────────────────
 
 /** All tools available in agent mode (editing capabilities). */
@@ -160,6 +173,7 @@ export const AGENT_TOOLS: ToolDefinition[] = [
   CREATE_FILE_TOOL,
   REWRITE_FILE_TOOL,
   RUN_COMMAND_TOOL,
+  GIT_CHANGES_TOOL,
 ];
 
 /** Utility tools available in ask/planning modes. */

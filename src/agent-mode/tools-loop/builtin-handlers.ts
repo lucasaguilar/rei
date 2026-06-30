@@ -3,9 +3,11 @@ import type { ModelProvider } from "../../providers/model-provider.js";
 import { executeCommand, limitCommandOutput } from "../../tools/command-executor.js";
 import { searchWeb } from "../../tools/search-tool.js";
 import { getWeather, formatWeatherOutput } from "../../tools/weather-tool.js";
+import type { GitChange } from "../../workspace/git-changes.js";
+import { detectGitChanges, getGitStatus } from "../../workspace/git-changes.js";
 
 /**
- * Built-in NON-edit tool handlers (web_search, weather, run_command), extracted from
+ * Built-in NON-edit tool handlers (web_search, weather, run_command, git_changes), extracted from
  * executeAgentTurnWithTools (Phase 2). Each takes the call args + a small context and returns the
  * tool-result string to feed back to the model — no shared loop state is mutated.
  */
@@ -13,6 +15,24 @@ import { getWeather, formatWeatherOutput } from "../../tools/weather-tool.js";
 interface StatusCtx {
   logger: AgentLogger;
   emitStatus: (msg: string) => void;
+}
+
+function formatGitChanges(changes: GitChange[]): string {
+  if (changes.length === 0) return "";
+
+  const lines = changes.map((change) => {
+    const icon = change.status === "added" ? "A" : change.status === "deleted" ? "D" : "M";
+    return `- [${icon}] ${change.filePath}`;
+  });
+
+  return `\n### 📁 Uncommitted Changes Detected:\n\n${lines.join("\n")}\n`;
+}
+
+function formatGitStatus(files: string[]): string {
+  if (files.length === 0) return "";
+
+  const lines = files.map((f) => `- ${f}`);
+  return `\n### 📁 Git Status (porcelain):\n\n${lines.join("\n")}\n`;
 }
 
 /** web_search → REI's built-in web search, formatted for the model. */
@@ -50,4 +70,31 @@ export async function handleRunCommand(
       (stdout ? `Stdout:\n${stdout}\n` : "") +
       (stderr ? `Stderr:\n${stderr}\n` : "") || "(no output)"
   );
+}
+
+/** git_changes → detect uncommitted changes in the workspace Git repository. */
+export async function handleGitChanges(
+  ctx: StatusCtx & { workspacePath: string },
+): Promise<string> {
+  ctx.logger.logInfo(`[tools] git_changes called`);
+  ctx.emitStatus("🔍 [REI] Detecting uncommitted changes…");
+
+  const changes = await detectGitChanges(ctx.workspacePath);
+  if (changes.length === 0) {
+    return `\n### 📁 Git Status: No uncommitted changes\nNo hay cambios sin confirmar en el workspace.\n`;
+  }
+
+  let output = formatGitChanges(changes);
+
+  // Also check porcelain status for renames, merges in progress, etc.
+  const statusFiles = await getGitStatus(ctx.workspacePath);
+  if (statusFiles.length > changes.length) {
+    const extra = statusFiles.filter((f) => !changes.some((c) => c.filePath === f));
+    output += `\n### 📁 Additional Status Entries:\n\n`;
+    for (const f of extra) {
+      output += `- ${f}\n`;
+    }
+  }
+
+  return `${output}\n`;
 }

@@ -8,6 +8,9 @@ vi.mock("../../tools/weather-tool.js", () => ({
 vi.mock("../../tools/search-tool.js", () => ({
   searchWeb: vi.fn().mockResolvedValue("SEARCH_OUTPUT"),
 }));
+vi.mock("../../tools/git-changes-tool.js", () => ({
+  getGitChanges: vi.fn().mockResolvedValue("MOCKED_GIT_CHANGES"),
+}));
 
 // Control the skill catalog without touching disk; keep the real skillsForMode /
 // findSkill so the mode-scoping and lookup logic is exercised for real.
@@ -108,6 +111,21 @@ describe("dispatchXmlToolCall (via executeToolCallsFromResponse)", () => {
     );
 
     expect(feedback).toContain("ERROR: server exploded");
+  });
+
+  it("dispatches git_changes tool call and formats it", async () => {
+    const response = `<call_tool name="git_changes">{}</call_tool>`;
+
+    const feedback = await executeToolCallsFromResponse(
+      response,
+      fakeProvider,
+      fakeLogger,
+      makeRegistry(),
+      { workspacePath: "/workspace", mode: "planning" },
+    );
+
+    expect(feedback).toContain("📁 Git Changes:");
+    expect(feedback).toContain("MOCKED_GIT_CHANGES");
   });
 });
 

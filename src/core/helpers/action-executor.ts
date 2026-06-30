@@ -11,6 +11,7 @@ import {
   formatWeatherOutput,
 } from "../../tools/weather-tool.js";
 import { searchWeb } from "../../tools/search-tool.js";
+import { getGitChanges, summarizeGitChanges } from "../../tools/git-changes-tool.js";
 import {
   loadSkills,
   skillsForMode,
@@ -38,6 +39,7 @@ async function dispatchXmlToolCall(
   provider: ModelProvider,
   logger: AgentLogger,
   mcpRegistry?: McpRegistry,
+  workspacePath?: string,
   skillContext?: { workspacePath: string; mode: SkillMode },
 ): Promise<string> {
   logger.logInfo(`Calling tool: ${call.name}`, { args: call.args });
@@ -82,6 +84,14 @@ async function dispatchXmlToolCall(
         const searchRes = await searchWeb(call.args.query as string, provider);
         return `\n### 🔍 Search Results: ${call.args.query}\n${searchRes}\n`;
       });
+    }
+    if (call.name === "git_changes") {
+      const wsPath = skillContext?.workspacePath;
+      if (!wsPath) {
+        return `\n[TOOL] git_changes -> ERROR: workspace path not available.\n`;
+      }
+      const summary = await getGitChanges(wsPath);
+      return `\n### 📁 Git Changes:\n${summary}\n`;
     }
     // Resolve the MCP tool name leniently: the registry key is "server/tool".
     // A "mcp:" prefix routes directly; but models frequently DROP the prefix
@@ -222,6 +232,7 @@ export async function executeToolCallsFromResponse(
       provider,
       logger,
       mcpRegistry,
+      skillContext?.workspacePath,
       skillContext,
     );
   }
@@ -248,7 +259,7 @@ export async function executeAgentToolsAndCommands(
   let feedback = "\n\n--- Execution Results ---\n";
 
   for (const call of toolCalls) {
-    feedback += await dispatchXmlToolCall(call, provider, logger, mcpRegistry);
+    feedback += await dispatchXmlToolCall(call, provider, logger, mcpRegistry, workspacePath);
   }
 
   for (const cmd of commands) {

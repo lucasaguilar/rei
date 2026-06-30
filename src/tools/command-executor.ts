@@ -156,20 +156,6 @@ function splitOnLogicalOps(commandLine: string): { segments: string[]; operators
       continue;
     }
 
-    // `/` — single-char operator, only outside quotes. Models use this to chain
-    // simple commands (e.g. `ls/grep`). We split on it so each side is validated
-    // and executed separately by the allow-list. Paths inside arguments (e.g.
-    // `find src/agent-mode -name "*.ts"`) are NOT affected because they appear
-    // after a valid command token — only bare top-level segments get split.
-    if (!inSingle && !inDouble && ch === "/") {
-      const prev = current.trim();
-      if (prev.length > 0) {
-        segments.push(prev);
-        operators.push("&&"); // treat as sequential execution
-        current = "";
-      }
-      continue;
-    }
 
     current += ch;
   }
