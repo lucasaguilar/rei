@@ -312,9 +312,9 @@ This forces the Interactive Wizard to launch, allowing you to update your settin
 
 ### 3. How the Generated `.env` Looks (Hybrid Model Routing)
 
-When you run the Interactive Configuration Wizard, it reads the template from [`.env.example`](file:///Users/lucas/www/rei/.env.example) and generates a workspace-local `.env` file containing comprehensive comments for every single tuning parameter. 
+When you run the Interactive Configuration Wizard, it reads the template from [`.env.example`](.env.example) and generates a workspace-local `.env` file containing comprehensive comments for every single tuning parameter.
 
-Below is the **complete `.env.example` configuration template** recommended for high-performance hybrid setups:
+> The canonical, always-current template is [`.env.example`](.env.example) — start there (it opens with copy-paste **LOCAL / CLOUD / HYBRID** quick-start profiles). The block below is an illustrative **excerpt** of the common knobs:
 
 ```ini
 # ==============================================================================
@@ -487,6 +487,31 @@ To truly understand how REI operates and tune it for your workspace, pay close a
 
 #### D. Test-Driven Development Auto-Healing
 * **`REI_TDD_MODE`**: Setting this to `true` (or toggling via `/tdd` inside chat) tells REI's sandbox validation loop to execute your project's test suite (`npm run test`) in addition to standard TypeScript compilation diagnostics. Any failing test traces will be fed back to the LLM automatically, enabling REI to auto-heal logical errors before applying edits to your workspace.
+
+#### E. Quality & behavior switches (local models)
+
+These are the knobs that silently make or break a local model. On a local backend (LM Studio / Ollama), a bad value here rarely errors loudly — it just degrades quality (repetition loops, truncated context, saturated edit loops). Defaults are already tuned for local; the list is here so you know *why*.
+
+* **`REI_CONTEXT_WINDOW`**: The provider-agnostic context budget (input + output), resolved in `src/config/model-runtime.ts` — it takes precedence over the legacy per-provider names (`OLLAMA_NUM_CTX`, `LLM_STUDIO_MAX_TOKENS`, …). **This is the single most important local setting.** For local providers, if it's unset REI does **no trimming** and sends the prompt untrimmed — so if your model is loaded with a small window (e.g. 8192) the server **truncates silently**, which breaks tool-calling and looks like a "bad model". Set it to the window you loaded in LM Studio (keep them in sync), or ≥ `30000` for thinking models. Cloud providers auto-use a large default (128000) when unset.
+* **`REI_PRESERVE_THINKING`** *(default `false`)*: Whether to re-send the model's prior `<think>`/reasoning back to it on later turns. **Keep it OFF for local models** — re-fed reasoning accumulates across the tools loop and the model echoes its own prior thoughts, causing repetition loops (the same command re-issued many times). Reasoning models regenerate reasoning fresh, so there's no loss. *(Caveat: Anthropic/Bedrock with extended thinking REQUIRE it ON — they need the thinking block + signature preserved on replay.)*
+* **`REI_EDIT_MODE`** *(default `direct`)*: How agent edits are applied. `direct` (recommended) writes edits straight to disk with one final verify — light and loop-free. `sandbox` (legacy/strict) validates every edit against a throwaway copy and persists only green state — safer, but the per-edit reject loop tends to **saturate local models**. Leave it `direct` on local.
+* **`REI_REASONING_EFFORT_<MODE>`** (`ASK` / `PLANNING` / `AGENT`): Per-mode thinking budget (`none | minimal | low | medium | high`), the OpenAI-standard knob LM Studio honors. Lets you keep agent turns thinking while making ask/planning snappy. Recommended: `ASK=none`, `PLANNING=low`, `AGENT=medium`. *(Note: some models are binary — e.g. `qwen3.6-35b-a3b` maps `none`→off and everything else→on, no middle.)*
+* **`REI_MAX_TURNS`** *(default 12)*: Max iterations of the agent tool-calling loop within a single turn before REI stops and returns a summary of the work done.
+* **Anti-loop sampling** (`REI_AGENT_TEMPERATURE`, `REI_AGENT_FREQUENCY_PENALTY`, `REI_AGENT_PRESENCE_PENALTY`): the agent/tools path adds a mild temperature + repetition penalties by default to break repetition loops at the source (greedy temperature-0 decoding was the #1 cause on local models). Raise the frequency penalty toward `0.5` if loops persist.
+
+> **Recommended profile for local models** — copy this into your workspace `.env` (see quick-start section **A** in [`.env.example`](.env.example) for the full template):
+> ```ini
+> MODEL_PROVIDER=llmstudio
+> LLM_STUDIO_MODEL=qwen/qwen3.6-35b-a3b
+> REI_CONTEXT_WINDOW=61440            # MUST match the window loaded in LM Studio
+> REI_PRESERVE_THINKING=false         # avoid reasoning-echo repetition loops
+> REI_EDIT_MODE=direct                # avoid saturating the local agent loop
+> REI_REASONING_EFFORT_ASK=none       # snappy ask/planning
+> REI_ON_DEMAND_FILE_CONTEXT_ASK=1
+> REI_ON_DEMAND_FILE_CONTEXT_PLANNING=1
+> REI_ON_DEMAND_FILE_CONTEXT_AGENT=0
+> OLLAMA_TEMPERATURE=0                 # deterministic (ollama)
+> ```
 
 REI supports the following model providers out-of-the-box: `ollama`, `openrouter`, `gemini`, `groq`, `llmstudio`, `huggingface`, and `mock`.
 
