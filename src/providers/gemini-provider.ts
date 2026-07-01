@@ -1,5 +1,11 @@
 import type { ChatMessage } from "../chat/types.js";
-import type { ModelProvider, CompletionOptions } from "./model-provider.js";
+import type {
+  ModelProvider,
+  CompletionOptions,
+  ToolDefinition,
+  ChatCompletionWithTools,
+} from "./model-provider.js";
+import { openaiCompleteChatWithTools } from "./openai-tool-caller.js";
 
 interface GeminiPart {
   text?: string;
@@ -28,6 +34,10 @@ interface GeminiGenerateContentResponse extends GeminiErrorResponse {
 }
 
 const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
+// Google's OpenAI-compatibility layer — exposes /chat/completions with `tools`, so REI's shared
+// OpenAI tool-caller works unchanged (same path as llmstudio/ollama/openrouter/groq).
+const GEMINI_OPENAI_BASE_URL =
+  "https://generativelanguage.googleapis.com/v1beta/openai";
 const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
 const DEFAULT_GEMINI_REQUEST_TIMEOUT_MS = 120_000;
 
@@ -123,6 +133,24 @@ export class GeminiProvider implements ModelProvider {
         }
       }
     }
+  }
+
+  async completeChatWithTools(
+    messages: ChatMessage[],
+    tools: ToolDefinition[],
+    options?: CompletionOptions,
+  ): Promise<ChatCompletionWithTools> {
+    // Delegate to the shared OpenAI tool-caller via Google's OpenAI-compat endpoint (Bearer auth),
+    // so the native function-calling loop works for Gemini with zero bespoke parsing.
+    return openaiCompleteChatWithTools({
+      baseUrl: GEMINI_OPENAI_BASE_URL,
+      headers: { Authorization: `Bearer ${this.apiKey}` },
+      model: options?.model ?? this.model,
+      messages,
+      tools,
+      timeoutMs: this.requestTimeoutMs,
+      options,
+    });
   }
 
   private async fetchJson(

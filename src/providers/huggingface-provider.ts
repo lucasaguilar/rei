@@ -1,6 +1,12 @@
 import type { ChatMessage } from "../chat/types.js";
-import type { ModelProvider, CompletionOptions } from "./model-provider.js";
+import type {
+  ModelProvider,
+  CompletionOptions,
+  ToolDefinition,
+  ChatCompletionWithTools,
+} from "./model-provider.js";
 import { getMaxOutputTokens } from "../config/model-runtime.js";
+import { openaiCompleteChatWithTools } from "./openai-tool-caller.js";
 
 interface HFChatChoice {
   message?: { role?: string; content?: string | null };
@@ -146,6 +152,25 @@ export class HuggingFaceProvider implements ModelProvider {
         }
       }
     }
+  }
+
+  async completeChatWithTools(
+    messages: ChatMessage[],
+    tools: ToolDefinition[],
+    options?: CompletionOptions,
+  ): Promise<ChatCompletionWithTools> {
+    // HF's router is OpenAI-compatible, so REI's shared tool-caller works unchanged. Tool support is
+    // model-dependent: a model served without tool-calling simply returns text (no toolCalls), which
+    // the native loop handles as a plain answer — graceful degradation, no XML fallback needed.
+    return openaiCompleteChatWithTools({
+      baseUrl: HF_API_BASE_URL,
+      headers: { Authorization: `Bearer ${this.apiKey}` },
+      model: options?.model ?? this.model,
+      messages,
+      tools,
+      timeoutMs: this.requestTimeoutMs,
+      options,
+    });
   }
 
   private fetchChat(params: {
