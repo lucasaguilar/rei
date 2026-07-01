@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mcpToolsToDefinitions, formatMcpToolsForPrompt, modelFeedbackToolNames, WEATHER_TOOL, WEB_SEARCH_TOOL } from "./tool-definitions.js";
+import { mcpToolsToDefinitions, modelFeedbackToolNames, WEATHER_TOOL, WEB_SEARCH_TOOL } from "./tool-definitions.js";
 import type { McpTool } from "../tools/mcp/mcp-client.js";
 
 const TOOLS: McpTool[] = [
@@ -64,17 +64,3 @@ describe("modelFeedbackToolNames", () => {
   });
 });
 
-describe("formatMcpToolsForPrompt", () => {
-  it("returns '' when there are no tools", () => {
-    expect(formatMcpToolsForPrompt([])).toBe("");
-  });
-
-  it("lists each tool as 'mcp:name — description'", () => {
-    const block = formatMcpToolsForPrompt(TOOLS);
-    expect(block).toContain("## Available MCP Tools");
-    expect(block).toContain("- mcp:filesystem/readFile — Read a file's contents");
-    expect(block).toContain("- mcp:filesystem/listDir — List a directory");
-    // Teaches the XML JSON-argument convention
-    expect(block).toContain('<call_tool name="mcp:server/tool">');
-  });
-});

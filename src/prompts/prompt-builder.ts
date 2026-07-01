@@ -1,12 +1,6 @@
 import type { SessionMode } from "../chat/types.js";
 import { loadLocalRules, loadPrompt } from "./loader.js";
 import { detectProjectType } from "../workspace/project-type.js";
-import {
-  loadSkills,
-  skillsForMode,
-  buildSkillCatalogText,
-  type SkillMode,
-} from "../skills/skill-loader.js";
 
 export type AgentEditFormat = "sr" | "wholefile";
 
@@ -36,21 +30,9 @@ function buildProjectRules(workspacePath?: string): string {
   return "";
 }
 
-/** Builds the mode-scoped skill catalog text for the XML (ask/planning) path. */
-function buildModeSkillCatalog(
-  mode: SessionMode,
-  workspacePath?: string,
-): string {
-  const wsPath = workspacePath ?? process.env.REI_WORKSPACE_PATH;
-  if (!wsPath) return "";
-  const skills = skillsForMode(loadSkills(wsPath), mode as SkillMode);
-  return buildSkillCatalogText(skills);
-}
-
 export function buildSystemMessage(
   mode: SessionMode,
   workspacePath?: string,
-  useToolCalling = false,
 ): string {
   const projectRules = buildProjectRules(workspacePath);
 
@@ -79,36 +61,17 @@ export function buildSystemMessage(
     "",
   ];
 
+  // Native function-calling is the only engine (the XML interception path was removed), so every
+  // mode uses its `*-tools` prompt: native read_files/run_command/edit_file tool calls, NO XML tags.
+  // For agent, the tool prompt + its tool-format; for ask/planning, the tool prompt + the
+  // tool-agnostic response-format prompt. Skills ride as the native `use_skill` tool (from
+  // setupToolSelection), so no XML `<call_tool>` skill catalog is injected.
   if (mode === "agent") {
-    if (useToolCalling) {
-      sections.push(loadPrompt("modes/agent-tools"), "");
-      sections.push(loadPrompt("formats/agent-format-tools"));
-    } else {
-      const fmt = getAgentEditFormat();
-      if (fmt === "wholefile") {
-        sections.push(loadPrompt("modes/agent-wholefile"), "");
-        sections.push(loadPrompt("formats/agent-format-wholefile"));
-      } else {
-        sections.push(loadPrompt("modes/agent"), "");
-        sections.push(loadPrompt("formats/agent-format"));
-      }
-    }
-  } else if (useToolCalling) {
-    // ask/planning on the NATIVE function-calling path: use the *-tools mode prompt (native
-    // read_files/run_command, NO XML tags) so the model doesn't fall back to <request_files>/
-    // <execute_command>/<call_tool> and read files with capped `cat`/`sed`. The response-format
-    // prompt is tool-agnostic (just structure), so it's reused. Skills ride as the native
-    // `use_skill` tool (from setupToolSelection), so the XML <call_tool> skill catalog is omitted.
+    sections.push(loadPrompt("modes/agent-tools"), "");
+    sections.push(loadPrompt("formats/agent-format-tools"));
+  } else {
     sections.push(loadPrompt(`modes/${mode}-tools`), "");
     sections.push(loadPrompt(`formats/${mode}-format`));
-  } else {
-    sections.push(loadPrompt(`modes/${mode}`), "");
-    sections.push(loadPrompt(`formats/${mode}-format`));
-    // Ask/planning use the XML path (no structured tool schema), so the skill
-    // catalog rides in the prompt and the model invokes one via <call_tool
-    // name="use_skill">. Only skills scoped to this mode are offered.
-    const catalog = buildModeSkillCatalog(mode, workspacePath);
-    if (catalog) sections.push("", catalog);
   }
 
   return sections.join("\n");

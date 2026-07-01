@@ -3,22 +3,15 @@ import {
   resolveModelForMode,
   createProviderForMode,
 } from "../providers/provider-factory.js";
-import {
-  executeAgentTurn,
-  executeAgentTurnWholefile,
-} from "../agent-mode/generator.js";
 import { executeAgentTurnWithTools } from "../agent-mode/generator-tools.js";
 import {
-  formatMcpToolsForPrompt,
   mcpToolsToDefinitions,
-  modelFeedbackToolNames,
   AGENT_TOOLS,
 } from "../contracts/tool-definitions.js";
 import {
   buildSystemMessage,
   getAgentEditFormat,
 } from "../prompts/prompt-builder.js";
-import { streamTurnWithInterception } from "../agent-mode/helpers/token-streamer.js";
 import { buildTurnContext } from "../context/context-builder.js";
 import { buildMessagesForModel } from "../chat/message-builder.js";
 import { compactSession, needsCompaction } from "../chat/compactor.js";
@@ -33,18 +26,12 @@ import {
 } from "../workspace/workspace-scanner.js";
 import { applySREditBatchFS } from "../tools/patch-applier.js";
 import { detectProjectType } from "../workspace/project-type.js";
-import {
-  extractCommandRequests,
-  extractToolCalls,
-  extractFileRequests,
-} from "../agent-mode/response-handler.js";
 import { KnowledgeOrchestrator } from "../knowledge/orchestrator.js";
 import { AgentLogger } from "./logger.js";
 import { SCAN_CACHE_TTL_MS } from "./constants/agent.constants.js";
 import {
   buildTurnUserMessage,
   buildProjectFileTree,
-  looksLikeAgentJson,
   extractStageNumberFromPrompt,
   buildStageCompletionMessage,
   isStageSuccessful,
@@ -53,30 +40,16 @@ import {
 } from "./helpers/turn-message.helpers.js";
 import type { StreamTurnOptions } from "./models/agent.types.js";
 import {
-  executeFileRequestsFromResponse,
-  executeCommandsFromResponse,
-  executeToolCallsFromResponse,
   executeAgentToolsAndCommands,
   formatBatchPatchResult,
-  executeAndFormatTurnActions,
 } from "./helpers/action-executor.js";
-import {
-  loadSkills,
-  skillsForMode,
-  type SkillMode,
-} from "../skills/skill-loader.js";
+import { type SkillMode } from "../skills/skill-loader.js";
 import {
   ensureRepoMapIndexed,
   initWatcher,
 } from "./helpers/repo-map-indexer.js";
 import {
-  isDegenerate,
-  buildCommandSignature,
-  degenerateNotice,
-} from "../agent-mode/helpers/loop-guard.js";
-import {
   stripAllActionTags,
-  generateXmlToolCallId,
   CREATED_FILES_MARKER,
 } from "../agent-mode/helpers/patch-helpers.js";
 import { formatCodeDiff } from "../cli/markdown-renderer.js";
@@ -145,57 +118,6 @@ export class Agent {
 
   async run(prompt: string): Promise<string> {
     return this.provider.complete(prompt);
-  }
-
-  /** One prompt = one `rei.turn` root span (IP-2). Wraps the non-streaming Turn. */
-  async runTurn(session: ChatSession, userInput: string): Promise<string> {
-    return withTurnSpan(userInput, () =>
-      this.runTurnInternal(session, userInput),
-    );
-  }
-
-  private async runTurnInternal(
-    session: ChatSession,
-    userInput: string,
-  ): Promise<string> {
-    this.logger.startTurn();
-    this.logger.setCorrelationId(this.correlationId);
-    const enrichedUserMessage = await this.prepareSessionForTurn(
-      session,
-      userInput,
-    );
-    await this.compactSessionIfNeeded(session);
-
-    // session.messages holds the complete history; send only a trimmed
-    // window to the provider to keep prompt size under control.
-    const baseMessagesForModel = buildMessagesForModel(
-      session.messages,
-      session.mode,
-      session.mode === "agent" ? getAgentEditFormat() : undefined,
-    );
-    const messagesForModel = this.injectCurrentTurnContext(
-      baseMessagesForModel,
-      enrichedUserMessage,
-    );
-    const response = await this.generateAssistantResponse(
-      session.mode,
-      messagesForModel,
-    );
-    session.messages.push({
-      role: "assistant",
-      content: cleanResponseForHistory(response),
-      sourceMode: session.mode,
-    });
-
-    if (session.mode === "agent") {
-      const stageNum = extractStageNumberFromPrompt(userInput);
-      if (stageNum !== null && isStageSuccessful(response)) {
-        const total = getTotalStagesInPlan(this.workspacePath);
-        return response + buildStageCompletionMessage(stageNum, total, false);
-      }
-    }
-
-    return response;
   }
 
   /**
@@ -269,46 +191,17 @@ export class Agent {
         resolver?.();
       };
 
-      const turnPromise = (
-        agentProvider.completeChatWithTools
-          ? executeAgentTurnWithTools({
-              provider: agentProvider,
-              messagesForModel,
-              workspacePath: this.workspacePath,
-              logger: this.logger,
-              modelOverride: resolveModelForMode("agent"),
-              reasoningEffort: resolveReasoningEffort("agent"),
-              mcpRegistry: this.mcpRegistry,
-              onChunk,
-              userQuery: userInput,
-            })
-          : editFormat === "wholefile"
-            ? executeAgentTurnWholefile({
-                provider: agentProvider,
-                messagesForModel,
-                workspacePath: this.workspacePath,
-                logger: this.logger,
-                modelOverride: resolveModelForMode("agent"),
-                onChunk,
-                mcpRegistry: this.mcpRegistry,
-                modelFeedbackTools: modelFeedbackToolNames(
-                  mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools()),
-                ),
-              })
-            : executeAgentTurn({
-                provider: agentProvider,
-                messagesForModel,
-                workspacePath: this.workspacePath,
-                scannedFiles: this.getWorkspaceFiles(),
-                logger: this.logger,
-                modelOverride: resolveModelForMode("agent"),
-                onChunk,
-                mcpRegistry: this.mcpRegistry,
-                modelFeedbackTools: modelFeedbackToolNames(
-                  mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools()),
-                ),
-              })
-      ).finally(() => {
+      const turnPromise = executeAgentTurnWithTools({
+        provider: agentProvider,
+        messagesForModel,
+        workspacePath: this.workspacePath,
+        logger: this.logger,
+        modelOverride: resolveModelForMode("agent"),
+        reasoningEffort: resolveReasoningEffort("agent"),
+        mcpRegistry: this.mcpRegistry,
+        onChunk,
+        userQuery: userInput,
+      }).finally(() => {
         done = true;
         resolver?.();
       });
@@ -442,13 +335,11 @@ export class Agent {
       return;
     }
 
-    // ── Native ask/planning (DEFAULT; opt-out: REI_NATIVE_ASK=false) ──────────
+    // ── ask/planning ─────────────────────────────────────────────────────────
     // Routes ask/planning through the SAME native function-calling loop as agent, gated to a
     // read-only tool profile (toolsForMode → read_files / run_command / git_changes + web/MCP/
-    // skills, NO edits). Collapses the XML interception path onto one engine: the model investigates
-    // via real tool calls instead of emitting unreliable XML tags. Streams live through callModel's
-    // streamChatWithTools when present. Falls through to the legacy XML streamChat loop only when
-    // REI_NATIVE_ASK=false or the provider can't do tool calls.
+    // skills, NO edits): the model investigates via real tool calls instead of emitting unreliable
+    // XML tags. Streams live through callModel's streamChatWithTools when present.
     if (this.nativeToolsActive(session.mode)) {
       const askProvider = createProviderForMode(session.mode, this.provider);
       const chunksQueue: string[] = [];
@@ -510,321 +401,6 @@ export class Agent {
       return;
     }
 
-    if (this.provider.streamChat) {
-      let currentMessages = [...messagesForModel];
-      let hasMoreCommands = true;
-      let depth = 0;
-      let lastCmdSignature = "";
-      const maxDepth = getMaxTurns();
-      // Pre-compute which tool names require their result fed back to the model
-      // (MCP tools). Built-in search and weather tools also require feedback.
-      const feedbackTools = modelFeedbackToolNames(
-        mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools()),
-      );
-      feedbackTools.add("search");
-      // use_skill returns a recipe the model must act on — feed it back so the
-      // model continues (e.g. writes the plan) instead of ending the turn. Skill
-      // names are added too: models often call a skill by its own name directly
-      // (<call_tool name="write-spec">) instead of via use_skill.
-      feedbackTools.add("use_skill");
-      for (const s of skillsForMode(
-        loadSkills(this.workspacePath),
-        session.mode as SkillMode,
-      )) {
-        feedbackTools.add(s.name);
-      }
-
-      while (hasMoreCommands && depth < maxDepth) {
-        // Reset truncation budget per turn — each turn gets its own 3-continuation allowance
-        // so a truncated early turn doesn't exhaust the budget for later turns.
-        let truncationCount = 0;
-
-        // One `step-N` span per loop iteration (IP-3, ask/planning). Global-active so the
-        // llm-call / tool spans created while this iteration streams nest under it.
-        const endStep = startStepSpan(depth);
-        try {
-          options?.onStatus?.("producing_response");
-
-          const chunksQueue: string[] = [];
-          let resolver: (() => void) | null = null;
-          let done = false;
-          let finishReason = "stop";
-
-          const onChunk = (chunk: {
-            type: "thinking" | "text" | "status";
-            content: string;
-          }) => {
-            const encoded =
-              chunk.type === "thinking"
-                ? `\x10${chunk.content}`
-                : chunk.type === "text"
-                  ? `\x11${chunk.content}`
-                  : chunk.content;
-            chunksQueue.push(encoded);
-            resolver?.();
-          };
-
-          const turnPromise = streamTurnWithInterception({
-            provider: this.provider,
-            messages: currentMessages,
-            model: resolveModelForMode(session.mode),
-            mode: session.mode,
-            onChunk,
-            onFinish: (r) => {
-              finishReason = r;
-            },
-          }).finally(() => {
-            done = true;
-            resolver?.();
-          });
-
-          // Stream thoughts and action statuses to the user in real-time
-          while (!done || chunksQueue.length > 0) {
-            if (chunksQueue.length > 0) {
-              yield chunksQueue.shift()!;
-            } else {
-              await new Promise<void>((resolve) => {
-                resolver = resolve;
-              });
-            }
-          }
-
-          let streamResponse = await turnPromise;
-
-          // Auto-continue if truncated
-          while (finishReason === "length" && truncationCount < 3) {
-            truncationCount++;
-            this.logger.logInfo(
-              `[truncation] ask/planning response cut off (${truncationCount}/3), continuing...`,
-            );
-            const contMessages = [
-              ...currentMessages,
-              {
-                role: "assistant" as const,
-                content: cleanResponseForHistory(streamResponse),
-              },
-              {
-                role: "user" as const,
-                content:
-                  "Your previous response was cut off by the output token limit. Continue EXACTLY from where you left off — do NOT repeat, summarize, or restart.",
-              },
-            ];
-            const contChunksQueue: string[] = [];
-            let contResolver: (() => void) | null = null;
-            let contDone = false;
-            finishReason = "stop";
-
-            const contOnChunk = (chunk: {
-              type: "thinking" | "text" | "status";
-              content: string;
-            }) => {
-              const encoded =
-                chunk.type === "thinking"
-                  ? `\x10${chunk.content}`
-                  : chunk.type === "text"
-                    ? `\x11${chunk.content}`
-                    : chunk.content;
-              contChunksQueue.push(encoded);
-              contResolver?.();
-            };
-
-            const contPromise = streamTurnWithInterception({
-              provider: this.provider,
-              messages: contMessages,
-              model: resolveModelForMode(session.mode),
-              mode: session.mode,
-              onChunk: contOnChunk,
-              onFinish: (r) => {
-                finishReason = r;
-              },
-            }).finally(() => {
-              contDone = true;
-              contResolver?.();
-            });
-
-            while (!contDone || contChunksQueue.length > 0) {
-              if (contChunksQueue.length > 0) {
-                yield contChunksQueue.shift()!;
-              } else {
-                await new Promise<void>((resolve) => {
-                  contResolver = resolve;
-                });
-              }
-            }
-
-            const contResponse = await contPromise;
-            streamResponse = streamResponse + contResponse;
-          }
-
-          // ── Degenerate response detection ──────────────────────────────
-          if (isDegenerate(streamResponse)) {
-            this.logger.logInfo(
-              "[loop-guard] Degenerate response detected, breaking loop",
-            );
-            yield `\n\x1b[31m⚠️  [REI] Degenerate response detected (repetitive text). ` +
-              `The model entered a generation loop. ${degenerateNotice()}\x1b[0m\n`;
-            hasMoreCommands = false;
-            break;
-          }
-
-          const commands = extractCommandRequests(streamResponse);
-          const toolCalls = extractToolCalls(streamResponse);
-          const fileRequests = extractFileRequests(streamResponse);
-
-          this.logger.logInfo("Raw LLM Response (ask/planning)", {
-            finishReason,
-            commands: commands.length,
-            toolCalls: toolCalls.map((c) => c.name),
-            fileRequests: fileRequests.length,
-            contentPreview: stripThinkingBlock(streamResponse).slice(0, 200),
-          });
-
-          if (
-            commands.length > 0 ||
-            toolCalls.length > 0 ||
-            fileRequests.length > 0
-          ) {
-            // ── Command loop detection ────────────────────────────────────
-            const cmdSignature = buildCommandSignature(
-              commands,
-              toolCalls,
-              fileRequests,
-            );
-
-            // if (cmdSignature && cmdSignature === lastCmdSignature) {
-            //   this.logger.logInfo("[loop-guard] Repeated command signature detected, breaking loop", { cmdSignature });
-            //   yield `\n\x1b[31m⚠️  [REI] Loop detected: the model is repeating the same commands/tools. ` +
-            //     `Stopping execution to prevent an infinite loop.\x1b[0m\n`;
-            //   hasMoreCommands = false;
-            //   break;
-            // }
-            lastCmdSignature = cmdSignature;
-
-            depth++;
-            const { executionFeedback, userVisibleFeedback } =
-              await executeAndFormatTurnActions({
-                response: streamResponse,
-                workspacePath: this.workspacePath,
-                provider: this.provider,
-                logger: this.logger,
-                mcpRegistry: this.mcpRegistry,
-                mode: session.mode as SkillMode,
-              });
-
-            yield userVisibleFeedback;
-
-            // Commands and file requests always need model re-feed (the model must see
-            // the output to continue). For tool calls, only MCP tools need re-feed;
-            // fire-and-forget tools (weather, search) do not. Match leniently: models
-            // often drop the "mcp:" prefix, so also treat a bare connected MCP tool name
-            // as needing re-feed.
-            const mcpToolNames = new Set(
-              this.mcpRegistry.getAvailableTools().map((t) => t.name),
-            );
-            const hasFeedbackCall =
-              commands.length > 0 ||
-              fileRequests.length > 0 ||
-              toolCalls.some(
-                (c) =>
-                  feedbackTools.has(c.name) ||
-                  c.name.startsWith("mcp:") ||
-                  mcpToolNames.has(c.name),
-              );
-
-            if (hasFeedbackCall) {
-              const turnId = generateXmlToolCallId("turn");
-              const toolName =
-                commands.length > 0
-                  ? "execute_command"
-                  : fileRequests.length > 0
-                    ? "request_files"
-                    : toolCalls.map((c) => c.name).join(",") || "call_tool";
-              currentMessages = [
-                ...currentMessages,
-                {
-                  role: "assistant",
-                  content: cleanResponseForHistory(streamResponse),
-                  tool_calls: [
-                    {
-                      id: turnId,
-                      type: "function",
-                      function: { name: toolName, arguments: "{}" },
-                    },
-                  ],
-                },
-                {
-                  role: "tool",
-                  tool_call_id: turnId,
-                  name: toolName,
-                  content: executionFeedback,
-                },
-              ];
-            } else {
-              // Fire-and-forget: result already shown to user — end the turn here.
-              hasMoreCommands = false;
-              session.messages.push({
-                role: "assistant",
-                content: cleanResponseForHistory(streamResponse),
-                sourceMode: session.mode,
-              });
-            }
-          } else {
-            hasMoreCommands = false;
-
-            // Concat all assistant chunks for session storage
-            const allAssistantChunks = currentMessages
-              .slice(messagesForModel.length)
-              .filter((m) => m.role === "assistant")
-              .map((m) => m.content);
-
-            allAssistantChunks.push(streamResponse);
-
-            const finalContent = allAssistantChunks.join("\n\n");
-            const cleanAssistantContent = cleanResponseForHistory(finalContent);
-
-            session.messages.push({
-              role: "assistant",
-              content: cleanAssistantContent,
-              sourceMode: session.mode,
-            });
-          }
-        } finally {
-          endStep();
-        }
-      }
-
-      // ── maxDepth exhausted: save what we have and warn ──────────────
-      if (depth >= maxDepth) {
-        this.logger.logInfo(
-          `[loop-guard] ask/planning loop exhausted ${maxDepth} iterations`,
-        );
-        const lastAssistantMsgs = currentMessages
-          .slice(messagesForModel.length)
-          .filter((m) => m.role === "assistant")
-          .map((m) => m.content);
-        if (lastAssistantMsgs.length > 0) {
-          session.messages.push({
-            role: "assistant",
-            content: lastAssistantMsgs.join("\n\n"),
-            sourceMode: session.mode,
-          });
-        }
-        yield `\n\x1b[33m⚠️  [REI] Maximum iteration limit of ${maxDepth} reached. ` +
-          `Set REI_MAX_TURNS=${maxDepth + 3} in your .env to allow more iterations.\x1b[0m\n`;
-      }
-    } else {
-      const response = await this.generateNonAgentAssistantResponse(
-        session.mode,
-        messagesForModel,
-      );
-      session.messages.push({
-        role: "assistant",
-        content: response,
-        sourceMode: session.mode,
-      });
-      options?.onStatus?.("producing_response");
-      yield response;
-    }
   }
 
   private getWorkspaceFiles(): FileMeta[] {
@@ -846,38 +422,23 @@ export class Agent {
     return files;
   }
 
-  private async generateAssistantResponse(
-    mode: ChatSession["mode"],
-    messagesForModel: ChatSession["messages"],
-  ): Promise<string> {
-    if (mode !== "agent") {
-      return this.generateNonAgentAssistantResponse(mode, messagesForModel);
-    }
-
-    return this.generateAgentAssistantResponse(messagesForModel);
-  }
-
-  /** Whether the active agent provider supports structured tool calling. */
   private get useToolCalling(): boolean {
     const agentProvider = createProviderForMode("agent", this.provider);
     return typeof agentProvider.completeChatWithTools === "function";
   }
 
   /**
-   * Whether THIS turn runs on the native function-calling loop for the given mode.
-   * agent → whenever its provider supports tool calls. ask/planning → now the DEFAULT whenever the
-   * provider supports tool calls; `REI_NATIVE_ASK=false` is the escape hatch back to the legacy XML
-   * path during the transition (removed once the XML path is deleted). Providers without tool
-   * calling fall through to the XML path automatically.
-   * Single source of truth for prompt selection (native *-tools prompt), MCP-tools delivery
-   * (API param vs prompt text), and the dispatch branch.
+   * Whether the native function-calling path applies this turn. True whenever the active provider
+   * (agent-scoped for agent mode, else the primary) supports tool calls — which is now REQUIRED,
+   * since the XML interception path was removed. Single source of truth for prompt selection (native
+   * *-tools prompt), MCP-tools delivery (API param vs prompt text), and the ask/planning dispatch.
    */
   private nativeToolsActive(mode: ChatSession["mode"]): boolean {
-    if (mode === "agent") return this.useToolCalling;
-    return (
-      process.env.REI_NATIVE_ASK !== "false" &&
-      typeof this.provider.completeChatWithTools === "function"
-    );
+    const provider =
+      mode === "agent"
+        ? createProviderForMode("agent", this.provider)
+        : this.provider;
+    return typeof provider.completeChatWithTools === "function";
   }
 
   /**
@@ -932,22 +493,11 @@ export class Agent {
     const baseSystemContent = buildSystemMessage(
       session.mode,
       this.workspacePath,
-      this.nativeToolsActive(session.mode),
     );
     let systemContent = baseSystemContent;
 
-    // Advertise the live MCP tool list to the model — but ONLY for the XML modes
-    // (ask, planning, agent XML fallback) that discover tools from this text.
-    // The structured agent tools path already receives them via the API `tools`
-    // param, so adding the text list there just DUPLICATES the token cost — which
-    // is severe with large MCP servers (e.g. Google Workspace: dozens of tools).
-    const usesToolsApi = this.nativeToolsActive(session.mode);
-    if (this.mcpRegistry.hasTools() && !usesToolsApi) {
-      const mcpBlock = formatMcpToolsForPrompt(
-        this.mcpRegistry.getAvailableTools(),
-      );
-      if (mcpBlock) systemContent += `\n\n${mcpBlock}`;
-    }
+    // MCP tools are delivered to the model via the API `tools` param on every (native) turn, so no
+    // text tool-list is injected into the prompt — that path was XML-only and is gone.
 
     // Surface the project's REAL verify command so the model self-verifies correctly instead of
     // defaulting to a generic `tsc --noEmit` (which skips Angular templates, AOT/DI, and other
@@ -1132,220 +682,6 @@ export class Agent {
       provider: this.provider,
       modelOverride: process.env.COMPACTOR_MODEL,
     });
-  }
-
-  private async generateNonAgentAssistantResponse(
-    mode: ChatSession["mode"],
-    messagesForModel: ChatSession["messages"],
-  ): Promise<string> {
-    let currentMessages = [...messagesForModel];
-    let hasMoreCommands = true;
-    let depth = 0;
-    const maxDepth = getMaxTurns();
-    let lastResponse = "";
-    const feedbackTools = modelFeedbackToolNames(
-      mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools()),
-    );
-    feedbackTools.add("search");
-    feedbackTools.add("use_skill");
-    for (const s of skillsForMode(
-      loadSkills(this.workspacePath),
-      mode as SkillMode,
-    )) {
-      feedbackTools.add(s.name);
-    }
-
-    while (hasMoreCommands && depth < maxDepth) {
-      const raw = await this.provider.completeChat(currentMessages, {
-        model: resolveModelForMode(mode),
-      });
-
-      if (looksLikeAgentJson(raw) && depth === 0) {
-        const retryMessages: ChatSession["messages"] = [
-          ...currentMessages,
-          { role: "assistant", content: raw },
-          {
-            role: "user",
-            content:
-              `You are in ${mode} mode. Your previous response was a JSON object. ` +
-              "That is not valid for this mode. " +
-              "Return a plain text answer only. Do not output JSON. Do not use markdown code blocks.",
-          },
-        ];
-        const retried = await this.provider.completeChat(retryMessages, {
-          model: resolveModelForMode(mode),
-        });
-        if (looksLikeAgentJson(retried)) {
-          return `I'm in ${mode} mode and my response came out as structured JSON, which is not valid here. Please rephrase your question or switch to agent mode if you need structured output.`;
-        }
-        lastResponse = retried;
-      } else {
-        lastResponse = raw;
-      }
-
-      currentMessages.push({
-        role: "assistant",
-        content: cleanResponseForHistory(lastResponse),
-      });
-
-      const commands = extractCommandRequests(lastResponse);
-      const toolCalls = extractToolCalls(lastResponse);
-      const fileRequests = extractFileRequests(lastResponse);
-      if (
-        commands.length > 0 ||
-        toolCalls.length > 0 ||
-        fileRequests.length > 0
-      ) {
-        depth++;
-        let executionFeedback = "";
-        if (fileRequests.length > 0) {
-          executionFeedback += await executeFileRequestsFromResponse(
-            lastResponse,
-            this.workspacePath,
-            this.logger,
-          );
-        }
-        if (commands.length > 0) {
-          executionFeedback += await executeCommandsFromResponse(
-            lastResponse,
-            this.workspacePath,
-            this.logger,
-          );
-        }
-        const hasFeedbackCall = toolCalls.some(
-          (c) => feedbackTools.has(c.name) || c.name.startsWith("mcp:"),
-        );
-
-        if (toolCalls.length > 0) {
-          executionFeedback += await executeToolCallsFromResponse(
-            lastResponse,
-            this.provider,
-            this.logger,
-            this.mcpRegistry,
-            { workspacePath: this.workspacePath, mode: mode as SkillMode },
-          );
-        }
-
-        if (hasFeedbackCall) {
-          // MCP: feed results to model so it can chain or act on them.
-          currentMessages.push({
-            role: "user",
-            content: `System: Tool results:\n${executionFeedback}\n\nContinue your task — call more tools if needed, or give your final answer when you have everything you need.`,
-          });
-        } else {
-          // Fire-and-forget: result shown to user, turn ends here.
-          hasMoreCommands = false;
-        }
-      } else {
-        hasMoreCommands = false;
-      }
-    }
-
-    const allAssistantChunks = currentMessages
-      .slice(messagesForModel.length)
-      .filter((m) => m.role === "assistant")
-      .map((m) => m.content);
-
-    const finalContent = allAssistantChunks.join("\n\n");
-    return stripThinkingBlock(finalContent);
-  }
-
-  private async generateAgentAssistantResponse(
-    messagesForModel: ChatSession["messages"],
-  ): Promise<string> {
-    const agentProvider = createProviderForMode("agent", this.provider);
-
-    // Use structured tool calling when the provider supports it
-    if (agentProvider.completeChatWithTools) {
-      const outcome = await executeAgentTurnWithTools({
-        provider: agentProvider,
-        messagesForModel,
-        workspacePath: this.workspacePath,
-        logger: this.logger,
-        modelOverride: resolveModelForMode("agent"),
-        mcpRegistry: this.mcpRegistry,
-      });
-      if (outcome.validProposedPatches?.length) {
-        const result = await applySREditBatchFS(
-          outcome.validProposedPatches,
-          this.workspacePath,
-        );
-        const msg = formatBatchPatchResult(result);
-        const diffs = outcome.validProposedPatches
-          .filter((edit) =>
-            result.results.find((r) => r.file === edit.file && r.applied),
-          )
-          .map(
-            (edit) =>
-              `\n\x1b[1mArchivo:\x1b[0m ${edit.file}\n\`\`\`diff\n${formatCodeDiff(edit.search, edit.replace)}\n\`\`\``,
-          )
-          .join("");
-        return outcome.response + msg + diffs;
-      }
-      return outcome.response;
-    }
-
-    const editFormat = getAgentEditFormat();
-    const outcome =
-      editFormat === "wholefile"
-        ? await executeAgentTurnWholefile({
-            provider: agentProvider,
-            messagesForModel,
-            workspacePath: this.workspacePath,
-            logger: this.logger,
-            modelOverride: resolveModelForMode("agent"),
-            mcpRegistry: this.mcpRegistry,
-            modelFeedbackTools: modelFeedbackToolNames(
-              mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools()),
-            ),
-          })
-        : await executeAgentTurn({
-            provider: agentProvider,
-            messagesForModel,
-            workspacePath: this.workspacePath,
-            scannedFiles: this.getWorkspaceFiles(),
-            logger: this.logger,
-            modelOverride: resolveModelForMode("agent"),
-            mcpRegistry: this.mcpRegistry,
-            modelFeedbackTools: modelFeedbackToolNames(
-              mcpToolsToDefinitions(this.mcpRegistry.getAvailableTools()),
-            ),
-          });
-
-    // Aplica los parches válidos directamente
-    if (
-      outcome.validProposedPatches &&
-      outcome.validProposedPatches.length > 0
-    ) {
-      const result = await applySREditBatchFS(
-        outcome.validProposedPatches,
-        this.workspacePath,
-      );
-      const msg = formatBatchPatchResult(result);
-      const explanation = stripAllActionTags(
-        stripThinkingBlock(outcome.response),
-      );
-      const diffs = outcome.validProposedPatches
-        .filter((edit) =>
-          result.results.find((r) => r.file === edit.file && r.applied),
-        )
-        .map(
-          (edit) =>
-            `\n\x1b[1mArchivo:\x1b[0m ${edit.file}\n\`\`\`diff\n${formatCodeDiff(edit.search, edit.replace)}\n\`\`\``,
-        )
-        .join("");
-      return (explanation ? explanation + "\n\n" : "") + msg + diffs;
-    }
-    const feedback = await executeAgentToolsAndCommands(
-      outcome.response,
-      this.workspacePath,
-      this.provider,
-      this.logger,
-    );
-    const explanation = stripAllActionTags(
-      stripThinkingBlock(outcome.response),
-    );
-    return explanation + (feedback ? "\n\n" + feedback : "");
   }
 
   private initWatcher(): void {

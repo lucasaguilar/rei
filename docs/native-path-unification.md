@@ -121,6 +121,21 @@ Live agent + planning runs looped: the model re-issued the SAME command many tim
    row abandons the turn (finalize) instead of spinning to MAX_TURNS. `commandHistory` clears after a
    turn with edits so a legit post-edit `tsc` re-verify still runs.
 
+### Done (2026-07-01) — XML PATH DEMOLISHED 🎉
+Provider parity first (Phase 0): mock/gemini/huggingface gained `completeChatWithTools` (gemini+hf via
+their OpenAI-compat endpoints reusing the shared `openai-tool-caller`; mock scriptable). Then the
+demolition (Phase 1): agent.ts's streamTurn dispatch simplified to native-only; the XML ask/planning
+`streamChat` loop + the whole dead non-streaming path (`runTurn`/`generateAssistantResponse` family)
+deleted; `nativeToolsActive` simplified + `REI_NATIVE_ASK` removed; `buildSystemMessage` always uses
+`*-tools` prompts. Deleted: `generator.ts` (807), `token-streamer.ts` (137), `handle-sr-edits.ts`
+(307), `stream-with-continuation.ts` (82) + their tests; 6 XML-only prompts; `formatMcpToolArgs` +
+`formatMcpToolsForPrompt`. **Net −3140 lines, tsc clean, 495 tests green.** Native function-calling is
+now the ONLY engine across ask/planning/agent. gemini/hf need live validation (no keys locally).
+
+Minor leftovers (optional dead-export sweep, non-blocking): `modelFeedbackToolNames` and some
+`action-executor`/`response-handler` extractor exports are now production-dead but still used by the
+CLI layer / tests — trim in a later pass.
+
 ### Next
 - **Validate live**: run REI in **ask** mode against LM Studio with `REI_NATIVE_ASK=true`; confirm
   (a) reasoning/text stream live, (b) the model investigates via `read_files`/`run_command` (not XML

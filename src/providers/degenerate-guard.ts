@@ -60,8 +60,7 @@ export function withDegenerateGuard(provider: ModelProvider): ModelProvider {
       return response;
     },
 
-    // Also wrap streamChat to catch callers that use it directly
-    // (e.g. streamTurnWithInterception in token-streamer.ts).
+    // Also wrap streamChat to catch callers that use it directly.
     streamChat: provider.streamChat
       ? async function* (
           messages: ChatMessage[],

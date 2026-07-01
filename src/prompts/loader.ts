@@ -19,7 +19,7 @@ const cache = new Map<string, string>();
  * process so repeated calls within a session are free.
  *
  * @param section - Path relative to the `/prompts` root, without the `.md`
- *   extension. Examples: `"shared/base"`, `"modes/ask"`, `"formats/agent-format"`.
+ *   extension. Examples: `"shared/base"`, `"modes/ask-tools"`, `"formats/agent-format-tools"`.
  */
 export function loadPrompt(section: string): string {
   const cached = cache.get(section);
