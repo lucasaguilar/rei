@@ -20,10 +20,10 @@ describe("formatContextGauge", () => {
     expect(out).toContain("2% used");
   });
 
-  it("colors green / yellow / red by fill level", () => {
-    expect(formatContextGauge(10000, 122880)!).toContain("\x1b[32m"); // ~8% green
-    expect(formatContextGauge(90000, 122880)!).toContain("\x1b[33m"); // ~73% yellow
-    expect(formatContextGauge(115000, 122880)!).toContain("\x1b[31m"); // ~94% red
+  it("renders in dim gray — same color as the prep line", () => {
+    expect(formatContextGauge(10000, 122880)!).toContain("\x1b[90m"); // dim gray
+    expect(formatContextGauge(90000, 122880)!).toContain("\x1b[90m");
+    expect(formatContextGauge(115000, 122880)!).toContain("\x1b[90m");
   });
 
   it("reflects the MCP tools tokens once they're added to the history count", () => {

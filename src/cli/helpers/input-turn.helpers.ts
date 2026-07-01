@@ -31,7 +31,7 @@ function stripAnsiKeepingFences(text: string): string {
  * (e.g. 🦙 for Ollama, 🧠 for OpenRouter, ⚡ for Groq, ♊ for Gemini, 💻 for LM Studio).
  * Supports dedicated agent provider resolution in multi-provider environments.
  */
-function resolveActiveModelLabel(mode?: string): string {
+export function resolveActiveModelLabel(mode?: string): string {
   const isAgentMode = mode === "agent";
   const agentProvider = process.env.AGENT_MODEL_PROVIDER?.trim().toLowerCase();
 
@@ -306,11 +306,11 @@ export async function handleInputTurn(
 
     // Visual context-usage gauge: how much of the assumed window the prompt consumed this turn.
     // Helps spot when history/files are about to overflow (and explains slow prefill).
-    const gauge = formatContextGauge(sentTokens, getContextWindow());
+    const gauge = formatContextGauge(sentTokens, getContextWindow(), activeModel);
     if (gauge) actions.pushTranscript(`\n${gauge}`);
 
     actions.pushTranscript(
-      `${gauge ? "" : "\n"}\x1b[90m⏱️ Prep: ${(prepMs / 1000).toFixed(2)}s | TTFT(model): ${(ttftMs / 1000).toFixed(2)}s | Speed: ${speedText} | Tokens: ~${sentTokens} tok in, ~${recTokens} tok out | Model: ${activeModel}${outputNote}\x1b[0m`,
+      `${gauge ? "" : "\n"}\x1b[90m⏱️  Prep: ${(prepMs / 1000).toFixed(2)}s | TTFT(model): ${(ttftMs / 1000).toFixed(2)}s | Speed: ${speedText} | Tokens: ~${sentTokens} tok in, ~${recTokens} tok out\x1b[0m`,
     );
     actions.pushTranscript("");
   } catch (err: unknown) {

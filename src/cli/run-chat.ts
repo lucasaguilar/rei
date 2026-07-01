@@ -7,6 +7,7 @@ import type { ChatSession } from "../chat/types.js";
 import { getWelcomeMessage } from "./constants/chat.constants.js";
 import { formatContextGauge } from "./markdown-renderer.js";
 import { getContextWindow } from "../config/model-runtime.js";
+import { resolveActiveModelLabel } from "./helpers/input-turn.helpers.js";
 import {
   ChatRendererState,
   ChatUIState,
@@ -288,7 +289,8 @@ export async function runChat(
   );
   const startupTokens =
     startupHistoryTokens + agent.estimateActiveToolsTokens(session.mode);
-  const startupGauge = formatContextGauge(startupTokens, getContextWindow());
+  const activeModelLabel = resolveActiveModelLabel(session.mode);
+  const startupGauge = formatContextGauge(startupTokens, getContextWindow(), activeModelLabel);
   if (startupGauge) pushTranscript(startupGauge);
 
   if (autoIndex && !hasRagIndex(workspacePath)) {

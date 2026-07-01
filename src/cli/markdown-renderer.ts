@@ -71,13 +71,15 @@ export function formatCodeDiff(search: string, replace: string): string {
 export function formatContextGauge(
   promptTokens: number,
   ctxWindow: number,
+  modelLabel?: string,
 ): string | null {
   if (ctxWindow <= 0) return null;
   const pct = Math.min(100, Math.round((promptTokens / ctxWindow) * 100));
   const filled = Math.max(0, Math.min(10, Math.round(pct / 10)));
   const bar = "█".repeat(filled) + "░".repeat(10 - filled);
-  const color = pct >= 85 ? "\x1b[31m" : pct >= 60 ? "\x1b[33m" : "\x1b[32m";
-  return `${color}⏳ Context: ${promptTokens.toLocaleString()} / ${ctxWindow.toLocaleString()} tokens  [${bar}] ${pct}% used\x1b[0m`;
+  const color = "\x1b[90m"; // dim gray — same as the prep line below it
+  const suffix = modelLabel ? ` | ${modelLabel}` : "";
+  return `${color}⏳ Context: ${promptTokens.toLocaleString()} / ${ctxWindow.toLocaleString()} tokens  [${bar}] ${pct}% used${suffix}\x1b[0m`;
 }
 
 /**
