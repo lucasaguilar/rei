@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mcpToolsToDefinitions, modelFeedbackToolNames, WEATHER_TOOL, WEB_SEARCH_TOOL } from "./tool-definitions.js";
+import { mcpToolsToDefinitions, WEATHER_TOOL, WEB_SEARCH_TOOL } from "./tool-definitions.js";
 import type { McpTool } from "../tools/mcp/mcp-client.js";
 
 const TOOLS: McpTool[] = [
@@ -46,21 +46,6 @@ describe("mcpToolsToDefinitions modelFeedback flag", () => {
   it("sets modelFeedback: true on every MCP tool definition", () => {
     const defs = mcpToolsToDefinitions(TOOLS);
     expect(defs.every((d) => d.modelFeedback === true)).toBe(true);
-  });
-});
-
-describe("modelFeedbackToolNames", () => {
-  it("returns the set of mcp: names that need model re-feed", () => {
-    const mcpDefs = mcpToolsToDefinitions(TOOLS);
-    const names = modelFeedbackToolNames([...mcpDefs, WEATHER_TOOL, WEB_SEARCH_TOOL]);
-    expect(names.has("mcp:filesystem/readFile")).toBe(true);
-    expect(names.has("mcp:filesystem/listDir")).toBe(true);
-    expect(names.has("weather")).toBe(false);
-    expect(names.has("web_search")).toBe(false);
-  });
-
-  it("returns an empty set when no tools have modelFeedback", () => {
-    expect(modelFeedbackToolNames([WEATHER_TOOL, WEB_SEARCH_TOOL]).size).toBe(0);
   });
 });
 

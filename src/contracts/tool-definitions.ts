@@ -239,20 +239,4 @@ export function mcpToolsToDefinitions(mcpTools: McpTool[]): ToolDefinition[] {
   }));
 }
 
-/**
- * Returns the set of tool names (as they appear in <call_tool> tags) that
- * require their result to be fed back to the model.
- *
- * Used by the XML-path generators to decide whether to re-invoke the model
- * after a tool call or simply show the result to the user (fire-and-forget).
- * MCP tool names carry the "mcp:" prefix in the definitions but the parser
- * strips nothing — the names in the Set must match what extractToolCalls returns.
- */
-export function modelFeedbackToolNames(tools: ToolDefinition[]): Set<string> {
-  return new Set(
-    tools
-      .filter((t) => t.modelFeedback)
-      .map((t) => t.function.name),
-  );
-}
 

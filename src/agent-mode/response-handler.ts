@@ -1,8 +1,4 @@
-import type {
-  AgentSREdit,
-  AgentWholeFileEdit,
-} from "../contracts/agent-interaction.types.js";
-import { formatCodeDiff } from "../cli/markdown-renderer.js";
+import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
 import { stripThinkingBlock } from "../core/helpers/turn-message.helpers.js";
 
 function normalizeBlockContent(raw: string): string {
@@ -20,53 +16,8 @@ function normalizeBlockContent(raw: string): string {
   return content.replace(/^\n/, "").replace(/\n$/, "");
 }
 
-function compactPreview(raw: string, maxChars = 160): string {
-  const oneLine = raw
-    .split("\n")
-    .map((line) => line.trim())
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return oneLine.length > maxChars
-    ? `${oneLine.slice(0, Math.max(0, maxChars - 3))}...`
-    : oneLine;
-}
 
-export function formatSREditsForLog(edits: AgentSREdit[]): Array<{
-  file: string;
-  searchLines: number;
-  replaceLines: number;
-  searchPreview: string;
-  replacePreview: string;
-  diffPreview: string;
-}> {
-  return edits.map((edit) => ({
-    file: edit.file,
-    searchLines: edit.search.split("\n").length,
-    replaceLines: edit.replace.split("\n").length,
-    searchPreview: compactPreview(edit.search),
-    replacePreview: compactPreview(edit.replace),
-    diffPreview: formatCodeDiff(edit.search, edit.replace),
-  }));
-}
 
-/**
- * Extracts <request_files> tags from the agent response.
- */
-export function extractFileRequests(response: string): string[] {
-  const matches = [
-    ...stripThinkingBlock(response).matchAll(/<request_files>(.*?)<\/request_files>/gs),
-  ];
-  const files = new Set<string>();
-  for (const match of matches) {
-    const list = match[1].split(",");
-    for (const item of list) {
-      const trimmed = item.trim();
-      if (trimmed) files.add(trimmed);
-    }
-  }
-  return Array.from(files);
-}
 
 /**
  * Extracts <edit> blocks representing Search & Replace operations.
@@ -114,19 +65,6 @@ export function extractCreateFileRequests(
   return creates;
 }
 
-/**
- * Extracts <wholefile path="..."> blocks for complete file rewrites.
- */
-export function extractWholeFileEdits(response: string): AgentWholeFileEdit[] {
-  const edits: AgentWholeFileEdit[] = [];
-  const regex = /<wholefile\s+path="([^"]+)">([\.\s\S]*?)<\/wholefile>/gi;
-  for (const match of response.matchAll(regex)) {
-    const file = match[1].trim();
-    const content = match[2].replace(/^\n/, "").replace(/\n$/, "");
-    edits.push({ file, content });
-  }
-  return edits;
-}
 
 function normalizeCommandContent(raw: string): string {
   let content = raw.replace(/\r\n/g, "\n").trim();
