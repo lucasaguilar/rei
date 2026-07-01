@@ -136,6 +136,25 @@ Minor leftovers (optional dead-export sweep, non-blocking): `modelFeedbackToolNa
 `action-executor`/`response-handler` extractor exports are now production-dead but still used by the
 CLI layer / tests — trim in a later pass.
 
+### Gemini live-validation fixes (2026-07-01)
+First live Gemini test surfaced compat-layer strictness. Google's OpenAI-compat endpoint 400s on
+fields the OpenAI spec allows. Fixed in the shared tool-caller + the Gemini provider:
+- Added `omitParams?: readonly string[]` to `OpenAIToolsParams`; `buildToolsRequestBody` strips those
+  keys. Gemini passes `["frequency_penalty", "presence_penalty", "reasoning_effort"]` (confirmed 400
+  on `frequency_penalty`: "Unknown name ... Cannot find field").
+- Gemini also strips per-message `reasoning_content` (re-sent when preserve-thinking is on) before
+  delegating — the strict compat layer would reject the unknown message field on multi-turn; Gemini
+  regenerates reasoning fresh so nothing is lost.
+- Tests added in `openai-tool-caller.test.ts` for `omitParams`.
+STILL TO WATCH on further Gemini testing: `git_changes` has an empty `parameters` schema
+(`properties: {}`) — Gemini *may* reject empty function params. Not fixed preemptively (would touch
+the shared schema and risk the working providers); one-line isolated fix if it 400s.
+
+**VALIDATED LIVE (2026-07-01): Gemini AND HuggingFace both work on the native engine** (user
+confirmed). The whole XML demolition + provider parity is now complete AND live-validated across all
+8 providers. HuggingFace (TGI compat) needed no extra fixes; Gemini needed the omitParams +
+reasoning_content strip above.
+
 ### Next
 - **Validate live**: run REI in **ask** mode against LM Studio with `REI_NATIVE_ASK=true`; confirm
   (a) reasoning/text stream live, (b) the model investigates via `read_files`/`run_command` (not XML

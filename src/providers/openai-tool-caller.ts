@@ -75,6 +75,12 @@ export interface OpenAIToolsParams {
   options?: CompletionOptions;
   /** Hard output cap. Defaults to the unified REI_MAX_OUTPUT_TOKENS. */
   maxTokens?: number;
+  /**
+   * Request-body keys to strip before sending — for OpenAI-compat endpoints that reject fields the
+   * spec technically allows. Gemini's compat layer, for example, 400s on `frequency_penalty` /
+   * `presence_penalty` / `reasoning_effort`. Defaults to omitting nothing.
+   */
+  omitParams?: readonly string[];
 }
 
 /**
@@ -94,7 +100,7 @@ function buildToolsRequestBody(
   const { model, messages, tools, options } = params;
   const maxTokens = params.maxTokens ?? getMaxOutputTokens();
   const sampling = resolveAgentSampling();
-  return {
+  const body: Record<string, unknown> = {
     model: options?.model ?? model,
     messages: messages.map(toApiMessage),
     tools,
@@ -112,6 +118,9 @@ function buildToolsRequestBody(
       ? { reasoning_effort: options.reasoningEffort }
       : {}),
   };
+  // Drop fields a specific compat endpoint rejects (e.g. Gemini 400s on frequency_penalty).
+  for (const key of params.omitParams ?? []) delete body[key];
+  return body;
 }
 
 /**

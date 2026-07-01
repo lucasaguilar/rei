@@ -142,14 +142,22 @@ export class GeminiProvider implements ModelProvider {
   ): Promise<ChatCompletionWithTools> {
     // Delegate to the shared OpenAI tool-caller via Google's OpenAI-compat endpoint (Bearer auth),
     // so the native function-calling loop works for Gemini with zero bespoke parsing.
+    // Google's compat layer is strict and 400s on OpenAI fields REI sends by default:
+    //  - top-level: the anti-loop penalties + reasoning_effort → stripped via omitParams.
+    //  - per-message: `reasoning_content` (re-sent when preserve-thinking is on) → stripped here.
+    //    Gemini regenerates reasoning fresh, so dropping the re-fed field loses nothing.
+    const geminiMessages = messages.map((m) =>
+      m.reasoning_content ? { ...m, reasoning_content: undefined } : m,
+    );
     return openaiCompleteChatWithTools({
       baseUrl: GEMINI_OPENAI_BASE_URL,
       headers: { Authorization: `Bearer ${this.apiKey}` },
       model: options?.model ?? this.model,
-      messages,
+      messages: geminiMessages,
       tools,
       timeoutMs: this.requestTimeoutMs,
       options,
+      omitParams: ["frequency_penalty", "presence_penalty", "reasoning_effort"],
     });
   }
 

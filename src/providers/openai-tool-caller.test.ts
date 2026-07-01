@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   ToolCallAccumulator,
   openaiStreamChatWithTools,
+  openaiCompleteChatWithTools,
 } from "./openai-tool-caller.js";
 import type { ToolStreamDelta } from "./model-provider.js";
 
@@ -154,5 +155,63 @@ describe("openaiStreamChatWithTools (SSE end-to-end, mocked fetch)", () => {
         () => {},
       ),
     ).rejects.toThrow(/Tool streaming request failed/);
+  });
+});
+
+describe("openaiCompleteChatWithTools request body — omitParams (mocked fetch)", () => {
+  const realFetch = globalThis.fetch;
+  const prevFreq = process.env.REI_AGENT_FREQUENCY_PENALTY;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    if (prevFreq === undefined) delete process.env.REI_AGENT_FREQUENCY_PENALTY;
+    else process.env.REI_AGENT_FREQUENCY_PENALTY = prevFreq;
+  });
+
+  function okJson() {
+    return new Response(
+      JSON.stringify({ choices: [{ message: { content: "ok" }, finish_reason: "stop" }] }),
+      { status: 200 },
+    );
+  }
+
+  async function capture(omitParams?: string[]): Promise<Record<string, unknown>> {
+    process.env.REI_AGENT_FREQUENCY_PENALTY = "0.3"; // ensure penalties are present to be stripped
+    let sent: Record<string, unknown> = {};
+    globalThis.fetch = vi.fn(async (_url: unknown, init: { body: string }) => {
+      sent = JSON.parse(init.body);
+      return okJson();
+    }) as unknown as typeof fetch;
+    await openaiCompleteChatWithTools({
+      baseUrl: "http://x/v1",
+      headers: {},
+      model: "m",
+      messages: [],
+      tools: [],
+      timeoutMs: 1000,
+      options: { reasoningEffort: "low" },
+      omitParams,
+    });
+    return sent;
+  }
+
+  it("sends penalties + reasoning_effort by default (no omitParams)", async () => {
+    const body = await capture();
+    expect(body).toHaveProperty("frequency_penalty");
+    expect(body).toHaveProperty("reasoning_effort", "low");
+  });
+
+  it("strips exactly the omitted fields (Gemini compat), leaving the rest intact", async () => {
+    const body = await capture([
+      "frequency_penalty",
+      "presence_penalty",
+      "reasoning_effort",
+    ]);
+    expect(body).not.toHaveProperty("frequency_penalty");
+    expect(body).not.toHaveProperty("presence_penalty");
+    expect(body).not.toHaveProperty("reasoning_effort");
+    // untouched fields survive
+    expect(body).toHaveProperty("model", "m");
+    expect(body).toHaveProperty("tool_choice", "auto");
+    expect(body).toHaveProperty("max_tokens");
   });
 });
