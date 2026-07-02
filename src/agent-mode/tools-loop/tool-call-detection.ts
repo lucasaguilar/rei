@@ -40,3 +40,23 @@ export function looksLikeAttemptedToolCall(content: string): boolean {
   // and tag-dominated (not a real prose answer that happens to name a tag).
   return trimmed.length <= TAG_DOMINATED_MAX;
 }
+
+// ── Narrate-don't-act detection ───────────────────────────────────────────────
+// A weak local model often ANNOUNCES an investigation in natural language ("leamos los archivos",
+// "voy a leer", "let me read the files") and then STOPS without emitting the tool call — leaving a
+// short, useless "I'll do X" message. This is NOT a faked tool call (no tag), so looksLikeAttempted
+// misses it. Detect it conservatively: a SHORT response that voices imminent investigation intent
+// and references reading/files/code, and is NOT already a real plan (no `## Stage`).
+const ANNOUNCE_VERB =
+  /\b(voy a|vamos a|primero (?:voy|le|revis|analic|busc)|d[ée]jame (?:leer|revisar|ver|mirar)|leamos|revisemos|analicemos|miremos|let me (?:read|check|look|inspect|start|examine|explore)|let'?s (?:read|start|check|look|examine|explore)|i'?ll (?:read|check|look|inspect|start|examine|explore)|i will (?:read|check|look|inspect|start|examine|explore))\b/i;
+const INVESTIGATE_NOUN =
+  /\b(archivos?|leer|read|files?|c[óo]digo|code|revisar|inspect|examin|analiz|analyz|buscar|search|grep|ver)\b/i;
+const ANNOUNCEMENT_MAX = 400;
+
+export function looksLikeUnfulfilledAnnouncement(content: string): boolean {
+  if (!content) return false;
+  const trimmed = content.trim();
+  if (trimmed.length > ANNOUNCEMENT_MAX) return false; // a real plan/answer is longer
+  if (/##\s*stage/i.test(trimmed)) return false; // already a structured plan → not an empty promise
+  return ANNOUNCE_VERB.test(trimmed) && INVESTIGATE_NOUN.test(trimmed);
+}

@@ -31,7 +31,14 @@ const AGENT_TOOLS_DIRECTIVE =
 // the directive focuses on efficient investigation instead of edit batching.
 const READONLY_TOOLS_DIRECTIVE =
   "TOOL-CALLING (function-calling path — you use tools like read_files / run_command, NOT XML " +
-  "blocks): TO READ A REPO FILE, ALWAYS use read_files — it returns the WHOLE file. Pass ALL the " +
+  "blocks).\n" +
+  "RULE — EXECUTE, DON'T NARRATE (NON-NEGOTIABLE): The MOMENT you state you will look at, read, " +
+  "check, search or inspect anything (\"leamos los archivos\", \"voy a leer\", \"primero reviso\", " +
+  "\"let me read/check\"), you MUST emit the corresponding tool call IN THE SAME response. NEVER end " +
+  "your turn with only a sentence describing what you are about to do — a turn that announces an " +
+  "action without emitting its tool call accomplishes nothing and is a failure. If you intend to " +
+  "read files to build the plan, call read_files NOW in this response; do not just say you will.\n" +
+  "TO READ A REPO FILE, ALWAYS use read_files — it returns the WHOLE file. Pass ALL the " +
   "paths you need in a SINGLE read_files call. NEVER read file contents with run_command " +
   "(cat/head/tail/sed/less): that output is capped and the MIDDLE is dropped, so you only see the " +
   "start and end and will think the file is truncated. Use run_command only for real commands " +

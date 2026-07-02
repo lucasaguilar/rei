@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { looksLikeAttemptedToolCall } from "./tool-call-detection.js";
+import {
+  looksLikeAttemptedToolCall,
+  looksLikeUnfulfilledAnnouncement,
+} from "./tool-call-detection.js";
 
 describe("looksLikeAttemptedToolCall", () => {
   it("flags a bare faked tool call (the whole message is the call)", () => {
@@ -37,5 +40,39 @@ describe("looksLikeAttemptedToolCall", () => {
   it("returns false for empty/plain content", () => {
     expect(looksLikeAttemptedToolCall("")).toBe(false);
     expect(looksLikeAttemptedToolCall("Listo, apliqué los cambios.")).toBe(false);
+  });
+});
+
+describe("looksLikeUnfulfilledAnnouncement", () => {
+  it("flags a short announcement of investigation with no tool call (the real bug)", () => {
+    expect(
+      looksLikeUnfulfilledAnnouncement(
+        "Vamos a hacerlo. Primero leamos los archivos clave para armar el plan preciso.",
+      ),
+    ).toBe(true);
+    expect(
+      looksLikeUnfulfilledAnnouncement("Let me read the relevant files first."),
+    ).toBe(true);
+    expect(looksLikeUnfulfilledAnnouncement("Voy a revisar el código.")).toBe(true);
+  });
+
+  it("does NOT flag a real completed plan (has Stage headers / is long)", () => {
+    const plan =
+      "## Stage 1: Setup\nFiles to modify: src/a.ts\n\n## Stage 2: Wire it\nFiles to modify: src/b.ts";
+    expect(looksLikeUnfulfilledAnnouncement(plan)).toBe(false);
+  });
+
+  it("does NOT flag a normal answer that merely mentions reading a file", () => {
+    expect(
+      looksLikeUnfulfilledAnnouncement(
+        "El archivo config.ts define las variables de entorno y se lee al arrancar.",
+      ),
+    ).toBe(false);
+    expect(looksLikeUnfulfilledAnnouncement("")).toBe(false);
+  });
+
+  it("does NOT flag a long substantive response even if it opens with intent", () => {
+    const long = "Voy a leer el código. " + "Detalle técnico. ".repeat(40);
+    expect(looksLikeUnfulfilledAnnouncement(long)).toBe(false);
   });
 });

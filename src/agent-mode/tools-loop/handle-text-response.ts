@@ -8,7 +8,10 @@ import {
   type ExecutionResult,
 } from "../helpers/patch-helpers.js";
 import { buildFinalResponse } from "./finalize-response.js";
-import { looksLikeAttemptedToolCall } from "./tool-call-detection.js";
+import {
+  looksLikeAttemptedToolCall,
+  looksLikeUnfulfilledAnnouncement,
+} from "./tool-call-detection.js";
 
 // Caps the number of format-correction nudges when the model emits a tool call as text/XML
 // instead of via the native function-calling interface.
@@ -110,6 +113,41 @@ export async function handleTextResponse(params: {
             "Do NOT write tool calls as text or XML tags. Use the native function-calling " +
             "interface to invoke the tools (read_files, edit_file, create_file, run_command) directly. " +
             "Retry the same action now using a proper tool call.",
+        },
+      ],
+      formatCorrections: formatCorrections + 1,
+      verifyRetries,
+    };
+  }
+
+  // NARRATE-DON'T-ACT guard: the model announced an investigation ("leamos los archivos", "let me
+  // read") but emitted no tool call and produced no real answer — a weak-local-model failure where it
+  // describes the action instead of doing it (common on the read-only ask/planning path). Nudge it to
+  // actually call the tool (or answer). Shares the format-correction budget so it can't loop.
+  if (
+    looksLikeUnfulfilledAnnouncement(content) &&
+    formatCorrections < MAX_FORMAT_CORRECTIONS &&
+    loopCount < maxTurns
+  ) {
+    logger.logInfo("[tools] narrate-don't-act nudge", {
+      attempt: formatCorrections + 1,
+      contentPreview: content.slice(0, 120),
+    });
+    emitStatus(
+      "↩️  [REI] Model announced an action without doing it — asking it to actually call the tool",
+    );
+    return {
+      action: "continue",
+      messages: [
+        ...currentMessages,
+        { role: "assistant", content },
+        {
+          role: "user",
+          content:
+            "You said you would read/inspect files but did NOT call any tool — so nothing happened " +
+            "and the task did not progress. Do it NOW: emit the read_files (or run_command) tool call " +
+            "in THIS response to gather what you need. If you ALREADY have enough context, write your " +
+            "COMPLETE answer/plan instead. Do not just describe what you are about to do.",
         },
       ],
       formatCorrections: formatCorrections + 1,
