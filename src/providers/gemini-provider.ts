@@ -4,8 +4,12 @@ import type {
   CompletionOptions,
   ToolDefinition,
   ChatCompletionWithTools,
+  ToolStreamDelta,
 } from "./model-provider.js";
-import { openaiCompleteChatWithTools } from "./openai-tool-caller.js";
+import {
+  openaiCompleteChatWithTools,
+  openaiStreamChatWithTools,
+} from "./openai-tool-caller.js";
 
 interface GeminiPart {
   text?: string;
@@ -135,30 +139,52 @@ export class GeminiProvider implements ModelProvider {
     }
   }
 
+  /**
+   * Shared request params for both tool-calling paths via Google's OpenAI-compat endpoint.
+   * The compat layer is strict and 400s on OpenAI fields REI sends by default:
+   *  - top-level: the anti-loop penalties + reasoning_effort → stripped via omitParams.
+   *  - per-message: `reasoning_content` (re-sent when preserve-thinking is on) → stripped here.
+   *    Gemini regenerates reasoning fresh, so dropping the re-fed field loses nothing.
+   */
+  private geminiToolParams(
+    messages: ChatMessage[],
+    tools: ToolDefinition[],
+    options?: CompletionOptions,
+  ) {
+    return {
+      baseUrl: GEMINI_OPENAI_BASE_URL,
+      headers: { Authorization: `Bearer ${this.apiKey}` },
+      model: options?.model ?? this.model,
+      messages: messages.map((m) =>
+        m.reasoning_content ? { ...m, reasoning_content: undefined } : m,
+      ),
+      tools,
+      timeoutMs: this.requestTimeoutMs,
+      options,
+      omitParams: ["frequency_penalty", "presence_penalty", "reasoning_effort"],
+    };
+  }
+
   async completeChatWithTools(
     messages: ChatMessage[],
     tools: ToolDefinition[],
     options?: CompletionOptions,
   ): Promise<ChatCompletionWithTools> {
-    // Delegate to the shared OpenAI tool-caller via Google's OpenAI-compat endpoint (Bearer auth),
-    // so the native function-calling loop works for Gemini with zero bespoke parsing.
-    // Google's compat layer is strict and 400s on OpenAI fields REI sends by default:
-    //  - top-level: the anti-loop penalties + reasoning_effort → stripped via omitParams.
-    //  - per-message: `reasoning_content` (re-sent when preserve-thinking is on) → stripped here.
-    //    Gemini regenerates reasoning fresh, so dropping the re-fed field loses nothing.
-    const geminiMessages = messages.map((m) =>
-      m.reasoning_content ? { ...m, reasoning_content: undefined } : m,
+    return openaiCompleteChatWithTools(
+      this.geminiToolParams(messages, tools, options),
     );
-    return openaiCompleteChatWithTools({
-      baseUrl: GEMINI_OPENAI_BASE_URL,
-      headers: { Authorization: `Bearer ${this.apiKey}` },
-      model: options?.model ?? this.model,
-      messages: geminiMessages,
-      tools,
-      timeoutMs: this.requestTimeoutMs,
-      options,
-      omitParams: ["frequency_penalty", "presence_penalty", "reasoning_effort"],
-    });
+  }
+
+  async streamChatWithTools(
+    messages: ChatMessage[],
+    tools: ToolDefinition[],
+    onDelta: (delta: ToolStreamDelta) => void,
+    options?: CompletionOptions,
+  ): Promise<ChatCompletionWithTools> {
+    return openaiStreamChatWithTools(
+      this.geminiToolParams(messages, tools, options),
+      onDelta,
+    );
   }
 
   private async fetchJson(

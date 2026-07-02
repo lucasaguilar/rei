@@ -155,6 +155,17 @@ confirmed). The whole XML demolition + provider parity is now complete AND live-
 8 providers. HuggingFace (TGI compat) needed no extra fixes; Gemini needed the omitParams +
 reasoning_content strip above.
 
+### Streaming rolled out to ALL OpenAI-compat providers (2026-07-02)
+Testing Ollama (qwen3.6:27b-mlx, planning mode) surfaced that Ollama's native-tool turns ran with
+`streamed:false` — native tools worked (via /v1) but there was NO live token streaming, because only
+`llm-studio-provider` implemented `streamChatWithTools`; every other provider fell back to the
+non-streaming `completeChatWithTools`. Added `streamChatWithTools` (delegating to the shared
+`openaiStreamChatWithTools`) to ollama, openrouter, groq, gemini (reusing its geminiToolParams shaping
+→ omitParams + reasoning_content strip), and huggingface. Now all real providers stream reasoning/text
+live on the native path (mock stays non-streaming — it's a test double). tsc + 480 tests green.
+Note: Ollama uses the /v1 OpenAI-compat endpoint (NOT native /api/chat), which sidesteps the
+tool_call args-as-object gotcha (see the /api/chat comment in ollama-provider.ts).
+
 ### Next
 - **Validate live**: run REI in **ask** mode against LM Studio with `REI_NATIVE_ASK=true`; confirm
   (a) reasoning/text stream live, (b) the model investigates via `read_files`/`run_command` (not XML

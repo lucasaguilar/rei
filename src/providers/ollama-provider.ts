@@ -4,8 +4,13 @@ import type {
   CompletionOptions,
   ToolDefinition,
   ChatCompletionWithTools,
+  ToolStreamDelta,
 } from "./model-provider.js";
-import { openaiCompleteChatWithTools, toApiMessage } from "./openai-tool-caller.js";
+import {
+  openaiCompleteChatWithTools,
+  openaiStreamChatWithTools,
+  toApiMessage,
+} from "./openai-tool-caller.js";
 import { getContextWindow, getMaxOutputTokens } from "../config/model-runtime.js";
 
 interface OllamaChatResponse {
@@ -212,6 +217,27 @@ export class OllamaProvider implements ModelProvider {
       timeoutMs: this.requestTimeoutMs,
       options,
     });
+  }
+
+  async streamChatWithTools(
+    messages: ChatMessage[],
+    tools: ToolDefinition[],
+    onDelta: (delta: ToolStreamDelta) => void,
+    options?: CompletionOptions,
+  ): Promise<ChatCompletionWithTools> {
+    // Same /v1 OpenAI-compat path as completeChatWithTools, but streams reasoning/text deltas live.
+    return openaiStreamChatWithTools(
+      {
+        baseUrl: `${this.baseUrl}/v1`,
+        headers: {},
+        model: options?.model ?? this.model,
+        messages,
+        tools,
+        timeoutMs: this.requestTimeoutMs,
+        options,
+      },
+      onDelta,
+    );
   }
 
   private async fetchChat(params: {

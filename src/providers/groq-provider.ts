@@ -4,8 +4,13 @@ import type {
   CompletionOptions,
   ToolDefinition,
   ChatCompletionWithTools,
+  ToolStreamDelta,
 } from "./model-provider.js";
-import { openaiCompleteChatWithTools, toApiMessage } from "./openai-tool-caller.js";
+import {
+  openaiCompleteChatWithTools,
+  openaiStreamChatWithTools,
+  toApiMessage,
+} from "./openai-tool-caller.js";
 
 interface GroqChatChoice {
   message?: {
@@ -237,6 +242,26 @@ export class GroqProvider implements ModelProvider {
       timeoutMs: this.requestTimeoutMs,
       options,
     });
+  }
+
+  async streamChatWithTools(
+    messages: ChatMessage[],
+    tools: ToolDefinition[],
+    onDelta: (delta: ToolStreamDelta) => void,
+    options?: CompletionOptions,
+  ): Promise<ChatCompletionWithTools> {
+    return openaiStreamChatWithTools(
+      {
+        baseUrl: GROQ_API_BASE_URL,
+        headers: { Authorization: `Bearer ${this.apiKey}` },
+        model: options?.model ?? this.model,
+        messages,
+        tools,
+        timeoutMs: this.requestTimeoutMs,
+        options,
+      },
+      onDelta,
+    );
   }
 
   private fetchChat(params: {

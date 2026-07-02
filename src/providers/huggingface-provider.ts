@@ -4,9 +4,13 @@ import type {
   CompletionOptions,
   ToolDefinition,
   ChatCompletionWithTools,
+  ToolStreamDelta,
 } from "./model-provider.js";
 import { getMaxOutputTokens } from "../config/model-runtime.js";
-import { openaiCompleteChatWithTools } from "./openai-tool-caller.js";
+import {
+  openaiCompleteChatWithTools,
+  openaiStreamChatWithTools,
+} from "./openai-tool-caller.js";
 
 interface HFChatChoice {
   message?: { role?: string; content?: string | null };
@@ -171,6 +175,26 @@ export class HuggingFaceProvider implements ModelProvider {
       timeoutMs: this.requestTimeoutMs,
       options,
     });
+  }
+
+  async streamChatWithTools(
+    messages: ChatMessage[],
+    tools: ToolDefinition[],
+    onDelta: (delta: ToolStreamDelta) => void,
+    options?: CompletionOptions,
+  ): Promise<ChatCompletionWithTools> {
+    return openaiStreamChatWithTools(
+      {
+        baseUrl: HF_API_BASE_URL,
+        headers: { Authorization: `Bearer ${this.apiKey}` },
+        model: options?.model ?? this.model,
+        messages,
+        tools,
+        timeoutMs: this.requestTimeoutMs,
+        options,
+      },
+      onDelta,
+    );
   }
 
   private fetchChat(params: {
