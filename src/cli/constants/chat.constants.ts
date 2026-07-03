@@ -55,6 +55,7 @@ export const COMMANDS: Array<{
   { command: "/exit", description: "end the session" },
   { command: "/clear", description: "clear conversation history" },
   { command: "/help", description: "show available commands" },
+  { command: "/version", description: "show REI version" },
   { command: "/mode ask", description: "switch to ask mode" },
   { command: "/mode planning", description: "switch to planning mode" },
   { command: "/mode agent", description: "switch to agent mode" },

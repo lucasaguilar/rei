@@ -6,6 +6,7 @@ import { clearPromptCache } from "../../prompts/loader.js";
 import { generateRepoMap } from "../../tools/repo-map-generator.js";
 import { startIndexingWorker } from "../../context/rag/rag-indexer.js";
 import { getHelpText } from "../../cli/constants/chat.constants.js";
+import { getVersion } from "../../cli/version.js";
 
 const MODE_RE = /^\/mode\s+(\S+)$/;
 
@@ -20,6 +21,7 @@ export const miscCommands: CommandHandler = {
     c === "/tdd" ||
     c === "/index" ||
     c === "/help" ||
+    c === "/version" ||
     c === "/env" ||
     MODE_RE.test(c),
 
@@ -128,6 +130,10 @@ export const miscCommands: CommandHandler = {
         response:
           "[REI] Full repository indexing started. The AST skeleton map is updating and RAG indexing is running in the background.",
       };
+    }
+
+    if (trimmed === "/version") {
+      return { success: true, response: `[REI] rei ${getVersion()}` };
     }
 
     if (trimmed === "/help") {

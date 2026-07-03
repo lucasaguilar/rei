@@ -4,9 +4,17 @@ import { Agent } from "../core/agent.js";
 import { createModelProvider } from "../providers/provider-factory.js";
 import { planningSkill } from "../skills/planning-skill.js";
 import { runChat } from "./run-chat.js";
+import { getVersion } from "./version.js";
 
 export async function runCli(args: string[]): Promise<void> {
   const parsed = parseCliArgs(args);
+
+  // --version is a zero-dependency shortcut: prints version and exits before anything else
+  if (parsed.version) {
+    console.log(`rei ${getVersion()}`);
+    process.exit(0);
+  }
+
   const command =
     parsed.command ?? (parsed.workspaceInput ? "chat" : undefined);
   const rest = parsed.commandArgs;
@@ -72,10 +80,12 @@ function parseCliArgs(args: string[]): {
   command?: string;
   commandArgs: string[];
   noAutoIndex: boolean;
+  version: boolean;
 } {
   const positional: string[] = [];
   let workspaceInput: string | undefined;
   let noAutoIndex = false;
+  let version = false;
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -106,6 +116,11 @@ function parseCliArgs(args: string[]): {
       continue;
     }
 
+    if (arg === "--version") {
+      version = true;
+      continue;
+    }
+
     positional.push(arg);
   }
 
@@ -114,6 +129,7 @@ function parseCliArgs(args: string[]): {
     command: positional[0],
     commandArgs: positional.slice(1),
     noAutoIndex,
+    version,
   };
 }
 
