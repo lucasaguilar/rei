@@ -19,6 +19,7 @@ import { type ChatSession } from "../chat/types.js";
 import { getTotalStagesInPlan } from "../chat/plan-tracker.js";
 import { VectorStore } from "../context/rag/vector-store.js";
 import { getRelevantMapContext } from "../context/rag/map-retriever.js";
+import { isOnDemandFileContextEnabled } from "../context/constants/context-builder.constants.js";
 import type { FSWatcher } from "chokidar";
 import {
   scanWorkspace,
@@ -633,11 +634,17 @@ export class Agent {
       );
     }
 
+    // On-demand modes (ask/planning) get PURE on-demand orientation — like Pi/Hermes/OpenCode, we
+    // inject NO proactive repo map or file tree. Sending a partial/collapsed view misleads the model
+    // (it concludes unseen files "don't exist") and defeats caching; instead the model discovers the
+    // structure with tools (ls / find / git ls-files / read_files, per the directive). Agent mode
+    // (on-demand off) keeps both for one-turn proactive context.
+    const onDemand = isOnDemandFileContextEnabled(session.mode);
     const enrichedMessage = buildTurnUserMessage({
       userInput,
       context,
-      repositorySkeletonMap,
-      projectFileTree: buildProjectFileTree(scannedFiles),
+      repositorySkeletonMap: onDemand ? undefined : repositorySkeletonMap,
+      projectFileTree: onDemand ? undefined : buildProjectFileTree(scannedFiles),
     });
 
     this.logger.logInfo("Enriched user message size", {

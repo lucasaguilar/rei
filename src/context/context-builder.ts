@@ -242,14 +242,19 @@ export async function buildTurnContext(params: {
     ),
   ]);
 
+  // On-demand modes (ask/planning by default) get NO proactive code injection: the semantic RAG
+  // code snippets are query-relevant (change every turn → cache-hostile) and redundant with the
+  // model's own read_files. Gate them like file previews so the prompt stays lean and the stable
+  // prefix caches. Agent (on-demand off) keeps them for one-turn proactive context.
+  const onDemand = isOnDemandFileContextEnabled(mode);
   const raw: TurnContext = {
     workspacePath,
     repoSummary,
     relevantFiles,
     externalKnowledge,
     ragResults,
-    ragNodeSnippets,
-    callerFiles: callerFiles.length > 0 ? callerFiles : undefined,
+    ragNodeSnippets: onDemand ? undefined : ragNodeSnippets,
+    callerFiles: onDemand ? undefined : callerFiles.length > 0 ? callerFiles : undefined,
   };
 
   if (params.tokenBudget !== undefined) {

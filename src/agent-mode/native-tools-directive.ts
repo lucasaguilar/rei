@@ -42,7 +42,13 @@ const READONLY_TOOLS_DIRECTIVE =
   "paths you need in a SINGLE read_files call. NEVER read file contents with run_command " +
   "(cat/head/tail/sed/less): that output is capped and the MIDDLE is dropped, so you only see the " +
   "start and end and will think the file is truncated. Use run_command only for real commands " +
-  "(search like grep/rg, git, build/tests). You CANNOT edit files in this mode — investigate and " +
+  "(search like grep/rg, git, build/tests).\n" +
+  "REPO VIEWS ARE PARTIAL: the skeleton map shows only files relevant to the query, and the file " +
+  "tree may be grouped/truncated. They are NOT the complete repository. NEVER conclude a file " +
+  "\"does not exist\" or ask the user whether it exists just because it isn't in what you were " +
+  "shown — VERIFY it yourself with run_command (`ls <dir>`, `find . -name \"<pattern>\"`, " +
+  "`git ls-files`) or read_files, then continue. Discover paths with tools; do not guess or ask.\n" +
+  "You CANNOT edit files in this mode — investigate and " +
   "answer (or produce a plan); do not attempt to write changes.";
 
 /**

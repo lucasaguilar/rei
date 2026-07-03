@@ -5,8 +5,13 @@ import type {
 import { preserveThinkingEnabled } from "../../config/model-runtime.js";
 
 const FILE_TREE_HEADER = "### PROJECT FILE TREE";
-/** ~1500 tokens ≈ 6000 chars. Generous: a flat path list is cheap and deterministic. */
-const DEFAULT_TREE_CHAR_BUDGET = 6000;
+/**
+ * ~3000 tokens ≈ 12000 chars. The file tree is STABLE across turns (repo structure changes rarely),
+ * so it caches on the server after the first turn — a one-time prefill cost, not per-turn. Worth it:
+ * the model must see EVERY filename or it wrongly concludes unseen files "don't exist". A mid-size
+ * repo (~400 files) fits the grouped-by-dir view within this budget; larger repos degrade gracefully.
+ */
+const DEFAULT_TREE_CHAR_BUDGET = 12000;
 
 /**
  * Renders the scanned workspace files as a compact, deterministic path listing so
@@ -31,23 +36,29 @@ export function buildProjectFileTree(
     return `${FILE_TREE_HEADER}\n\n${full}`;
   }
 
-  // 2. Too big: collapse to directories with file counts.
-  const dirCounts = new Map<string, number>();
+  // 2. Too big: group filenames by directory — compact (the dir prefix is shared) but STILL LISTS
+  // EVERY FILENAME. Never collapse to bare counts: the model must be able to see that a file exists,
+  // otherwise it wrongly concludes files it can't see "don't exist" and asks the user / skips them.
+  const byDir = new Map<string, string[]>();
   for (const p of paths) {
     const slash = p.lastIndexOf("/");
     const dir = slash === -1 ? "." : p.slice(0, slash);
-    dirCounts.set(dir, (dirCounts.get(dir) ?? 0) + 1);
+    const name = slash === -1 ? p : p.slice(slash + 1);
+    (byDir.get(dir) ?? byDir.set(dir, []).get(dir)!).push(name);
   }
-  const collapsed = [...dirCounts.entries()]
+  const grouped = [...byDir.entries()]
     .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([dir, n]) => `${dir}/ (${n} files)`)
+    .map(([dir, names]) => `${dir}/: ${names.join(", ")}`)
     .join("\n");
-  if (collapsed.length <= charBudget) {
-    return `${FILE_TREE_HEADER} (collapsed to directories — ${paths.length} files total)\n\n${collapsed}`;
+  if (grouped.length <= charBudget) {
+    return `${FILE_TREE_HEADER} (grouped by directory — ${paths.length} files)\n\n${grouped}`;
   }
 
-  // 3. Still too big: truncate the directory listing.
-  return `${FILE_TREE_HEADER} (truncated — ${paths.length} files total)\n\n${collapsed.slice(0, charBudget)}\n…`;
+  // 3. Still too big for even the grouped view: truncate, and tell the model how to see the rest.
+  return (
+    `${FILE_TREE_HEADER} (truncated — ${paths.length} files total; ` +
+    `use run_command \`ls <dir>\` / \`git ls-files\` to list the rest)\n\n${grouped.slice(0, charBudget)}\n…`
+  );
 }
 
 export function buildTurnUserMessage(params: {
