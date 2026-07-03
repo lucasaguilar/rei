@@ -22,6 +22,7 @@ function makeState(): ChatUIState {
     paletteClosed: false,
     cols: 80,
     rows: 24,
+    sessionMode: "agent",
   } as ChatUIState;
 }
 

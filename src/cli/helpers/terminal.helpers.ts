@@ -1,5 +1,6 @@
 import * as readline from "readline";
-import { ANSI_REGEX } from "../constants/chat.constants.js";
+import { ANSI_REGEX, MODE_PROMPTS } from "../constants/chat.constants.js";
+import type { SessionMode } from "../../chat/types.js";
 
 export function stripAnsi(value: string): string {
   return value.replace(ANSI_REGEX, "");
@@ -7,6 +8,18 @@ export function stripAnsi(value: string): string {
 
 export function visibleLength(value: string): number {
   return stripAnsi(value).length;
+}
+
+/**
+ * Usable width for input TEXT (the wrap width), given the terminal columns and the mode prompt.
+ * SINGLE SOURCE OF TRUTH shared by the renderer (to wrap the input into visual rows) and the
+ * keyboard handler (to move the cursor between those rows on Up/Down) — so the two can never
+ * disagree about where a visual line breaks. Mirrors the renderer's own `cols`/`promptLen` math.
+ */
+export function inputWrapWidth(sessionMode: string, cols: number): number {
+  const c = Math.max(40, cols - 1);
+  const promptLen = visibleLength(MODE_PROMPTS[sessionMode as SessionMode] ?? "");
+  return Math.max(1, c - promptLen - 1);
 }
 
 export function takeVisible(value: string, width: number): string {

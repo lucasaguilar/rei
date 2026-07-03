@@ -66,6 +66,7 @@ export interface ChatUIState {
   paletteClosed: boolean;
   cols: number;
   rows: number;
+  sessionMode: string; // SessionMode — kept in sync each draw so key handling knows the prompt width
 }
 
 export interface KeyboardActions {

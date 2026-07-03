@@ -1,4 +1,3 @@
-import wrapAnsi from "wrap-ansi";
 import {
   ActivePalette,
   CommandEntry,
@@ -15,16 +14,33 @@ import {
   clamp,
   padRight,
   fitLine,
-  viewportForInput,
   visibleLength,
+  takeVisible,
 } from "../helpers/terminal.helpers.js";
 import { TurnStatus } from "../../core/models/agent.types.js";
 import { SessionMode } from "../../chat/types.js";
+
+/** Split text into fixed-width visual chunks, respecting ANSI escapes. */
+function splitByVisibleWidth(text: string, width: number): string[] {
+  if (!text || visibleLength(text) <= width) return [text];
+  const lines: string[] = [];
+  let remaining = text;
+  while (remaining.length > 0 && visibleLength(remaining) > 0) {
+    // takeVisible returns the longest prefix whose visual length ≤ width.
+    const chunk = takeVisible(remaining, width);
+    if (!chunk || visibleLength(chunk) === 0) break;
+    lines.push(chunk);
+    remaining = remaining.slice(chunk.length);
+  }
+  return lines;
+}
 
 export class ChatRenderer {
   private static lastDrawnLinesCount = 0;
   private static lastDrawnCols = 0;
   private static lastDrawnLines: string[] = [];
+  /** Rows the terminal cursor was parked ABOVE the bottom of the last draw (multi-line input). */
+  private static lastCursorRowsFromBottom = 0;
 
   public static resetDrawnState(): void {
     this.lastDrawnLinesCount = 0;
@@ -42,6 +58,15 @@ export class ChatRenderer {
     if (this.lastDrawnLinesCount <= 0) return;
 
     process.stdout.write("\x1b[?25l"); // Hide cursor
+
+    // The previous draw may have parked the cursor in the MIDDLE of a multi-line input (we move it
+    // up to the input's cursor row). clearUI erases upward from the current line, so we must first
+    // drop back down to the bottom of the drawn block — otherwise the rows below the cursor are
+    // never cleared and ghost (the repeated-line garbage you can get on a wrapped/pasted prompt).
+    if (this.lastCursorRowsFromBottom > 0) {
+      process.stdout.write(`\x1b[${this.lastCursorRowsFromBottom}B`);
+      this.lastCursorRowsFromBottom = 0;
+    }
 
     let reflowedRows = this.lastDrawnLinesCount;
     if (newCols && newCols !== this.lastDrawnCols && this.lastDrawnLines.length > 0) {
@@ -70,9 +95,6 @@ export class ChatRenderer {
   public static draw(state: ChatRendererState): void {
     const currentCols = Math.max(40, state.cols - 1);
     const currentRows = Math.max(12, state.rows);
-
-    this.clearUI(currentCols);
-    this.lastDrawnCols = currentCols;
 
     const cols = currentCols;
     const rows = currentRows;
@@ -150,30 +172,53 @@ export class ChatRenderer {
     const promptLen = visibleLength(promptText);
 
     const inputInnerWidth = Math.max(1, cols - promptLen - 1);
-    const viewport = viewportForInput(
-      state.inputBuffer,
-      state.inputCursor,
-      inputInnerWidth,
-    );
-    const cursorInViewport = clamp(
-      state.inputCursor - viewport.start,
-      0,
-      Math.max(0, viewport.visible.length),
-    );
 
-    // Render newlines (from a multi-line paste) as a dim ↵ glyph so the input
-    // box stays on one scrolling line. Each \n maps to exactly one visible column,
-    // so the cursor-column math below is unaffected. The buffer keeps real \n.
-    const visibleInput = viewport.visible.replace(/\n/g, "\x1b[90m↵\x1b[0m");
-    uiLines.push(`${promptText}${visibleInput}`);
+    this.clearUI(currentCols);
+    this.lastDrawnCols = currentCols;
 
-    process.stdout.write("\x1b[?25l");
+    // Render newlines (from a multi-line paste) as a dim ↵ glyph inline. Each is one visible
+    // column, so the whole input is a flat sequence of columns for wrapping + cursor math.
+    const visibleInput = state.inputBuffer.replace(/\n/g, "\x1b[90m↵\x1b[0m");
+
+    // Wrap the input into visual rows of inputInnerWidth. THIS is the feature: a line that reaches
+    // the right edge continues on the row below as you type, instead of scrolling horizontally.
+    const allWrapped = splitByVisibleWidth(visibleInput, inputInnerWidth);
+
+    // Cursor 2D position — every raw buffer char (incl. \n→↵) occupies exactly one visible column,
+    // so the cursor's visible position equals its raw index and wrapping is a pure width divide.
+    const cursorRow = Math.floor(state.inputCursor / inputInnerWidth);
+    const cursorCol = state.inputCursor % inputInnerWidth;
+
+    // Vertical cap: keep the input box bounded. Show at most MAX_INPUT_ROWS rows as a window that
+    // always keeps the cursor's row visible, so a very long / pasted prompt stays usable.
+    const MAX_INPUT_ROWS = 8;
+    const winStart =
+      allWrapped.length > MAX_INPUT_ROWS
+        ? clamp(cursorRow - (MAX_INPUT_ROWS - 1), 0, allWrapped.length - MAX_INPUT_ROWS)
+        : 0;
+    const wrappedLines = allWrapped.slice(winStart, winStart + MAX_INPUT_ROWS);
+    const cursorRowInWindow = cursorRow - winStart;
+
+    // First input row carries the prompt; continuation rows are padded so text stays aligned.
+    uiLines.push(`${promptText}${wrappedLines[0] ?? ""}`);
+    for (let i = 1; i < wrappedLines.length; i++) {
+      uiLines.push(`${" ".repeat(promptLen)}${wrappedLines[i]}`);
+    }
+
+    process.stdout.write("\x1b[?25l"); // hide cursor while drawing
     process.stdout.write(uiLines.join("\r\n"));
-    this.lastDrawnLinesCount = uiLines.length;
+    this.lastDrawnLinesCount = uiLines.length; // clearUI erases exactly this many rows next draw
     this.lastDrawnLines = uiLines;
 
-    const inputColumn = promptLen + 1 + cursorInViewport;
-    process.stdout.write(`\x1b[${inputColumn}G\x1b[?25h`);
+    // The terminal cursor now sits at the end of the last drawn row. Move it UP to the cursor's
+    // input row, then to its absolute column (prompt on row 0 and padding on the rest both offset
+    // the input text by promptLen columns).
+    const rowsUp = wrappedLines.length - 1 - cursorRowInWindow;
+    if (rowsUp > 0) process.stdout.write(`\x1b[${rowsUp}A`);
+    const cursorColumn = promptLen + cursorCol + 1; // 1-based terminal column
+    process.stdout.write(`\x1b[${cursorColumn}G\x1b[?25h`);
+    // Remember how far above the bottom the cursor is parked, so the NEXT clearUI drops back down
+    // to the bottom before erasing (otherwise the rows below the cursor ghost).
+    this.lastCursorRowsFromBottom = rowsUp;
   }
 }
-

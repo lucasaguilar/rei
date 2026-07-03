@@ -4,6 +4,7 @@ import {
   isMouseSgrSequence,
   looksLikeAnsiNoise,
   clamp,
+  inputWrapWidth,
 } from "../helpers/terminal.helpers.js";
 
 export class KeyboardHandler {
@@ -146,6 +147,20 @@ export class KeyboardHandler {
     const palette = activePalette.items;
 
     if (key.name === "up") {
+      // Multi-line input: move the cursor UP one visual row (keeping its column) before falling
+      // back to history/palette. Only when editing a fresh buffer (not mid-history, no palette) and
+      // the cursor isn't already on the first row.
+      const upWidth = inputWrapWidth(state.sessionMode, state.cols);
+      if (
+        palette.length === 0 &&
+        state.historyCursor === undefined &&
+        state.inputCursor >= upWidth
+      ) {
+        state.inputCursor -= upWidth;
+        actions.draw();
+        return;
+      }
+
       if (state.historyCursor !== undefined) {
         state.historyCursor = Math.max(0, state.historyCursor - 1);
         state.inputBuffer = state.inputHistory[state.historyCursor];
@@ -184,6 +199,23 @@ export class KeyboardHandler {
     }
 
     if (key.name === "down") {
+      // Multi-line input: move the cursor DOWN one visual row before falling back to history/palette.
+      const downWidth = inputWrapWidth(state.sessionMode, state.cols);
+      const cursorRow = Math.floor(state.inputCursor / downWidth);
+      const lastRow = Math.floor(state.inputBuffer.length / downWidth);
+      if (
+        palette.length === 0 &&
+        state.historyCursor === undefined &&
+        cursorRow < lastRow
+      ) {
+        state.inputCursor = Math.min(
+          state.inputBuffer.length,
+          state.inputCursor + downWidth,
+        );
+        actions.draw();
+        return;
+      }
+
       if (state.historyCursor !== undefined) {
         if (state.historyCursor < state.inputHistory.length - 1) {
           state.historyCursor += 1;

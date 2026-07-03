@@ -91,6 +91,7 @@ export async function runChat(
     paletteClosed: false,
     cols: process.stdout.columns || 80,
     rows: process.stdout.rows || 24,
+    sessionMode: session.mode,
   };
 
   const pushTranscript = (value: string, writeToStdout = true): void => {
@@ -130,6 +131,9 @@ export async function runChat(
   const draw = (): void => {
     // Skip rendering if actively resizing to avoid overlapping visual frames
     if (resizeTimer !== undefined) return;
+
+    // Keep the keyboard state's mode current so Up/Down row-navigation uses the right prompt width.
+    state.sessionMode = session.mode;
 
     const renderState: ChatRendererState = {
       cols: process.stdout.columns || 80,
