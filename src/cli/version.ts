@@ -18,5 +18,5 @@ export function getVersion(): string {
   const pkgPath = resolvePackageJson();
   const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
   cachedVersion = pkg.version ?? "0.0.0";
-  return cachedVersion;
+  return cachedVersion!;
 }

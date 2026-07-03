@@ -77,7 +77,10 @@ STOP and ask the user BEFORE:
 
 ## Output format
 
-When you invoke `use_skill less-is-more`, emit a brief analysis first:
+When you invoke `use_skill less-is-more`, your response MUST START with the block below, emitted
+VERBATIM — same header, same five bullet labels, in this exact order. Do not paraphrase it into a
+table or prose, do not rename the labels, do not skip it. It is the machine-checkable proof that the
+four filters actually ran (telemetry greps for the literal `Less-is-more check:` header):
 
 ```
 Less-is-more check:
@@ -88,4 +91,5 @@ Less-is-more check:
 - Decision: proceed / propose alternative / stop here
 ```
 
-Then follow with the implementation, respecting whatever you eliminated.
+Only AFTER that block do you write the analysis, the recommendation, or the implementation —
+respecting whatever you eliminated. If you did not run the filters, do not invoke the skill.

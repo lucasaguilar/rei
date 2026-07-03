@@ -37,22 +37,63 @@ const MAX_NON_SYSTEM_MESSAGES: Record<SessionMode, number> = {
 
 const AGENT_ACTION_TAG_PATTERN = /<(wholefile|edit|request_files|create)\b/;
 
-/**
- * Returns true if an assistant message belongs to a non-agent mode (e.g. ask/planning).
- * These messages use prose format ("Direct Answer", plain text) and pollute agent-mode
- * context by making small models pattern-match to the wrong output format.
- *
- * Planning responses are preserved regardless: they contain structured implementation
- * plans that the agent should read and execute, not discard.
- */
-function isNonAgentAssistantMessage(message: ChatMessage): boolean {
-  // Preserve planning responses — they are structured plans for the agent to follow.
-  if (message.sourceMode === "planning") return false;
+// How many of the most-recent assistant turns to keep VERBATIM. Older prose answers are
+// demoted to a one-line gist (see demoteOldAssistantProse). Configurable so power users can
+// trade continuity for context budget; default 3 keeps the last few exchanges intact.
+function verbatimAssistantTurns(): number {
+  const raw = Number(process.env.REI_VERBATIM_HISTORY_TURNS);
+  return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 3;
+}
 
-  return (
-    message.role === "assistant" &&
-    !AGENT_ACTION_TAG_PATTERN.test(message.content)
-  );
+/**
+ * Collapse a verbose historical assistant answer down to a compact gist. In a coding agent the
+ * durable state is the workspace (files on disk, re-read on demand) plus the DECISIONS — not the
+ * assistant's expository prose. Re-sending a 1700-token analysis from an unrelated earlier task
+ * every turn is near-pure waste. We keep the headline (or first non-empty line) as an anchor so a
+ * later "as I said before" reference still resolves. The FULL text stays in session.messages
+ * (persistence / user scrollback) — only what we send to the model shrinks.
+ */
+function demoteAssistantProse(message: ChatMessage): ChatMessage {
+  const lines = message.content
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  // Already short — demoting saves nothing and would only lose fidelity.
+  if (lines.length <= 2) return message;
+
+  const headline =
+    lines.find((line) => /^#{1,6}\s+/.test(line))?.replace(/^#{1,6}\s+/, "") ??
+    lines[0];
+  const gist = headline.length > 200 ? `${headline.slice(0, 197)}…` : headline;
+  return { ...message, content: `[Earlier answer — gist] ${gist}` };
+}
+
+/**
+ * Recency-tiered history: keep the last `verbatimTurns` assistant answers intact, and demote
+ * OLDER prose answers to a gist. Two carve-outs are preserved verbatim regardless of age because
+ * they carry durable, non-expository value:
+ *   - agent action messages (edits/creates/requests) — the record of what was done, and
+ *   - planning-sourced plans — structured plans the agent is meant to read and execute.
+ * User and system messages are untouched (user turns already re-inject workspace grounding).
+ */
+function demoteOldAssistantProse(
+  messages: ChatMessage[],
+  verbatimTurns: number,
+): ChatMessage[] {
+  let assistantSeen = 0;
+  const result = messages.slice();
+  for (let i = result.length - 1; i >= 0; i -= 1) {
+    const message = result[i];
+    if (message.role !== "assistant") continue;
+    assistantSeen += 1;
+    const isRecent = assistantSeen <= verbatimTurns;
+    const isAction = AGENT_ACTION_TAG_PATTERN.test(message.content);
+    const isPlan = message.sourceMode === "planning";
+    if (!isRecent && !isAction && !isPlan) {
+      result[i] = demoteAssistantProse(message);
+    }
+  }
+  return result;
 }
 
 /**
@@ -117,6 +158,14 @@ export function buildMessagesForModel(
     },
   );
 
+  // Recency-tiered demotion: the last few assistant answers stay verbatim; older prose answers
+  // collapse to a gist so re-sending stale ask/planning essays doesn't burn context every turn.
+  // Runs BEFORE the budget accounting so the freed room lets more RECENT history survive the trim.
+  const tieredNonSystemMessages = demoteOldAssistantProse(
+    normalizedNonSystemMessages,
+    verbatimAssistantTurns(),
+  );
+
   // Keep the tail of the conversation under a token budget that SCALES WITH the context
   // window (was a hardcoded 18000 that silently dropped older history on large-window cloud /
   // big-local models → "I don't remember what we were doing"). Reserve room for output;
@@ -130,15 +179,15 @@ export function buildMessagesForModel(
   const budgetedMessages: ChatMessage[] = [];
 
   // We always want to keep the latest message (which is the current user prompt)
-  if (normalizedNonSystemMessages.length > 0) {
+  if (tieredNonSystemMessages.length > 0) {
     const latestMsg =
-      normalizedNonSystemMessages[normalizedNonSystemMessages.length - 1];
+      tieredNonSystemMessages[tieredNonSystemMessages.length - 1];
     budgetedMessages.unshift(latestMsg);
     accumulatedTokens += estimateTokens(latestMsg.content);
 
     // Going backwards from the second-to-last message
-    for (let i = normalizedNonSystemMessages.length - 2; i >= 0; i--) {
-      const msg = normalizedNonSystemMessages[i];
+    for (let i = tieredNonSystemMessages.length - 2; i >= 0; i--) {
+      const msg = tieredNonSystemMessages[i];
       const tokens = estimateTokens(msg.content);
       if (accumulatedTokens + tokens > MAX_TOKEN_BUDGET) {
         break; // Stop including older history to fit context window
@@ -151,22 +200,9 @@ export function buildMessagesForModel(
   const finalNonSystem =
     budgetedMessages.length > 0
       ? budgetedMessages
-      : normalizedNonSystemMessages;
+      : tieredNonSystemMessages;
 
-  // In agent mode, compact old assistant messages that have no XML action tags.
-  // These come from ask/planning turns and contain "Direct Answer" / prose format
-  // which causes small models to pattern-match to the wrong output format.
-
-  // NOTE: testing this!!! remove it if it's not good!
   const modeNormalized = finalNonSystem;
-  // const modeNormalized =
-  //   mode === "agent"
-  //     ? finalNonSystem.map((message) =>
-  //         isNonAgentAssistantMessage(message)
-  //           ? { ...message, content: "[Previous response — different mode]" }
-  //           : message,
-  //       )
-  //     : finalNonSystem;
 
   // Aider-style system_reminder: append a format reminder to the LAST user message
   // in agent mode. Small models have recency bias — instructions near the generation
