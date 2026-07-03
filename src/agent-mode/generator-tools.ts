@@ -232,12 +232,11 @@ export async function executeAgentTurnWithTools(params: {
         continue;
       }
 
-      // Past the truncation guard ⇒ this turn produced usable output (tool calls or a complete
-      // answer), i.e. progress. Here the "continuation" is a re-entry of THIS loop (not a nested
-      // while like the XML/ask paths), so the counter must persist across iterations to stay
-      // bounded — but reset it on a productive turn so the cap is "consecutive truncations", not a
-      // lifetime total. Otherwise an early truncation streak would starve a later truncated turn.
-      truncationContinuations = 0;
+      // NOTE: truncationContinuations is a TOTAL for this user-turn — it does NOT reset on a
+      // productive turn. Resetting it created a runaway loop with over-thinking models: they emit
+      // ~max_output tokens of pure reasoning (content empty) → truncate → get continued → an
+      // occasional tool call reset the counter → repeat, burning thousands of tokens per turn up to
+      // MAX_TURNS. Capping the TOTAL truncations (see MAX_TRUNCATION_CONTINUATIONS) bounds it hard.
 
       // Capture text explanation from first turn
       if (loopCount === 1 && result.content.trim()) {

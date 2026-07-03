@@ -69,10 +69,11 @@ export async function handleTruncation(params: {
     };
   }
 
-  // Exhausted continuations. Apply whatever was validated on-green and report honestly
-  // (raising REI_MAX_OUTPUT_TOKENS is the real fix for a model that keeps truncating).
+  // Exhausted the TOTAL truncation budget for this turn — bail out instead of burning more tokens.
+  // A thinking model that emits max-output pure reasoning (empty content) every turn will otherwise
+  // loop here. Two real fixes: give it room to finish (raise the output cap) OR turn thinking off.
   logger.logInfo(
-    `[truncation] gave up after ${MAX_TRUNCATION_CONTINUATIONS} continuations — output cap too low for this model?`,
+    `[truncation] gave up after ${MAX_TRUNCATION_CONTINUATIONS} truncations this turn — likely over-thinking (reasoning fills the output cap before any answer)`,
   );
   const truncEdits = await virtualEdits();
   return {
@@ -82,8 +83,11 @@ export async function handleTruncation(params: {
       {
         response: appendCreatedSummary(
           firstTurnExplanation ||
-            "⚠️ The model kept hitting the output-token limit before finishing. " +
-              "Increase REI_MAX_OUTPUT_TOKENS (thinking models need room for reasoning + the tool call).",
+            "⚠️ The model kept generating only reasoning (no answer) past the output-token limit — " +
+              "it over-thinks. Fix ONE of:\n" +
+              "  • raise REI_MAX_OUTPUT_TOKENS (e.g. 8192+) so it can finish reasoning + answer in one turn, OR\n" +
+              "  • disable thinking for this mode: REI_REASONING_EFFORT_<MODE>=none " +
+              "(qwen-style models are binary — low/medium don't cap it, only `none` turns it off).",
         ),
         validProposedPatches: truncEdits,
       },

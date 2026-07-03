@@ -208,18 +208,19 @@ describe("executeAgentTurnWithTools — characterization", () => {
     expect(toolMsgs.some((m) => m.content.startsWith("ERROR:"))).toBe(true);
   });
 
-  it("resets the truncation budget after a productive turn (consecutive, not lifetime, cap)", async () => {
-    // 4 truncations total (> the 3-cap) but never 3 in a row: a productive read_files turn in the
-    // middle resets the streak. With a lifetime cap the loop would bail early with the
-    // "kept hitting the output-token limit" finalize; with a per-streak reset it reaches the answer.
+  it("caps TOTAL truncations per turn (not consecutive) — bails on a runaway over-thinker", async () => {
+    // The runaway: an over-thinking model emits max-output pure reasoning → truncate, sometimes
+    // slips in a tool call, and keeps going. The truncation budget is now a TOTAL for the turn (it
+    // does NOT reset on a productive turn), so 3 truncations — even with a read_files in between —
+    // bails with the over-thinking finalize instead of looping to burn tokens up to MAX_TURNS.
     fs.writeFileSync(path.join(ws, "x.txt"), "hello");
     const provider = makeToolProvider([
-      truncated("p1"),
-      truncated("p2"),
-      toolCall("read_files", { paths: ["x.txt"] }), // productive → resets the streak
-      truncated("p3"),
-      truncated("p4"),
-      answer("FINAL-ANSWER-OK"),
+      truncated("p1"), // total 1
+      truncated("p2"), // total 2
+      toolCall("read_files", { paths: ["x.txt"] }), // productive — but does NOT reset the total
+      truncated("p3"), // total 3 → next truncation bails
+      truncated("p4"), // budget exhausted → finalize here
+      answer("FINAL-ANSWER-OK"), // never reached
     ]);
     const outcome = await executeAgentTurnWithTools({
       provider,
@@ -227,11 +228,13 @@ describe("executeAgentTurnWithTools — characterization", () => {
       workspacePath: ws,
       logger: fakeLogger,
     });
-    expect(outcome.response).toContain("FINAL-ANSWER-OK");
-    // All six responses were consumed (the loop never bailed on the truncation cap).
+    // Bailed with the honest over-thinking message; never reached the (would-be) final answer.
+    expect(outcome.response).not.toContain("FINAL-ANSWER-OK");
+    expect(outcome.response).toMatch(/over-?thinks|reasoning|output-token limit/i);
+    // Only p1, p2, read_files, p3, p4 were consumed — the answer (6th) was never requested.
     expect(
       (provider.completeChatWithTools as ReturnType<typeof vi.fn>).mock.calls.length,
-    ).toBe(6);
+    ).toBe(5);
   });
 
   it("creates a new file via create_file (direct mode)", async () => {
