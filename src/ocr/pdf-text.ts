@@ -5,6 +5,11 @@ import { PDFParse } from "pdf-parse";
  *  (likely scanned) — Phase 1 can't OCR it, so the caller falls back to a clear message. */
 const MIN_TEXT_LAYER_CHARS = 16;
 
+/** Strip pdf-parse's per-page separators ("-- 3 of 23 --") so they don't count as real text. */
+export function stripPageMarkers(text: string): string {
+  return text.replace(/--\s*\d+\s+of\s+\d+\s*--/g, "");
+}
+
 export interface PdfExtraction {
   /** Trimmed text extracted from the PDF's text layer. */
   text: string;
@@ -27,10 +32,16 @@ export async function extractPdfText(pdfPath: string): Promise<PdfExtraction> {
     const result = await parser.getText();
     // Collapse runs of 3+ blank lines (pdf-parse is whitespace-noisy) but preserve words/lines.
     const text = (result.text ?? "").replace(/\n{3,}/g, "\n\n").trim();
+    // pdf-parse emits page separators ("-- 3 of 23 --") for EVERY page, even scanned ones with
+    // no real text layer. Those markers alone (~13 chars each) blow past MIN_TEXT_LAYER_CHARS, so
+    // a scanned PDF gets misclassified as digital and never routed to vision OCR (it injects blank
+    // pages as a "faithful transcription"). Measure the REAL content with the markers + whitespace
+    // stripped, so an image-only PDF correctly reports hasTextLayer:false.
+    const contentChars = stripPageMarkers(text).replace(/\s+/g, "").length;
     return {
       text,
       pages: result.total ?? 0,
-      hasTextLayer: text.length >= MIN_TEXT_LAYER_CHARS,
+      hasTextLayer: contentChars >= MIN_TEXT_LAYER_CHARS,
     };
   } finally {
     await parser.destroy();

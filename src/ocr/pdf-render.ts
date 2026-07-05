@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import { PDFParse } from "pdf-parse";
+import sharp from "sharp";
 
 // Page budget + render scale for scanned-PDF OCR (each page is a separate vision call, so
 // these guard against runaway cost/time on big documents). Override via env.
@@ -13,6 +14,21 @@ function intEnv(name: string, fallback: number): number {
 function floatEnv(name: string, fallback: number): number {
   const n = parseFloat(process.env[name] ?? "");
   return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+/**
+ * Rotate a rendered PNG data URL clockwise and return a fresh PNG data URL. Photos of books/
+ * documents are often shot sideways or upside-down; a VL model can't read rotated text and spins
+ * into hallucinated repetition loops (observed: a 90°-rotated page produced "PÁG. 18…PÁG. 481"
+ * garbage; rotated upright it transcribed cleanly). The OCR flow (which owns orientation, via an
+ * explicit REI_OCR_ROTATE or auto-detection) calls this per page before the vision request.
+ * `degrees === 0` is a no-op (returns the input untouched — no decode/encode round-trip).
+ */
+export async function rotateDataUrl(dataUrl: string, degrees: number): Promise<string> {
+  if (degrees === 0) return dataUrl;
+  const input = Buffer.from(dataUrl.split(",")[1] ?? "", "base64");
+  const out = await sharp(input).rotate(degrees).png().toBuffer();
+  return `data:image/png;base64,${out.toString("base64")}`;
 }
 
 export interface RenderedPage {

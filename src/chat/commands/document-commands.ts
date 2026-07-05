@@ -34,8 +34,52 @@ function formatAskResult(r: AskResult): string {
   return `\x1b[1;97;45m REI \x1b[0m ${lines.join("\n")}`;
 }
 
-const READ_RE = /^\/(?:read-document|readdoc)\s+(\S+)(?:\s+([\s\S]+))?$/;
-const ASK_RE = /^\/(?:ask-document|askdoc)\s+(\S+)\s+([\s\S]+)$/;
+const READ_RE = /^\/(?:read-document|readdoc)\s+([\s\S]+)$/;
+const ASK_RE = /^\/(?:ask-document|askdoc)\s+([\s\S]+)$/;
+
+/**
+ * Splits a command's argument string into `<file>` and the trailing text (a question or a
+ * page-range), tolerating file paths that contain SPACES, are quoted, or are `@`-prefixed (the
+ * `@file` picker inserts `@path`). A bare `(\S+)` capture broke on real names like
+ * "ocr/guia escaneada.ocr.md" — it stopped at the first space, so the file resolved to "ocr/guia".
+ * Strategy: honor quotes first; otherwise strip a leading `@` and take the LONGEST leading
+ * substring that resolves to an existing file (probe the filesystem at each word boundary), so the
+ * split lands right after the real filename. Falls back to first-word when nothing exists on disk.
+ */
+export function splitFileAndRest(
+  args: string,
+  workspacePath: string,
+): { file: string; rest: string } {
+  const trimmed = args.trim();
+
+  const quoted = trimmed.match(/^(['"])(.+?)\1\s*([\s\S]*)$/);
+  if (quoted) return { file: quoted[2], rest: quoted[3].trim() };
+
+  const raw = trimmed.replace(/^@/, "");
+  const isFile = (p: string): boolean => {
+    try {
+      const abs = path.isAbsolute(p) ? p : path.resolve(workspacePath, p);
+      return fs.statSync(abs).isFile();
+    } catch {
+      return false;
+    }
+  };
+
+  let best: { file: string; rest: string } | null = null;
+  const boundary = /\S\s/g; // a non-space immediately followed by a space = a candidate cut point
+  let m: RegExpExecArray | null;
+  while ((m = boundary.exec(raw)) !== null) {
+    const cut = m.index + 1;
+    if (isFile(raw.slice(0, cut))) {
+      best = { file: raw.slice(0, cut), rest: raw.slice(cut).trim() };
+    }
+  }
+  if (isFile(raw)) best = { file: raw, rest: "" }; // whole arg is the file (no trailing text)
+  if (best) return best;
+
+  const fm = raw.match(/^(\S+)\s*([\s\S]*)$/);
+  return fm ? { file: fm[1], rest: fm[2].trim() } : { file: raw, rest: "" };
+}
 
 /**
  * `/ask-document <file> <question>` — grounded Q&A with verified citations.
@@ -48,8 +92,10 @@ export const documentCommands: CommandHandler = {
   run: async ({ command, workspacePath, provider, onStatus }): Promise<CommandResult> => {
     const readMatch = command.match(READ_RE);
     if (readMatch) {
-      const fileArg = readMatch[1].replace(/^@/, "");
-      const rangeText = readMatch[2]?.trim() ?? "";
+      const { file: fileArg, rest: rangeText } = splitFileAndRest(
+        readMatch[1],
+        workspacePath,
+      );
       const filePath = path.isAbsolute(fileArg)
         ? fileArg
         : path.resolve(workspacePath, fileArg);
@@ -83,13 +129,21 @@ export const documentCommands: CommandHandler = {
 
     const askMatch = command.match(ASK_RE);
     if (askMatch) {
-      const fileArg = askMatch[1].replace(/^@/, "");
-      const question = askMatch[2].trim();
+      const { file: fileArg, rest: question } = splitFileAndRest(
+        askMatch[1],
+        workspacePath,
+      );
       const filePath = path.isAbsolute(fileArg)
         ? fileArg
         : path.resolve(workspacePath, fileArg);
       if (!fs.existsSync(filePath)) {
         return { success: false, response: `[REI] File not found: ${fileArg}` };
+      }
+      if (!question) {
+        return {
+          success: false,
+          response: `[REI] ask-document needs a question: /ask-document <file> <question>`,
+        };
       }
       try {
         const result = await askDocument({

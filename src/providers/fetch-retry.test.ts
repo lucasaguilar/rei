@@ -7,6 +7,8 @@ describe("isRetryableFetchError", () => {
     expect(isRetryableFetchError(new Error("ECONNRESET"))).toBe(true);
     expect(isRetryableFetchError(new Error("socket hang up"))).toBe(true);
     expect(isRetryableFetchError(new Error("request timed out"))).toBe(true);
+    // AbortController timeout surfaces this exact message — must retry (cold-start rescue).
+    expect(isRetryableFetchError(new Error("This operation was aborted"))).toBe(true);
   });
 
   it("does not flag non-transient errors", () => {
@@ -61,6 +63,38 @@ describe("fetchWithRetry", () => {
       }),
     ).rejects.toThrow(/fetch failed/);
     expect(fetchMock).toHaveBeenCalledTimes(3); // 1 + 2 retries
+  });
+
+  it("retries an abort at most once even when maxRetries is higher (slow backend fails fast)", async () => {
+    // A timed-out request re-runs identically; only cold-start benefits from ONE retry. Without the
+    // cap this would attempt 4× (1 + maxRetries), each burning a full timeout.
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValue(new Error("This operation was aborted"));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(
+      fetchWithRetry("http://x/y", {}, {
+        timeoutMs: 1000,
+        maxRetries: 3,
+        retryDelayMs: 1,
+      }),
+    ).rejects.toThrow(/aborted/);
+    expect(fetchMock).toHaveBeenCalledTimes(2); // initial + 1 abort retry, not 4
+  });
+
+  it("still uses full maxRetries for connection drops (not abort)", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error("fetch failed"));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(
+      fetchWithRetry("http://x/y", {}, {
+        timeoutMs: 1000,
+        maxRetries: 3,
+        retryDelayMs: 1,
+      }),
+    ).rejects.toThrow(/fetch failed/);
+    expect(fetchMock).toHaveBeenCalledTimes(4); // 1 + 3 retries — abort cap must not shrink this
   });
 
   it("returns HTTP error responses without retrying (caller checks .ok)", async () => {

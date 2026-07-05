@@ -31,10 +31,12 @@ export async function prepareExtractedText(
   sourcePath: string,
   fullText: string,
   pages: number,
-  opts?: { workspacePath?: string },
+  opts?: { workspacePath?: string; alwaysSave?: boolean },
 ): Promise<PreparedDoc> {
   const inlineMax = intEnv("REI_OCR_INLINE_MAX_CHARS", DEFAULT_INLINE_MAX_CHARS);
-  const forceSave = process.env.REI_OCR_SAVE === "1";
+  // alwaysSave: scanned-PDF OCR is slow and expensive, so we ALWAYS keep the result on disk (even
+  // a short or partial transcription) — otherwise a small/early-bailed scan leaves nothing behind.
+  const forceSave = process.env.REI_OCR_SAVE === "1" || opts?.alwaysSave === true;
   const isLarge = fullText.length > inlineMax;
 
   const savedPath =
@@ -75,6 +77,20 @@ function resolveOutDir(sourcePath: string, workspacePath?: string): string {
   }
   if (workspacePath) return path.join(workspacePath, "ocr");
   return path.dirname(sourcePath);
+}
+
+/**
+ * Always writes the OCR text to the visible `ocr/<base>.ocr.md` artifact, returning its path.
+ * Called incrementally as a scan progresses (after each page) so partial work is visible and
+ * survives a mid-run kill — the final prepareExtractedText write lands on the same path.
+ */
+export async function writeOcrArtifact(
+  sourcePath: string,
+  fullText: string,
+  pages: number,
+  workspacePath?: string,
+): Promise<string | undefined> {
+  return writeOcrFile(sourcePath, fullText, pages, workspacePath);
 }
 
 /** Writes the full extracted text to `<workspace>/.rei/ocr/<base>.ocr.md` (tmp on failure). */

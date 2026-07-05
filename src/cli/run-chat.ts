@@ -49,7 +49,10 @@ export async function runChat(
         summary: existing.summary,
       }
     : { messages: [], mode: "ask" };
-  const mentionEntries = buildMentionEntries(workspacePath);
+  // Rebuilt after every turn (see submitCurrentUserInput): a turn can CREATE files — e.g. the OCR
+  // sidecar writes ocr/*.ocr.md — and they must be @-referenceable this session, not only after a
+  // restart. `let` so the getPalette closure below always reads the freshest scan.
+  let mentionEntries = buildMentionEntries(workspacePath);
 
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     console.error(
@@ -224,6 +227,8 @@ export async function runChat(
   // Bridge the Enter key handler to the full input-processing pipeline.
   const submitCurrentUserInput = async (): Promise<void> => {
     await InputHandler.submitInput(inputContext);
+    // Pick up any files the turn just created (OCR output, generated files) so `@` finds them now.
+    mentionEntries = buildMentionEntries(workspacePath);
   };
 
   const kbActions: KeyboardActions = {
