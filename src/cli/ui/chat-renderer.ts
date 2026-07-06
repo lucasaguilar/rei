@@ -199,6 +199,14 @@ export class ChatRenderer {
     const wrappedLines = allWrapped.slice(winStart, winStart + MAX_INPUT_ROWS);
     const cursorRowInWindow = cursorRow - winStart;
 
+    // Active-document indicator: a dim 📄 line right above the prompt. It's part of uiLines (so the
+    // tracked line count + clearUI stay correct) and sits ABOVE the input rows, leaving the cursor
+    // math below untouched.
+    if (state.activeDocument) {
+      const docName = state.activeDocument.split("/").pop() ?? state.activeDocument;
+      uiLines.push(`\x1b[2m📄 ${docName}\x1b[0m`);
+    }
+
     // First input row carries the prompt; continuation rows are padded so text stays aligned.
     uiLines.push(`${promptText}${wrappedLines[0] ?? ""}`);
     for (let i = 1; i < wrappedLines.length; i++) {

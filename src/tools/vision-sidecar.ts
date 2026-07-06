@@ -497,7 +497,14 @@ export interface VisionAugmentation {
   /** Per-image results that succeeded. */
   images: Array<{ path: string; description: string }>;
   /** Per-PDF text extractions (digital → text layer; scanned → page-by-page vision OCR). */
-  documents: Array<{ path: string; text: string; pages: number }>;
+  documents: Array<{
+    path: string;
+    text: string;
+    pages: number;
+    /** Where the full extracted text was saved (the ocr/*.ocr.md), if any — used to auto-activate
+     *  it as the /ask-document target. Undefined for small inline docs that weren't written. */
+    savedPath?: string;
+  }>;
 }
 
 /**
@@ -654,7 +661,7 @@ export async function describeAttachedImages(
   const config = getVisionConfig();
 
   // --- PDFs: digital → text layer (pdf-parse); scanned → render pages → OCR via vision. ---
-  const documents: Array<{ path: string; text: string; pages: number }> = [];
+  const documents: VisionAugmentation["documents"] = [];
   for (const pdfPath of pdfPaths) {
     const name = path.basename(pdfPath);
     onStatus?.(`📄 Reading ${name}…`);
@@ -663,6 +670,10 @@ export async function describeAttachedImages(
       if (res.hasTextLayer) {
         const prepared = await prepareExtractedText(pdfPath, res.text, res.pages, {
           workspacePath,
+          // Persist even a small digital PDF, so EVERY attached doc gets an ocr/*.ocr.md artifact
+          // and becomes the active /ask-document target — consistent with the scanned path (before
+          // this, a short digital PDF was injected inline only: no file, no active doc).
+          alwaysSave: true,
         });
         if (prepared.savedPath) {
           onStatus?.(
@@ -670,7 +681,12 @@ export async function describeAttachedImages(
               `saved → ${prepared.savedPath}`,
           );
         }
-        documents.push({ path: pdfPath, text: prepared.inject, pages: res.pages });
+        documents.push({
+          path: pdfPath,
+          text: prepared.inject,
+          pages: res.pages,
+          savedPath: prepared.savedPath,
+        });
       } else if (config) {
         // No text layer → scanned: rasterize pages and OCR each with the vision model.
         onStatus?.(`🧾 ${name} looks scanned — rendering pages for OCR…`);
@@ -685,7 +701,12 @@ export async function describeAttachedImages(
               `💾 ${prepared.truncated ? "Large doc — full OCR" : "Full OCR"} saved → ${prepared.savedPath}`,
             );
           }
-          documents.push({ path: pdfPath, text: prepared.inject, pages: ocr.pages });
+          documents.push({
+            path: pdfPath,
+            text: prepared.inject,
+            pages: ocr.pages,
+            savedPath: prepared.savedPath,
+          });
         } else onStatus?.(`⚠️  Could not OCR any page of ${name}.`);
       } else {
         onStatus?.(

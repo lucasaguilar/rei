@@ -55,6 +55,12 @@ describe("documentCommands handler", () => {
     expect(r.success).toBe(true);
     expect(r.response).toContain("Hola mundo");
   });
+
+  it("/ask-document with no file and no active document guides the user", async () => {
+    const r = await documentCommands.run(ctx("/ask-document que dice del doc?"));
+    expect(r.success).toBe(false);
+    expect(r.response).toContain("No hay documento activo");
+  });
 });
 
 describe("splitFileAndRest", () => {

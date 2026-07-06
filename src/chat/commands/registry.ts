@@ -1,6 +1,7 @@
 import type { CommandContext, CommandResult } from "./command-handler.js";
 import { sessionCommands } from "./session-commands.js";
 import { documentCommands } from "./document-commands.js";
+import { activeDocumentCommands } from "./active-document-commands.js";
 import { miscCommands } from "./misc-commands.js";
 import { specCommands } from "./spec-commands.js";
 import { runPlanCommand, planFileCommands } from "./plan-commands.js";
@@ -14,6 +15,7 @@ import { providerCommands } from "./provider-commands.js";
 const COMMAND_HANDLERS = [
   sessionCommands,
   documentCommands,
+  activeDocumentCommands,
   miscCommands,
   specCommands,
   runPlanCommand,

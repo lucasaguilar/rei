@@ -89,7 +89,7 @@ export function splitFileAndRest(
 export const documentCommands: CommandHandler = {
   match: (c) => READ_RE.test(c) || ASK_RE.test(c),
 
-  run: async ({ command, workspacePath, provider, onStatus }): Promise<CommandResult> => {
+  run: async ({ command, session, workspacePath, provider, onStatus }): Promise<CommandResult> => {
     const readMatch = command.match(READ_RE);
     if (readMatch) {
       const { file: fileArg, rest: rangeText } = splitFileAndRest(
@@ -129,22 +129,49 @@ export const documentCommands: CommandHandler = {
 
     const askMatch = command.match(ASK_RE);
     if (askMatch) {
-      const { file: fileArg, rest: question } = splitFileAndRest(
-        askMatch[1],
-        workspacePath,
-      );
-      const filePath = path.isAbsolute(fileArg)
-        ? fileArg
-        : path.resolve(workspacePath, fileArg);
+      const parsed = splitFileAndRest(askMatch[1], workspacePath);
+      const resolveAbs = (f: string): string =>
+        path.isAbsolute(f) ? f : path.resolve(workspacePath, f);
+      const isFile = (f: string): boolean => {
+        try {
+          return fs.statSync(resolveAbs(f)).isFile();
+        } catch {
+          return false;
+        }
+      };
+
+      // Resolve the target: an explicit file that exists wins; otherwise fall back to the ACTIVE
+      // document and treat the whole argument as the question (so `/ask-document <pregunta>` works).
+      let fileArg: string;
+      let question: string;
+      if (isFile(parsed.file)) {
+        fileArg = parsed.file;
+        question = parsed.rest;
+      } else if (session.activeDocument) {
+        fileArg = session.activeDocument;
+        question = askMatch[1].trim();
+      } else {
+        return {
+          success: false,
+          response:
+            `[REI] No hay documento activo. Indicá uno: /ask-document <file> <pregunta>, ` +
+            `o activá con /doc use <file> (o arrastrá un PDF para OCRearlo).`,
+        };
+      }
+
+      const filePath = resolveAbs(fileArg);
       if (!fs.existsSync(filePath)) {
         return { success: false, response: `[REI] File not found: ${fileArg}` };
       }
       if (!question) {
         return {
           success: false,
-          response: `[REI] ask-document needs a question: /ask-document <file> <question>`,
+          response: `[REI] Falta la pregunta: /ask-document [file] <pregunta>`,
         };
       }
+      // Asking about a document activates it for follow-up questions.
+      const rel = path.relative(workspacePath, filePath);
+      session.activeDocument = !rel || rel.startsWith("..") ? filePath : rel;
       try {
         const result = await askDocument({
           filePath,

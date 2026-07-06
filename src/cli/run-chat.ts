@@ -95,6 +95,7 @@ export async function runChat(
     cols: process.stdout.columns || 80,
     rows: process.stdout.rows || 24,
     sessionMode: session.mode,
+    activeDocument: session.activeDocument,
   };
 
   const pushTranscript = (value: string, writeToStdout = true): void => {
@@ -137,6 +138,8 @@ export async function runChat(
 
     // Keep the keyboard state's mode current so Up/Down row-navigation uses the right prompt width.
     state.sessionMode = session.mode;
+    // Mirror the active document (a command may have changed it) so the indicator stays current.
+    state.activeDocument = session.activeDocument;
 
     const renderState: ChatRendererState = {
       cols: process.stdout.columns || 80,
@@ -153,6 +156,7 @@ export async function runChat(
       sessionMode: session.mode,
       inputBuffer: state.inputBuffer,
       inputCursor: state.inputCursor,
+      activeDocument: session.activeDocument,
     };
 
     // selectedCommandIndex can be adjusted by draw

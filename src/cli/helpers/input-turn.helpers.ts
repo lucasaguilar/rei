@@ -1,3 +1,4 @@
+import * as path from "path";
 import type { TurnStatus } from "../../core/models/agent.types.js";
 import { renderMarkdown } from "../markdown-renderer.js";
 import type { InputHandlerContext } from "../models/input-handler.types.js";
@@ -125,6 +126,18 @@ export async function handleInputTurn(
       actions.pushTranscript(
         `\x1b[2m🖼️  ${parts.join(" + ")} analyzed; extracted text added to context.\x1b[0m`,
       );
+      // Auto-activate the freshly-saved OCR doc as the /ask-document target (last one wins), so the
+      // user can ask grounded questions without re-typing the path. Store it workspace-relative.
+      const savedDoc = [...vision.documents].reverse().find((d) => d.savedPath);
+      if (savedDoc?.savedPath) {
+        const rel = path.relative(ctx.workspacePath, savedDoc.savedPath);
+        const active = !rel || rel.startsWith("..") ? savedDoc.savedPath : rel;
+        session.activeDocument = active;
+        state.activeDocument = active;
+        actions.pushTranscript(
+          `\x1b[2m📄 Documento activo: ${active} — preguntale con /ask-document <pregunta> (o /doc clear)\x1b[0m`,
+        );
+      }
       actions.pushTranscript("");
       actions.draw();
     }

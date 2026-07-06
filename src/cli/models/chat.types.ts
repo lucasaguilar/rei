@@ -39,6 +39,8 @@ export interface ChatRendererState {
   sessionMode: string; // SessionMode
   inputBuffer: string;
   inputCursor: number;
+  /** Path of the active /ask-document target, shown as a 📄 indicator above the prompt. */
+  activeDocument?: string;
 }
 
 export interface ChatUIState {
@@ -67,6 +69,7 @@ export interface ChatUIState {
   cols: number;
   rows: number;
   sessionMode: string; // SessionMode — kept in sync each draw so key handling knows the prompt width
+  activeDocument?: string; // synced from session each draw (see run-chat draw())
 }
 
 export interface KeyboardActions {

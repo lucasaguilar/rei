@@ -27,4 +27,8 @@ export interface ChatSession {
   mode: SessionMode;
   createdAt?: string;
   summary?: string;
+  /** Workspace-relative (or absolute) path to the OCR/text doc that /ask-document targets by
+   *  default. Auto-set when a document finishes OCR; changed via /doc; cleared by /doc clear.
+   *  Session-scoped (a new session starts with none). Single doc for now; multi-doc is future. */
+  activeDocument?: string;
 }
