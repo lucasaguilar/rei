@@ -46,4 +46,12 @@ describe("parseGroundedResponse", () => {
     expect(p.answer).toBe("La IA es un agente autónomo.");
     expect(p.answer).not.toContain('"answer"');
   });
+
+  it("does NOT leak a pure-<think> response (all budget spent reasoning, no answer)", () => {
+    const r = "<think>" + "El usuario quiere sumar. ".repeat(50) + "</think>";
+    const p = parseGroundedResponse(r);
+    expect(p.answer).not.toContain("<think>");
+    expect(p.answer).not.toContain("El usuario quiere sumar");
+    expect(p.notFound).toBe(true);
+  });
 });

@@ -52,12 +52,19 @@ export function parseGroundedResponse(response: string): ParsedGrounded {
     .replace(/<think>[\s\S]*$/i, "")
     .trim();
 
-  // Fallback already tries to rescue the "answer" field, so a truncated JSON with NO closing
-  // brace (early-return path) still shows prose instead of raw JSON.
+  // Fallback rescues the "answer" field from a truncated JSON, else shows the (think-stripped)
+  // prose. NEVER fall back to the raw `response` — when a reasoning model burns its whole budget on
+  // <think> and returns no answer, `cleaned` is empty and `|| response` would dump the ENTIRE
+  // reasoning block to screen (observed: 19.8k chars of <think> shown as the "answer"). Instead,
+  // report that nothing usable came back.
+  const rescued = (extractAnswerField(cleaned) ?? cleaned).trim();
   const fallback: ParsedGrounded = {
-    answer: extractAnswerField(cleaned) ?? (cleaned || response).trim(),
+    answer:
+      rescued ||
+      "(El modelo no devolvió una respuesta: el razonamiento consumió toda la salida. " +
+        "Reintentá, o desactivá el thinking del modelo.)",
     claims: [],
-    notFound: false,
+    notFound: rescued.length === 0,
   };
   const start = cleaned.indexOf("{");
   const end = cleaned.lastIndexOf("}");
