@@ -25,6 +25,16 @@ function maxCommandOutputChars(): number {
   return Number.isFinite(n) && n > 0 ? n : DEFAULT_MAX_COMMAND_OUTPUT;
 }
 
+// Hard wall-clock cap per spawned command. Without it, a command that blocks on stdin (a script
+// with input(), a bare `python3`/`cat`) or loops forever never fires "close", the promise never
+// resolves, and the WHOLE agent turn hangs with no output (observed). REI_COMMAND_TIMEOUT_MS overrides.
+const DEFAULT_COMMAND_TIMEOUT_MS = 180_000;
+
+function commandTimeoutMs(): number {
+  const n = parseInt(process.env.REI_COMMAND_TIMEOUT_MS ?? "", 10);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_COMMAND_TIMEOUT_MS;
+}
+
 /**
  * Limits the length of a command output to prevent context window explosion.
  * Truncates from the middle, leaving the beginning (initial errors/output)
@@ -271,21 +281,43 @@ function runSpawn(finalCmd: string, finalArgs: string[], cwd: string): Promise<C
     const child = spawn(finalCmd, finalArgs, {
       cwd,
       shell: false,
+      // stdin = ignore (/dev/null): a script that reads stdin — input(), sys.stdin, a bare
+      // `python3`/`cat` — gets immediate EOF instead of blocking the turn forever waiting for input.
+      stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, FORCE_COLOR: "0" },
     });
 
     let stdout = "";
     let stderr = "";
+    let settled = false;
+    const finish = (r: CommandResult): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(r);
+    };
 
-    child.stdout.on("data", (data) => (stdout += data.toString()));
-    child.stderr.on("data", (data) => (stderr += data.toString()));
+    // Safety net for a genuine infinite loop: kill the process and return what we have.
+    const timeoutMs = commandTimeoutMs();
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      finish({
+        success: false,
+        exitCode: -1,
+        stdout: stdout.trim(),
+        stderr: (stderr + `\n[REI] Command timed out after ${Math.round(timeoutMs / 1000)}s and was killed.`).trim(),
+      });
+    }, timeoutMs);
+
+    child.stdout!.on("data", (data) => (stdout += data.toString()));
+    child.stderr!.on("data", (data) => (stderr += data.toString()));
 
     child.on("close", (code) => {
-      resolve({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code ?? -1, success: code === 0 });
+      finish({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code ?? -1, success: code === 0 });
     });
 
     child.on("error", (err) => {
-      resolve({ success: false, exitCode: -1, stdout: "", stderr: `Execution Error: ${err.message}` });
+      finish({ success: false, exitCode: -1, stdout: "", stderr: `Execution Error: ${err.message}` });
     });
   });
 }
@@ -455,16 +487,41 @@ async function runPipeline(
   }
 
   return new Promise((resolve) => {
-    const children = prepared.map((p) =>
-      spawn(p.finalCmd, p.finalArgs, { cwd, shell: false, env: { ...process.env, FORCE_COLOR: "0" } }),
+    const children = prepared.map((p, i) =>
+      spawn(p.finalCmd, p.finalArgs, {
+        cwd,
+        shell: false,
+        // Only the FIRST stage's stdin is closed (/dev/null) so it can't block on input; the rest
+        // receive their stdin from the previous stage's piped stdout.
+        stdio: [i === 0 ? "ignore" : "pipe", "pipe", "pipe"],
+        env: { ...process.env, FORCE_COLOR: "0" },
+      }),
     );
+
+    let settled = false;
+    const finish = (r: CommandResult): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(r);
+    };
+    const timeoutMs = commandTimeoutMs();
+    const timer = setTimeout(() => {
+      for (const c of children) c.kill("SIGKILL");
+      finish({
+        success: false,
+        exitCode: -1,
+        stdout: "",
+        stderr: `[REI] Pipeline timed out after ${Math.round(timeoutMs / 1000)}s and was killed.`,
+      });
+    }, timeoutMs);
 
     // Wire stdout → stdin between consecutive stages; swallow EPIPE when a
     // downstream stage (e.g. head) exits early and closes its stdin.
     for (let i = 0; i < children.length - 1; i++) {
-      children[i].stdout.pipe(children[i + 1].stdin);
-      children[i].stdout.on("error", () => {});
-      children[i + 1].stdin.on("error", () => {});
+      children[i].stdout!.pipe(children[i + 1].stdin!);
+      children[i].stdout!.on("error", () => {});
+      children[i + 1].stdin!.on("error", () => {});
     }
 
     const lastIdx = children.length - 1;
@@ -478,11 +535,11 @@ async function runPipeline(
     const exitInfo: Array<{ code: number | null; signal: NodeJS.Signals | null }> =
       new Array(children.length).fill(null);
 
-    children[lastIdx].stdout.on("data", (d) => (lastStdout += d.toString()));
+    children[lastIdx].stdout!.on("data", (d) => (lastStdout += d.toString()));
 
     children.forEach((child, i) => {
       let cstderr = "";
-      child.stderr.on("data", (d) => (cstderr += d.toString()));
+      child.stderr!.on("data", (d) => (cstderr += d.toString()));
       child.on("error", (err) => {
         spawnErr = `Execution Error: ${err.message}`;
       });
@@ -498,7 +555,7 @@ async function runPipeline(
         if (pending > 0) return;
 
         if (spawnErr) {
-          resolve({ success: false, exitCode: -1, stdout: "", stderr: spawnErr });
+          finish({ success: false, exitCode: -1, stdout: "", stderr: spawnErr });
           return;
         }
 
@@ -527,7 +584,7 @@ async function runPipeline(
           success: effectiveExit === 0,
         };
         // Last stage's redirects (e.g. `... | tail -5 > out.txt`) apply to final output.
-        resolve(applyRedirects(result, prepared[lastIdx].redir, cwd, workspaceRoot));
+        finish(applyRedirects(result, prepared[lastIdx].redir, cwd, workspaceRoot));
       });
     });
   });

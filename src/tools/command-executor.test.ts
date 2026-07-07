@@ -157,4 +157,22 @@ describe("command-executor: pipefail semantics", () => {
     expect(result.success).toBe(true);
     expect(result.exitCode).toBe(0);
   });
+
+  it("does not hang on a command that reads stdin (gets EOF, not a block)", async () => {
+    // `cat` with no args reads stdin forever with an inherited/open stdin; with stdin closed it
+    // returns immediately. If this test times out, the stdin=ignore fix regressed.
+    const result = await executeCommand("cat", tempWorkspace);
+    expect(result.exitCode).toBe(0);
+  }, 5000);
+
+  it("kills a command that runs forever and reports a timeout", async () => {
+    process.env.REI_COMMAND_TIMEOUT_MS = "600";
+    try {
+      const result = await executeCommand('node -e "setInterval(()=>{},1000)"', tempWorkspace);
+      expect(result.success).toBe(false);
+      expect(result.stderr).toContain("timed out");
+    } finally {
+      delete process.env.REI_COMMAND_TIMEOUT_MS;
+    }
+  }, 5000);
 });

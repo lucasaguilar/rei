@@ -211,9 +211,34 @@ export function resolveWorkspacePath(
   filePath: string,
   workspacePath: string,
 ): string {
-  return path.isAbsolute(filePath)
+  const abs = path.isAbsolute(filePath)
     ? path.resolve(filePath)
     : path.resolve(workspacePath, filePath);
+  return collapseDoubledWorkspaceDir(abs, workspacePath);
+}
+
+/**
+ * Guard against a model that prefixes the workspace FOLDER NAME onto a relative path — e.g. writing
+ * "rei-ocr/x.py" while the workspace already IS ".../rei-ocr", which resolves to the phantom nested
+ * ".../rei-ocr/rei-ocr/x.py". The file then lands in the wrong place and every later `run_command`
+ * fails to find it (observed: the agent thrashing across paths until the turn budget ran out).
+ *
+ * We collapse the doubled "<base>/<base>" segment — but ONLY when that nested dir does NOT already
+ * exist on disk, so an INTENTIONAL same-named nesting (e.g. Django's "myproject/myproject/") is
+ * left untouched. Narrow by design: it fires solely when the path starts with `<workspace-base>/`.
+ */
+function collapseDoubledWorkspaceDir(abs: string, workspacePath: string): string {
+  const ws = path.resolve(workspacePath);
+  const base = path.basename(ws);
+  if (!base) return abs;
+  const doubledPrefix = path.join(ws, base) + path.sep;
+  if (!abs.startsWith(doubledPrefix)) return abs;
+  try {
+    if (fs.existsSync(path.join(ws, base))) return abs; // real nested dir → intentional, keep it
+  } catch {
+    /* unreadable → treat as phantom and collapse */
+  }
+  return path.join(ws, abs.slice(doubledPrefix.length));
 }
 
 /**

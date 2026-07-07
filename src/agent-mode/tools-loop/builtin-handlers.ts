@@ -65,6 +65,17 @@ export async function handleRunCommand(
   ctx.logger.logCommandExecution(cmd, cmdResult);
   const stdout = limitCommandOutput(cmdResult.stdout ?? "");
   const stderr = limitCommandOutput(cmdResult.stderr ?? "");
+
+  // Surface the output to the USER too (not just the model). Otherwise a script's result — e.g. a
+  // reconciliation report a script prints to stdout — stays invisible unless the model restates it,
+  // and if the model runs out of turns the user sees only file patches, never the answer. Show a
+  // trimmed tail so it's informative without flooding the transcript.
+  const shown = (stdout || stderr).trim();
+  if (shown) {
+    const tail = shown.split("\n").slice(-20).join("\n");
+    ctx.emitStatus(`   ↳ exit ${cmdResult.exitCode}\n${tail}`);
+  }
+
   return (
     `Exit: ${cmdResult.exitCode}\n` +
       (stdout ? `Stdout:\n${stdout}\n` : "") +
