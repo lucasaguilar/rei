@@ -114,13 +114,18 @@ function getOllamaModels() {
 }
 
 /**
- * Returns available models from a running LLM Studio instance.
+ * Returns available models from a running OpenAI-compatible local server (LM Studio, MTPLX, …).
  * Falls back to PROVIDER_MODELS.llmstudio if the request fails.
  */
 async function getLlmStudioModels() {
     try {
-        const baseUrl = process.env.LLM_STUDIO_BASE_URL || 'http://localhost:1234';
-        const res = await fetch(`${baseUrl}/v1/models`);
+        // The provider convention (and the /model command) is that LLM_STUDIO_BASE_URL already ENDS
+        // in /v1 — e.g. http://127.0.0.1:8000/v1 for MTPLX. Strip a trailing /v1 (and slashes) before
+        // re-appending, so we don't fetch a doubled ".../v1/v1/models" (→ 404, listing nothing). This
+        // makes ONE url value work for both the wizard AND the provider, with or without /v1.
+        const raw = (process.env.LLM_STUDIO_BASE_URL || 'http://localhost:1234').replace(/\/+$/, '');
+        const base = raw.replace(/\/v1$/i, '');
+        const res = await fetch(`${base}/v1/models`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         const models = (data.data || []).map(m => m.id).filter(Boolean);

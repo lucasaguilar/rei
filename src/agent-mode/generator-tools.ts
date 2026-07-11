@@ -29,6 +29,7 @@ import {
   evaluateBlockedRepeats,
   BLOCKED_REPEAT_STOP_MESSAGE,
 } from "./tools-loop/blocked-repeat-guard.js";
+import { evaluateNoProduce, produceThresholds, PRODUCE_NOW_MESSAGE } from "./tools-loop/no-produce-guard.js";
 import { withNativeToolsDirective } from "./native-tools-directive.js";
 import type { SkillMode } from "../skills/skill-loader.js";
 
@@ -136,6 +137,9 @@ export async function executeAgentTurnWithTools(params: {
   // Streak of consecutive all-blocked-repeat turns; escalation policy lives in blocked-repeat-guard.
   let consecutiveBlockedTurns = 0;
   const MAX_BLOCKED_TURNS = 2;
+  // Streak of consecutive investigate-only turns (no edit/create); policy in no-produce-guard.
+  let investigateOnlyTurns = 0;
+  const PRODUCE = produceThresholds();
 
   const appendCreatedSummary = (resp: string): string => {
     if (createdFiles.length === 0) return resp;
@@ -168,17 +172,13 @@ export async function executeAgentTurnWithTools(params: {
     persistToDisk,
   } = createVirtualFileTree(workspacePath);
 
-  // Edit mode. DEFAULT = `direct`: work like a human/CLI agent — apply edits straight to disk
-  // with NO per-edit sandbox compile-check; the model self-verifies via run_command (sees real
-  // disk) and REI runs ONE final verify at the end. Lighter (no per-edit sandbox copies) and
-  // avoids the reject-per-edit loop that saturates local models, at the cost of leaving partial
-  // edits on disk if the task aborts (recoverable via git).
-  // Opt into the stricter `REI_EDIT_MODE=sandbox` to validate the cumulative virtual tree per
-  // edit and persist only green state (never leaves broken code on disk; heavier).
+  // Edit mode. DEFAULT `direct`: apply edits straight to disk (no per-edit sandbox); the model
+  // self-verifies via run_command and REI runs ONE final verify. Lighter, avoids the reject-per-edit
+  // loop that saturates local models, but leaves partial edits on abort (git-recoverable).
+  // REI_EDIT_MODE=sandbox validates the cumulative tree per edit, persisting only green state (heavier).
   const directMode = process.env.REI_EDIT_MODE !== "sandbox";
 
-  // Finalize with whatever was gathered (applies queued edits + one honest verify). Reused by the
-  // turn-limit exit and the loop-guard abandon path; reads loopCount at call time.
+  // Finalize with whatever was gathered (queued edits + one final verify); reused by turn-limit + loop-guard abandon.
   const finalizeAtLimit = () =>
     buildTurnLimitOutcome({
       loopCount,
@@ -194,8 +194,7 @@ export async function executeAgentTurnWithTools(params: {
   while (loopCount < MAX_TURNS) {
     loopCount++;
 
-    // One `step-N` span per loop iteration (IP-3, agent function-calling). Global-active so
-    // the llm-call / tool spans created while this iteration runs nest under it.
+    // One `step-N` span per loop iteration (global-active so llm-call/tool spans nest under it).
     const endStep = startStepSpan(loopCount - 1);
     try {
       logger.logInfo(`[tools] Turn ${loopCount}/${MAX_TURNS}`);
@@ -232,11 +231,9 @@ export async function executeAgentTurnWithTools(params: {
         continue;
       }
 
-      // NOTE: truncationContinuations is a TOTAL for this user-turn — it does NOT reset on a
-      // productive turn. Resetting it created a runaway loop with over-thinking models: they emit
-      // ~max_output tokens of pure reasoning (content empty) → truncate → get continued → an
-      // occasional tool call reset the counter → repeat, burning thousands of tokens per turn up to
-      // MAX_TURNS. Capping the TOTAL truncations (see MAX_TRUNCATION_CONTINUATIONS) bounds it hard.
+      // NOTE: truncationContinuations is a TOTAL for the user-turn (NOT reset on productive turns).
+      // Resetting it let over-thinking models loop (reason→truncate→continue→tool-call resets it→
+      // repeat, burning thousands of tokens); capping the TOTAL (MAX_TRUNCATION_CONTINUATIONS) bounds it.
 
       // Capture text explanation from first turn
       if (loopCount === 1 && result.content.trim()) {
@@ -244,8 +241,7 @@ export async function executeAgentTurnWithTools(params: {
       }
 
       // ── No tool calls ──────────────────────────────────────────────────────
-      // The model returned plain text: either a faked-as-text tool call (nudge + continue), a
-      // completion that fails final verify (self-correct + continue), or a genuine finish.
+      // Plain text: a faked-as-text tool call (nudge), a completion failing final verify (self-correct), or a genuine finish.
       if (result.toolCalls.length === 0) {
         const outcome = await handleTextResponse({
           content: result.content,
@@ -274,8 +270,7 @@ export async function executeAgentTurnWithTools(params: {
       }
 
       // ── Process tool calls ─────────────────────────────────────────────────
-      // Add the assistant message with tool_calls to history. Carry the reasoning
-      // so it can be re-sent to the model when REI_PRESERVE_THINKING=true.
+      // Record the assistant tool_calls in history; carry reasoning for REI_PRESERVE_THINKING re-send.
       currentMessages.push({
         role: "assistant",
         content: result.content,
@@ -283,8 +278,8 @@ export async function executeAgentTurnWithTools(params: {
         ...(result.reasoning ? { reasoning_content: result.reasoning } : {}),
       });
 
-      // Execute every tool call in this turn (spans + arg-parse + dispatch to the extracted
-      // handlers). Edits are only QUEUED into editTasks here; we apply them as a batch below.
+      // Execute every tool call (spans + arg-parse + dispatch). Edits are only QUEUED here, applied as a batch below.
+      const createdBefore = createdFiles.length; // to detect a create_file this turn (produce-or-bail)
       let { hasToolFailure, editTasks, toolResultsMap, blockedRepeatCount } =
         await dispatchToolCalls(
         result.toolCalls,
@@ -312,15 +307,11 @@ export async function executeAgentTurnWithTools(params: {
       // isn't mistaken for a no-progress loop.
       if (editTasks.length > 0) commandHistory.clear();
 
-      // Apply this turn's edits onto the CURRENT virtual content (cumulative), per file & in
-      // order; then validate the WHOLE virtual tree. This catches cross-file breakage (e.g. an
-      // Angular template referencing a member added in its .ts) while letting interdependent
-      // files be fixed across turns. Search blocks are matched against the working content the
-      // model is shown, so already-edited files don't "poison" later edits.
-      // After repeated search mismatches, hold the affected files + escalation mode here so we
-      // can act AFTER the tool results are fed back.
-      // Apply the queued edits to the virtual tree, then persist (direct) or validate-then-persist
-      // (sandbox). Mutates the maps by reference; returns the failure/escalation decisions.
+      // Apply this turn's queued edits onto the CURRENT virtual tree (cumulative, per file & in order),
+      // then validate the WHOLE tree — catches cross-file breakage while letting interdependent files be
+      // fixed across turns. Search blocks match the content the model was shown (no already-edited poison).
+      // Persists (direct) or validate-then-persists (sandbox); mutates maps by ref; returns failure/
+      // escalation decisions (mismatch escalation is acted on AFTER tool results are fed back).
       const batch = await applyEditBatch(editTasks, {
         workspacePath,
         loopCount,
@@ -363,8 +354,7 @@ export async function executeAgentTurnWithTools(params: {
         });
       }
 
-      // Loop-guard escalation: nudge (forceful STOP message) → abandon (finalize) on a 2nd
-      // all-blocked turn in a row. Policy in blocked-repeat-guard.
+      // Loop-guard: nudge (forceful STOP) → abandon (finalize) on a 2nd all-blocked turn. Policy in blocked-repeat-guard.
       const guard = evaluateBlockedRepeats({
         toolCallCount: result.toolCalls.length,
         blockedRepeatCount,
@@ -381,17 +371,29 @@ export async function executeAgentTurnWithTools(params: {
         currentMessages.push({ role: "user", content: BLOCKED_REPEAT_STOP_MESSAGE });
       }
 
-      // Do NOT return here just because we have valid edits — keep looping so the
-      // model can edit additional files in the same task. We apply everything once
-      // the model signals completion (a plain-text response, handled above, which
-      // returns the accumulated virtual tree as `validProposedPatches`). Reads, commands,
-      // queued edits and failures all simply continue the loop.
+      // Produce-or-bail: investigation that never edits/creates is the "explore forever, output nothing" loop (varied cmds → blocked-repeat guard misses it).
+      const produce = evaluateNoProduce({
+        toolCallCount: result.toolCalls.length,
+        producedDeliverable: editTasks.length > 0 || createdFiles.length > createdBefore,
+        investigateOnlyTurns, ...PRODUCE,
+      });
+      investigateOnlyTurns = produce.investigateOnlyTurns;
+      if (produce.action === "abandon") {
+        emitStatus("⛔  [REI] Demasiada investigación sin producir — cerrando con lo reunido.");
+        return finalizeAtLimit();
+      } else if (produce.action === "nudge") {
+        emitStatus("↩️  [REI] Mucha exploración sin producir — pidiéndole que entregue ya.");
+        currentMessages.push({ role: "user", content: PRODUCE_NOW_MESSAGE });
+      }
+
+      // Do NOT return on valid edits — keep looping so the model can edit more files; everything is
+      // applied when it signals completion (a plain-text response, handled above). Reads/commands/
+      // queued-edits/failures all just continue the loop.
     } finally {
       endStep();
     }
   }
 
-  // Hit the turn limit without the model signalling completion — apply any queued edits (with one
-  // honest final verify) or report the failure with guidance.
+  // Hit the turn limit without completion — apply queued edits (with one final verify) or report failure.
   return finalizeAtLimit();
 }
