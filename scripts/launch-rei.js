@@ -46,7 +46,9 @@ export const PROVIDER_MODELS = {
         PROVIDER_MODELS = {
             ollama: ['llama3.2', 'qwen2.5-coder:14b'],
             openrouter: ['qwen/qwen3.6-plus'],
-            gemini: ['gemini-2.5-flash']
+            gemini: ['gemini-2.5-flash'],
+            llmstudio: [],
+            mtplx: []
         };
     }
 
@@ -155,7 +157,26 @@ function buildOllamaSummary(envVars) {
 function getEnvPrefix(provider) {
     if (provider === 'llmstudio') return 'LLM_STUDIO';
     if (provider === 'huggingface') return 'HF';
+    if (provider === 'mtplx') return 'MTPLX';
     return provider.toUpperCase();
+}
+
+/**
+ * Returns available models from a running MTPLX server (OpenAI-compatible).
+ * Falls back to PROVIDER_MODELS.mtplx if the request fails.
+ */
+async function getMtplxModels() {
+    try {
+        const raw = (process.env.MTPLX_BASE_URL || 'http://localhost:8000').replace(/\/+$/, '');
+        const base = raw.replace(/\/v1$/i, '');
+        const res = await fetch(`${base}/v1/models`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const models = (data.data || []).map(m => m.id).filter(Boolean);
+        return models.length > 0 ? models : (PROVIDER_MODELS.mtplx ?? []);
+    } catch {
+        return PROVIDER_MODELS.mtplx ?? [];
+    }
 }
 
 async function pickProvider(message, initialValue) {
@@ -174,6 +195,8 @@ async function pickModel(provider, message, initialModel) {
         baseList = getOllamaModels();
     } else if (provider === 'llmstudio') {
         baseList = await getLlmStudioModels();
+    } else if (provider === 'mtplx') {
+        baseList = await getMtplxModels();
     } else {
         baseList = PROVIDER_MODELS[provider] ?? [];
     }

@@ -7,6 +7,7 @@ import { OllamaProvider } from "./ollama-provider.js";
 import { GroqProvider } from "./groq-provider.js";
 import { OpenRouterProvider } from "./openrouter-provider.js";
 import { HuggingFaceProvider } from "./huggingface-provider.js";
+import { MtplxProvider } from "./mtplx-provider.js";
 import { withDegenerateGuard } from "./degenerate-guard.js";
 import { withTelemetry } from "./with-telemetry.js";
 
@@ -17,7 +18,8 @@ export type ProviderName =
   | "gemini"
   | "openrouter"
   | "huggingface"
-  | "llmstudio";
+  | "llmstudio"
+  | "mtplx";
 
 export function createModelProvider(providerNameArg?: string): ModelProvider {
   const providerName = (
@@ -49,9 +51,12 @@ export function createModelProvider(providerNameArg?: string): ModelProvider {
     case "llmstudio":
       provider = new LlmStudioProvider();
       break;
+    case "mtplx":
+      provider = new MtplxProvider();
+      break;
     default:
       throw new Error(
-        `Unknown MODEL_PROVIDER: ${providerNameArg ?? process.env.MODEL_PROVIDER}. Expected one of: mock, ollama, groq, gemini, openrouter, huggingface, llmstudio`,
+        `Unknown MODEL_PROVIDER: ${providerNameArg ?? process.env.MODEL_PROVIDER}. Expected one of: mock, ollama, groq, gemini, openrouter, huggingface, llmstudio, mtplx`,
       );
   }
 
@@ -85,6 +90,7 @@ const PROVIDER_ENV_PREFIX: Record<string, string> = {
   gemini: "GEMINI",
   huggingface: "HF",
   llmstudio: "LLM_STUDIO",
+  mtplx: "MTPLX",
 };
 
 /** Trims a value and treats "" / whitespace as unset (so empty env vars fall back). */

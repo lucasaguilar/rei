@@ -30,6 +30,30 @@ const CLOUD_CONTEXT_DEFAULTS: Record<
   huggingface: { window: 32000, envPrefix: "HF" },
 };
 
+/** Per-provider runtime config. Local providers (ollama, llmstudio, mtplx) use contextWindow=0
+ *  (no trimming; user sets the loaded window). Cloud providers get a large default so they
+ *  aren't trimmed prematurely. */
+const PROVIDER_RUNTIME_CONFIGS: Record<
+  string,
+  {
+    contextWindow: number;
+    maxOutputTokens?: number;
+    tokenLimit?: number;
+    supportsToolCalling: boolean;
+    supportsReasoning: boolean;
+    isLocal: boolean;
+  }
+> = {
+  ollama: { contextWindow: 0, supportsToolCalling: true, supportsReasoning: false, isLocal: true },
+  llmstudio: { contextWindow: 0, supportsToolCalling: true, supportsReasoning: false, isLocal: true },
+  mtplx: { contextWindow: 0, supportsToolCalling: true, supportsReasoning: false, isLocal: true },
+  openrouter: { contextWindow: 128000, supportsToolCalling: true, supportsReasoning: true, isLocal: false },
+  gemini: { contextWindow: 128000, supportsToolCalling: true, supportsReasoning: false, isLocal: false },
+  groq: { contextWindow: 128000, supportsToolCalling: true, supportsReasoning: false, isLocal: false },
+  huggingface: { contextWindow: 32000, supportsToolCalling: true, supportsReasoning: false, isLocal: false },
+  mock: { contextWindow: 4096, supportsToolCalling: false, supportsReasoning: false, isLocal: true },
+};
+
 /**
  * Total context window REI assumes for trimming (input + output).
  *
@@ -56,6 +80,11 @@ export function getContextWindow(): number {
   )
     .toLowerCase()
     .trim();
+
+  // Check runtime config first (local providers like mtplx/llmstudio have contextWindow=0)
+  const runtime = PROVIDER_RUNTIME_CONFIGS[provider];
+  if (runtime && runtime.contextWindow === 0) return 0;
+
   const cloud = CLOUD_CONTEXT_DEFAULTS[provider];
   if (!cloud) return 0; // local/unknown → no trimming (user-configured)
 

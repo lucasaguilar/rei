@@ -11,6 +11,7 @@ const VALID_PROVIDERS = [
   "openrouter",
   "huggingface",
   "llmstudio",
+  "mtplx",
 ];
 
 /** Active model env var for a provider/mode (ask vs agent). */
@@ -40,6 +41,10 @@ function getModelEnvVar(providerName: string, mode?: string): string | undefined
       return mode === "agent"
         ? (process.env.LLM_STUDIO_MODEL_AGENT ?? process.env.LLM_STUDIO_MODEL)
         : process.env.LLM_STUDIO_MODEL;
+    case "mtplx":
+      return mode === "agent"
+        ? (process.env.MTPLX_MODEL_AGENT ?? process.env.MTPLX_MODEL)
+        : process.env.MTPLX_MODEL;
     default:
       return undefined;
   }
@@ -75,7 +80,7 @@ export const providerCommands: CommandHandler = {
           : "";
         return {
           success: true,
-          response: `[REI] Active provider (Ask/Planning): '${currentPrimary}'${agentProv}\nAvailable: 'ollama', 'openrouter', 'gemini', 'groq', 'llmstudio', 'huggingface', 'mock'.\nUsage:\n  '/provider <name>' to change Ask/Planning provider.\n  '/provider agent <name>' to change Agent provider.`,
+          response: `[REI] Active provider (Ask/Planning): '${currentPrimary}'${agentProv}\nAvailable: 'ollama', 'openrouter', 'gemini', 'groq', 'llmstudio', 'mtplx', 'huggingface', 'mock'.\nUsage:\n  '/provider <name>' to change Ask/Planning provider.\n  '/provider agent <name>' to change Agent provider.`,
         };
       }
 
@@ -161,6 +166,20 @@ export const providerCommands: CommandHandler = {
             }
           } catch {
             availableModelsText = "\n\n(Note: Could not fetch available models. Make sure LM Studio API server is running.)";
+          }
+        } else if (targetProvider === "mtplx") {
+          try {
+            const baseUrl = (process.env.MTPLX_BASE_URL || "http://localhost:8000/v1").replace(/\/+$/, "");
+            const res = await fetch(`${baseUrl}/models`);
+            if (res.ok) {
+              const data = (await res.json()) as { data?: Array<{ id: string }> };
+              if (data.data && data.data.length > 0) {
+                const names = data.data.map((m) => m.id);
+                availableModelsText = `\n\nAvailable models in MTPLX:\n${names.map((n) => `  - ${n}`).join("\n")}`;
+              }
+            }
+          } catch {
+            availableModelsText = "\n\n(Note: Could not fetch available models. Make sure MTPLX server is running.)";
           }
         }
 
