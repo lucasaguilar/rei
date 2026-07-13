@@ -10,6 +10,8 @@ const MODEL_ENV_KEYS = [
   "OLLAMA_MODEL_PLANNING",
   "LLM_STUDIO_MODEL",
   "LLM_STUDIO_MODEL_AGENT",
+  "MTPLX_MODEL",
+  "MTPLX_MODEL_AGENT",
   "OPENROUTER_MODEL",
   "OPENROUTER_MODEL_AGENT",
   "HF_MODEL",
@@ -99,5 +101,22 @@ describe("resolveModelForMode (uniform across providers)", () => {
   it("returns undefined for an unknown provider", () => {
     process.env.MODEL_PROVIDER = "mock";
     expect(resolveModelForMode("ask")).toBeUndefined();
+  });
+
+  it("resolves MTPLX models (mtplx provider)", () => {
+    process.env.MODEL_PROVIDER = "mtplx";
+    process.env.MTPLX_MODEL = "mis-modo-lo";
+    expect(resolveModelForMode("ask")).toBe("mis-modo-lo");
+    expect(resolveModelForMode("planning")).toBe("mis-modo-lo");
+    expect(resolveModelForMode("agent")).toBe("mis-modo-lo"); // fallback
+    process.env.MTPLX_MODEL_AGENT = "mtplx-agent";
+    expect(resolveModelForMode("agent")).toBe("mtplx-agent");
+  });
+
+  it("treats empty MTPLX_MODEL_AGENT as unset and falls back to base", () => {
+    process.env.MODEL_PROVIDER = "mtplx";
+    process.env.MTPLX_MODEL = "mis-modo-lo";
+    process.env.MTPLX_MODEL_AGENT = "";
+    expect(resolveModelForMode("agent")).toBe("mis-modo-lo");
   });
 });

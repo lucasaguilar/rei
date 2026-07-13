@@ -331,7 +331,7 @@ async function main() {
     // silently ignored. Prompted only for local providers (cloud models have large
     // fixed windows and rarely need REI's budget overrides).
     const usesOllama = envVars.MODEL_PROVIDER === 'ollama' || envVars.AGENT_MODEL_PROVIDER === 'ollama';
-    const LOCAL_PROVIDERS = ['ollama', 'llmstudio'];
+    const LOCAL_PROVIDERS = ['ollama', 'llmstudio', 'mtplx'];
     const usesLocal =
         LOCAL_PROVIDERS.includes(envVars.MODEL_PROVIDER) ||
         LOCAL_PROVIDERS.includes(envVars.AGENT_MODEL_PROVIDER);

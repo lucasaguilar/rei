@@ -35,12 +35,16 @@ REI doesn't "guess" or rely on flaky regex searches. It parses your codebase's a
 * **TypeScript & JavaScript (God Mode):** Uses `ts-morph` to map classes, functions, and interfaces, automatically performing **Caller Discovery** to find and load all files affected by a symbol change.
 * **Polyglot Codebases (Standard Mode):** Incorporates `web-tree-sitter` for advanced structural understanding of Python, Rust, Go, Java, and other languages.
 
-### 3. 🧪 Sandbox Auto-Healing & Compiler-Awareness
-REI refuses to break your repository. When executing code changes in Agent Mode:
-1. **Isolated Sandbox:** REI creates a temporary directory copy of the workspace to apply edits.
-2. **Type & Compilation Checking:** Runs type verification (e.g., `npx tsc --noEmit` for TypeScript).
-3. **Optional TDD Loop:** Automatically runs the project's test suite (`npm run test`) to validate functionality.
-4. **Auto-Healing:** If the compiler or test suite reports an error, REI feeds the diagnostics back to the LLM for automatic correction, presenting the patch to you only once it compiles flawlessly.
+### 3. 🧪 Two Edit Philosophies: Controlled (default) vs. Auto-Sandbox
+REI refuses to break your repository — but *you* choose how the loop behaves, via `REI_EDIT_MODE`:
+
+**`direct` — Controlled (default; recommended for local models).**
+Edits land on disk exactly as the model proposes — *the code stays the way you instructed it*, with no per-edit second-guessing. The model self-verifies with `run_command` (it sees the real disk, like a human at a terminal), and REI runs **one honest final verify** when the task completes; on failure it feeds the diagnostics back for a bounded self-correction. Light, cache-friendly, and it avoids the reject-per-edit loop that **saturates local models**.
+
+**`sandbox` — Auto (strict, hands-off).**
+Every edit is validated against a throwaway copy: REI compiles the cumulative tree (project-type-aware, e.g. `npx tsc --noEmit`), auto-heals compiler errors by feeding diagnostics back to the LLM, and persists **only green state** — never leaving broken code on disk. Safer and more automatic, at the cost of a heavier per-edit loop.
+
+**Optional TDD gate (`REI_TDD_MODE=true`):** appends your test suite to the *single* final verify (`… && npm run test`), so "done" means *compiles **and** tests pass*.
 
 ### 4. ⚡ Offline Semantic RAG Engine
 REI features an ultra-fast, entirely local Retrieval-Augmented Generation pipeline:
@@ -176,12 +180,10 @@ REI will:
 
 > **No save/load needed within a session.** `/runplan` runs the **latest plan from your current session** automatically — regenerate the plan and `/runplan` immediately uses the new one. (See *Plan persistence* below.)
 
-### 4. Sandbox auto-healing & compilation (Verify)
-Before any code is written back to your workspace:
-* REI copies the files to an isolated **temporary sandbox**.
-* It applies the proposed changes and runs the **project-type-aware verify command** (e.g. `npx ngc -p tsconfig.app.json --noEmit` for Angular, `npx tsc --noEmit` for plain TypeScript).
-* If compiler errors are found, REI feeds the exact diagnostic block back to the LLM for **Auto-Healing**.
-* Once the edits compile with **zero errors**, the verified code is cleanly applied to your working directory.
+### 4. Verify: apply-then-check (default) or sandbox-then-apply
+How verification happens depends on `REI_EDIT_MODE`:
+* **`direct` (default):** edits are written to your working directory as they're made; when the task finishes, REI runs the project-type-aware verify command once (e.g. `npx tsc --noEmit`, `npx ngc -p tsconfig.app.json --noEmit` for Angular) and, on errors, bounces the diagnostics back for a bounded self-correction.
+* **`sandbox`:** REI copies files to an isolated temporary sandbox, applies + verifies each cumulative step there, auto-heals, and only writes **zero-error** code back to your working directory.
 
 Continue with `/runplan stage 2`, `stage 3`, and so on. After each stage REI prints a lightweight `Stage X of Y completed` note — but the real "done" signal is the code plus the verify command, not a checklist.
 
