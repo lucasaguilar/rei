@@ -149,9 +149,11 @@ export async function handleInputTurn(
   }
 
   const estimatedTokens = estimateMessagesTokens(session.messages);
-  if (estimatedTokens > 20000) {
+  const contextWindow = getContextWindow();
+  const warningThreshold = Math.round(contextWindow * 0.15);
+  if (estimatedTokens > warningThreshold) {
     actions.pushTranscript(
-      `\x1b[33m⚠️  [REI] Warning: The accumulated session exceeds 20,000 tokens (approximately ${estimatedTokens} tokens). ` +
+      `\x1b[33m⚠️  [REI] Warning: The accumulated session exceeds ${warningThreshold.toLocaleString()} tokens (approximately ${estimatedTokens.toLocaleString()} tokens). ` +
         `If you notice slowdowns or context-related errors, consider using /session new.\x1b[0m`,
     );
     actions.pushTranscript("");

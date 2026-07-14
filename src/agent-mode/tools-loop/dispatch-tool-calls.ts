@@ -128,7 +128,7 @@ export async function dispatchToolCalls(
       switch (call.function.name) {
         // ── read_files ───────────────────────────────────────────────
         case "read_files": {
-          toolResult = await handleReadFiles((args.paths as string[]) ?? [], {
+          const rf = await handleReadFiles((args.paths as string[]) ?? [], {
             workspacePath,
             logger,
             emitStatus,
@@ -137,6 +137,15 @@ export async function dispatchToolCalls(
             virtualFiles,
             alreadyProvided,
           });
+          toolResult = rf.text;
+          // Re-reading ONLY files it already has = no progress. Count it as a blocked repeat so the
+          // loop-guard (nudge → abandon) catches the "re-read the same file forever" loop FAST,
+          // instead of grinding until produce-or-bail at turn 8/12.
+          if (rf.allUnchanged) {
+            blockedRepeatCount += 1;
+            logger.logInfo("[tools] read_files loop-guard: blocked re-read (all files unchanged)");
+            emitStatus("↩️  [REI] Re-lectura sin cambios bloqueada — el archivo ya está arriba; editá o respondé.");
+          }
           toolResultsMap.set(call.id, toolResult);
           break;
         }

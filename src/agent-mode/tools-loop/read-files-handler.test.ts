@@ -26,26 +26,37 @@ describe("handleReadFiles", () => {
   });
   afterEach(() => fs.rmSync(ws, { recursive: true, force: true }));
 
-  it("returns disk content for a fresh file and records it as provided", async () => {
+  it("returns disk content for a fresh file, records it, and is NOT allUnchanged", async () => {
     fs.writeFileSync(path.join(ws, "a.ts"), "const a = 1;");
     const out = await handleReadFiles(["a.ts"], ctx);
-    expect(out).toContain("const a = 1;");
+    expect(out.text).toContain("const a = 1;");
+    expect(out.allUnchanged).toBe(false);
     expect(ctx.alreadyProvided.get("a.ts")).toBe("const a = 1;");
   });
 
-  it("dedups a re-read of an unchanged file (points back instead of re-dumping)", async () => {
+  it("dedups a re-read of an unchanged file and flags allUnchanged (→ loop-guard)", async () => {
     fs.writeFileSync(path.join(ws, "a.ts"), "const a = 1;");
     await handleReadFiles(["a.ts"], ctx); // first read records it
     const second = await handleReadFiles(["a.ts"], ctx);
-    expect(second).toContain("unchanged since you last read it");
-    expect(second).not.toContain("const a = 1;");
+    expect(second.text).toContain("ALREADY have the full content");
+    expect(second.text).not.toContain("const a = 1;");
+    expect(second.allUnchanged).toBe(true);
+  });
+
+  it("is NOT allUnchanged when at least one file is fresh (mixed read)", async () => {
+    fs.writeFileSync(path.join(ws, "a.ts"), "const a = 1;");
+    fs.writeFileSync(path.join(ws, "b.ts"), "const b = 2;");
+    await handleReadFiles(["a.ts"], ctx); // a is now provided
+    const mixed = await handleReadFiles(["a.ts", "b.ts"], ctx); // a unchanged, b fresh
+    expect(mixed.allUnchanged).toBe(false);
+    expect(mixed.text).toContain("const b = 2;");
   });
 
   it("reflects pending virtual edits instead of stale disk", async () => {
     fs.writeFileSync(path.join(ws, "a.ts"), "old");
     ctx.virtualFiles.set("a.ts", "new pending content");
     const out = await handleReadFiles(["a.ts"], ctx);
-    expect(out).toContain("new pending content");
-    expect(out).not.toContain("old");
+    expect(out.text).toContain("new pending content");
+    expect(out.text).not.toContain("old");
   });
 });
