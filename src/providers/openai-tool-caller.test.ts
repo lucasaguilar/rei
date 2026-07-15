@@ -3,8 +3,41 @@ import {
   ToolCallAccumulator,
   openaiStreamChatWithTools,
   openaiCompleteChatWithTools,
+  mergeLeadingSystemMessages,
 } from "./openai-tool-caller.js";
 import type { ToolStreamDelta } from "./model-provider.js";
+import type { ChatMessage } from "../chat/types.js";
+
+describe("mergeLeadingSystemMessages", () => {
+  const sys = (c: string): ChatMessage => ({ role: "system", content: c });
+  const user = (c: string): ChatMessage => ({ role: "user", content: c });
+
+  it("merges two leading system messages into one (content concatenated)", () => {
+    const out = mergeLeadingSystemMessages([sys("base"), sys("directive"), user("hi")]);
+    expect(out).toEqual([sys("base\n\ndirective"), user("hi")]);
+  });
+
+  it("leaves a single leading system untouched", () => {
+    const msgs = [sys("base"), user("hi")];
+    expect(mergeLeadingSystemMessages(msgs)).toEqual(msgs);
+  });
+
+  it("is a no-op when there is no system message", () => {
+    const msgs = [user("hi")];
+    expect(mergeLeadingSystemMessages(msgs)).toEqual(msgs);
+  });
+
+  it("only merges LEADING system messages (a later system is left in place)", () => {
+    const msgs = [sys("base"), user("hi"), sys("mid")];
+    expect(mergeLeadingSystemMessages(msgs)).toEqual(msgs);
+  });
+
+  it("preserves the first message's other fields when merging", () => {
+    const first: ChatMessage = { role: "system", content: "a", sourceMode: "agent" };
+    const out = mergeLeadingSystemMessages([first, sys("b"), user("x")]);
+    expect(out[0]).toEqual({ role: "system", content: "a\n\nb", sourceMode: "agent" });
+  });
+});
 
 /**
  * Unit tests for the streamed-tool-call accumulator (the hard part of the streaming spike): id/name

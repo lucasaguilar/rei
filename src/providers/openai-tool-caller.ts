@@ -13,6 +13,23 @@ import {
 } from "../config/model-runtime.js";
 import { fetchWithRetry } from "./fetch-retry.js";
 
+/**
+ * Collapse consecutive LEADING system messages into one. REI legitimately emits two system blocks
+ * (base prompt + native-tools directive), but some strict chat templates (e.g. qwen3.6) raise
+ * "System message must be at the beginning" on a SECOND system message. Merging keeps the content
+ * identical (concatenated with a blank line) while satisfying those templates. No-op for 0 or 1.
+ */
+export function mergeLeadingSystemMessages(messages: ChatMessage[]): ChatMessage[] {
+  let n = 0;
+  while (n < messages.length && messages[n].role === "system") n += 1;
+  if (n <= 1) return messages;
+  const merged: ChatMessage = {
+    ...messages[0],
+    content: messages.slice(0, n).map((m) => m.content).join("\n\n"),
+  };
+  return [merged, ...messages.slice(n)];
+}
+
 interface OpenAIToolCallResponse {
   choices?: Array<{
     message?: {
@@ -102,7 +119,7 @@ function buildToolsRequestBody(
   const sampling = resolveAgentSampling();
   const body: Record<string, unknown> = {
     model: options?.model ?? model,
-    messages: messages.map(toApiMessage),
+    messages: mergeLeadingSystemMessages(messages).map(toApiMessage),
     tools,
     tool_choice: "auto",
     temperature: sampling.temperature,

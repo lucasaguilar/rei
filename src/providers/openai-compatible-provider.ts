@@ -6,7 +6,7 @@ import type {
   ChatCompletionWithTools,
   ToolStreamDelta,
 } from "./model-provider.js";
-import { toApiMessage } from "./openai-tool-caller.js";
+import { toApiMessage, mergeLeadingSystemMessages } from "./openai-tool-caller.js";
 import {
   openaiCompleteChatWithTools,
   openaiStreamChatWithTools,
@@ -251,7 +251,7 @@ export abstract class OpenAiCompatibleProvider implements ModelProvider {
 
     const requestBody: Record<string, unknown> = {
       model: modelOverride ?? this.model,
-      messages: messages.map(toApiMessage),
+      messages: mergeLeadingSystemMessages(messages).map(toApiMessage),
       stream,
       temperature: this.temperature,
       max_tokens: getMaxOutputTokens(),
