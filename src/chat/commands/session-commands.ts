@@ -1,16 +1,55 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import type { CommandHandler, CommandResult } from "./command-handler.js";
 import type { ChatSession } from "../types.js";
 import {
   archiveCurrentSession,
+  currentPath,
   listSessions,
   loadSessionById,
   saveSession,
 } from "../session-store.js";
+import { estimateTokens } from "../helpers/token-estimator.js";
 import {
   clearCurrentPlan,
   restoreCurrentPlanFromSession,
 } from "../plan-tracker.js";
 import { compactSession } from "../compactor.js";
+
+/**
+ * Recursively counts files and collects top-level folders, excluding hidden dirs
+ * and common ignored directories (node_modules, .git, dist).
+ */
+function getRepoSummary(workspacePath: string): { fileCount: number; topFolders: string[] } {
+  const ignored = new Set(['node_modules', '.git', 'dist']);
+  let fileCount = 0;
+  const topFolders: string[] = [];
+
+  function walk(dir: string, depth: number): void {
+    try {
+      for (const entry of fs.readdirSync(dir)) {
+        const fullPath = path.join(dir, entry);
+        const stat = fs.statSync(fullPath);
+        if (stat.isDirectory()) {
+          if (depth === 0 && !entry.startsWith('.') && !ignored.has(entry)) {
+            topFolders.push(entry);
+          }
+          if (!entry.startsWith('.') && !ignored.has(entry)) {
+            walk(fullPath, depth + 1);
+          }
+        } else if (stat.isFile()) {
+          fileCount++;
+        }
+      }
+    } catch {
+      // Permission denied or missing dir — skip
+    }
+  }
+
+  walk(workspacePath, 0);
+  topFolders.sort();
+  return { fileCount, topFolders };
+}
 
 /**
  * Session lifecycle: `/session` (info · new · archive · list · load) and `/compact`.
@@ -19,6 +58,7 @@ import { compactSession } from "../compactor.js";
 export const sessionCommands: CommandHandler = {
   match: (c) =>
     c === "/session" ||
+    c === "/session info" ||
     c === "/session list" ||
     c === "/compact" ||
     /^\/session\s+new(?:\s+.+)?$/.test(c) ||
@@ -105,6 +145,52 @@ export const sessionCommands: CommandHandler = {
           `Turns: ${turns}\n` +
           `Created: ${created}\n` +
           `Summary: ${session.summary ? "yes" : "no"}`,
+      };
+    }
+
+    if (trimmed === "/session info") {
+      const filePath = currentPath(workspacePath);
+      const sessionId = path.basename(filePath, ".json");
+      const fileLabel = fs.existsSync(filePath) ? filePath : "not saved yet";
+
+      const userMsgs = session.messages.filter((m) => m.role === "user");
+      const assistantMsgs = session.messages.filter((m) => m.role === "assistant");
+      const toolResults = session.messages.filter((m) => m.role === "tool");
+      const toolCalls = session.messages
+        .filter((m) => m.tool_calls && m.tool_calls.length > 0)
+        .reduce((sum, m) => sum + m.tool_calls!.length, 0);
+
+      const userTokens = userMsgs.reduce((a, m) => a + estimateTokens(m.content), 0);
+      const assistantTokens = assistantMsgs.reduce((a, m) => a + estimateTokens(m.content), 0);
+      const totalTokens = userTokens + assistantTokens;
+
+      const repoSummary = getRepoSummary(workspacePath);
+
+      return {
+        success: true,
+        response:
+          `[REI] Session Info\n` +
+          `\n` +
+          `File: ${fileLabel}\n` +
+          `ID: ${sessionId}\n` +
+          `\n` +
+          `Messages\n` +
+          `  Total: ${session.messages.length}\n` +
+          `  User: ${userMsgs.length}\n` +
+          `  Assistant: ${assistantMsgs.length}\n` +
+          `  Tools: ${toolCalls} calls, ${toolResults.length} results\n` +
+          `\n` +
+          `Tokens\n` +
+          `  Input: ${userTokens.toLocaleString()}\n` +
+          `  Output: ${assistantTokens.toLocaleString()}\n` +
+          `  Total: ${totalTokens.toLocaleString()}\n` +
+          `\n` +
+          `Workspace: ${workspacePath}\n` +
+          `\n` +
+          `Repository summary:\n` +
+          `  Total files scanned: ${repoSummary.fileCount}\n` +
+          `  Top-level folders: ${repoSummary.topFolders.join(", ")}`,
+        recordInSession: false,
       };
     }
 

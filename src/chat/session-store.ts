@@ -19,7 +19,7 @@ function sessionsDir(workspacePath: string): string {
   return path.join(workspacePath, SESSIONS_DIR);
 }
 
-function currentPath(workspacePath: string): string {
+export function currentPath(workspacePath: string): string {
   return path.join(sessionsDir(workspacePath), CURRENT_FILE);
 }
 
