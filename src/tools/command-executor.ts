@@ -109,6 +109,22 @@ function isRtkAvailable(): boolean {
 }
 
 /**
+ * Returns extra directories allowed by the REI sandbox, read from the REI_ALLOWED_DIRS
+ * environment variable (comma-separated). Expands `~` to the user's home directory and
+ * normalizes each path. Used by resolveCdTarget, writeRedirectFile, and the rm guard.
+ */
+function extraAllowedDirs(): string[] {
+  const raw = process.env.REI_ALLOWED_DIRS ?? "";
+  if (!raw.trim()) return [];
+  const homedir = os.homedir();
+  return raw
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .map((p) => path.normalize(p.startsWith("~") ? path.join(homedir, p.slice(1)) : p));
+}
+
+/**
  * Parses a command line string into tokens, respecting single and double
  * quoted strings. Quotes are stripped from the resulting tokens.
  * Example: `grep -r "some pattern" src` → ["grep", "-r", "some pattern", "src"]
@@ -184,9 +200,11 @@ function resolveCdTarget(
 ): { ok: true; cwd: string } | { ok: false; error: string } {
   const absPath = path.isAbsolute(rawPath) ? rawPath : path.join(cwd, rawPath);
   const normalized = path.normalize(absPath);
-  const normalizedRoot = path.normalize(workspaceRoot);
-
-  if (normalized !== normalizedRoot && !normalized.startsWith(normalizedRoot + path.sep)) {
+  const allowedDirs = [
+    path.normalize(workspaceRoot),
+    ...extraAllowedDirs(),
+  ];
+  if (!allowedDirs.some((d) => normalized === d || normalized.startsWith(d + path.sep))) {
     return { ok: false, error: `Security Error: cd target '${rawPath}' is outside the workspace.` };
   }
   if (!fs.existsSync(normalized)) {
@@ -262,8 +280,11 @@ function writeRedirectFile(
 ): string | null {
   const abs = path.isAbsolute(target) ? target : path.join(cwd, target);
   const norm = path.normalize(abs);
-  const root = path.normalize(workspaceRoot);
-  if (norm !== root && !norm.startsWith(root + path.sep)) {
+  const allowedDirs = [
+    path.normalize(workspaceRoot),
+    ...extraAllowedDirs(),
+  ];
+  if (!allowedDirs.some((d) => norm === d || norm.startsWith(d + path.sep))) {
     return `Security Error: redirect target '${target}' is outside the workspace.`;
   }
   try {
@@ -388,6 +409,7 @@ function prepareCommand(
     const allowedDirs = [
       path.normalize(workspaceRoot),
       path.normalize(path.join(homedir, ".rei")),
+      ...extraAllowedDirs(),
     ];
     for (const arg of args) {
       if (arg.startsWith("-")) continue;
