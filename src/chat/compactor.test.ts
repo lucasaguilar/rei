@@ -73,6 +73,14 @@ function makeProvider(
 }
 
 describe("compactSession resilience", () => {
+  const savedTimeout = process.env.COMPACTOR_TIMEOUT_MS;
+  beforeEach(() => {
+    delete process.env.COMPACTOR_TIMEOUT_MS;
+  });
+  afterEach(() => {
+    if (savedTimeout === undefined) delete process.env.COMPACTOR_TIMEOUT_MS;
+    else process.env.COMPACTOR_TIMEOUT_MS = savedTimeout;
+  });
   it("falls back to the default model when COMPACTOR_MODEL fails", async () => {
     const provider = makeProvider(async (_m, o) => {
       if (o?.model) throw new Error("No models loaded"); // bad override
@@ -123,5 +131,64 @@ describe("compactSession resilience", () => {
 
     expect(result).toEqual(makeMessages());
     expect(provider.completeChat).toHaveBeenCalledTimes(1); // no fallback retry
+  });
+
+  it("times out on override and falls back to default model", async () => {
+    vi.useFakeTimers();
+    process.env.COMPACTOR_TIMEOUT_MS = "50";
+
+    const provider = makeProvider(async (_m, o) => {
+      if (o?.model) {
+        // Simulate a cold model that never responds — use setTimeout so fake timers can fire the timeout
+        await new Promise((resolve) => setTimeout(resolve, 999_999));
+      }
+      return "FALLBACK SUMMARY";
+    });
+
+    const promise = compactSession({
+      messages: makeMessages(),
+      provider,
+      modelOverride: "qwen3:4b",
+      force: true,
+    });
+
+    // Fire all pending timers so the timeout fires and fallback runs
+    await vi.runAllTimersAsync();
+
+    const result = await promise;
+
+    const summary = result.find((m) => m.content.includes("CONVERSATION SUMMARY"));
+    expect(summary?.content).toContain("FALLBACK SUMMARY");
+    expect(provider.completeChat).toHaveBeenCalledTimes(2);
+
+    vi.useRealTimers();
+  });
+
+  it("degrades to full history when both override and default time out", async () => {
+    vi.useFakeTimers();
+    process.env.COMPACTOR_TIMEOUT_MS = "50";
+
+    const provider = makeProvider(async () => {
+      // Both calls hang forever — use setTimeout so fake timers can fire the timeout
+      await new Promise((resolve) => setTimeout(resolve, 999_999));
+    });
+    const original = makeMessages();
+
+    const promise = compactSession({
+      messages: original,
+      provider,
+      modelOverride: "qwen3:4b",
+      force: true,
+    });
+
+    // Fire all pending timers — both timeouts fire, degradation kicks in
+    await vi.runAllTimersAsync();
+
+    const result = await promise;
+
+    expect(result).toEqual(original);
+    expect(result.some((m) => m.content.includes("CONVERSATION SUMMARY"))).toBe(false);
+
+    vi.useRealTimers();
   });
 });
