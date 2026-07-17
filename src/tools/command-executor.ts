@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { withToolSpan } from "../telemetry/spans.js";
+import { DENIED_KEYWORDS, getAllowedCommands, getAllowedDirs } from "./sandbox-config.js";
 
 export interface CommandResult {
   stdout: string;
@@ -56,44 +57,9 @@ export function limitCommandOutput(
   return `${start}\n\n[... Truncated ${truncatedLength} characters (${linesTruncated} lines) of middle output for context safety ...]\n\n${end}`;
 }
 
-const ALLOWED_COMMANDS = new Set([
-  // Node / JS / TS
-  "npm", "npx", "node", "tsc", "ng",
-  // Python
-  "python", "python3", "pip", "pip3", "uv",
-  // Go
-  "go",
-  // Rust
-  "cargo",
-  // Java / Kotlin
-  "mvn", "gradle", "java", "javac", "kotlin",
-  // PHP
-  "php", "composer",
-  // .NET / C#
-  "dotnet",
-  // Shell utilities
-  "ls", "find", "grep", "cat", "pwd", "mkdir",
-  "curl", "git", "env", "which", "date", "printf", "echo", "chmod", "command",
-  "rm", "tar", "unzip", "file", "wget",
-  "true", "false", "test",
-  // Read-only text utilities (file exploration: read by parts, slice, count)
-  "head", "tail", "sed", "awk", "wc", "sort", "uniq", "cut", "tr",
-  // macOS automation
-  "osascript",
-  // REI internal
-  "rtk",
-]);
-
-const DENIED_KEYWORDS = [
-  "rm -rf",
-  "sudo",
-  "chown",
-  "mkfs",
-  //">",
-  //">>",
-  //"|",
-  //"&",
-];
+// DENIED_KEYWORDS and STATIC_ALLOWED_COMMANDS are imported from sandbox-config.js.
+// getAllowedCommands() merges the static set with REI_ALLOWED_COMMANDS env var.
+// getAllowedDirs() merges workspace + ~/.rei + REI_ALLOWED_DIRS env var.
 
 let rtkAvailableCache: boolean | undefined = undefined;
 
@@ -106,22 +72,6 @@ function isRtkAvailable(): boolean {
     rtkAvailableCache = false;
   }
   return rtkAvailableCache;
-}
-
-/**
- * Returns extra directories allowed by the REI sandbox, read from the REI_ALLOWED_DIRS
- * environment variable (comma-separated). Expands `~` to the user's home directory and
- * normalizes each path. Used by resolveCdTarget, writeRedirectFile, and the rm guard.
- */
-function extraAllowedDirs(): string[] {
-  const raw = process.env.REI_ALLOWED_DIRS ?? "";
-  if (!raw.trim()) return [];
-  const homedir = os.homedir();
-  return raw
-    .split(",")
-    .map((p) => p.trim())
-    .filter(Boolean)
-    .map((p) => path.normalize(p.startsWith("~") ? path.join(homedir, p.slice(1)) : p));
 }
 
 /**
@@ -200,10 +150,7 @@ function resolveCdTarget(
 ): { ok: true; cwd: string } | { ok: false; error: string } {
   const absPath = path.isAbsolute(rawPath) ? rawPath : path.join(cwd, rawPath);
   const normalized = path.normalize(absPath);
-  const allowedDirs = [
-    path.normalize(workspaceRoot),
-    ...extraAllowedDirs(),
-  ];
+  const allowedDirs = getAllowedDirs(workspaceRoot);
   if (!allowedDirs.some((d) => normalized === d || normalized.startsWith(d + path.sep))) {
     return { ok: false, error: `Security Error: cd target '${rawPath}' is outside the workspace.` };
   }
@@ -280,10 +227,7 @@ function writeRedirectFile(
 ): string | null {
   const abs = path.isAbsolute(target) ? target : path.join(cwd, target);
   const norm = path.normalize(abs);
-  const allowedDirs = [
-    path.normalize(workspaceRoot),
-    ...extraAllowedDirs(),
-  ];
+  const allowedDirs = getAllowedDirs(workspaceRoot);
   if (!allowedDirs.some((d) => norm === d || norm.startsWith(d + path.sep))) {
     return `Security Error: redirect target '${target}' is outside the workspace.`;
   }
@@ -393,7 +337,8 @@ function prepareCommand(
 
   if (!cmd) return { ok: false, error: "Empty command." };
 
-  if (!ALLOWED_COMMANDS.has(cmd)) {
+  const allowed = getAllowedCommands();
+  if (!allowed.includes(cmd)) {
     return { ok: false, error: `Security Error: Command '${cmd}' is not in the allow-list.` };
   }
 
@@ -405,12 +350,7 @@ function prepareCommand(
     if (hasRecursive) {
       return { ok: false, error: "Security Error: Recursive deletion is not allowed." };
     }
-    const homedir = process.env.HOME || os.homedir();
-    const allowedDirs = [
-      path.normalize(workspaceRoot),
-      path.normalize(path.join(homedir, ".rei")),
-      ...extraAllowedDirs(),
-    ];
+    const allowedDirs = getAllowedDirs(workspaceRoot);
     for (const arg of args) {
       if (arg.startsWith("-")) continue;
       const absPath = path.isAbsolute(arg) ? arg : path.join(cwd, arg);
