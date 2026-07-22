@@ -91,6 +91,10 @@ export class Agent {
   public readonly provider: ModelProvider;
   private readonly workspacePath: string;
   private correlationId: string;
+  /** ID of the turn currently being processed. Stamped onto every ChatMessage produced this turn
+   *  (user prompt + assistant/tool messages) so the flat session becomes segmentable for
+   *  navigation/detour-pruning and correlates with agent-flow.jsonl. See docs/context-drift-spec.md. */
+  private currentTurnId = "";
   /** Hardware warnings collected during prepareSessionForTurn — emitted at stream start. */
   private pendingHardwareWarnings: string[] = [];
   /** Registry of connected MCP servers — populated lazily via connectMcp(). */
@@ -142,6 +146,7 @@ export class Agent {
   ): AsyncIterable<string> {
     this.logger.startTurn();
     this.logger.setCorrelationId(this.correlationId);
+    this.currentTurnId = this.logger.getTurnId();
     const enrichedUserMessage = await this.prepareSessionForTurn(
       session,
       userInput,
@@ -233,6 +238,7 @@ export class Agent {
         session.messages.push({
           role: "assistant",
           content: cleanResponseForHistory(outcome.response),
+          turnId: this.currentTurnId,
         });
         options?.onStatus?.("producing_response");
         // Yield clean explanation as rendered text (only if not already streamed via onChunk).
@@ -285,6 +291,7 @@ export class Agent {
         session.messages.push({
           role: "assistant",
           content: cleanResponseForHistory(outcome.response + feedback),
+          turnId: this.currentTurnId,
         });
         options?.onStatus?.("producing_response");
         if (cleanExplanation && !hasStreamedText)
@@ -305,6 +312,7 @@ export class Agent {
       session.messages.push({
         role: "assistant",
         content: cleanResponseForHistory(outcome.response),
+        turnId: this.currentTurnId,
       });
       options?.onStatus?.("producing_response");
       // Only yield the response text if it wasn't already streamed via onChunk
@@ -394,6 +402,7 @@ export class Agent {
         role: "assistant",
         content: cleanResponseForHistory(outcome.response),
         sourceMode: session.mode,
+        turnId: this.currentTurnId,
       });
       options?.onStatus?.("producing_response");
       // Only emit the response text if it wasn't already streamed live via onChunk.
@@ -653,7 +662,11 @@ export class Agent {
     });
 
     // Persist only the raw user input so historical turns stay compact.
-    session.messages.push({ role: "user", content: userInput });
+    session.messages.push({
+      role: "user",
+      content: userInput,
+      turnId: this.currentTurnId,
+    });
 
     return enrichedMessage;
   }

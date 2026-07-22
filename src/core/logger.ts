@@ -55,6 +55,12 @@ export class AgentLogger {
     this.correlationId = id;
   }
 
+  /** The current turn's id (set by startTurn). Reused to stamp ChatMessages so the session
+   *  correlates with this turn's agent-flow.jsonl entries. See docs/context-drift-spec.md. */
+  public getTurnId(): string {
+    return this.turnId;
+  }
+
   private persistLogEntry(phase: LogEntry["phase"], data: any) {
     try {
       const entry: LogEntry = {

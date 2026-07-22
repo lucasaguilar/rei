@@ -18,6 +18,12 @@ export interface ChatMessage {
   /** The session mode that produced this message. Used to preserve planning
    *  responses in agent-mode context (they contain implementation plans). */
   sourceMode?: SessionMode;
+  /** ID of the turn that produced this message. All messages of one turn (the user prompt plus the
+   *  assistant/tool messages it generated) share it, so the flat `messages[]` becomes segmentable
+   *  for navigation and detour-pruning. Reuses the AgentLogger turnId, so it also correlates a
+   *  session with its `agent-flow.jsonl` entries. Optional: older sessions simply lack it.
+   *  See docs/context-drift-spec.md. */
+  turnId?: string;
 }
 
 export type SessionMode = "ask" | "planning" | "agent";
