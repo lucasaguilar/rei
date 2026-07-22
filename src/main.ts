@@ -6,3 +6,6 @@ initTelemetry();
 
 const args = process.argv.slice(2);
 await runCli(args);
+
+// Ensure clean exit — prevents dangling handles (MCP, chokidar watcher) from keeping Node alive.
+process.exit(0);

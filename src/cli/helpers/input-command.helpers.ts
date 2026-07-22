@@ -15,8 +15,10 @@ export async function handleInputCommand(
   const { state, agent, session, actions } = ctx;
 
   if (trimmed === "/exit") {
-    actions.pushTranscript("Goodbye!");
-    actions.draw();
+    // Clear the current prompt line, then write farewell directly to stdout.
+    // No draw() call — avoids the prompt overwriting our message.
+    process.stdout.write("\x1b[2K"); // erase prompt line in place
+    process.stdout.write("\nGoodbye!\n");
     state.running = false;
     return true;
   }

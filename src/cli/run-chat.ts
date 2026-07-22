@@ -72,7 +72,7 @@ export async function runChat(
   let spinnerTimer: NodeJS.Timeout | undefined;
   const transcript: string[] = [];
 
-  const state: ChatUIState = {
+  const uiState: ChatUIState = {
     running: true,
     busy: false,
     activeStatus: undefined,
@@ -97,6 +97,21 @@ export async function runChat(
     sessionMode: session.mode,
     activeDocument: session.activeDocument,
   };
+
+  let exitResolve!: () => void;
+  const shutdownPromise = new Promise<void>((resolve) => { exitResolve = resolve; });
+
+  // Shutdown interceptor: any component that sets `state.running = false`
+  // (e.g., /exit, Ctrl+C) triggers the Proxy trap, which resolves the
+  // shutdown promise and kicks off the cleanup → process.exit flow.
+  const state: ChatUIState = new Proxy(uiState, {
+    set(target, prop, value) {
+      if (prop === "running" && value === false) {
+        exitResolve();
+      }
+      return Reflect.set(target, prop, value);
+    },
+  });
 
   const pushTranscript = (value: string, writeToStdout = true): void => {
     if (writeToStdout) {
@@ -133,6 +148,9 @@ export async function runChat(
   };
 
   const draw = (): void => {
+    // Skip rendering if shutting down — /exit writes "Goodbye!" directly;
+    // a late draw() would clear it and redraw the prompt as a ghost.
+    if (!state.running) return;
     // Skip rendering if actively resizing to avoid overlapping visual frames
     if (resizeTimer !== undefined) return;
 
@@ -280,6 +298,7 @@ export async function runChat(
 
   process.stdin.on("keypress", onKeypress);
   process.stdout.on("resize", onResize);
+  process.stdin.on("close", () => exitResolve());
 
   if (existing) {
     const nonSystem = existing.messages.filter((m) => m.role !== "system");
@@ -324,9 +343,9 @@ export async function runChat(
 
   draw();
 
-  while (state.running) {
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
+  // Wait for the chat loop to end: `/exit`, Ctrl+C, or stdin close.
+  // The Proxy on `state` resolves this promise when `running` becomes false.
+  await shutdownPromise;
 
   stopSpinner();
   process.stdout.write("\x1b[?2004l"); // disable bracketed paste
@@ -337,6 +356,8 @@ export async function runChat(
     process.stdin.setRawMode(false);
   }
 
+  // Erase the ghost prompt line(s) the renderer left behind, then exit.
   ChatRenderer.clearUI();
   process.stdout.write("\x1b[?25h"); // Show cursor
+  process.exit(0);
 }
