@@ -125,9 +125,13 @@ export function buildMessagesForModel(
   // otherwise the entire array is non-system messages.
   const nonSystemMessages = systemMessage ? messages.slice(1) : messages;
 
-  // Drop empty assistant placeholders so they don't waste context window.
+  // Drop empty assistant placeholders (waste context), and turns pruned as off-topic detours via
+  // `/tree prune` (kept on disk, excluded here). Whole turns are pruned together so removing them
+  // leaves user/assistant/tool pairing intact. See docs/context-drift-spec.md.
   const cleanedNonSystemMessages = nonSystemMessages.filter(
-    (message) => !(message.role === "assistant" && !message.content.trim()),
+    (message) =>
+      !message.pruned &&
+      !(message.role === "assistant" && !message.content.trim()),
   );
 
   // Legacy sessions may persist full enriched context in user turns.

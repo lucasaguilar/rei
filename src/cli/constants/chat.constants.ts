@@ -71,6 +71,7 @@ export const COMMANDS: Array<{
   { command: "/doc clear", description: "deactivate the current document" },
   { command: "/tdd", description: "toggle TDD mode (run tests in sandbox)" },
   { command: "/index", description: "regenerate repository skeleton map" },
+  { command: "/tree", description: "list session turns; /tree prune <n> excludes a detour from context, /tree keep <n> restores it" },
   { command: "/session", description: "show basic session info (use /session info for full details)" },
   { command: "/session info", description: "show full session info with token usage and repo summary" },
   { command: "/session list", description: "list archived sessions" },

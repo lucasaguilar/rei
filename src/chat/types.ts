@@ -24,6 +24,11 @@ export interface ChatMessage {
    *  session with its `agent-flow.jsonl` entries. Optional: older sessions simply lack it.
    *  See docs/context-drift-spec.md. */
   turnId?: string;
+  /** Marked as an off-topic detour via `/tree prune`. Pruned messages stay on disk (recoverable
+   *  with `/tree keep`) but are excluded from what's sent to the model, so a tangent stops diluting
+   *  the working context. Whole turns are pruned together, so user/assistant/tool pairs stay intact.
+   *  See docs/context-drift-spec.md. */
+  pruned?: boolean;
 }
 
 export type SessionMode = "ask" | "planning" | "agent";
