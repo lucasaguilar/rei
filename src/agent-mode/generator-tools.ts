@@ -18,6 +18,7 @@ import { setupToolSelection } from "./tools-loop/tool-selection.js";
 import { callModel } from "./tools-loop/call-model.js";
 import { createVirtualFileTree } from "./tools-loop/virtual-file-tree.js";
 import { dispatchToolCalls } from "./tools-loop/dispatch-tool-calls.js";
+import type { ElicitFn } from "../chat/elicitation.js";
 import { applyEditBatch, setEditResults } from "./tools-loop/apply-edit-batch.js";
 import { handleTextResponse } from "./tools-loop/handle-text-response.js";
 import {
@@ -66,6 +67,9 @@ export async function executeAgentTurnWithTools(params: {
   userQuery?: string;
   /** Mode whose tool-permission profile + directive govern this turn. Defaults to "agent". */
   mode?: SkillMode;
+  /** Asks the user a question mid-turn (ask_user tool). Frontend-provided; when absent, the
+   *  dispatch falls back to the non-interactive safe default. See docs/intent-router-spec.md. */
+  elicit?: ElicitFn;
 }): Promise<ExecutionResult> {
   const {
     provider,
@@ -78,6 +82,7 @@ export async function executeAgentTurnWithTools(params: {
     onChunk,
     userQuery,
     mode = "agent",
+    elicit,
   } = params;
 
   if (!provider.completeChatWithTools) {
@@ -287,6 +292,7 @@ export async function executeAgentTurnWithTools(params: {
           workspacePath,
           logger,
           emitStatus,
+          elicit,
           provider,
           mcpRegistry,
           toRel,

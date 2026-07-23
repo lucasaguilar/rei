@@ -207,6 +207,7 @@ export class Agent {
         mcpRegistry: this.mcpRegistry,
         onChunk,
         userQuery: userInput,
+        elicit: options?.elicit,
       }).finally(() => {
         done = true;
         resolver?.();

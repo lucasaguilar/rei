@@ -19,7 +19,8 @@ vi.mock("../../workspace/git-changes.js", () => ({
   getGitStatus: vi.fn(async () => ["src/file1.ts", "src/file2.ts"]),
 }));
 
-import { handleWebSearch, handleWeather, handleRunCommand, handleGitChanges } from "./builtin-handlers.js";
+import { handleWebSearch, handleWeather, handleAskUser, handleRunCommand, handleGitChanges } from "./builtin-handlers.js";
+import type { Elicitation } from "../../chat/elicitation.js";
 import { searchWeb } from "../../tools/search-tool.js";
 import { executeCommand } from "../../tools/command-executor.js";
 import type { ModelProvider } from "../../providers/model-provider.js";
@@ -42,6 +43,45 @@ describe("builtin handlers", () => {
     const out = await handleWeather("Buenos Aires", statusCtx);
     expect(out).toContain("18°C clear");
     expect(out).toContain("Weather: Buenos Aires");
+  });
+
+  it("handleAskUser builds a SELECT when options are given and returns the answer", async () => {
+    let seen: Elicitation | undefined;
+    const elicit = async (e: Elicitation) => {
+      seen = e;
+      return { id: e.id, value: "signup" };
+    };
+    const out = await handleAskUser("login or signup?", ["login", "signup"], {
+      ...statusCtx,
+      elicit,
+    });
+    expect(seen?.kind).toBe("select");
+    expect(seen?.options?.map((o) => o.value)).toEqual(["login", "signup"]);
+    expect(out).toBe("The user answered: signup");
+  });
+
+  it("handleAskUser builds a TEXT question when no options, and returns the free-form answer", async () => {
+    let seen: Elicitation | undefined;
+    const elicit = async (e: Elicitation) => {
+      seen = e;
+      return { id: e.id, value: "https://api.example.com" };
+    };
+    const out = await handleAskUser("api base url?", undefined, { ...statusCtx, elicit });
+    expect(seen?.kind).toBe("text");
+    expect(out).toContain("https://api.example.com");
+  });
+
+  it("handleAskUser tells the model to assume when the user does not answer (headless default)", async () => {
+    const elicit = async (e: Elicitation) => ({ id: e.id, value: "" });
+    const out = await handleAskUser("which one?", undefined, { ...statusCtx, elicit });
+    expect(out).toContain("did not answer");
+    expect(out).toContain("best assumption");
+  });
+
+  it("handleAskUser rejects an empty question", async () => {
+    const elicit = async (e: Elicitation) => ({ id: e.id, value: "x" });
+    const out = await handleAskUser("  ", undefined, { ...statusCtx, elicit });
+    expect(out).toContain("ERROR");
   });
 
   it("handleRunCommand executes and reports exit code + stdout", async () => {

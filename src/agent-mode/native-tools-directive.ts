@@ -51,10 +51,20 @@ const READONLY_TOOLS_DIRECTIVE =
   "You CANNOT edit files in this mode — investigate and " +
   "answer (or produce a plan); do not attempt to write changes.";
 
+// Applies to every mode: when to ask the user vs. figure it out yourself. Reinforces the ask_user
+// tool description and stays consistent with the read-only rule "discover paths with tools; do not
+// guess or ask". See docs/intent-router-spec.md.
+const ASK_USER_DIRECTIVE =
+  "\nASK THE USER (ask_user tool) only when a decision is genuinely theirs, or a requirement is " +
+  "truly ambiguous (e.g. which of two behaviours they want) — and ask BEFORE doing work that could " +
+  "be wrong, rather than guessing and wasting turns. NEVER use ask_user for anything you can " +
+  "determine yourself by reading files or running commands (paths, whether a file exists, code " +
+  "facts): discover those with tools.";
+
 /**
  * Prepends the mode-appropriate native-tools directive right after the leading system message(s)
  * so it lands at high priority. agent → edit-batching guidance; ask/planning → read-only
- * investigation guidance.
+ * investigation guidance. Both get the shared ask_user guidance.
  */
 export function withNativeToolsDirective(
   messages: ChatMessage[],
@@ -62,7 +72,9 @@ export function withNativeToolsDirective(
 ): ChatMessage[] {
   const directive: ChatMessage = {
     role: "system",
-    content: mode === "agent" ? AGENT_TOOLS_DIRECTIVE : READONLY_TOOLS_DIRECTIVE,
+    content:
+      (mode === "agent" ? AGENT_TOOLS_DIRECTIVE : READONLY_TOOLS_DIRECTIVE) +
+      ASK_USER_DIRECTIVE,
   };
   const firstNonSystem = messages.findIndex((m) => m.role !== "system");
   const at = firstNonSystem === -1 ? messages.length : firstNonSystem;

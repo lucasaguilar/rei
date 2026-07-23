@@ -8,9 +8,11 @@ import { handleReadFiles } from "./read-files-handler.js";
 import {
   handleWebSearch,
   handleWeather,
+  handleAskUser,
   handleRunCommand,
   handleGitChanges,
 } from "./builtin-handlers.js";
+import { nonInteractiveElicit, type ElicitFn } from "../../chat/elicitation.js";
 import {
   handleEditFile,
   handleRewriteFile,
@@ -28,6 +30,9 @@ export interface DispatchContext {
   workspacePath: string;
   logger: AgentLogger;
   emitStatus: (msg: string) => void;
+  /** Asks the user a question mid-turn (ask_user tool). Frontend-provided; defaults to the
+   *  non-interactive safe default when absent (headless/server). See docs/intent-router-spec.md. */
+  elicit?: ElicitFn;
   provider: ModelProvider;
   mcpRegistry?: McpRegistry;
   // read_files (virtual-file state)
@@ -75,6 +80,7 @@ export async function dispatchToolCalls(
     workspacePath,
     logger,
     emitStatus,
+    elicit,
     provider,
     mcpRegistry,
     toRel,
@@ -179,6 +185,17 @@ export async function dispatchToolCalls(
             logger,
             emitStatus,
           });
+          toolResultsMap.set(call.id, toolResult);
+          break;
+        }
+
+        // ── ask_user (built-in) ──────────────────────────────────────
+        case "ask_user": {
+          toolResult = await handleAskUser(
+            (args.question as string) ?? "",
+            args.options as string[] | undefined,
+            { logger, emitStatus, elicit: elicit ?? nonInteractiveElicit },
+          );
           toolResultsMap.set(call.id, toolResult);
           break;
         }

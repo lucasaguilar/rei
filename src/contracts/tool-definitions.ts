@@ -151,6 +151,34 @@ export const WEB_SEARCH_TOOL: ToolDefinition = {
   },
 };
 
+export const ASK_USER_TOOL: ToolDefinition = {
+  type: "function",
+  function: {
+    name: "ask_user",
+    description:
+      "Ask the user a clarifying question when a decision is genuinely theirs, or the request is " +
+      "ambiguous — and ask BEFORE doing work that might be wrong. Do NOT use it for anything you " +
+      "can determine yourself by reading the repo or running a command. Provide `options` for a " +
+      "multiple-choice question, or omit them for a free-form answer. " +
+      'Example: ask_user({question: "Is this a login or a signup form?", options: ["login", "signup"]}).',
+    parameters: {
+      type: "object",
+      properties: {
+        question: {
+          type: "string",
+          description: "The question to ask the user.",
+        },
+        options: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional choices for the user to pick from (omit for a free-form answer).",
+        },
+      },
+      required: ["question"],
+    },
+  },
+};
+
 export const GIT_CHANGES_TOOL: ToolDefinition = {
   type: "function",
   function: {

@@ -5,6 +5,11 @@ import { searchWeb } from "../../tools/search-tool.js";
 import { getWeather, formatWeatherOutput } from "../../tools/weather-tool.js";
 import type { GitChange } from "../../workspace/git-changes.js";
 import { detectGitChanges, getGitStatus } from "../../workspace/git-changes.js";
+import {
+  newElicitationId,
+  type ElicitFn,
+  type Elicitation,
+} from "../../chat/elicitation.js";
 
 /**
  * Built-in NON-edit tool handlers (web_search, weather, run_command, git_changes), extracted from
@@ -52,6 +57,40 @@ export async function handleWeather(location: string, ctx: StatusCtx): Promise<s
   ctx.emitStatus(`🌤️  [REI] Weather: ${location}`);
   const weatherRes = await getWeather(location);
   return `\n### 🌤️ Weather: ${location}\n${formatWeatherOutput(weatherRes)}\n`;
+}
+
+/**
+ * ask_user → asks the user a clarifying question via the injected ElicitFn and returns their answer
+ * as the tool result (fed back to the model). Multiple-choice when `options` are given, free-form
+ * otherwise. Headless/non-interactive resolves to the safe default → "did not answer", so the loop
+ * never hangs waiting on an absent user. See docs/intent-router-spec.md.
+ */
+export async function handleAskUser(
+  question: string,
+  options: string[] | undefined,
+  ctx: StatusCtx & { elicit: ElicitFn },
+): Promise<string> {
+  const q = question.trim();
+  if (!q) return "ERROR: ask_user requires a non-empty question.";
+  ctx.logger.logInfo(`[tools] ask_user: "${q}"`);
+  ctx.emitStatus(`❓  [REI] Asking: ${q}`);
+
+  const opts = (options ?? []).filter((o) => typeof o === "string" && o.trim());
+  const request: Elicitation =
+    opts.length > 0
+      ? {
+          id: newElicitationId(),
+          kind: "select",
+          message: q,
+          options: opts.map((o) => ({ value: o, label: o })),
+          default: opts[0],
+        }
+      : { id: newElicitationId(), kind: "text", message: q, default: "" };
+
+  const answered = (await ctx.elicit(request)).value.trim();
+  return answered
+    ? `The user answered: ${answered}`
+    : "The user did not answer. Proceed with your best assumption and state it explicitly.";
 }
 
 /** run_command → execute a shell command in the workspace; returns exit code + (limited) output. */

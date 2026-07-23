@@ -6,6 +6,7 @@ import {
   toolsForMode,
   WEB_SEARCH_TOOL,
   WEATHER_TOOL,
+  ASK_USER_TOOL,
   mcpToolsToDefinitions,
 } from "../../contracts/tool-definitions.js";
 import type { SkillMode } from "../../skills/skill-loader.js";
@@ -102,7 +103,7 @@ export function setupToolSelection(params: {
     const mcp = mcpToolsToDefinitions(allMcpTools.filter((t) => activeMcp.has(t.name)));
     // Expose the built-in web_search + weather tools on the native path too (explicit-trigger
     // only) — otherwise a "search the web" request had no REI tool to call.
-    const tools = [...baseTools, WEB_SEARCH_TOOL, WEATHER_TOOL, ...mcp];
+    const tools = [...baseTools, WEB_SEARCH_TOOL, WEATHER_TOOL, ASK_USER_TOOL, ...mcp];
     if (useToolSearch) tools.push(SEARCH_TOOLS_DEF);
     if (useSkillTool) tools.push(useSkillTool);
     return tools;

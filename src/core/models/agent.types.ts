@@ -11,6 +11,9 @@ export type TurnStatus =
 
 export type StreamTurnOptions = {
   onStatus?: (status: TurnStatus) => void;
+  /** Frontend-provided elicitation (ask_user tool). CLI passes an interactive renderer; server/
+   *  headless omits it → the dispatch uses the non-interactive safe default. */
+  elicit?: import("../../chat/elicitation.js").ElicitFn;
 };
 
 export interface PendingPatchAssessmentItem {
