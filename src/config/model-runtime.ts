@@ -6,7 +6,11 @@
  *
  * Resolved here (instead of scattered `process.env` reads) so the context budget,
  * the providers' output cap, and the agent-loop turn limit can never drift apart.
+ *
+ * Per-model overrides (rei.config.json, via getActiveModelTuning) take precedence over the env
+ * defaults here — see docs/model-config-spec.md.
  */
+import { getActiveModelTuning } from "./model-tuning.js";
 
 function positiveInt(value: string | undefined, fallback: number): number {
   const n = parseInt(value ?? "", 10);
@@ -67,6 +71,11 @@ const PROVIDER_RUNTIME_CONFIGS: Record<
  * Uses the agent provider when set (it drives the heavy turns), else the primary provider.
  */
 export function getContextWindow(): number {
+  // Per-model override (rei.config.json) wins — and fixes the "stale global window on model switch"
+  // footgun: each model can declare its own window.
+  const tuned = getActiveModelTuning()?.contextWindow;
+  if (tuned && tuned > 0) return tuned;
+
   const explicit = positiveInt(
     process.env.REI_CONTEXT_WINDOW ?? process.env.OLLAMA_NUM_CTX,
     0,
@@ -100,6 +109,8 @@ export function getContextWindow(): number {
  * can actually emit (they used to be separate and could be set inconsistently).
  */
 export function getMaxOutputTokens(): number {
+  const tuned = getActiveModelTuning()?.maxTokens;
+  if (tuned && tuned > 0) return tuned;
   return positiveInt(
     process.env.REI_MAX_OUTPUT_TOKENS ??
       process.env.LLM_STUDIO_MAX_TOKENS ??
@@ -148,7 +159,13 @@ export function resolveReasoningEffort(mode?: string): string | undefined {
     ?.split("#")[0]
     .trim()
     .toLowerCase();
-  return raw && REASONING_EFFORTS.has(raw) ? raw : undefined;
+  if (raw && REASONING_EFFORTS.has(raw)) return raw;
+  // No explicit env → honor the active model's `thinking` intent. "off" → reasoning_effort:none
+  // (the lever LM Studio honors). "on"/unset → the model's own default (undefined). The mlx_lm
+  // /no_think lever is a later phase; see docs/model-config-spec.md.
+  const thinking = getActiveModelTuning()?.thinking;
+  if (thinking === "off") return "none";
+  return undefined;
 }
 
 /**
@@ -180,6 +197,10 @@ export interface AgentSampling {
   temperature: number;
   frequencyPenalty: number;
   presencePenalty: number;
+  /** From per-model tuning only (config-only, no env knob). Sent to the model when defined. top_k
+   *  is a non-OpenAI-standard extension local runtimes accept; omitted unless configured. */
+  topP?: number;
+  topK?: number;
 }
 
 /**
@@ -200,19 +221,21 @@ export interface AgentSampling {
  *   REI_AGENT_PRESENCE_PENALTY    (default 0.3)
  */
 export function resolveAgentSampling(): AgentSampling {
+  // Per-model tuning (rei.config.json) wins over the global env knob for each parameter.
+  const t = getActiveModelTuning();
+  const pick = (value: number | undefined, env: string | undefined): number =>
+    value !== undefined ? clampFloat(value, 0, 2) : floatInRange(env, 0.3, 0, 2);
   return {
-    temperature: floatInRange(process.env.REI_AGENT_TEMPERATURE, 0.3, 0, 2),
-    frequencyPenalty: floatInRange(
-      process.env.REI_AGENT_FREQUENCY_PENALTY,
-      0.3,
-      0,
-      2,
-    ),
-    presencePenalty: floatInRange(
-      process.env.REI_AGENT_PRESENCE_PENALTY,
-      0.3,
-      0,
-      2,
-    ),
+    temperature: pick(t?.temperature, process.env.REI_AGENT_TEMPERATURE),
+    frequencyPenalty: pick(t?.frequencyPenalty, process.env.REI_AGENT_FREQUENCY_PENALTY),
+    presencePenalty: pick(t?.presencePenalty, process.env.REI_AGENT_PRESENCE_PENALTY),
+    topP: t?.topP,
+    topK: t?.topK,
   };
+}
+
+/** Clamps a numeric config value into [min,max] (out-of-range → nearest bound). */
+function clampFloat(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
 }

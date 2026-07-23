@@ -64,6 +64,10 @@ import {
   getMaxTurns,
   resolveReasoningEffort,
 } from "../config/model-runtime.js";
+import {
+  resolveModelTuning,
+  setActiveModelTuning,
+} from "../config/model-tuning.js";
 import { estimateTokens } from "../chat/helpers/token-estimator.js";
 import {
   checkHardware,
@@ -147,6 +151,11 @@ export class Agent {
     this.logger.startTurn();
     this.logger.setCorrelationId(this.correlationId);
     this.currentTurnId = this.logger.getTurnId();
+    // Resolve this turn's per-model tuning (rei.config.json) ONCE; the config resolvers
+    // (getContextWindow / resolveAgentSampling / reasoning_effort) read it. See model-config-spec.md.
+    setActiveModelTuning(
+      resolveModelTuning(resolveModelForMode(session.mode), this.workspacePath),
+    );
     const enrichedUserMessage = await this.prepareSessionForTurn(
       session,
       userInput,

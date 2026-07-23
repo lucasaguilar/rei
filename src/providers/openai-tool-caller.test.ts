@@ -233,6 +233,19 @@ describe("openaiCompleteChatWithTools request body — omitParams (mocked fetch)
     expect(body).toHaveProperty("reasoning_effort", "low");
   });
 
+  it("includes top_p/top_k in the body only when the active model tuning sets them", async () => {
+    const { setActiveModelTuning } = await import("../config/model-tuning.js");
+    const withoutTuning = await capture();
+    expect(withoutTuning).not.toHaveProperty("top_p");
+    expect(withoutTuning).not.toHaveProperty("top_k");
+
+    setActiveModelTuning({ id: "m", topP: 0.8, topK: 20 });
+    const withTuning = await capture();
+    setActiveModelTuning(undefined);
+    expect(withTuning).toHaveProperty("top_p", 0.8);
+    expect(withTuning).toHaveProperty("top_k", 20);
+  });
+
   it("strips exactly the omitted fields (Gemini compat), leaving the rest intact", async () => {
     const body = await capture([
       "frequency_penalty",

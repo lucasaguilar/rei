@@ -129,6 +129,8 @@ function buildToolsRequestBody(
     ...(sampling.presencePenalty > 0
       ? { presence_penalty: sampling.presencePenalty }
       : {}),
+    ...(sampling.topP !== undefined ? { top_p: sampling.topP } : {}),
+    ...(sampling.topK !== undefined ? { top_k: sampling.topK } : {}),
     max_tokens: maxTokens,
     stream,
     ...(options?.reasoningEffort

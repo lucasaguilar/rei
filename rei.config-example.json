@@ -5,5 +5,47 @@
       "command": "node",
       "args": ["path/to/your/mcp-server/build/index.js"]
     }
+  },
+  "providers": {
+    "lmstudio": {
+      "models": [
+        {
+          "id": "deepreinforce-ai/ornith-1.0-35b",
+          "contextWindow": 65536,
+          "maxTokens": 8192,
+          "temperature": 0.6,
+          "topP": 0.95,
+          "topK": 20
+        },
+        {
+          "id": "qwen/qwen3.6-35b-a3b",
+          "contextWindow": 65536,
+          "maxTokens": 8192,
+          "temperature": 0.6,
+          "topP": 0.95,
+          "topK": 20,
+          "presencePenalty": 0.0,
+          "thinking": "off"
+        },
+        {
+          "id": "qwen/qwen3.6-27b",
+          "contextWindow": 65536,
+          "maxTokens": 8192,
+          "temperature": 0.7,
+          "topP": 0.8,
+          "topK": 20,
+          "presencePenalty": 1.5,
+          "thinking": "off"
+        },
+        {
+          "id": "gemma",
+          "contextWindow": 65536,
+          "maxTokens": 8192,
+          "temperature": 0.4,
+          "topP": 0.9,
+          "topK": 40
+        }
+      ]
+    }
   }
 }
