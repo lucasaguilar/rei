@@ -13,6 +13,7 @@ import {
   handleGitChanges,
 } from "./builtin-handlers.js";
 import { nonInteractiveElicit, type ElicitFn } from "../../chat/elicitation.js";
+import { handleDelegate } from "./delegate-handler.js";
 import {
   handleEditFile,
   handleRewriteFile,
@@ -196,6 +197,20 @@ export async function dispatchToolCalls(
             args.options as string[] | undefined,
             { logger, emitStatus, elicit: elicit ?? nonInteractiveElicit },
           );
+          toolResultsMap.set(call.id, toolResult);
+          break;
+        }
+
+        // ── delegate (sub-agent, isolated context) ───────────────────
+        case "delegate": {
+          toolResult = await handleDelegate(args as { task?: unknown; files?: unknown }, {
+            provider,
+            workspacePath,
+            logger,
+            mcpRegistry,
+            emitStatus,
+            elicit,
+          });
           toolResultsMap.set(call.id, toolResult);
           break;
         }

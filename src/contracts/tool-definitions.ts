@@ -179,6 +179,36 @@ export const ASK_USER_TOOL: ToolDefinition = {
   },
 };
 
+export const DELEGATE_TOOL: ToolDefinition = {
+  type: "function",
+  function: {
+    name: "delegate",
+    description:
+      "Delegate a SELF-CONTAINED subtask to a fresh sub-agent that runs in an ISOLATED, clean " +
+      "context — it does NOT see this conversation. Use it for a well-specified piece of work you " +
+      "have already thought through, to keep YOUR context lean. Provide a COMPLETE task description " +
+      "and the relevant file paths (the sub-agent starts fresh, so include everything it needs). It " +
+      "returns a short summary; its file edits land on disk. Do NOT delegate vague or exploratory " +
+      'work. Example: delegate({task: "add a `pruned` flag to ChatMessage and filter it in ' +
+      'buildMessagesForModel", files: ["src/chat/types.ts", "src/chat/message-builder.ts"]}).',
+    parameters: {
+      type: "object",
+      properties: {
+        task: {
+          type: "string",
+          description: "The complete, self-contained task for the sub-agent.",
+        },
+        files: {
+          type: "array",
+          items: { type: "string" },
+          description: "Workspace file paths the sub-agent should read/edit.",
+        },
+      },
+      required: ["task"],
+    },
+  },
+};
+
 export const GIT_CHANGES_TOOL: ToolDefinition = {
   type: "function",
   function: {

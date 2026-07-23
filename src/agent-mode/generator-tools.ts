@@ -64,6 +64,8 @@ export async function executeAgentTurnWithTools(params: {
   mode?: SkillMode;
   /** ask_user elicitation; frontend-provided, else the dispatch uses the non-interactive default. */
   elicit?: ElicitFn;
+  /** Sub-agent nesting depth. 0 = orchestrator (can delegate); >0 = worker (no `delegate` tool). */
+  depth?: number;
 }): Promise<ExecutionResult> {
   const {
     provider,
@@ -77,6 +79,7 @@ export async function executeAgentTurnWithTools(params: {
     userQuery,
     mode = "agent",
     elicit,
+    depth = 0,
   } = params;
 
   if (!provider.completeChatWithTools) {
@@ -89,9 +92,7 @@ export async function executeAgentTurnWithTools(params: {
   const emitStatus = (msg: string) =>
     onChunk?.({ type: "status", content: `\n\x1b[33m${msg}\x1b[0m\n` });
 
-  // Tool selection (built-in + web_search/weather + MCP with on-demand tool-search + skills) is
-  // extracted into setupToolSelection (Phase 2). `activeMcp` is returned MUTABLE so the
-  // search_tools handler below can grow it by reference.
+  // Tool selection lives in setupToolSelection. `activeMcp` returned MUTABLE (search_tools grows it).
   const { buildTools, activeMcp, allMcpTools, useToolSearch, skills } = setupToolSelection({
     mcpRegistry,
     messagesForModel,
@@ -99,6 +100,7 @@ export async function executeAgentTurnWithTools(params: {
     workspacePath,
     logger,
     mode,
+    allowSubAgents: depth === 0,
   });
 
   let currentMessages: ChatMessage[] = withNativeToolsDirective(
@@ -115,13 +117,11 @@ export async function executeAgentTurnWithTools(params: {
   // before emitting a tool call — common with thinking models) is continued back into the loop.
   // Reset to 0 after any productive turn (see below), so an early streak doesn't starve later turns.
   let truncationContinuations = 0;
-  // Tracks consecutive search-block mismatches (edit_file whose <search> text is
-  // not found verbatim in the file). Two-tier escalation, since a weak local model
-  // often can't reproduce exact search text even with the file in front of it:
+  // Tracks consecutive search-block mismatches (edit_file whose <search> isn't found verbatim).
+  // Two-tier escalation for weak local models that can't reproduce exact search text:
   //   - at 2: inject the file's exact content so it can copy the search verbatim.
-  //   - at 4: it STILL can't match → tell it to stop using edit_file and call
-  //           rewrite_file (whole-file overwrite), which has no match requirement.
-  // The streak only resets on a successful edit.
+  //   - at 4: still no match → switch it to rewrite_file (whole-file, no match requirement).
+  // Resets on a successful edit.
   let consecutiveSearchMismatchFailures = 0;
   const MISMATCH_INJECT_AT = 2;
   const MISMATCH_WHOLEFILE_AT = 4;

@@ -7,6 +7,7 @@ import {
   WEB_SEARCH_TOOL,
   WEATHER_TOOL,
   ASK_USER_TOOL,
+  DELEGATE_TOOL,
   mcpToolsToDefinitions,
 } from "../../contracts/tool-definitions.js";
 import type { SkillMode } from "../../skills/skill-loader.js";
@@ -61,6 +62,8 @@ export function setupToolSelection(params: {
   logger: AgentLogger;
   /** Mode whose tool-permission profile gates the built-in tools. Defaults to "agent". */
   mode?: SkillMode;
+  /** Expose the `delegate` tool. False inside a sub-agent (depth-1 guard: no nesting). Default true. */
+  allowSubAgents?: boolean;
 }): ToolSelection {
   const {
     mcpRegistry,
@@ -69,6 +72,7 @@ export function setupToolSelection(params: {
     workspacePath,
     logger,
     mode = "agent",
+    allowSubAgents = true,
   } = params;
 
   const allMcpTools = mcpRegistry ? mcpRegistry.getAvailableTools() : [];
@@ -104,6 +108,7 @@ export function setupToolSelection(params: {
     // Expose the built-in web_search + weather tools on the native path too (explicit-trigger
     // only) — otherwise a "search the web" request had no REI tool to call.
     const tools = [...baseTools, WEB_SEARCH_TOOL, WEATHER_TOOL, ASK_USER_TOOL, ...mcp];
+    if (allowSubAgents) tools.push(DELEGATE_TOOL);
     if (useToolSearch) tools.push(SEARCH_TOOLS_DEF);
     if (useSkillTool) tools.push(useSkillTool);
     return tools;
