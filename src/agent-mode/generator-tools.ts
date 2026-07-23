@@ -1,8 +1,5 @@
-/**
- * Agent mode generator using structured function/tool calling.
- * Used when the active provider implements completeChatWithTools.
- * Falls back to the XML-based generator if not.
- */
+/** Agent mode generator using structured function/tool calling (provider must implement
+ *  completeChatWithTools; falls back to the XML-based generator otherwise). */
 import type { ChatMessage } from "../chat/types.js";
 import type { ModelProvider } from "../providers/model-provider.js";
 import type { AgentLogger } from "../core/logger.js";
@@ -39,8 +36,7 @@ export { setEditResults };
 
 const MAX_TURNS = getMaxTurns();
 
-// The per-mode native-tools directive moved into its own module (SRP / file-size). Re-exported
-// here so existing importers (incl. native-tools-directive.test.ts) keep working unchanged.
+// The native-tools directive moved into its own module; re-exported here for existing importers.
 export { withNativeToolsDirective };
 
 /**
@@ -57,8 +53,7 @@ export async function executeAgentTurnWithTools(params: {
   reasoningEffort?: string;
   /** Connected MCP registry. When provided, MCP tools are merged into the tool list. */
   mcpRegistry?: McpRegistry;
-  /** Live progress callback — emits "status" chunks as each tool runs so the
-   *  user sees activity (this path is otherwise silent until the turn ends). */
+  /** Live progress callback — emits "status" chunks as each tool runs (else silent until end). */
   onChunk?: (event: {
     type: "thinking" | "text" | "status";
     content: string;
@@ -67,8 +62,7 @@ export async function executeAgentTurnWithTools(params: {
   userQuery?: string;
   /** Mode whose tool-permission profile + directive govern this turn. Defaults to "agent". */
   mode?: SkillMode;
-  /** Asks the user a question mid-turn (ask_user tool). Frontend-provided; when absent, the
-   *  dispatch falls back to the non-interactive safe default. See docs/intent-router-spec.md. */
+  /** ask_user elicitation; frontend-provided, else the dispatch uses the non-interactive default. */
   elicit?: ElicitFn;
 }): Promise<ExecutionResult> {
   const {

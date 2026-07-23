@@ -19,7 +19,7 @@ vi.mock("../../workspace/git-changes.js", () => ({
   getGitStatus: vi.fn(async () => ["src/file1.ts", "src/file2.ts"]),
 }));
 
-import { handleWebSearch, handleWeather, handleAskUser, handleRunCommand, handleGitChanges } from "./builtin-handlers.js";
+import { handleWebSearch, handleWeather, handleAskUser, handleRunCommand, handleGitChanges, describeDestructive } from "./builtin-handlers.js";
 import type { Elicitation } from "../../chat/elicitation.js";
 import { searchWeb } from "../../tools/search-tool.js";
 import { executeCommand } from "../../tools/command-executor.js";
@@ -82,6 +82,40 @@ describe("builtin handlers", () => {
     const elicit = async (e: Elicitation) => ({ id: e.id, value: "x" });
     const out = await handleAskUser("  ", undefined, { ...statusCtx, elicit });
     expect(out).toContain("ERROR");
+  });
+
+  it("describeDestructive flags deletes/discards but not safe commands", () => {
+    expect(describeDestructive("rm src/foo.ts")).toBeTruthy();
+    expect(describeDestructive("cd x && rm -f a.txt")).toBeTruthy();
+    expect(describeDestructive("git reset --hard HEAD~1")).toBeTruthy();
+    expect(describeDestructive("git clean -fd")).toBeTruthy();
+    expect(describeDestructive("git checkout -- src/a.ts")).toBeTruthy();
+    // safe:
+    expect(describeDestructive("ls -la")).toBeNull();
+    expect(describeDestructive("git status")).toBeNull();
+    expect(describeDestructive("git checkout main")).toBeNull(); // branch switch, not discard
+    expect(describeDestructive("rmdir empty")).toBeNull(); // not `rm `
+    expect(describeDestructive("npm run confirm")).toBeNull(); // 'rm' inside a word
+  });
+
+  it("handleRunCommand confirms a destructive command and does NOT run it when declined", async () => {
+    const elicit = async (e: Elicitation) => ({ id: e.id, value: "no" });
+    const out = await handleRunCommand("rm src/foo.ts", { ...statusCtx, workspacePath: "/w", elicit });
+    expect(out).toContain("DECLINED");
+    expect(executeCommand).not.toHaveBeenCalled();
+  });
+
+  it("handleRunCommand runs a destructive command when confirmed", async () => {
+    const elicit = async (e: Elicitation) => ({ id: e.id, value: "yes" });
+    await handleRunCommand("rm src/foo.ts", { ...statusCtx, workspacePath: "/w", elicit });
+    expect(executeCommand).toHaveBeenCalled();
+  });
+
+  it("handleRunCommand does NOT gate a normal command", async () => {
+    const elicit = vi.fn();
+    await handleRunCommand("ls src", { ...statusCtx, workspacePath: "/w", elicit });
+    expect(elicit).not.toHaveBeenCalled();
+    expect(executeCommand).toHaveBeenCalled();
   });
 
   it("handleRunCommand executes and reports exit code + stdout", async () => {

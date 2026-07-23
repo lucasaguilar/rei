@@ -73,7 +73,8 @@ export async function handleAskUser(
   const q = question.trim();
   if (!q) return "ERROR: ask_user requires a non-empty question.";
   ctx.logger.logInfo(`[tools] ask_user: "${q}"`);
-  ctx.emitStatus(`❓  [REI] Asking: ${q}`);
+  // NOTE: no emitStatus here — the interactive frontend (CliElicitation) already renders the
+  // question in the transcript; a status line would duplicate it. Headless has no user to notify.
 
   const opts = (options ?? []).filter((o) => typeof o === "string" && o.trim());
   const request: Elicitation =
@@ -93,12 +94,54 @@ export async function handleAskUser(
     : "The user did not answer. Proceed with your best assumption and state it explicitly.";
 }
 
+// Deterministic safety gate: commands that DELETE or DISCARD data get an explicit user confirm
+// before running (the model may issue them without realising the cost). This complements the HARD
+// blocks already in command-executor (rm -rf and out-of-workspace rm are rejected outright) by
+// catching the permitted-but-destructive cases (a single-file rm, git reset --hard) that would
+// otherwise run silently. See docs/intent-router-spec.md — "deterministic gates".
+const DESTRUCTIVE_PATTERNS: Array<{ test: RegExp; describe: string }> = [
+  { test: /(^|[\s;&|])rm\s+/, describe: "delete file(s)" },
+  { test: /git\s+reset\s+--hard/, describe: "discard ALL uncommitted changes (git reset --hard)" },
+  { test: /git\s+clean\s+-[a-z]*f/, describe: "delete untracked files (git clean)" },
+  { test: /git\s+checkout\s+(--|\.(\s|$))/, describe: "discard local changes (git checkout)" },
+];
+
+/** Returns a human description if the command destroys/discards data, else null. */
+export function describeDestructive(cmd: string): string | null {
+  for (const p of DESTRUCTIVE_PATTERNS) if (p.test.test(cmd)) return p.describe;
+  return null;
+}
+
+function confirmDestructiveEnabled(): boolean {
+  return process.env.REI_CONFIRM_DESTRUCTIVE !== "false"; // default ON
+}
+
 /** run_command → execute a shell command in the workspace; returns exit code + (limited) output. */
 export async function handleRunCommand(
   cmd: string,
-  ctx: StatusCtx & { workspacePath: string },
+  ctx: StatusCtx & { workspacePath: string; elicit?: ElicitFn },
 ): Promise<string> {
   ctx.logger.logInfo(`[tools] run_command: ${cmd}`);
+
+  // Confirm destructive commands before running. Only with an interactive frontend (ctx.elicit set):
+  // headless/server has no one to ask, and the HARD blocks in command-executor still guard it there.
+  const danger = describeDestructive(cmd);
+  if (danger && confirmDestructiveEnabled() && ctx.elicit) {
+    const { value } = await ctx.elicit({
+      id: newElicitationId(),
+      kind: "confirm",
+      message: `⚠️  This command will ${danger}:\n    ${cmd}\nRun it?`,
+      default: "no",
+    });
+    if (value !== "yes") {
+      ctx.emitStatus(`🛑  [REI] Comando destructivo cancelado por el usuario: ${cmd}`);
+      return (
+        `The user DECLINED to run this command (it would ${danger}): ${cmd}\n` +
+        `Do NOT run it again. Continue without it, or ask the user how to proceed.`
+      );
+    }
+  }
+
   ctx.emitStatus(`💻  [REI] Running: ${cmd}`);
   const cmdResult = await executeCommand(cmd, ctx.workspacePath);
   ctx.logger.logCommandExecution(cmd, cmdResult);

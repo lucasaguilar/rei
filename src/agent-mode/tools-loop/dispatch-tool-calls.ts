@@ -267,6 +267,7 @@ export async function dispatchToolCalls(
             logger,
             emitStatus,
             workspacePath,
+            elicit,
           });
           toolResultsMap.set(call.id, toolResult);
           break;

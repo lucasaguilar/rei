@@ -86,7 +86,7 @@ export async function handleInputTurn(
   ctx: InputHandlerContext,
   options?: { displayText?: string },
 ): Promise<void> {
-  const { state, agent, session, transcript, actions } = ctx;
+  const { state, agent, session, transcript, actions, elicit } = ctx;
 
   // Show user input immediately — use a short label when the actual prompt is internal/verbose
   const displayLabel = options?.displayText ?? trimmed;
@@ -182,6 +182,7 @@ export async function handleInputTurn(
     const startTime = Date.now();
 
     for await (const token of agent.streamTurn(session, promptForModel, {
+      elicit,
       onStatus: (status) => {
         if (lastStatus === status) return;
         if (status === "producing_response") return;

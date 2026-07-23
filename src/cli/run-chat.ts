@@ -25,6 +25,7 @@ import { ChatRenderer } from "./ui/chat-renderer.js";
 import { KeyboardHandler } from "./ui/keyboard-handler.js";
 import { InputHandler } from "./ui/input-handler.js";
 import type { InputHandlerContext } from "./models/input-handler.types.js";
+import { CliElicitation } from "./cli-elicitation.js";
 import {
   startIndexingWorker,
   hasRagIndex,
@@ -227,12 +228,25 @@ export async function runChat(
     state.historyDraft = "";
   };
 
+  // Transcript-based elicitation (ask_user tool): the model asks a question mid-turn, the turn
+  // pauses so the user can type an answer through REI's own input, then resumes. See A vs @clack
+  // analysis in docs/intent-router-spec.md.
+  const cliElicit = new CliElicitation({
+    pushTranscript,
+    setBusy: (busy) => {
+      state.busy = busy;
+    },
+    stopSpinner,
+    draw,
+  });
+
   const inputContext: InputHandlerContext = {
     state,
     agent,
     session,
     transcript,
     workspacePath,
+    elicit: cliElicit.elicit,
     actions: {
       pushTranscript,
       streamText,
@@ -248,6 +262,15 @@ export async function runChat(
 
   // Bridge the Enter key handler to the full input-processing pipeline.
   const submitCurrentUserInput = async (): Promise<void> => {
+    // If the model is awaiting an ask_user answer, the next submitted line answers IT (not a new
+    // turn). Echo it, clear the input, and resume the paused turn. See CliElicitation.
+    if (cliElicit.isPending) {
+      const answer = state.inputBuffer;
+      pushTranscript(`\x1b[1;36mYou: ${answer.trim()}\x1b[0m`);
+      resetInput();
+      cliElicit.deliver(answer);
+      return;
+    }
     await InputHandler.submitInput(inputContext);
     // Pick up any files the turn just created (OCR output, generated files) so `@` finds them now.
     mentionEntries = buildMentionEntries(workspacePath);

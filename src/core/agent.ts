@@ -383,6 +383,7 @@ export class Agent {
         onChunk,
         userQuery: userInput,
         mode: session.mode as SkillMode,
+        elicit: options?.elicit,
       }).finally(() => {
         done = true;
         resolver?.();
