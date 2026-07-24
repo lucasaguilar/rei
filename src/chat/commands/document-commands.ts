@@ -7,6 +7,12 @@ import {
   parsePageSpec,
 } from "../../skills/ask-document/index.js";
 import type { AskResult } from "../../skills/ask-document/index.js";
+import {
+  resolveModelTuning,
+  setActiveModelTuning,
+  getActiveModelTuning,
+} from "../../config/model-tuning.js";
+import { resolveModelForMode } from "../../providers/provider-factory.js";
 
 /** Renders an ask-document result: answer + per-claim citations (✅ verified / ≈ fuzzy / ⚠️ unverified). */
 function formatAskResult(r: AskResult): string {
@@ -172,6 +178,17 @@ export const documentCommands: CommandHandler = {
       // Asking about a document activates it for follow-up questions.
       const rel = path.relative(workspacePath, filePath);
       session.activeDocument = !rel || rel.startsWith("..") ? filePath : rel;
+      // ask-document is a command (bypasses the agent turn that sets the active tuning), so set it
+      // here using the same resolution path as agent.ts — resolveModelForMode reads the env vars
+      // (LLM_STUDIO_MODEL, etc.) which is what the user actually configured. provider.getModel()
+      // could return "" if the provider was initialized without an explicit model param.
+      // See docs/model-config-spec.md.
+      const prevTuning = getActiveModelTuning();
+      setActiveModelTuning(
+        resolveModelForMode(session.mode)
+          ? resolveModelTuning(resolveModelForMode(session.mode), workspacePath)
+          : undefined,
+      );
       try {
         const result = await askDocument({
           filePath,
@@ -186,6 +203,8 @@ export const documentCommands: CommandHandler = {
           success: false,
           response: `[REI] ask-document failed: ${err instanceof Error ? err.message : String(err)}`,
         };
+      } finally {
+        setActiveModelTuning(prevTuning);
       }
     }
 

@@ -12,6 +12,7 @@ import {
   toApiMessage,
 } from "./openai-tool-caller.js";
 import { getContextWindow, getMaxOutputTokens } from "../config/model-runtime.js";
+import { getActiveModelTuning } from "../config/model-tuning.js";
 
 interface OllamaChatResponse {
   message?: {
@@ -49,6 +50,26 @@ export class OllamaProvider implements ModelProvider {
     );
     this.keepAlive = process.env.OLLAMA_KEEP_ALIVE ?? DEFAULT_OLLAMA_KEEP_ALIVE;
     this.ollamaOptions = buildOllamaRequestOptions();
+  }
+
+  /** The provider's default model id — lets callers resolve its per-model tuning (rei.config.json). */
+  getModel(): string {
+    return this.model;
+  }
+
+  /** ollamaOptions with the active per-model tuning (rei.config.json) applied on top — so the chat
+   *  path honors it too, not just the tools path. Config overrides the env defaults; absent → env. */
+  private tunedOptions(): OllamaRequestOptions {
+    const t = getActiveModelTuning();
+    if (!t) return this.ollamaOptions;
+    return {
+      ...this.ollamaOptions,
+      ...(t.temperature !== undefined ? { temperature: t.temperature } : {}),
+      ...(t.topP !== undefined ? { top_p: t.topP } : {}),
+      ...(t.topK !== undefined ? { top_k: t.topK } : {}),
+      ...(t.frequencyPenalty !== undefined ? { frequency_penalty: t.frequencyPenalty } : {}),
+      ...(t.presencePenalty !== undefined ? { presence_penalty: t.presencePenalty } : {}),
+    };
   }
 
   async complete(prompt: string, options?: CompletionOptions): Promise<string> {
@@ -260,9 +281,10 @@ export class OllamaProvider implements ModelProvider {
         messages: messages.map(toApiMessage).map(toOllamaNativeToolArgs),
         stream,
         keep_alive: this.keepAlive,
-        // temperature + repetition penalties live inside ollamaOptions now.
-        // A non-zero temperature + penalties prevent greedy-decoding repetition loops.
-        options: this.ollamaOptions,
+        // temperature + repetition penalties live inside the options. tunedOptions() layers the
+        // per-model rei.config.json tuning on top of the env defaults (chat path). Non-zero temp +
+        // penalties also prevent greedy-decoding repetition loops.
+        options: this.tunedOptions(),
       }),
     };
 
@@ -308,6 +330,8 @@ interface OllamaRequestOptions {
   num_predict?: number;
   num_thread?: number;
   temperature?: number;
+  top_p?: number;
+  top_k?: number;
   frequency_penalty?: number;
   presence_penalty?: number;
   repeat_penalty?: number;

@@ -126,6 +126,13 @@ export function getMaxTurns(): number {
   return positiveInt(process.env.REI_MAX_TURNS, 12);
 }
 
+/** Whether the orchestrator may delegate to isolated-context sub-agents (the `delegate` tool).
+ *  Opt-in (default OFF): delegation is experimental + model-dependent — enable it to evaluate.
+ *  See docs/sub-agent-spec.md. */
+export function subAgentsEnabled(): boolean {
+  return process.env.REI_SUBAGENT_ENABLED === "true";
+}
+
 // Values the OpenAI-compatible `reasoning_effort` param accepts (LM Studio rejects others,
 // e.g. "on"/"off", with a 400). NOTE: a model may internally collapse these to on/off —
 // e.g. qwen3.6-35b-a3b maps "none"→off and low/medium/high→on (a harmless server WARN),

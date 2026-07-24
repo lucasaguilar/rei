@@ -11,6 +11,7 @@ import {
   mcpToolsToDefinitions,
 } from "../../contracts/tool-definitions.js";
 import type { SkillMode } from "../../skills/skill-loader.js";
+import { subAgentsEnabled } from "../../config/model-runtime.js";
 import {
   searchMcpTools,
   SEARCH_TOOLS_DEF,
@@ -108,7 +109,8 @@ export function setupToolSelection(params: {
     // Expose the built-in web_search + weather tools on the native path too (explicit-trigger
     // only) — otherwise a "search the web" request had no REI tool to call.
     const tools = [...baseTools, WEB_SEARCH_TOOL, WEATHER_TOOL, ASK_USER_TOOL, ...mcp];
-    if (allowSubAgents) tools.push(DELEGATE_TOOL);
+    // `delegate` only at the orchestrator level (allowSubAgents=depth 0) AND when opt-in enabled.
+    if (allowSubAgents && subAgentsEnabled()) tools.push(DELEGATE_TOOL);
     if (useToolSearch) tools.push(SEARCH_TOOLS_DEF);
     if (useSkillTool) tools.push(useSkillTool);
     return tools;

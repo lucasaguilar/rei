@@ -54,4 +54,31 @@ describe("parseGroundedResponse", () => {
     expect(p.answer).not.toContain("El usuario quiere sumar");
     expect(p.notFound).toBe(true);
   });
+
+  it("repairs trailing commas in claims array", () => {
+    const r = '{"answer":"OK","claims":[{"text":"afirmacion","page":5,"quote":"cita"},],"notFound":false}';
+    const p = parseGroundedResponse(r);
+    expect(p.answer).toBe("OK");
+    expect(p.claims).toHaveLength(1);
+    expect(p.claims[0]).toEqual({ text: "afirmacion", page: 5, quote: "cita" });
+  });
+
+  it("deduplicates identical claims (same page and quote)", () => {
+    const r = JSON.stringify({
+      answer: "OK",
+      claims: [
+        { text: "a", page: 17, quote: "Numerosas empresas..." },
+        { text: "b", page: 13, quote: "A menudo..." },
+        { text: "a", page: 17, quote: "Numerosas empresas..." },
+        { text: "b", page: 13, quote: "A menudo..." },
+      ],
+      notFound: false,
+    });
+    const p = parseGroundedResponse(r);
+    expect(p.claims).toHaveLength(2);
+    expect(p.claims[0].quote).toBe("Numerosas empresas...");
+    expect(p.claims[1].quote).toBe("A menudo...");
+  });
 });
+
+

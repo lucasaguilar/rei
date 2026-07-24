@@ -12,6 +12,7 @@ import {
   openaiStreamChatWithTools,
 } from "./openai-tool-caller.js";
 import { getMaxOutputTokens } from "../config/model-runtime.js";
+import { getActiveModelTuning } from "../config/model-tuning.js";
 import { fetchWithRetry } from "./fetch-retry.js";
 
 // ── Wire-format interfaces (OpenAI-compatible `/v1/chat/completions`) ─────
@@ -62,6 +63,11 @@ export abstract class OpenAiCompatibleProvider implements ModelProvider {
   protected repeatPenalty?: number;
   protected frequencyPenalty!: number;
   protected presencePenalty!: number;
+
+  /** The provider's default model id — lets callers resolve its per-model tuning (rei.config.json). */
+  getModel(): string {
+    return this.model;
+  }
 
   async complete(prompt: string, options?: CompletionOptions): Promise<string> {
     return this.completeChat([{ role: "user", content: prompt }], options);
@@ -249,15 +255,20 @@ export abstract class OpenAiCompatibleProvider implements ModelProvider {
   }): Promise<Response> {
     const { messages, stream, modelOverride, reasoningEffort } = params;
 
+    // Per-model tuning (rei.config.json) overrides the provider's env defaults on the CHAT path too
+    // (ask-document, direct completeChat) — not just the agent tools path. See docs/model-config-spec.md.
+    const t = getActiveModelTuning();
     const requestBody: Record<string, unknown> = {
       model: modelOverride ?? this.model,
       messages: mergeLeadingSystemMessages(messages).map(toApiMessage),
       stream,
-      temperature: this.temperature,
+      temperature: t?.temperature ?? this.temperature,
       max_tokens: getMaxOutputTokens(),
-      frequency_penalty: this.frequencyPenalty,
-      presence_penalty: this.presencePenalty,
+      frequency_penalty: t?.frequencyPenalty ?? this.frequencyPenalty,
+      presence_penalty: t?.presencePenalty ?? this.presencePenalty,
     };
+    if (t?.topP !== undefined) requestBody.top_p = t.topP;
+    if (t?.topK !== undefined) requestBody.top_k = t.topK;
     if (this.repeatPenalty !== undefined) {
       requestBody.repeat_penalty = this.repeatPenalty;
     }

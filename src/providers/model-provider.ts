@@ -69,6 +69,8 @@ export interface ToolStreamDelta {
 export interface ModelProvider {
   complete(prompt: string, options?: CompletionOptions): Promise<string>;
   completeChat(messages: ChatMessage[], options?: CompletionOptions): Promise<string>;
+  /** The provider's default model id, when it exposes one — used to resolve per-model tuning. */
+  getModel?(): string;
   streamChat?(messages: ChatMessage[], options?: CompletionOptions): AsyncIterable<string>;
   /** Structured function/tool calling. Optional — providers that don't support it return undefined. */
   completeChatWithTools?(

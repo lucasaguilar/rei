@@ -58,37 +58,106 @@ export function parseGroundedResponse(response: string): ParsedGrounded {
   // reasoning block to screen (observed: 19.8k chars of <think> shown as the "answer"). Instead,
   // report that nothing usable came back.
   const rescued = (extractAnswerField(cleaned) ?? cleaned).trim();
+  const fallbackClaims = extractClaimsFallback(cleaned);
   const fallback: ParsedGrounded = {
     answer:
       rescued ||
       "(El modelo no devolvió una respuesta: el razonamiento consumió toda la salida. " +
         "Reintentá, o desactivá el thinking del modelo.)",
-    claims: [],
+    claims: fallbackClaims,
     notFound: rescued.length === 0,
   };
   const start = cleaned.indexOf("{");
   const end = cleaned.lastIndexOf("}");
   if (start === -1 || end <= start) return fallback;
-  try {
-    const obj = JSON.parse(cleaned.slice(start, end + 1));
+
+  const rawJsonStr = cleaned.slice(start, end + 1);
+  const parsedObj = tryParseJson(rawJsonStr);
+  if (parsedObj) {
+    const obj = parsedObj as Record<string, unknown>;
+    const rawClaims = Array.isArray(obj.claims)
+      ? obj.claims
+          .filter((c: unknown) => c && typeof c === "object")
+          .map((c: { text?: unknown; page?: unknown; quote?: unknown }) => ({
+            text: typeof c.text === "string" ? c.text : "",
+            page: typeof c.page === "number" ? c.page : undefined,
+            quote: typeof c.quote === "string" ? c.quote : undefined,
+          }))
+      : fallbackClaims;
+    const claims = dedupeClaims(rawClaims.length > 0 ? rawClaims : fallbackClaims);
     return {
       answer: typeof obj.answer === "string" ? obj.answer : fallback.answer,
-      claims: Array.isArray(obj.claims)
-        ? obj.claims
-            .filter((c: unknown) => c && typeof c === "object")
-            .map((c: { text?: unknown; page?: unknown; quote?: unknown }) => ({
-              text: typeof c.text === "string" ? c.text : "",
-              page: typeof c.page === "number" ? c.page : undefined,
-              quote: typeof c.quote === "string" ? c.quote : undefined,
-            }))
-        : [],
+      claims,
       notFound: obj.notFound === true,
     };
-  } catch {
-    // Truncated/invalid JSON: fallback already rescued the "answer" string (claims dropped —
-    // can't verify a partial), so the user sees prose, not raw JSON.
-    return fallback;
   }
+
+  return {
+    ...fallback,
+    claims: dedupeClaims(fallback.claims),
+  };
+}
+
+/** Deduplicates claims that cite the exact same quote/text on the same page. */
+function dedupeClaims<T extends { text?: string; page?: number; quote?: string }>(claims: T[]): T[] {
+  const seen = new Set<string>();
+  const result: T[] = [];
+  for (const c of claims) {
+    const content = (c.quote || c.text || "").trim().toLowerCase().replace(/\s+/g, " ");
+    if (!content) continue;
+    const key = `${c.page ?? ""}:${content}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(c);
+    }
+  }
+  return result;
+}
+
+
+/** Attempts standard JSON.parse, followed by common repair strategies (trailing commas, unescaped newlines). */
+function tryParseJson(jsonStr: string): unknown {
+  try {
+    return JSON.parse(jsonStr);
+  } catch {
+    try {
+      // Fix trailing commas before } or ]
+      const fixedCommas = jsonStr.replace(/,\s*([}\]])/g, "$1");
+      return JSON.parse(fixedCommas);
+    } catch {
+      try {
+        // Fix literal unescaped newlines in JSON strings
+        const fixedNewlines = jsonStr.replace(/([^\\])\r?\n/g, "$1\\n");
+        return JSON.parse(fixedNewlines);
+      } catch {
+        return null;
+      }
+    }
+  }
+}
+
+/** Best-effort extraction of claims using regex when JSON.parse fails on malformed/truncated output. */
+function extractClaimsFallback(text: string): Array<{ text: string; page?: number; quote?: string }> {
+  const claims: Array<{ text: string; page?: number; quote?: string }> = [];
+  const claimsIdx = text.indexOf('"claims"');
+  const targetText = claimsIdx !== -1 ? text.slice(claimsIdx) : text;
+
+  const objRegex = /\{[^{}]*?\}/g;
+  let match: RegExpExecArray | null;
+  while ((match = objRegex.exec(targetText)) !== null) {
+    const block = match[0];
+    const textM = block.match(/"text"\s*:\s*"((?:\\.|[^"\\])*)"/i);
+    const pageM = block.match(/"page"\s*:\s*(\d+)/i);
+    const quoteM = block.match(/"quote"\s*:\s*"((?:\\.|[^"\\])*)"/i);
+    if (textM || quoteM) {
+      claims.push({
+        text: textM ? textM[1].replace(/\\"/g, '"') : "",
+        page: pageM ? parseInt(pageM[1], 10) : undefined,
+        quote: quoteM ? quoteM[1].replace(/\\"/g, '"') : undefined,
+      });
+    }
+  }
+  return claims;
 }
 
 /** Best-effort extraction of the "answer" string from malformed/truncated grounded JSON. */
@@ -101,3 +170,4 @@ function extractAnswerField(text: string): string | undefined {
     return m[1];
   }
 }
+

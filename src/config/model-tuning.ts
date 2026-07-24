@@ -44,16 +44,27 @@ export function matchModel(
   });
 }
 
-/** Resolves the ModelTuning for `modelName` from rei.config.json, or undefined if none matches. */
+/** Resolves the ModelTuning for `modelName` from rei.config.json, or undefined if none matches.
+ *  When `providerKey` is provided, searches only that provider's models list (avoids false
+ *  positives from a different provider that happens to share a normalized name). */
 export function resolveModelTuning(
   modelName: string | undefined,
   workspacePath: string,
+  providerKey?: string,
 ): ModelTuning | undefined {
   if (!modelName) return undefined;
   const config = loadReiConfig(workspacePath) as ReiConfig & {
     providers?: ProvidersConfig;
   };
   const providers = config.providers ?? {};
+
+  // When the caller knows which provider is active, search only that list.
+  if (providerKey && providers[providerKey]?.models?.length) {
+    const hit = matchModel(modelName, providers[providerKey].models);
+    if (hit) return hit;
+  }
+
+  // Fallback: search all providers (backward compat for callers that don't pass providerKey).
   for (const provider of Object.values(providers)) {
     const hit = matchModel(modelName, provider.models ?? []);
     if (hit) return hit;
