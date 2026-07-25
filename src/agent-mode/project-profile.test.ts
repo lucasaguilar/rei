@@ -14,13 +14,11 @@ describe("buildProjectProfile", () => {
   const writePkg = (obj: unknown) =>
     fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify(obj));
 
-  it("flags ESM and says use import, not require (the bug this fixes)", () => {
-    writePkg({ type: "module", scripts: { test: "vitest", build: "tsc" } });
+  it("flags ESM and says use import, not require", () => {
+    writePkg({ type: "module" });
     const p = buildProjectProfile(dir);
     expect(p).toContain("ESM");
     expect(p).toContain("NOT `require`");
-    expect(p).toContain("npm test");
-    expect(p).toContain("npm run build");
   });
 
   it("flags CommonJS when type is not module", () => {
@@ -31,7 +29,15 @@ describe("buildProjectProfile", () => {
   it("reports TypeScript when tsconfig.json is present", () => {
     writePkg({ type: "module" });
     fs.writeFileSync(path.join(dir, "tsconfig.json"), "{}");
-    expect(buildProjectProfile(dir)).toContain("TypeScript");
+    const p = buildProjectProfile(dir);
+    expect(p).toContain("typescript");
+  });
+
+  it("auto-detects non-JS/TS projects agnostically (e.g. Python, Rust)", () => {
+    fs.writeFileSync(path.join(dir, "pyproject.toml"), "");
+    const p = buildProjectProfile(dir);
+    expect(p).toContain("python");
+    expect(p).toContain("py_compile");
   });
 
   it("includes curated rules files (AGENTS.md, .rei/rules.md)", () => {
@@ -55,3 +61,4 @@ describe("buildProjectProfile", () => {
     expect(() => buildProjectProfile(dir)).not.toThrow();
   });
 });
+
