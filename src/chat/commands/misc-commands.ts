@@ -118,7 +118,7 @@ export const miscCommands: CommandHandler = {
       return {
         success: true,
         response:
-          "[REI] Indexación del repositorio iniciada. El mapa de estructura AST y los vectores RAG se están generando en segundo plano.",
+          "[REI] Repository indexing started. AST skeleton map and RAG vectors are being generated in the background.",
       };
     }
 
