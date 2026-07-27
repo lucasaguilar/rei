@@ -86,7 +86,10 @@ export async function runSubAgent(params: SubAgentParams): Promise<string> {
   // sampling / context window / thinking come from ITS rei.config.json entry, not the orchestrator's),
   // then restore. See docs/model-config-spec.md + sub-agent-spec.md.
   const prevTuning = getActiveModelTuning();
-  setActiveModelTuning(resolveModelTuning(workerModel, workspacePath));
+  const providerKey = (process.env.AGENT_MODEL_PROVIDER ?? process.env.MODEL_PROVIDER ?? "")
+    .toLowerCase()
+    .trim();
+  setActiveModelTuning(resolveModelTuning(workerModel, workspacePath, providerKey || undefined));
   try {
     const result = await executeAgentTurnWithTools({
       provider,
