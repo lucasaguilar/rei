@@ -150,7 +150,7 @@ export async function handleInputTurn(
 
   const estimatedTokens = estimateMessagesTokens(session.messages);
   const contextWindow = getContextWindow();
-  const warningThreshold = Math.round(contextWindow * 0.15);
+  const warningThreshold = Math.round(contextWindow * 0.75);
   if (estimatedTokens > warningThreshold) {
     actions.pushTranscript(
       `\x1b[33m⚠️  [REI] Warning: The accumulated session exceeds ${warningThreshold.toLocaleString()} tokens (approximately ${estimatedTokens.toLocaleString()} tokens). ` +
