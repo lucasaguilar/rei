@@ -120,14 +120,20 @@ function tryParseJson(jsonStr: string): unknown {
   try {
     return JSON.parse(jsonStr);
   } catch {
+    // Fix trailing commas before } or ] — declare here so the newline fix can chain on top.
+    const fixedCommas = jsonStr.replace(/,\s*([}\]])/g, "$1");
     try {
-      // Fix trailing commas before } or ]
-      const fixedCommas = jsonStr.replace(/,\s*([}\]])/g, "$1");
       return JSON.parse(fixedCommas);
     } catch {
       try {
-        // Fix literal unescaped newlines in JSON strings
-        const fixedNewlines = jsonStr.replace(/([^\\])\r?\n/g, "$1\\n");
+        // Fix unescaped newlines — chain on top of comma fix, and only inside strings.
+        // Structural whitespace newlines are valid JSON; only newlines *inside* string values
+        // need escaping. The regex matches a JSON string (handling escaped chars) and escapes
+        // literal newlines within its content.
+        const fixedNewlines = fixedCommas.replace(
+          /"((?:[^"\\]|\\.)*)"/g,
+          (_: string, content: string) => '"' + content.replace(/\r?\n/g, '\\n') + '"',
+        );
         return JSON.parse(fixedNewlines);
       } catch {
         return null;
