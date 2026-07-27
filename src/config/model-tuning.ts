@@ -30,17 +30,26 @@ function normalize(modelName: string): string {
   return modelName.toLowerCase().replace(/^.*\//, "").replace(/-thinking$/, "");
 }
 
-/** Finds the tuning whose id matches `modelName` (exact after normalization, or the config id is a
- *  prefix of the active name). Precise on purpose — no fuzzy two-way `includes`. */
+/** Finds the tuning whose id matches `modelName`.
+ *  Checks exact full ID match first (including provider/org prefix, e.g. "mlx-community/ornith-1.0-35b")
+ *  to support distinct tunings per quantization/org prefix. Falls back to normalized matching. */
 export function matchModel(
   modelName: string,
   models: ModelTuning[],
 ): ModelTuning | undefined {
+  if (!modelName) return undefined;
+  const target = modelName.trim().toLowerCase();
+
+  // 1. Exact full ID match (preserves distinctions like mlx-community/ vs deepreinforce-ai/)
+  const exact = models.find((m) => m.id.trim().toLowerCase() === target);
+  if (exact) return exact;
+
+  // 2. Fallback: normalized match (strips org prefix and -thinking suffix)
   const norm = normalize(modelName);
   if (!norm) return undefined;
   return models.find((m) => {
     const id = normalize(m.id);
-    return id.length > 0 && (norm === id || norm.startsWith(id));
+    return id.length > 0 && norm === id;
   });
 }
 

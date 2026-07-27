@@ -32,6 +32,32 @@ describe("matchModel (name normalization)", () => {
   });
 });
 
+describe("matchModel (no prefix match — collision safety)", () => {
+  it("short config id 'qwen' does NOT match 'qwen3.6-27b'", () => {
+    const shortId = [{ id: "qwen", temperature: 0.5 }];
+    expect(matchModel("qwen3.6-27b", shortId)).toBeUndefined();
+  });
+
+  it("short config id 'gemma' does NOT match 'gemma-4-26b-a4b'", () => {
+    const shortId = [{ id: "gemma", temperature: 0.4 }];
+    expect(matchModel("gemma-4-26b-a4b", shortId)).toBeUndefined();
+  });
+
+  it("normalization still works: provider prefix stripped, exact match after", () => {
+    const withProvider = [{ id: "ornith-1.0-35b", temperature: 0.35 }];
+    expect(matchModel("mlx-community/Ornith-1.0-35B", withProvider)?.temperature).toBe(0.35);
+  });
+
+  it("matches exact full ID first, allowing distinct tunings for different org prefixes", () => {
+    const multiOrg: ModelTuning[] = [
+      { id: "mlx-community/ornith-1.0-35b", temperature: 0.35 },
+      { id: "deepreinforce-ai/ornith-1.0-35b", temperature: 0.15 },
+    ];
+    expect(matchModel("mlx-community/ornith-1.0-35b", multiOrg)?.temperature).toBe(0.35);
+    expect(matchModel("deepreinforce-ai/ornith-1.0-35b", multiOrg)?.temperature).toBe(0.15);
+  });
+});
+
 describe("resolveModelTuning (reads rei.config.json)", () => {
   let dir: string;
   beforeEach(() => {
@@ -54,9 +80,16 @@ describe("resolveModelTuning (reads rei.config.json)", () => {
 });
 
 describe("config resolvers honor the active tuning (precedence over env defaults)", () => {
+  beforeEach(() => {
+    // Clear env vars that may be set by .env so tests are deterministic.
+    delete process.env.REI_AGENT_TEMPERATURE;
+    delete process.env.REI_AGENT_FREQUENCY_PENALTY;
+    delete process.env.REI_REASONING_EFFORT_AGENT;
+  });
   afterEach(() => {
     setActiveModelTuning(undefined);
     delete process.env.REI_AGENT_TEMPERATURE;
+    delete process.env.REI_AGENT_FREQUENCY_PENALTY;
     delete process.env.REI_REASONING_EFFORT_AGENT;
   });
 
