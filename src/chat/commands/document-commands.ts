@@ -184,10 +184,15 @@ export const documentCommands: CommandHandler = {
       // could return "" if the provider was initialized without an explicit model param.
       // See docs/model-config-spec.md.
       const prevTuning = getActiveModelTuning();
+      const primaryProvider = (process.env.MODEL_PROVIDER ?? "llmstudio").toLowerCase().trim();
+      const providerKey =
+        session.mode === "agent"
+          ? (process.env.AGENT_MODEL_PROVIDER ?? primaryProvider).toLowerCase().trim()
+          : primaryProvider;
+
+      const modelName = resolveModelForMode(session.mode);
       setActiveModelTuning(
-        resolveModelForMode(session.mode)
-          ? resolveModelTuning(resolveModelForMode(session.mode), workspacePath)
-          : undefined,
+        modelName ? resolveModelTuning(modelName, workspacePath, providerKey) : undefined,
       );
       try {
         const result = await askDocument({
