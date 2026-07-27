@@ -118,9 +118,9 @@ export class ChatRenderer {
           }
           return `${head}${state.inputHistory[state.historySearchIndex]}`;
         })()
-      : state.busy && state.activeStatus
-        ? `\x1b[1;36m[REI] Thinking ${SPINNER_FRAMES[state.spinnerIndex % SPINNER_FRAMES.length]} ${
-            THINKING_TEXT[state.activeStatus as TurnStatus]
+      : state.activeStatus || state.activeStatusText
+        ? `\x1b[1;36m[REI] ${SPINNER_FRAMES[state.spinnerIndex % SPINNER_FRAMES.length]} ${
+            state.activeStatusText ?? THINKING_TEXT[state.activeStatus as TurnStatus] ?? state.activeStatus
           }\x1b[0m`
         : SHORTCUT_HINT;
 

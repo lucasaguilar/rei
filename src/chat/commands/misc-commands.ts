@@ -108,27 +108,17 @@ export const miscCommands: CommandHandler = {
     }
 
     if (trimmed === "/index") {
-      // 1. Generate and persist the AST Skeleton Map — show progress via console.
-      console.log("\n\x1b[33m[REI] Generando skeleton map AST...\x1b[0m");
-      generateRepoMap(workspacePath)
-        .then(() => {
-          console.log("\x1b[32m[REI] ✓ Skeleton map AST generado correctamente.\x1b[0m\n");
-        })
-        .catch((err) => console.error("[/index] Repo map error:", err));
+      // 1. Generate and persist the AST Skeleton Map.
+      generateRepoMap(workspacePath).catch((err) =>
+        console.error("[/index] Repo map error:", err),
+      );
 
-      // 2. Start the RAG vector indexing with progress feedback.
-      startIndexingWorker(workspacePath, {
-        onProgress: (indexed, total) => {
-          console.log(`\x1b[33m[REI] RAG indexing... ${indexed}/${total} archivos\x1b[0m`);
-        },
-        onDone: (message) => {
-          console.log(`\x1b[32m[REI] ✓ ${message}\x1b[0m\n`);
-        },
-      });
+      // 2. Start the RAG vector indexing in background.
+      startIndexingWorker(workspacePath);
       return {
         success: true,
         response:
-          "[REI] Full repository indexing started. The AST skeleton map is updating and RAG indexing is running in the background.",
+          "[REI] Indexación del repositorio iniciada. El mapa de estructura AST y los vectores RAG se están generando en segundo plano.",
       };
     }
 

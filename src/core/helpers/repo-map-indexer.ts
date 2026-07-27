@@ -47,10 +47,6 @@ export async function ensureRepoMapIndexed(params: {
 
   if (chunksToEmbed.length > 0) {
     onStatus?.("indexing_repository");
-    console.log(
-      `\n\x1b[33m[REI] Indexing repository: Generating local embeddings for ${chunksToEmbed.length} code block(s)...` +
-      `\n      This runs on your CPU. Please wait...\x1b[0m\n`
-    );
   }
 
   for (const chunk of chunks) {
@@ -73,6 +69,7 @@ export async function ensureRepoMapIndexed(params: {
       },
       vector,
     );
+    await new Promise((resolve) => setTimeout(resolve, 0));
   }
 
   await vectorStore.save();

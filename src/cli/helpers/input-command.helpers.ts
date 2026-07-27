@@ -6,6 +6,8 @@ import { handleInputTurn } from "./input-turn.helpers.js";
 import { grabClipboardImage } from "../../tools/clipboard-image.js";
 import { extractImagePaths, extractPdfPaths } from "../../tools/vision-sidecar.js";
 import { saveSession } from "../../chat/session-store.js";
+import { generateRepoMap } from "../../tools/repo-map-generator.js";
+import { startIndexingWorker } from "../../context/rag/rag-indexer.js";
 import * as fs from "fs";
 
 export async function handleInputCommand(
@@ -20,6 +22,38 @@ export async function handleInputCommand(
     process.stdout.write("\x1b[2K"); // erase prompt line in place
     process.stdout.write("\nGoodbye!\n");
     state.running = false;
+    return true;
+  }
+
+  if (trimmed === "/index") {
+    actions.pushTranscript("");
+    actions.pushTranscript(`\x1b[1;36mYou: /index\x1b[0m`);
+    actions.pushTranscript(
+      `\x1b[33m[REI] Indexación iniciada en segundo plano (Worker Thread)...\x1b[0m`,
+    );
+    actions.pushTranscript("");
+
+    state.activeStatus = "indexing_repository";
+    state.activeStatusText = "Indexando repositorio (mapa AST)...";
+    state.spinnerIndex = 0;
+    actions.startSpinner();
+    actions.draw();
+
+    generateRepoMap(ctx.workspacePath).catch(() => {});
+
+    startIndexingWorker(ctx.workspacePath, {
+      onProgress: (indexed, total) => {
+        state.activeStatusText = `Indexando repositorio... ${indexed}/${total} archivos`;
+        actions.draw();
+      },
+      onDone: (message) => {
+        state.activeStatus = undefined;
+        state.activeStatusText = undefined;
+        actions.pushTranscript(`\x1b[32m[REI] ✓ ${message}\x1b[0m`);
+        actions.draw();
+      },
+    });
+
     return true;
   }
 

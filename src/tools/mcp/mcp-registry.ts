@@ -92,38 +92,20 @@ export class McpRegistry {
    * Safe to call multiple times — subsequent calls are no-ops.
    */
   async connect(): Promise<void> {
-    if (this.connected) {
-      console.debug("[MCP Registry] Already connected, skipping...");
-      return;
-    }
+    if (this.connected) return;
     this.connected = true;
 
     const config = loadReiConfig(this.workspacePath);
     const entries = Object.entries(config.mcpServers ?? {});
 
-    if (entries.length === 0) {
-      console.debug("[MCP Registry] No MCP servers configured");
-      return;
-    }
-
-    console.log(`[MCP Registry] Connecting to ${entries.length} server(s)...`);
+    if (entries.length === 0) return;
 
     await Promise.all(
       entries.map(async ([serverName, serverConfig]) => {
         try {
-          console.log(`[MCP Registry] 🔄 Connecting to "${serverName}"...`);
-          console.debug(`[MCP Registry]   Creating client...`);
           const client = await this.createClient(serverName, serverConfig);
-          console.debug(`[MCP Registry]   ✅ Client created`);
-          
-          console.debug(`[MCP Registry]   Listing tools...`);
           const tools = await client.listTools();
-          console.debug(`[MCP Registry]   ✅ Got ${tools.length} tools`);
-          
           this.servers.set(serverName, { client, tools });
-          console.log(
-            `[MCP Registry] ✅ Connected to "${serverName}" — ${tools.length} tool(s): ${tools.map((t) => t.name).join(", ")}`,
-          );
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           console.warn(
@@ -132,9 +114,13 @@ export class McpRegistry {
         }
       }),
     );
-    
+
+    const summaries = Array.from(this.servers.entries())
+      .map(([name, s]) => `${name} (${s.tools.length} tools)`)
+      .join(", ");
+
     console.log(
-      `[MCP Registry] Connected to ${this.servers.size}/${entries.length} servers`,
+      `[MCP Registry] 🔌 Connected ${this.servers.size}/${entries.length} server(s)${summaries ? `: ${summaries}` : ""}`,
     );
   }
 

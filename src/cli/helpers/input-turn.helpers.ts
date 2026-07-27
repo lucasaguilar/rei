@@ -229,6 +229,11 @@ export async function handleInputTurn(
         buffer += cleanToken;
         const isNowInside = isInsideXmlBlock(buffer);
 
+        if (state.activeStatus && cleanToken.trim()) {
+          actions.stopSpinner();
+          state.activeStatus = undefined;
+        }
+
         if (!isText && !isNowInside && !wasInside && cleanToken.trim()) {
           // status / agent raw response: show live — skip whitespace-only tokens
           if (!liveContentShown) {

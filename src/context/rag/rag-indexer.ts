@@ -11,6 +11,8 @@ import { VectorStore, VectorMetadata } from "./vector-store.js";
 import { generateEmbedding } from "./embedder.js";
 import type { VectorSearchResult } from "./vector-store.js";
 
+import { Worker } from "node:worker_threads";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export interface RagIndexerOptions {
@@ -22,27 +24,51 @@ export interface RagSearchResult extends VectorSearchResult {
   score: number;
 }
 
+let activeWorker: Worker | null = null;
 let indexingActive = false;
 let indexingAbortFlag = false;
 
 /**
- * Runs the RAG indexing in the same process using the event loop.
- * Each `await` call (embedding generation, file I/O) naturally yields
- * execution to keyboard/UI handlers, keeping the terminal responsive.
- * Safe to call multiple times — a second call aborts the previous run.
+ * Runs the RAG indexing off the main thread in a dedicated Worker Thread.
+ * Keeps the CLI UI and spinner 100% smooth (60 FPS) while heavy ONNX/vector math runs in background.
  */
 export function startIndexingWorker(
   workspacePath: string,
   options: RagIndexerOptions = {},
 ): void {
-  // NOTE: Abort any ongoing indexing before starting a new one
-  if (indexingActive) {
-    indexingAbortFlag = true;
+  if (activeWorker) {
+    activeWorker.terminate();
+    activeWorker = null;
   }
 
-  runIndexing(workspacePath, options).catch((err: Error) => {
-    options.onDone?.(`RAG indexing error: ${err.message}`);
-  });
+  try {
+    const workerUrl = new URL("./rag-worker.js", import.meta.url);
+    const worker = new Worker(workerUrl, { workerData: { workspacePath } });
+    activeWorker = worker;
+
+    worker.on("message", (data) => {
+      if (data.type === "progress") {
+        options.onProgress?.(data.indexed, data.total);
+      } else if (data.type === "done") {
+        options.onDone?.(data.message);
+        activeWorker = null;
+      } else if (data.type === "error") {
+        options.onDone?.(`RAG indexing error: ${data.error}`);
+        activeWorker = null;
+      }
+    });
+
+    worker.on("error", (_err) => {
+      activeWorker = null;
+      runIndexing(workspacePath, options).catch((err: Error) => {
+        options.onDone?.(`RAG indexing error: ${err.message}`);
+      });
+    });
+  } catch {
+    runIndexing(workspacePath, options).catch((err: Error) => {
+      options.onDone?.(`RAG indexing error: ${err.message}`);
+    });
+  }
 }
 
 async function runIndexing(

@@ -171,6 +171,7 @@ export async function runChat(
       inputHistory: state.inputHistory,
       busy: state.busy,
       activeStatus: state.activeStatus,
+      activeStatusText: state.activeStatusText,
       spinnerIndex: state.spinnerIndex,
       sessionMode: session.mode,
       inputBuffer: state.inputBuffer,

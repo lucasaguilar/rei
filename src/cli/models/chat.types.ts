@@ -35,6 +35,7 @@ export interface ChatRendererState {
   inputHistory: string[];
   busy: boolean;
   activeStatus?: string; // TurnStatus
+  activeStatusText?: string;
   spinnerIndex: number;
   sessionMode: string; // SessionMode
   inputBuffer: string;
@@ -47,6 +48,7 @@ export interface ChatUIState {
   running: boolean;
   busy: boolean;
   activeStatus?: string; // TurnStatus
+  activeStatusText?: string;
   spinnerIndex: number;
 
   historySearchMode: boolean;
