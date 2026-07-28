@@ -60,14 +60,26 @@ export function startIndexingWorker(
 
     worker.on("error", (_err) => {
       activeWorker = null;
+      if (!indexingActive) {
+        runIndexing(workspacePath, options).catch((err: Error) => {
+          options.onDone?.(`RAG indexing error: ${err.message}`);
+        });
+      } else {
+        options.onDone?.(
+          "RAG indexing already in progress. Please wait for the current run to finish.",
+        );
+      }
+    });
+  } catch {
+    if (!indexingActive) {
       runIndexing(workspacePath, options).catch((err: Error) => {
         options.onDone?.(`RAG indexing error: ${err.message}`);
       });
-    });
-  } catch {
-    runIndexing(workspacePath, options).catch((err: Error) => {
-      options.onDone?.(`RAG indexing error: ${err.message}`);
-    });
+    } else {
+      options.onDone?.(
+        "RAG indexing already in progress. Please wait for the current run to finish.",
+      );
+    }
   }
 }
 
