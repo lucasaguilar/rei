@@ -1,5 +1,6 @@
 import type { ChatSession } from "./types.js";
 import type { ModelProvider } from "../providers/model-provider.js";
+import type { LiveStatusEvent } from "./commands/command-handler.js";
 import { dispatchCommand } from "./commands/registry.js";
 
 export interface CommandResult {
@@ -11,12 +12,19 @@ export interface CommandResult {
   recreateAgent?: boolean;
 }
 
+export interface MenuCommandOptions {
+  /** Streams live progress to the transcript (for slow commands like /ask-document). */
+  onStatus?: (message: string) => void;
+  /** Optional live status callback for long-running operations that need in-place progress (e.g. /index). */
+  onLiveStatus?: (event: LiveStatusEvent) => void;
+}
+
 export async function processMenuCommand(
   command: string,
   session: ChatSession,
   workspacePath: string,
   provider: ModelProvider,
-  onStatus?: (message: string) => void,
+  options?: MenuCommandOptions,
 ): Promise<CommandResult> {
   const trimmed = command.trim();
 
@@ -27,7 +35,8 @@ export async function processMenuCommand(
     session,
     workspacePath,
     provider,
-    onStatus,
+    onStatus: options?.onStatus,
+    onLiveStatus: options?.onLiveStatus,
   });
   if (dispatched) return dispatched;
 

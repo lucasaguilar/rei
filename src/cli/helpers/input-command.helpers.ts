@@ -6,8 +6,6 @@ import { handleInputTurn } from "./input-turn.helpers.js";
 import { grabClipboardImage } from "../../tools/clipboard-image.js";
 import { extractImagePaths, extractPdfPaths } from "../../tools/vision-sidecar.js";
 import { saveSession } from "../../chat/session-store.js";
-import { generateRepoMap } from "../../tools/repo-map-generator.js";
-import { startIndexingWorker } from "../../context/rag/rag-indexer.js";
 import * as fs from "fs";
 
 export async function handleInputCommand(
@@ -25,37 +23,6 @@ export async function handleInputCommand(
     return true;
   }
 
-  if (trimmed === "/index") {
-    actions.pushTranscript("");
-    actions.pushTranscript(`\x1b[1;36mYou: /index\x1b[0m`);
-    actions.pushTranscript(
-      `\x1b[33m[REI] Indexación iniciada en segundo plano (Worker Thread)...\x1b[0m`,
-    );
-    actions.pushTranscript("");
-
-    state.activeStatus = "indexing_repository";
-    state.activeStatusText = "Indexando repositorio (mapa AST)...";
-    state.spinnerIndex = 0;
-    actions.startSpinner();
-    actions.draw();
-
-    generateRepoMap(ctx.workspacePath).catch(() => {});
-
-    startIndexingWorker(ctx.workspacePath, {
-      onProgress: (indexed, total) => {
-        state.activeStatusText = `Indexando repositorio... ${indexed}/${total} archivos`;
-        actions.draw();
-      },
-      onDone: (message) => {
-        state.activeStatus = undefined;
-        state.activeStatusText = undefined;
-        actions.pushTranscript(`\x1b[32m[REI] ✓ ${message}\x1b[0m`);
-        actions.draw();
-      },
-    });
-
-    return true;
-  }
 
   // /paste-image [text]: grab an image from the clipboard (macOS) into a temp file,
   // then run a normal turn referencing it so the vision sidecar describes it.
@@ -97,14 +64,38 @@ export async function handleInputCommand(
 
   // Delegate to the centralized command processor. The onStatus callback streams live progress
   // (e.g. /ask-document indexing) to the transcript so slow commands don't look frozen.
+  // The onLiveStatus handler drives the status bar + spinner for long-running operations like /index.
+  const onLiveStatus = (event: import("../../chat/commands/command-handler.js").LiveStatusEvent) => {
+    switch (event.type) {
+      case "init":
+        state.activeStatus = "indexing_repository";
+        state.activeStatusText = event.text;
+        state.spinnerIndex = 0;
+        actions.startSpinner();
+        break;
+      case "progress":
+        state.activeStatusText = event.text;
+        break;
+      case "done":
+        state.activeStatus = undefined;
+        state.activeStatusText = undefined;
+        actions.pushTranscript(`\x1b[32m${event.text}\x1b[0m`);
+        break;
+    }
+    actions.draw();
+  };
+
   const result = await processMenuCommand(
     trimmed,
     session,
     ctx.workspacePath,
     agent.provider,
-    (message: string) => {
-      actions.pushTranscript(`\x1b[2m${message}\x1b[0m`);
-      actions.draw();
+    {
+      onStatus: (message: string) => {
+        actions.pushTranscript(`\x1b[2m${message}\x1b[0m`);
+        actions.draw();
+      },
+      onLiveStatus,
     },
   );
 

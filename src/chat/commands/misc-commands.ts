@@ -1,4 +1,4 @@
-import type { CommandHandler, CommandResult } from "./command-handler.js";
+import type { CommandHandler, CommandResult, LiveStatusEvent } from "./command-handler.js";
 import type { ChatMessage, SessionMode } from "../types.js";
 import { saveSession } from "../session-store.js";
 import { clearCurrentPlan } from "../plan-tracker.js";
@@ -25,7 +25,7 @@ export const miscCommands: CommandHandler = {
     c === "/env" ||
     MODE_RE.test(c),
 
-  run: ({ command: trimmed, session, workspacePath }): CommandResult => {
+  run: ({ command: trimmed, session, workspacePath, onStatus, onLiveStatus }): CommandResult => {
     if (trimmed === "/reloadprompts") {
       clearPromptCache();
       return {
@@ -108,17 +108,29 @@ export const miscCommands: CommandHandler = {
     }
 
     if (trimmed === "/index") {
-      // 1. Generate and persist the AST Skeleton Map.
-      generateRepoMap(workspacePath).catch((err) =>
-        console.error("[/index] Repo map error:", err),
-      );
+      const emit = onStatus ?? (() => {});
+      const live = onLiveStatus ?? (() => {});
 
-      // 2. Start the RAG vector indexing in background.
-      startIndexingWorker(workspacePath);
+      // 1. Generate and persist the AST Skeleton Map (errors logged, no user-facing).
+      live({ type: "init", text: `Generating AST skeleton map...` });
+      generateRepoMap(workspacePath).catch((err) => {
+        console.error("[/index] Repo map error:", err);
+      });
+
+      // 2. Start the RAG vector indexing in background with live progress.
+      startIndexingWorker(workspacePath, {
+        onProgress: (indexed: number, total: number) => {
+          live({ type: "progress", text: `Indexing repository... ${indexed}/${total} files` });
+        },
+        onDone: (message: string) => {
+          // Final message goes to transcript via emit (stays in history).
+          live({ type: "done", text: `✓ ${message}` });
+        },
+      });
+
       return {
         success: true,
-        response:
-          "[REI] Repository indexing started. AST skeleton map and RAG vectors are being generated in the background.",
+        response: "",
       };
     }
 

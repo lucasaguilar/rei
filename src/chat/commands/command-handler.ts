@@ -17,6 +17,13 @@ export interface CommandContext {
   provider: ModelProvider;
   /** Streams live progress to the transcript (for slow commands like /ask-document). */
   onStatus?: (message: string) => void;
+  /** Optional live status callback for long-running operations that need in-place progress (e.g. /index). */
+  onLiveStatus?: (event: LiveStatusEvent) => void;
+}
+
+export interface LiveStatusEvent {
+  type: "init" | "progress" | "done";
+  text: string;
 }
 
 /** A self-contained command, or a group of related commands. */
