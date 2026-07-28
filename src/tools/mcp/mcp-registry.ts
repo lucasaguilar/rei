@@ -93,12 +93,14 @@ export class McpRegistry {
    */
   async connect(): Promise<void> {
     if (this.connected) return;
-    this.connected = true;
 
     const config = loadReiConfig(this.workspacePath);
     const entries = Object.entries(config.mcpServers ?? {});
 
     if (entries.length === 0) return;
+
+    // Mark as connected only after confirming there are servers to connect.
+    this.connected = true;
 
     await Promise.all(
       entries.map(async ([serverName, serverConfig]) => {

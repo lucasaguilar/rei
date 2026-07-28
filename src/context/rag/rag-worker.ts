@@ -12,6 +12,9 @@ import { HeuristicAstProvider } from "../ast-providers/heuristic-ast-provider.js
 import { VectorStore, type VectorMetadata } from "./vector-store.js";
 import { generateEmbedding } from "./embedder.js";
 
+const PROGRESS_THROTTLE_MS = 200; // Throttle progress messages to main thread
+let lastProgressTime = 0;
+
 async function runWorker(): Promise<void> {
   const { workspacePath } = (workerData ?? {}) as { workspacePath: string };
   if (!workspacePath) {
@@ -131,8 +134,12 @@ async function runWorker(): Promise<void> {
     }
 
     indexed += 1;
-    // Send progress updates back to main CLI thread on EVERY file
-    parentPort?.postMessage({ type: "progress", indexed, total });
+    // Throttle progress messages to avoid IPC overhead (every ~200ms)
+    const now = Date.now();
+    if (now - lastProgressTime >= PROGRESS_THROTTLE_MS) {
+      parentPort?.postMessage({ type: "progress", indexed, total });
+      lastProgressTime = now;
+    }
   }
 
   await store.save();
