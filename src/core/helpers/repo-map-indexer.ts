@@ -69,7 +69,7 @@ export async function ensureRepoMapIndexed(params: {
       },
       vector,
     );
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise<void>((resolve) => setImmediate(resolve));
   }
 
   await vectorStore.save();
