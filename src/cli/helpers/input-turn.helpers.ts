@@ -11,6 +11,7 @@ import { stripNativeToolSyntax } from "../../core/helpers/turn-message.helpers.j
 import { describeAttachedImages } from "../../tools/vision-sidecar.js";
 import { resolveModelForMode } from "../../providers/provider-factory.js";
 import type { SessionMode } from "../../chat/types.js";
+import { displayUserLabel } from "./chat.helpers.js";
 
 /**
  * Strips ANSI codes OUTSIDE fenced code blocks, but PRESERVES them inside ``` fences.
@@ -91,7 +92,7 @@ export async function handleInputTurn(
   // Show user input immediately — use a short label when the actual prompt is internal/verbose
   const displayLabel = options?.displayText ?? trimmed;
   actions.pushTranscript("");
-  actions.pushTranscript(`\x1b[1;36mYou: ${displayLabel}\x1b[0m`);
+  actions.pushTranscript(displayUserLabel(displayLabel));
   actions.pushTranscript("");
   actions.draw();
 
@@ -121,8 +122,10 @@ export async function handleInputTurn(
     if (vision) {
       promptForModel = vision.augmentedPrompt;
       const parts: string[] = [];
-      if (vision.images.length > 0) parts.push(`${vision.images.length} image(s)`);
-      if (vision.documents.length > 0) parts.push(`${vision.documents.length} PDF(s)`);
+      if (vision.images.length > 0)
+        parts.push(`${vision.images.length} image(s)`);
+      if (vision.documents.length > 0)
+        parts.push(`${vision.documents.length} PDF(s)`);
       actions.pushTranscript(
         `\x1b[2m🖼️  ${parts.join(" + ")} analyzed; extracted text added to context.\x1b[0m`,
       );
@@ -327,7 +330,11 @@ export async function handleInputTurn(
 
     // Visual context-usage gauge: how much of the assumed window the prompt consumed this turn.
     // Helps spot when history/files are about to overflow (and explains slow prefill).
-    const gauge = formatContextGauge(sentTokens, getContextWindow(), activeModel);
+    const gauge = formatContextGauge(
+      sentTokens,
+      getContextWindow(),
+      activeModel,
+    );
     if (gauge) actions.pushTranscript(`\n${gauge}`);
 
     actions.pushTranscript(

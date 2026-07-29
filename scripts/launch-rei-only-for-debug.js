@@ -46,7 +46,9 @@ export const PROVIDER_MODELS = {
         PROVIDER_MODELS = {
             ollama: ['llama3.2', 'qwen2.5-coder:14b'],
             openrouter: ['qwen/qwen3.6-plus'],
-            gemini: ['gemini-2.5-flash']
+            gemini: ['gemini-2.5-flash'],
+            llmstudio: [],
+            mtplx: []
         };
     }
 
@@ -114,13 +116,18 @@ function getOllamaModels() {
 }
 
 /**
- * Returns available models from a running LLM Studio instance.
+ * Returns available models from a running OpenAI-compatible local server (LM Studio, MTPLX, …).
  * Falls back to PROVIDER_MODELS.llmstudio if the request fails.
  */
 async function getLlmStudioModels() {
     try {
-        const baseUrl = process.env.LLM_STUDIO_BASE_URL || 'http://localhost:1234';
-        const res = await fetch(`${baseUrl}/v1/models`);
+        // The provider convention (and the /model command) is that LLM_STUDIO_BASE_URL already ENDS
+        // in /v1 — e.g. http://127.0.0.1:8000/v1 for MTPLX. Strip a trailing /v1 (and slashes) before
+        // re-appending, so we don't fetch a doubled ".../v1/v1/models" (→ 404, listing nothing). This
+        // makes ONE url value work for both the wizard AND the provider, with or without /v1.
+        const raw = (process.env.LLM_STUDIO_BASE_URL || 'http://localhost:1234').replace(/\/+$/, '');
+        const base = raw.replace(/\/v1$/i, '');
+        const res = await fetch(`${base}/v1/models`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         const models = (data.data || []).map(m => m.id).filter(Boolean);
@@ -150,7 +157,26 @@ function buildOllamaSummary(envVars) {
 function getEnvPrefix(provider) {
     if (provider === 'llmstudio') return 'LLM_STUDIO';
     if (provider === 'huggingface') return 'HF';
+    if (provider === 'mtplx') return 'MTPLX';
     return provider.toUpperCase();
+}
+
+/**
+ * Returns available models from a running MTPLX server (OpenAI-compatible).
+ * Falls back to PROVIDER_MODELS.mtplx if the request fails.
+ */
+async function getMtplxModels() {
+    try {
+        const raw = (process.env.MTPLX_BASE_URL || 'http://localhost:8000').replace(/\/+$/, '');
+        const base = raw.replace(/\/v1$/i, '');
+        const res = await fetch(`${base}/v1/models`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const models = (data.data || []).map(m => m.id).filter(Boolean);
+        return models.length > 0 ? models : (PROVIDER_MODELS.mtplx ?? []);
+    } catch {
+        return PROVIDER_MODELS.mtplx ?? [];
+    }
 }
 
 async function pickProvider(message, initialValue) {
@@ -169,6 +195,8 @@ async function pickModel(provider, message, initialModel) {
         baseList = getOllamaModels();
     } else if (provider === 'llmstudio') {
         baseList = await getLlmStudioModels();
+    } else if (provider === 'mtplx') {
+        baseList = await getMtplxModels();
     } else {
         baseList = PROVIDER_MODELS[provider] ?? [];
     }
@@ -303,7 +331,7 @@ async function main() {
     // silently ignored. Prompted only for local providers (cloud models have large
     // fixed windows and rarely need REI's budget overrides).
     const usesOllama = envVars.MODEL_PROVIDER === 'ollama' || envVars.AGENT_MODEL_PROVIDER === 'ollama';
-    const LOCAL_PROVIDERS = ['ollama', 'llmstudio'];
+    const LOCAL_PROVIDERS = ['ollama', 'llmstudio', 'mtplx'];
     const usesLocal =
         LOCAL_PROVIDERS.includes(envVars.MODEL_PROVIDER) ||
         LOCAL_PROVIDERS.includes(envVars.AGENT_MODEL_PROVIDER);

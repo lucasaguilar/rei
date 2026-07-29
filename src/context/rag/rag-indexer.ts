@@ -1,19 +1,21 @@
 import { existsSync } from "node:fs";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import { scanWorkspace } from "../../workspace/workspace-scanner.js";
-import { supportsAstIndexingExtension, getLanguageCapabilityForExtension } from "../../language/language-capabilities.js";
+import {
+  supportsAstIndexingExtension,
+  getLanguageCapabilityForExtension,
+} from "../../language/language-capabilities.js";
 import { AstProviderFactory } from "../../context/ast-providers/ast-provider-factory.js";
-import type { SourceFileLike, AstChunk } from "../../context/ast-providers/ast-provider.js";
+import type {
+  SourceFileLike,
+  AstChunk,
+} from "../../context/ast-providers/ast-provider.js";
 import { HeuristicAstProvider } from "../../context/ast-providers/heuristic-ast-provider.js";
 import { VectorStore, VectorMetadata } from "./vector-store.js";
 import { generateEmbedding } from "./embedder.js";
 import type { VectorSearchResult } from "./vector-store.js";
-
 import { Worker } from "node:worker_threads";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export interface RagIndexerOptions {
   onProgress?: (indexed: number, total: number) => void;
@@ -142,7 +144,9 @@ async function runIndexing(
         } catch {
           // Primary provider threw — fall back to HeuristicAstProvider (FR-8)
           try {
-            astChunks = await new HeuristicAstProvider().extractChunks(fileLike);
+            astChunks = await new HeuristicAstProvider().extractChunks(
+              fileLike,
+            );
           } catch {
             astChunks = [];
           }

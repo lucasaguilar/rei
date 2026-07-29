@@ -3,10 +3,15 @@ import type { InputHandlerContext } from "../models/input-handler.types.js";
 import { createModelProvider } from "../../providers/provider-factory.js";
 import { Agent } from "../../core/agent.js";
 import { handleInputTurn } from "./input-turn.helpers.js";
+import { displayUserLabel } from "./chat.helpers.js";
 import { grabClipboardImage } from "../../tools/clipboard-image.js";
-import { extractImagePaths, extractPdfPaths } from "../../tools/vision-sidecar.js";
+import {
+  extractImagePaths,
+  extractPdfPaths,
+} from "../../tools/vision-sidecar.js";
 import { saveSession } from "../../chat/session-store.js";
 import * as fs from "fs";
+import { LiveStatusEvent } from "../../chat/commands/command-handler.js";
 
 export async function handleInputCommand(
   trimmed: string,
@@ -22,7 +27,6 @@ export async function handleInputCommand(
     state.running = false;
     return true;
   }
-
 
   // /paste-image [text]: grab an image from the clipboard (macOS) into a temp file,
   // then run a normal turn referencing it so the vision sidecar describes it.
@@ -65,7 +69,7 @@ export async function handleInputCommand(
   // Delegate to the centralized command processor. The onStatus callback streams live progress
   // (e.g. /ask-document indexing) to the transcript so slow commands don't look frozen.
   // The onLiveStatus handler drives the status bar + spinner for long-running operations like /index.
-  const onLiveStatus = (event: import("../../chat/commands/command-handler.js").LiveStatusEvent) => {
+  const onLiveStatus = (event: LiveStatusEvent) => {
     switch (event.type) {
       case "init":
         state.activeStatus = "indexing_repository";
@@ -105,7 +109,7 @@ export async function handleInputCommand(
     // (Normal non-command input never reaches here — it returns false below and handleInputTurn
     // echoes it, so this avoids the double-echo bug.)
     if (!result.autoExecute) {
-      actions.pushTranscript(`\x1b[1;36mYou: ${trimmed}\x1b[0m`);
+      actions.pushTranscript(displayUserLabel(trimmed));
     }
     actions.pushTranscript(result.response);
 
@@ -152,7 +156,7 @@ export async function handleInputCommand(
   // Any slash-prefixed input is treated as a command. If it fails,
   // surface the command error and do not fall through to model execution.
   if (trimmed.startsWith("/")) {
-    actions.pushTranscript(`\x1b[1;36mYou: ${trimmed}\x1b[0m`);
+    actions.pushTranscript(displayUserLabel(trimmed));
     actions.pushTranscript(result.response);
     return true;
   }

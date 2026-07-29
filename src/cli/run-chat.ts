@@ -14,7 +14,7 @@ import {
   KeyboardActions,
 } from "./models/chat.types.js";
 import { clamp } from "./helpers/terminal.helpers.js";
-import { buildMentionEntries } from "./helpers/chat.helpers.js";
+import { buildMentionEntries, displayUserLabel } from "./helpers/chat.helpers.js";
 import {
   clearHistorySearchState,
   findHistoryMatch,
@@ -78,19 +78,16 @@ export async function runChat(
     busy: false,
     activeStatus: undefined,
     spinnerIndex: 0,
-
     historySearchMode: false,
     historySearchQuery: "",
     historySearchIndex: undefined,
     historySearchSnapshot: { buffer: "", cursor: 0 },
-
     inputBuffer: "",
     inputCursor: 0,
     inputHistory: [],
     historyCursor: undefined,
     historyDraft: "",
     pasting: false,
-
     selectedCommandIndex: 0,
     paletteClosed: false,
     cols: process.stdout.columns || 80,
@@ -100,7 +97,9 @@ export async function runChat(
   };
 
   let exitResolve!: () => void;
-  const shutdownPromise = new Promise<void>((resolve) => { exitResolve = resolve; });
+  const shutdownPromise = new Promise<void>((resolve) => {
+    exitResolve = resolve;
+  });
 
   // Shutdown interceptor: any component that sets `state.running = false`
   // (e.g., /exit, Ctrl+C) triggers the Proxy trap, which resolves the
@@ -267,7 +266,7 @@ export async function runChat(
     // turn). Echo it, clear the input, and resume the paused turn. See CliElicitation.
     if (cliElicit.isPending) {
       const answer = state.inputBuffer;
-      pushTranscript(`\x1b[1;36mYou: ${answer.trim()}\x1b[0m`);
+      pushTranscript(displayUserLabel(answer.trim()));
       resetInput();
       cliElicit.deliver(answer);
       return;
@@ -346,7 +345,11 @@ export async function runChat(
   const startupTokens =
     startupHistoryTokens + agent.estimateActiveToolsTokens(session.mode);
   const activeModelLabel = resolveActiveModelLabel(session.mode);
-  const startupGauge = formatContextGauge(startupTokens, getContextWindow(), activeModelLabel);
+  const startupGauge = formatContextGauge(
+    startupTokens,
+    getContextWindow(),
+    activeModelLabel,
+  );
   if (startupGauge) pushTranscript(startupGauge);
 
   if (autoIndex && !hasRagIndex(workspacePath)) {
