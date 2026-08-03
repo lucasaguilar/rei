@@ -66,6 +66,7 @@ export async function runCli(args: string[]): Promise<void> {
       await runChat(agent, workspacePath, autoIndex, {
         name: parsed.sessionName,
         continue: parsed.continueSession,
+        force: parsed.forceSession,
       });
       return;
     }
@@ -86,6 +87,7 @@ function parseCliArgs(args: string[]): {
   version: boolean;
   sessionName?: string;
   continueSession: boolean;
+  forceSession: boolean;
 } {
   const positional: string[] = [];
   let workspaceInput: string | undefined;
@@ -93,6 +95,7 @@ function parseCliArgs(args: string[]): {
   let version = false;
   let sessionName: string | undefined;
   let continueSession = false;
+  let forceSession = false;
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -145,6 +148,12 @@ function parseCliArgs(args: string[]): {
       continue;
     }
 
+    // --force: steal a session lock held by another (or a stale) instance.
+    if (arg === "--force") {
+      forceSession = true;
+      continue;
+    }
+
     if (arg === "--no-auto-index") {
       noAutoIndex = true;
       continue;
@@ -166,6 +175,7 @@ function parseCliArgs(args: string[]): {
     version,
     sessionName,
     continueSession,
+    forceSession,
   };
 }
 

@@ -36,15 +36,20 @@ import {
 import {
   resolveStartupSession,
   mostRecentSessionId,
+  getActiveSessionId,
 } from "../chat/session-store.js";
+import { acquireOrWarn, releaseSessionLock } from "../chat/session-lock.js";
 
 export async function runChat(
   agent: Agent,
   workspacePath = process.cwd(),
   autoIndex = true,
-  sessionOpts?: { name?: string; continue?: boolean },
+  sessionOpts?: { name?: string; continue?: boolean; force?: boolean },
 ): Promise<void> {
   const existing = resolveStartupSession(workspacePath, sessionOpts);
+  const sessionId = getActiveSessionId();
+  // Refuse to open a session already live in another terminal (avoids last-write-wins corruption).
+  if (!acquireOrWarn(workspacePath, sessionId, sessionOpts?.force)) return;
   const session: ChatSession = existing
     ? {
         messages: existing.messages,
@@ -125,7 +130,6 @@ export async function runChat(
       }
       transcript.push(line);
     }
-    // We only keep transcript in memory for metrics, not for rendering
     if (transcript.length > 3000) {
       transcript.splice(0, transcript.length - 3000);
     }
@@ -150,15 +154,13 @@ export async function runChat(
   };
 
   const draw = (): void => {
-    // Skip rendering if shutting down — /exit writes "Goodbye!" directly;
-    // a late draw() would clear it and redraw the prompt as a ghost.
+    // Skip rendering if shutting down — /exit writes "Goodbye!"; a late draw() would ghost it.
     if (!state.running) return;
     // Skip rendering if actively resizing to avoid overlapping visual frames
     if (resizeTimer !== undefined) return;
 
-    // Keep the keyboard state's mode current so Up/Down row-navigation uses the right prompt width.
+    // Keep keyboard mode + active document current (Up/Down prompt width, doc indicator).
     state.sessionMode = session.mode;
-    // Mirror the active document (a command may have changed it) so the indicator stays current.
     state.activeDocument = session.activeDocument;
 
     const renderState: ChatRendererState = {
@@ -180,8 +182,7 @@ export async function runChat(
       activeDocument: session.activeDocument,
     };
 
-    // selectedCommandIndex can be adjusted by draw
-    const paletteItems = renderState.activePalette.items;
+    const paletteItems = renderState.activePalette.items; // selectedCommandIndex adjusted by draw
     state.selectedCommandIndex = clamp(
       state.selectedCommandIndex,
       0,
@@ -230,9 +231,8 @@ export async function runChat(
     state.historyDraft = "";
   };
 
-  // Transcript-based elicitation (ask_user tool): the model asks a question mid-turn, the turn
-  // pauses so the user can type an answer through REI's own input, then resumes. See A vs @clack
-  // analysis in docs/intent-router-spec.md.
+  // Transcript-based elicitation (ask_user): the model asks mid-turn, the turn pauses so the user
+  // answers through REI's own input, then resumes. See docs/intent-router-spec.md.
   const cliElicit = new CliElicitation({
     pushTranscript,
     setBusy: (busy) => {
@@ -264,8 +264,7 @@ export async function runChat(
 
   // Bridge the Enter key handler to the full input-processing pipeline.
   const submitCurrentUserInput = async (): Promise<void> => {
-    // If the model is awaiting an ask_user answer, the next submitted line answers IT (not a new
-    // turn). Echo it, clear the input, and resume the paused turn. See CliElicitation.
+    // If awaiting an ask_user answer, the next line answers IT: echo, clear, resume. See CliElicitation.
     if (cliElicit.isPending) {
       const answer = state.inputBuffer;
       pushTranscript(displayUserLabel(answer.trim()));
@@ -383,6 +382,7 @@ export async function runChat(
   // The Proxy on `state` resolves this promise when `running` becomes false.
   await shutdownPromise;
 
+  releaseSessionLock(workspacePath, sessionId); // free the session for other terminals
   stopSpinner();
   process.stdout.write("\x1b[?2004l"); // disable bracketed paste
   process.stdin.off("keypress", onKeypress);

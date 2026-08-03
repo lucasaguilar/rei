@@ -1,6 +1,6 @@
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import type { ChatMessage, SessionMode } from './types.js';
+import * as fs from "node:fs";
+import * as path from "node:path";
+import type { ChatMessage, SessionMode } from "./types.js";
 
 export interface PersistedSession {
   version: 1;
@@ -12,8 +12,8 @@ export interface PersistedSession {
   messages: ChatMessage[];
 }
 
-const SESSIONS_DIR = '.rei/sessions';
-const CURRENT_FILE = 'current.json';
+const SESSIONS_DIR = ".rei/sessions";
+const CURRENT_FILE = "current.json";
 
 // The session file THIS instance reads/writes. Default `current.json` (retrocompat: the server and
 // any caller that never sets it behave exactly as before). The CLI sets it per instance at startup
@@ -29,13 +29,13 @@ export function setActiveSession(id: string): void {
 
 /** The current instance's session id (filename without .json). */
 export function getActiveSessionId(): string {
-  return activeSessionFile.replace(/\.json$/, '');
+  return activeSessionFile.replace(/\.json$/, "");
 }
 
 /** A fresh timestamped session id (YYYY-MM-DD-HHMMSS) — same format as archived sessions. */
 export function newSessionId(): string {
   const ts = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
+  const pad = (n: number) => String(n).padStart(2, "0");
   return (
     `${ts.getFullYear()}-${pad(ts.getMonth() + 1)}-${pad(ts.getDate())}` +
     `-${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}`
@@ -48,7 +48,7 @@ export function mostRecentSessionId(workspacePath: string): string | null {
   return sessions.length ? sessions[0].id : null;
 }
 
-function sessionsDir(workspacePath: string): string {
+export function sessionsDir(workspacePath: string): string {
   return path.join(workspacePath, SESSIONS_DIR);
 }
 
@@ -65,7 +65,7 @@ export function saveSession(
   messages: ChatMessage[],
   mode: SessionMode,
   summary?: string,
-  existingCreatedAt?: string
+  existingCreatedAt?: string,
 ): void {
   ensureSessionsDir(workspacePath);
   const now = new Date().toISOString();
@@ -78,12 +78,18 @@ export function saveSession(
     summary,
     messages,
   };
-  fs.writeFileSync(currentPath(workspacePath), JSON.stringify(data, null, 2), 'utf8');
+  fs.writeFileSync(
+    currentPath(workspacePath),
+    JSON.stringify(data, null, 2),
+    "utf8",
+  );
 }
 
-export function loadCurrentSession(workspacePath: string): PersistedSession | null {
+export function loadCurrentSession(
+  workspacePath: string,
+): PersistedSession | null {
   try {
-    const raw = fs.readFileSync(currentPath(workspacePath), 'utf8');
+    const raw = fs.readFileSync(currentPath(workspacePath), "utf8");
     const data = JSON.parse(raw) as PersistedSession;
     if (data.version !== 1 || !Array.isArray(data.messages)) return null;
     return data;
@@ -96,12 +102,15 @@ export function loadCurrentSession(workspacePath: string): PersistedSession | nu
  * Archives the current session to a dated file and removes current.json.
  * Optionally accepts a custom descriptive name for the archived file.
  */
-export function archiveCurrentSession(workspacePath: string, customName?: string): string | null {
+export function archiveCurrentSession(
+  workspacePath: string,
+  customName?: string,
+): string | null {
   const src = currentPath(workspacePath);
   if (!fs.existsSync(src)) return null;
 
   try {
-    const raw = fs.readFileSync(src, 'utf8');
+    const raw = fs.readFileSync(src, "utf8");
     JSON.parse(raw); // validate it's a well-formed session before archiving
 
     // ALWAYS prefix with the archive timestamp (local YYYY-MM-DD-HHMMSS) so sessions stay
@@ -110,22 +119,24 @@ export function archiveCurrentSession(workspacePath: string, customName?: string
     // session's createdAt — which is stale for long-lived sessions, so files showed the wrong
     // date. Using `now` (the moment of archiving) fixes both.
     const ts = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
+    const pad = (n: number) => String(n).padStart(2, "0");
     const prefix =
       `${ts.getFullYear()}-${pad(ts.getMonth() + 1)}-${pad(ts.getDate())}` +
       `-${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}`;
-    const sanitized = (customName ?? '')
+    const sanitized = (customName ?? "")
       .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
       .slice(0, 60);
-    const archiveName = sanitized ? `${prefix}-${sanitized}.json` : `${prefix}.json`;
+    const archiveName = sanitized
+      ? `${prefix}-${sanitized}.json`
+      : `${prefix}.json`;
 
     const dest = path.join(sessionsDir(workspacePath), archiveName);
-    
+
     // Handle collisions by appending a numeric suffix
     if (fs.existsSync(dest)) {
-      const base = archiveName.replace(/\.json$/, '');
+      const base = archiveName.replace(/\.json$/, "");
       let counter = 1;
       let newName = `${base}-${counter}.json`;
       let newDest = path.join(sessionsDir(workspacePath), newName);
@@ -146,7 +157,7 @@ export function archiveCurrentSession(workspacePath: string, customName?: string
 }
 
 export interface SessionSummaryEntry {
-  id: string;       // filename without .json
+  id: string; // filename without .json
   createdAt: string;
   updatedAt: string;
   mode: SessionMode;
@@ -160,13 +171,13 @@ export function listSessions(workspacePath: string): SessionSummaryEntry[] {
 
   const entries: SessionSummaryEntry[] = [];
   for (const file of fs.readdirSync(dir)) {
-    if (!file.endsWith('.json') || file === CURRENT_FILE) continue;
+    if (!file.endsWith(".json") || file === CURRENT_FILE) continue;
     try {
-      const raw = fs.readFileSync(path.join(dir, file), 'utf8');
+      const raw = fs.readFileSync(path.join(dir, file), "utf8");
       const data = JSON.parse(raw) as PersistedSession;
-      const nonSystem = data.messages.filter((m) => m.role !== 'system');
+      const nonSystem = data.messages.filter((m) => m.role !== "system");
       entries.push({
-        id: file.replace(/\.json$/, ''),
+        id: file.replace(/\.json$/, ""),
         createdAt: data.createdAt,
         updatedAt: data.updatedAt,
         mode: data.mode,
@@ -208,10 +219,13 @@ export function resolveStartupSession(
   return null;
 }
 
-export function loadSessionById(workspacePath: string, id: string): PersistedSession | null {
+export function loadSessionById(
+  workspacePath: string,
+  id: string,
+): PersistedSession | null {
   const filePath = path.join(sessionsDir(workspacePath), `${id}.json`);
   try {
-    const raw = fs.readFileSync(filePath, 'utf8');
+    const raw = fs.readFileSync(filePath, "utf8");
     const data = JSON.parse(raw) as PersistedSession;
     if (data.version !== 1 || !Array.isArray(data.messages)) return null;
     return data;
