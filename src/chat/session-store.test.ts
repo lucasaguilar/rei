@@ -2,7 +2,15 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { saveSession, archiveCurrentSession } from "./session-store.js";
+import {
+  saveSession,
+  archiveCurrentSession,
+  setActiveSession,
+  newSessionId,
+  mostRecentSessionId,
+  loadCurrentSession,
+  listSessions,
+} from "./session-store.js";
 
 describe("archiveCurrentSession naming", () => {
   let ws: string;
@@ -51,5 +59,52 @@ describe("archiveCurrentSession naming", () => {
 
   it("returns null when there is no current session", () => {
     expect(archiveCurrentSession(ws)).toBeNull();
+  });
+});
+
+describe("multi-session (setActiveSession / newSessionId / mostRecentSessionId)", () => {
+  let ws: string;
+  beforeEach(() => {
+    ws = fs.mkdtempSync(path.join(os.tmpdir(), "rei-multi-sess-"));
+  });
+  afterEach(() => {
+    fs.rmSync(ws, { recursive: true, force: true });
+    setActiveSession("current"); // reset the module-level active file for other tests
+  });
+
+  it("newSessionId is a YYYY-MM-DD-HHMMSS timestamp", () => {
+    expect(newSessionId()).toMatch(/^\d{4}-\d{2}-\d{2}-\d{6}$/);
+  });
+
+  it("saveSession writes to the ACTIVE session file, not current.json", () => {
+    setActiveSession("feature-x");
+    saveSession(ws, [{ role: "user", content: "hi" }], "agent");
+    expect(fs.existsSync(path.join(ws, ".rei/sessions/feature-x.json"))).toBe(true);
+    expect(fs.existsSync(path.join(ws, ".rei/sessions/current.json"))).toBe(false);
+  });
+
+  it("two named sessions are independent files (no collision)", () => {
+    setActiveSession("frontend");
+    saveSession(ws, [{ role: "user", content: "front" }], "ask");
+    setActiveSession("backend");
+    saveSession(ws, [{ role: "user", content: "back" }], "ask");
+    setActiveSession("frontend");
+    expect(loadCurrentSession(ws)?.messages[0].content).toBe("front");
+    setActiveSession("backend");
+    expect(loadCurrentSession(ws)?.messages[0].content).toBe("back");
+    expect(listSessions(ws).map((s) => s.id).sort()).toEqual(["backend", "frontend"]);
+  });
+
+  it("mostRecentSessionId returns the latest by updatedAt (for `rei -c`)", async () => {
+    setActiveSession("older");
+    saveSession(ws, [{ role: "user", content: "a" }], "ask");
+    await new Promise((r) => setTimeout(r, 10));
+    setActiveSession("newer");
+    saveSession(ws, [{ role: "user", content: "b" }], "ask");
+    expect(mostRecentSessionId(ws)).toBe("newer");
+  });
+
+  it("mostRecentSessionId is null when there are no sessions", () => {
+    expect(mostRecentSessionId(ws)).toBeNull();
   });
 });

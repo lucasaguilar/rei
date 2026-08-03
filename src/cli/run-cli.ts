@@ -63,7 +63,10 @@ export async function runCli(args: string[]): Promise<void> {
 
     if (command === "chat") {
       const autoIndex = !parsed.noAutoIndex;
-      await runChat(agent, workspacePath, autoIndex);
+      await runChat(agent, workspacePath, autoIndex, {
+        name: parsed.sessionName,
+        continue: parsed.continueSession,
+      });
       return;
     }
 
@@ -81,11 +84,15 @@ function parseCliArgs(args: string[]): {
   commandArgs: string[];
   noAutoIndex: boolean;
   version: boolean;
+  sessionName?: string;
+  continueSession: boolean;
 } {
   const positional: string[] = [];
   let workspaceInput: string | undefined;
   let noAutoIndex = false;
   let version = false;
+  let sessionName: string | undefined;
+  let continueSession = false;
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -111,6 +118,33 @@ function parseCliArgs(args: string[]): {
       continue;
     }
 
+    // --session/-s <name>: bind this terminal to a named session (multi-session). See multi-session-spec.
+    if (arg === "--session" || arg === "-s") {
+      const value = args[i + 1];
+      if (!value || value.startsWith("-")) {
+        console.error("Missing value for --session");
+        process.exit(1);
+      }
+      sessionName = value;
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--session=")) {
+      const value = arg.slice("--session=".length).trim();
+      if (!value) {
+        console.error("Missing value for --session");
+        process.exit(1);
+      }
+      sessionName = value;
+      continue;
+    }
+
+    // --continue/-c: resume the most recent session instead of starting fresh.
+    if (arg === "--continue" || arg === "-c") {
+      continueSession = true;
+      continue;
+    }
+
     if (arg === "--no-auto-index") {
       noAutoIndex = true;
       continue;
@@ -130,6 +164,8 @@ function parseCliArgs(args: string[]): {
     commandArgs: positional.slice(1),
     noAutoIndex,
     version,
+    sessionName,
+    continueSession,
   };
 }
 

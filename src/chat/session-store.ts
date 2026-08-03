@@ -15,12 +15,45 @@ export interface PersistedSession {
 const SESSIONS_DIR = '.rei/sessions';
 const CURRENT_FILE = 'current.json';
 
+// The session file THIS instance reads/writes. Default `current.json` (retrocompat: the server and
+// any caller that never sets it behave exactly as before). The CLI sets it per instance at startup
+// (a fresh auto-id, a named session, or the most-recent one for -c), so N terminals don't collide.
+// Module-level like setActiveModelTuning — avoids threading the id through ~10 saveSession call sites.
+// See docs/multi-session-spec.md.
+let activeSessionFile = CURRENT_FILE;
+
+/** Binds this instance to session `<id>.json`. Call once at startup. */
+export function setActiveSession(id: string): void {
+  activeSessionFile = `${id}.json`;
+}
+
+/** The current instance's session id (filename without .json). */
+export function getActiveSessionId(): string {
+  return activeSessionFile.replace(/\.json$/, '');
+}
+
+/** A fresh timestamped session id (YYYY-MM-DD-HHMMSS) — same format as archived sessions. */
+export function newSessionId(): string {
+  const ts = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return (
+    `${ts.getFullYear()}-${pad(ts.getMonth() + 1)}-${pad(ts.getDate())}` +
+    `-${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}`
+  );
+}
+
+/** The most recently updated session id, or null if there are none (for `rei -c`). */
+export function mostRecentSessionId(workspacePath: string): string | null {
+  const sessions = listSessions(workspacePath);
+  return sessions.length ? sessions[0].id : null;
+}
+
 function sessionsDir(workspacePath: string): string {
   return path.join(workspacePath, SESSIONS_DIR);
 }
 
 export function currentPath(workspacePath: string): string {
-  return path.join(sessionsDir(workspacePath), CURRENT_FILE);
+  return path.join(sessionsDir(workspacePath), activeSessionFile);
 }
 
 function ensureSessionsDir(workspacePath: string): void {
@@ -146,6 +179,33 @@ export function listSessions(workspacePath: string): SessionSummaryEntry[] {
   }
 
   return entries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+/**
+ * Resolves which session an instance uses at startup (multi-session, see docs/multi-session-spec.md)
+ * and binds it via setActiveSession:
+ *  - `name`     → `<name>.json` (resume it if it exists, else a fresh named one)
+ *  - `continue` → the most recently updated session
+ *  - default    → a BRAND-NEW session (own auto-id file), never colliding with other instances
+ * Returns the loaded session, or null for a fresh one.
+ */
+export function resolveStartupSession(
+  workspacePath: string,
+  opts?: { name?: string; continue?: boolean },
+): PersistedSession | null {
+  if (opts?.name) {
+    setActiveSession(opts.name);
+    return loadCurrentSession(workspacePath);
+  }
+  if (opts?.continue) {
+    const recent = mostRecentSessionId(workspacePath);
+    if (recent) {
+      setActiveSession(recent);
+      return loadCurrentSession(workspacePath);
+    }
+  }
+  setActiveSession(newSessionId());
+  return null;
 }
 
 export function loadSessionById(workspacePath: string, id: string): PersistedSession | null {

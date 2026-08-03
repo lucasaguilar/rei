@@ -33,14 +33,18 @@ import {
   startIndexingWorker,
   hasRagIndex,
 } from "../context/rag/rag-indexer.js";
-import { loadCurrentSession } from "../chat/session-store.js";
+import {
+  resolveStartupSession,
+  mostRecentSessionId,
+} from "../chat/session-store.js";
 
 export async function runChat(
   agent: Agent,
   workspacePath = process.cwd(),
   autoIndex = true,
+  sessionOpts?: { name?: string; continue?: boolean },
 ): Promise<void> {
-  const existing = loadCurrentSession(workspacePath);
+  const existing = resolveStartupSession(workspacePath, sessionOpts);
   const session: ChatSession = existing
     ? {
         messages: existing.messages,
@@ -49,9 +53,8 @@ export async function runChat(
         summary: existing.summary,
       }
     : { messages: [], mode: "ask" };
-  // Rebuilt after every turn (see submitCurrentUserInput): a turn can CREATE files — e.g. the OCR
-  // sidecar writes ocr/*.ocr.md — and they must be @-referenceable this session, not only after a
-  // restart. `let` so the getPalette closure below always reads the freshest scan.
+  // Rebuilt after every turn (submitCurrentUserInput): a turn can CREATE files (OCR sidecar writes
+  // ocr/*.ocr.md) that must be @-referenceable this session. `let` so getPalette reads the freshest scan.
   let mentionEntries = buildMentionEntries(workspacePath);
 
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -64,9 +67,8 @@ export async function runChat(
 
   readline.emitKeypressEvents(process.stdin);
   process.stdin.setRawMode(true);
-  // Bracketed paste: the terminal wraps pasted text in \e[200~ … \e[201~, which
-  // Node surfaces as 'paste-start'/'paste-end' keypress events. This lets us treat
-  // newlines inside a paste as literal text instead of submitting on each one.
+  // Bracketed paste: the terminal wraps pasted text in \e[200~ … \e[201~ (Node emits
+  // 'paste-start'/'paste-end'), so newlines inside a paste stay literal instead of submitting.
   process.stdout.write("\x1b[?2004h");
 
   let spinnerTimer: NodeJS.Timeout | undefined;
@@ -100,9 +102,8 @@ export async function runChat(
     exitResolve = resolve;
   });
 
-  // Shutdown interceptor: any component that sets `state.running = false`
-  // (e.g., /exit, Ctrl+C) triggers the Proxy trap, which resolves the
-  // shutdown promise and kicks off the cleanup → process.exit flow.
+  // Shutdown interceptor: setting `state.running = false` (/exit, Ctrl+C) triggers the Proxy trap,
+  // which resolves the shutdown promise and kicks off the cleanup → process.exit flow.
   const state: ChatUIState = new Proxy(uiState, {
     set(target, prop, value) {
       if (prop === "running" && value === false) {
@@ -112,7 +113,7 @@ export async function runChat(
     },
   });
 
-  // NOTE pushTranscript describe the process of adding a new line to the transcript and writing it to stdout.
+  // pushTranscript: adds a line to the transcript and writes it to stdout.
   const pushTranscript = (value: string, writeToStdout = true): void => {
     if (writeToStdout) {
       ChatRenderer.clearUI();
@@ -130,7 +131,7 @@ export async function runChat(
     }
   };
 
-  // streamText: function that takes a string as input and writes it to the process.stdout.
+  // streamText: writes a string straight to process.stdout.
   const streamText = (value: string): void => {
     ChatRenderer.clearUI();
     process.stdout.write(value);
@@ -335,6 +336,13 @@ export async function runChat(
     }
   } else {
     pushTranscript(getWelcomeMessage(session.mode));
+    // Multi-session: this is a fresh session — tell the user how to recover the previous one.
+    const recent = mostRecentSessionId(workspacePath);
+    if (recent) {
+      pushTranscript(
+        `\x1b[90m[REI] Nueva sesión. Usá 'rei -c' para continuar la última (${recent}), o 'rei --session <nombre>' para una con nombre.\x1b[0m`,
+      );
+    }
   }
 
   // Show the context gauge on startup too (not only after the first turn), so the user sees
