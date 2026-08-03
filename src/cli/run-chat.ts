@@ -14,7 +14,10 @@ import {
   KeyboardActions,
 } from "./models/chat.types.js";
 import { clamp } from "./helpers/terminal.helpers.js";
-import { buildMentionEntries, displayUserLabel } from "./helpers/chat.helpers.js";
+import {
+  buildMentionEntries,
+  displayUserLabel,
+} from "./helpers/chat.helpers.js";
 import {
   clearHistorySearchState,
   findHistoryMatch,
@@ -30,11 +33,7 @@ import {
   startIndexingWorker,
   hasRagIndex,
 } from "../context/rag/rag-indexer.js";
-import {
-  loadCurrentSession,
-  saveSession,
-  archiveCurrentSession,
-} from "../chat/session-store.js";
+import { loadCurrentSession } from "../chat/session-store.js";
 
 export async function runChat(
   agent: Agent,
@@ -113,6 +112,7 @@ export async function runChat(
     },
   });
 
+  // NOTE pushTranscript describe the process of adding a new line to the transcript and writing it to stdout.
   const pushTranscript = (value: string, writeToStdout = true): void => {
     if (writeToStdout) {
       ChatRenderer.clearUI();
@@ -130,6 +130,7 @@ export async function runChat(
     }
   };
 
+  // streamText: function that takes a string as input and writes it to the process.stdout.
   const streamText = (value: string): void => {
     ChatRenderer.clearUI();
     process.stdout.write(value);

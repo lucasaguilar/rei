@@ -94,21 +94,37 @@ export function getMentionPalette(
     .slice(0, 100);
 }
 
+// NOTE getActivePalette is a function that returns the current palette to display
+// based on the state of the chat UI and the mention entries. It returns an object
+// with a kind property that can be either "mention" or "none", and an items property
+// that is an array of the relevant palette items. If there are no mention items,
+// it returns a "none" kind with an empty array of items.
 export function getActivePalette(
   state: ChatUIState,
   mentionEntries: MentionEntry[],
 ): ActivePalette {
   const mentionItems = getMentionPalette(state, mentionEntries);
+
   if (mentionItems.length > 0) {
-    return { kind: "mention", items: mentionItems };
+    return {
+      kind: "mention",
+      items: mentionItems,
+    };
   }
 
   const commandItems = getCommandPalette(state);
+
   if (commandItems.length > 0) {
-    return { kind: "command", items: commandItems };
+    return {
+      kind: "command",
+      items: commandItems,
+    };
   }
 
-  return { kind: "none", items: [] };
+  return {
+    kind: "none",
+    items: [],
+  };
 }
 
 export function findHistoryMatch(

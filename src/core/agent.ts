@@ -421,7 +421,6 @@ export class Agent {
       if (!hasStreamedText) yield `\x11${plainResponse}`;
       return;
     }
-
   }
 
   private getWorkspaceFiles(): FileMeta[] {
@@ -664,7 +663,9 @@ export class Agent {
       userInput,
       context,
       repositorySkeletonMap: onDemand ? undefined : repositorySkeletonMap,
-      projectFileTree: onDemand ? undefined : buildProjectFileTree(scannedFiles),
+      projectFileTree: onDemand
+        ? undefined
+        : buildProjectFileTree(scannedFiles),
     });
 
     this.logger.logInfo("Enriched user message size", {
