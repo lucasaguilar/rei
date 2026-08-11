@@ -42,4 +42,7 @@ export interface ChatSession {
    *  default. Auto-set when a document finishes OCR; changed via /doc; cleared by /doc clear.
    *  Session-scoped (a new session starts with none). Single doc for now; multi-doc is future. */
   activeDocument?: string;
+  /** Active data-driven role (e.g. "auditor") — a posture layered on `mode`, loaded from
+   *  prompts/roles/<name>.md. Its body is injected into the system prompt. See docs/roles-spec.md. */
+  activeRole?: string;
 }

@@ -9,6 +9,8 @@ import {
   getTotalStagesInPlan,
   isPlanMessage,
   restoreCurrentPlanFromSession,
+  savePlanToFile,
+  loadPlanFromFile,
 } from "./plan-tracker.js";
 import type { ChatMessage } from "./types.js";
 
@@ -21,6 +23,31 @@ Files to modify: a.html
 ## Stage 3: Style it
 Files to modify: a.scss
 `;
+
+describe("loadPlanFromFile — input formats (@ / .md / path)", () => {
+  let ws: string;
+  beforeEach(() => {
+    ws = fs.mkdtempSync(path.join(os.tmpdir(), "rei-plan-load-"));
+    savePlanToFile(ws, "my-plan", "PLAN CONTENT");
+  });
+  afterEach(() => fs.rmSync(ws, { recursive: true, force: true }));
+
+  it("loads by bare name, with .md, with a path, and with an @ prefix", () => {
+    for (const input of [
+      "my-plan",
+      "my-plan.md",
+      ".rei/plans/my-plan.md",
+      "@.rei/plans/my-plan.md", // the file-picker inserts @<path> — the bug that was failing
+    ]) {
+      expect(loadPlanFromFile(ws, input)).toBe("PLAN CONTENT");
+    }
+  });
+
+  it("still throws a clear error for a missing plan", () => {
+    expect(() => loadPlanFromFile(ws, "does-not-exist")).toThrow(/not found/);
+    expect(() => loadPlanFromFile(ws, "@.rei/plans/nope.md")).toThrow(/not found/);
+  });
+});
 
 describe("plan-tracker (no todo checklist)", () => {
   let workspace: string;

@@ -33,6 +33,7 @@ function buildProjectRules(workspacePath?: string): string {
 export function buildSystemMessage(
   mode: SessionMode,
   workspacePath?: string,
+  roleBody?: string,
 ): string {
   const projectRules = buildProjectRules(workspacePath);
 
@@ -46,6 +47,9 @@ export function buildSystemMessage(
   const sections: string[] = [
     loadPrompt("shared/base"),
     "",
+    // Active role posture (auditor, security, …) — high priority, right after the base identity so it
+    // overrides the default helpful/agreeable stance. See docs/roles-spec.md.
+    ...(roleBody ? [`## ACTIVE ROLE (overrides default posture)\n${roleBody}`, ""] : []),
     loadPrompt("shared/personality"),
     "",
     currentDateLine,

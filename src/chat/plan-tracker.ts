@@ -93,24 +93,36 @@ export function savePlanToFile(workspacePath: string, planName: string, planCont
  * Loads the full plan content from .rei/plans/<name>.md in the workspace.
  */
 export function loadPlanFromFile(workspacePath: string, planName: string): string {
-  // Sanitize the planName
-  const sanitized = planName.replace(/[^a-zA-Z0-9_\-]/g, '_');
+  // Accept: a bare name (`my-plan`), a name with extension (`my-plan.md`), a workspace-relative path
+  // (`.rei/plans/my-plan.md`), and any of those prefixed with `@` (the file-picker inserts `@<path>`).
+  const input = planName.trim().replace(/^@/, "");
 
-  // Try to find it as a direct file or inside .rei/plans/
-  let filePath = path.join(workspacePath, '.rei', 'plans', `${sanitized}.md`);
-  if (!fs.existsSync(filePath)) {
-    // If not found in .rei/plans/, maybe they specified a path or filename directly in workspace
-    filePath = path.resolve(workspacePath, planName);
-    if (!fs.existsSync(filePath)) {
-      throw new Error(`Plan file not found: '${planName}'`);
+  const readOrNull = (p: string): string | null => {
+    try {
+      return fs.existsSync(p) ? fs.readFileSync(p, "utf8") : null;
+    } catch {
+      return null;
     }
+  };
+
+  // Looks like a PATH (has a separator) → resolve it directly under the workspace, with/without .md.
+  // Don't sanitize here: the user gave an explicit path on purpose.
+  if (input.includes("/") || input.includes("\\")) {
+    const abs = path.resolve(workspacePath, input);
+    const content = readOrNull(abs) ?? readOrNull(`${abs}.md`);
+    if (content !== null) return content;
+    throw new Error(`Plan file not found: '${planName}'`);
   }
 
-  try {
-    return fs.readFileSync(filePath, 'utf8');
-  } catch (err) {
-    throw new Error(`Failed to read plan from disk: ${err instanceof Error ? err.message : String(err)}`);
-  }
+  // A BARE name → .rei/plans/<sanitized>.md (drop an optional .md the user typed; sanitize the name
+  // to avoid path traversal since it becomes part of a filename).
+  const bare = input.replace(/\.md$/i, "");
+  const sanitized = bare.replace(/[^a-zA-Z0-9_\-]/g, "_");
+  const content = readOrNull(
+    path.join(workspacePath, ".rei", "plans", `${sanitized}.md`),
+  );
+  if (content !== null) return content;
+  throw new Error(`Plan file not found: '${planName}'`);
 }
 
 /**

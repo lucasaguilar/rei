@@ -45,6 +45,7 @@ import {
   formatBatchPatchResult,
 } from "./helpers/action-executor.js";
 import { type SkillMode } from "../skills/skill-loader.js";
+import { loadRole } from "../skills/role-loader.js";
 import {
   ensureRepoMapIndexed,
   initWatcher,
@@ -510,9 +511,14 @@ export class Agent {
     }
 
     // Rebuild system message on every turn or when mode changes, to keep the active plan progress checklist in sync.
+    // An active role (auditor, …) injects its posture into the prompt. See docs/roles-spec.md.
+    const activeRole = session.activeRole
+      ? loadRole(session.activeRole, this.workspacePath)
+      : null;
     const baseSystemContent = buildSystemMessage(
       session.mode,
       this.workspacePath,
+      activeRole?.body,
     );
     let systemContent = baseSystemContent;
 
