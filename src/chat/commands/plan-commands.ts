@@ -6,6 +6,8 @@ import {
   loadCurrentPlanContent,
   savePlanToFile,
   loadPlanFromFile,
+  saveReviewToFile,
+  isReviewMessage,
   STAGE_REGEX,
   isPlanMessage,
 } from "../plan-tracker.js";
@@ -160,9 +162,40 @@ export const runPlanCommand: CommandHandler = {
  * Extracted verbatim from menu-command-processor (Phase 1 — no behavior change).
  */
 export const planFileCommands: CommandHandler = {
-  match: (c) => c.startsWith("/saveplan") || c.startsWith("/loadplan"),
+  match: (c) =>
+    c.startsWith("/saveplan") ||
+    c.startsWith("/loadplan") ||
+    c.startsWith("/savereview"),
 
   run: ({ command: trimmed, session, workspacePath }): CommandResult => {
+    if (trimmed.startsWith("/savereview")) {
+      const m = trimmed.match(/^\/savereview\s+(\S+)$/i);
+      if (!m) {
+        return { success: false, response: "[REI] Invalid format. Use: /savereview <name>" };
+      }
+      const name = m[1];
+      // The review is the most recent assistant message that looks like an auditor review.
+      const lastReview = [...session.messages]
+        .reverse()
+        .find((msg) => msg.role === "assistant" && msg.content && isReviewMessage(msg.content));
+      if (!lastReview || !lastReview.content) {
+        return {
+          success: false,
+          response:
+            "[REI] No review found in this session. Run the auditor first (/role auditor → audit a plan).",
+        };
+      }
+      try {
+        const savedPath = saveReviewToFile(workspacePath, name, lastReview.content);
+        return { success: true, response: `[REI] Review saved to: ${savedPath}` };
+      } catch (err) {
+        return {
+          success: false,
+          response: `[REI] Error saving review: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+    }
+
     if (trimmed.startsWith("/saveplan")) {
       const saveMatch = trimmed.match(/^\/saveplan\s+(\S+)$/i);
       if (!saveMatch) {

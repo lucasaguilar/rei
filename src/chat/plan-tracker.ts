@@ -90,6 +90,32 @@ export function savePlanToFile(workspacePath: string, planName: string, planCont
 }
 
 /**
+ * Saves an auditor review to `.rei/plans/<name>.review.md` — next to its plan, so `@` and /loadplan
+ * find it. Overwrites (a re-audit reflects the plan's current state). See docs/roles-spec.md.
+ */
+export function saveReviewToFile(workspacePath: string, name: string, content: string): string {
+  const sanitized = name.replace(/[^a-zA-Z0-9_\-]/g, '_');
+  const plansDir = path.join(workspacePath, '.rei', 'plans');
+  const filePath = path.join(plansDir, `${sanitized}.review.md`);
+  try {
+    fs.mkdirSync(plansDir, { recursive: true });
+    fs.writeFileSync(filePath, content, 'utf8');
+    return filePath;
+  } catch (err) {
+    throw new Error(`Failed to save review to disk: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/** True when an assistant message looks like an auditor review (exec summary / verdict / risks+blind-spots). */
+export function isReviewMessage(content: string): boolean {
+  return (
+    /executive summary/i.test(content) ||
+    /needs critical fixes|approved with observations|unviable/i.test(content) ||
+    (/\brisks?\b/i.test(content) && /blind spot/i.test(content))
+  );
+}
+
+/**
  * Loads the full plan content from .rei/plans/<name>.md in the workspace.
  */
 export function loadPlanFromFile(workspacePath: string, planName: string): string {

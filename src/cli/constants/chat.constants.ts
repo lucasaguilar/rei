@@ -61,6 +61,7 @@ export const COMMANDS: Array<{
   { command: "/mode agent", description: "switch to agent mode" },
   { command: "/runplan [stage <num>]", description: "execute planning-mode plan (optionally by stage)" },
   { command: "/saveplan <name>", description: "save the full plan to disk as .rei/plans/<name>.md" },
+  { command: "/savereview <name>", description: "save the auditor's review as .rei/plans/<name>.review.md" },
   { command: "/loadplan <name>", description: "load a plan from disk and update active checklist" },
   { command: "/savespec <name>", description: "save the write-spec spec to disk as .rei/specs/<name>.md" },
   { command: "/loadspec <name>", description: "load a spec from disk into the session for decomposition" },

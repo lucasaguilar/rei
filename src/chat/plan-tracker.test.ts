@@ -11,6 +11,8 @@ import {
   restoreCurrentPlanFromSession,
   savePlanToFile,
   loadPlanFromFile,
+  saveReviewToFile,
+  isReviewMessage,
 } from "./plan-tracker.js";
 import type { ChatMessage } from "./types.js";
 
@@ -46,6 +48,34 @@ describe("loadPlanFromFile — input formats (@ / .md / path)", () => {
   it("still throws a clear error for a missing plan", () => {
     expect(() => loadPlanFromFile(ws, "does-not-exist")).toThrow(/not found/);
     expect(() => loadPlanFromFile(ws, "@.rei/plans/nope.md")).toThrow(/not found/);
+  });
+});
+
+describe("saveReviewToFile / isReviewMessage (/savereview)", () => {
+  let ws: string;
+  beforeEach(() => {
+    ws = fs.mkdtempSync(path.join(os.tmpdir(), "rei-review-"));
+  });
+  afterEach(() => fs.rmSync(ws, { recursive: true, force: true }));
+
+  it("saves the review next to the plan as <name>.review.md", () => {
+    const p = saveReviewToFile(ws, "my-plan", "## Executive Summary\nNeeds critical fixes");
+    expect(p.endsWith(".rei/plans/my-plan.review.md")).toBe(true);
+    expect(fs.readFileSync(p, "utf8")).toContain("Needs critical fixes");
+  });
+
+  it("overwrites on re-save (re-audit reflects current plan)", () => {
+    saveReviewToFile(ws, "p", "v1");
+    const p = saveReviewToFile(ws, "p", "v2");
+    expect(fs.readFileSync(p, "utf8")).toBe("v2");
+  });
+
+  it("isReviewMessage detects an auditor review, not a plan or chit-chat", () => {
+    expect(isReviewMessage("## Executive Summary\n...")).toBe(true);
+    expect(isReviewMessage("Approved with observations. Minor nits only.")).toBe(true);
+    expect(isReviewMessage("Risks & Inconsistencies\n...\nBlind Spots & Key Questions")).toBe(true);
+    expect(isReviewMessage("Sure, here is the code you asked for.")).toBe(false);
+    expect(isReviewMessage("## Stage 1: do the thing")).toBe(false);
   });
 });
 
