@@ -493,19 +493,33 @@ export class Agent {
         logger: this.logger,
         onStatus,
       });
-
-      this.initWatcher();
+      if (!process.env.REI_SKIP_RAG) {
+        this.initWatcher(); // init watcher only if RAG is enabled
+      }
     }
 
     // 2. Recuperar solo fragmentos relevantes basados en la entrada del usuario
     if (userInput) {
-      const relevantMap = await getRelevantMapContext(
-        this.vectorStore,
-        userInput,
-      );
-      repositorySkeletonMap = relevantMap
-        ? `### RELEVANT REPOSITORY SKELETON MAP\n\n${relevantMap}`
-        : undefined;
+      // const relevantMap = await getRelevantMapContext(
+      //   this.vectorStore,
+      //   userInput,
+      // );
+      // repositorySkeletonMap = relevantMap
+      //   ? `### RELEVANT REPOSITORY SKELETON MAP\n\n${relevantMap}`
+      //   : undefined;
+      if (process.env.REI_SKIP_RAG) {
+        // No vector store to query — skip semantic retrieval.
+        // The flat repo map is still in the system prompt.
+        repositorySkeletonMap = undefined;
+      } else {
+        const relevantMap = await getRelevantMapContext(
+          this.vectorStore,
+          userInput,
+        );
+        repositorySkeletonMap = relevantMap
+          ? `### RELEVANT REPOSITORY SKELETON MAP\n\n${relevantMap}`
+          : undefined;
+      }
     } else {
       repositorySkeletonMap = undefined;
     }

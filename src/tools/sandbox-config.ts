@@ -27,6 +27,9 @@ export const STATIC_ALLOWED_COMMANDS = new Set([
   "true", "false", "test",
   // Read-only text utilities (file exploration: read by parts, slice, count)
   "head", "tail", "sed", "awk", "wc", "sort", "uniq", "cut", "tr",
+  // Read-only exploration/search (no writes, no sub-command execution): faster/cleaner
+  // ways for the agent to search, compare and inspect the tree than the ones above.
+  "rg", "egrep", "fgrep", "diff", "jq", "stat", "basename", "dirname", "realpath",
   // macOS automation
   "osascript",
   // REI internal

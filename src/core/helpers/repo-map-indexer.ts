@@ -27,6 +27,11 @@ export async function ensureRepoMapIndexed(params: {
 }): Promise<string> {
   const { workspacePath, vectorStore, logger, onStatus } = params;
 
+  if (process.env.REI_SKIP_RAG) {
+    logger.logInfo("Skipping RAG indexing due to REI_SKIP_RAG env var");
+    return await generateRepoMap(workspacePath); // Still generate the map for other purposes like code completion.
+  }
+
   const repoMap = await generateRepoMap(workspacePath);
   await vectorStore.load();
 
@@ -37,10 +42,7 @@ export async function ensureRepoMapIndexed(params: {
 
   const chunks = await chunkRepoMap(workspacePath);
   const chunksToEmbed = chunks.filter((chunk) => {
-    const hash = crypto
-      .createHash("md5")
-      .update(chunk.content)
-      .digest("hex");
+    const hash = crypto.createHash("md5").update(chunk.content).digest("hex");
     const existing = vectorStore.getById(chunk.metadata.id);
     return !existing || existing.metadata.fileHash !== hash;
   });
@@ -50,10 +52,7 @@ export async function ensureRepoMapIndexed(params: {
   }
 
   for (const chunk of chunks) {
-    const hash = crypto
-      .createHash("md5")
-      .update(chunk.content)
-      .digest("hex");
+    const hash = crypto.createHash("md5").update(chunk.content).digest("hex");
     const existing = vectorStore.getById(chunk.metadata.id);
 
     if (existing && existing.metadata.fileHash === hash) {
@@ -88,23 +87,20 @@ export function initWatcher(params: {
   const { workspacePath, vectorStore, logger, clearScanCache } = params;
 
   logger.logInfo("Initializing file watcher for incremental AST updates");
-  const watcher = chokidar.watch(
-    getWatcherGlobs(),
-    {
-      cwd: workspacePath,
-      ignored: [
-        "**/node_modules/**",
-        "**/dist/**",
-        ".rei/**",
-        "**/.rei/**",
-        "**/.git/**",
-        "**/bin/**",
-        "**/obj/**",
-      ],
-      persistent: true,
-      ignoreInitial: true,
-    },
-  );
+  const watcher = chokidar.watch(getWatcherGlobs(), {
+    cwd: workspacePath,
+    ignored: [
+      "**/node_modules/**",
+      "**/dist/**",
+      ".rei/**",
+      "**/.rei/**",
+      "**/.git/**",
+      "**/bin/**",
+      "**/obj/**",
+    ],
+    persistent: true,
+    ignoreInitial: true,
+  });
 
   const handleChange = async (filePath: string) => {
     clearScanCache();
