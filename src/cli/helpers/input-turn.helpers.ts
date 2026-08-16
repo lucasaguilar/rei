@@ -181,7 +181,6 @@ export async function handleInputTurn(
     let liveContentShown = false;
     let firstTokenTime = -1;
     let callingModelTime = -1;
-    let chunkCount = 0;
     const startTime = Date.now();
 
     for await (const token of agent.streamTurn(session, promptForModel, {
@@ -205,7 +204,6 @@ export async function handleInputTurn(
       const isText = token.startsWith("\x11");
       const cleanToken = isThinking || isText ? token.slice(1) : token;
 
-      chunkCount++;
       totalOutputChars += cleanToken.length;
 
       // Track first visible token for timing
@@ -302,7 +300,6 @@ export async function handleInputTurn(
         ? Math.max(0, firstTokenTime - callingModelTime)
         : Math.max(0, firstTokenTime - startTime);
     const generationMs = Math.max(1, endTime - firstTokenTime);
-    const totalMs = Math.max(1, endTime - startTime);
 
     // Approximate token counts (1 token ~= 4 chars in mixed code/text prompts)
     const inputMsgs = session.messages.slice(0, -1);
@@ -316,16 +313,13 @@ export async function handleInputTurn(
 
     const recTokens = Math.max(1, Math.round(totalOutputChars / 4));
 
-    const streamSpeedValue = recTokens / (generationMs / 1000);
-    const averageSpeedValue = recTokens / (totalMs / 1000);
+    // Speed = decoded tokens (visible + thinking) / generation time.
+    // `generationMs` is clamped to >= 1ms so single-chunk turns never produce Infinity.
+    const speedValue = recTokens / (generationMs / 1000);
     const formatSpeed = (value: number): string =>
       value > 0 && value < 0.1 ? "<0.1" : value.toFixed(1);
-    const streamSpeed = formatSpeed(streamSpeedValue);
-    const averageSpeed = formatSpeed(averageSpeedValue);
-    const speedText =
-      chunkCount > 1 ? `${streamSpeed} tok/s` : `${averageSpeed} tok/s (avg)`;
+    const speedText = `${formatSpeed(speedValue)} tok/s`;
 
-    const outputNote = recTokens <= 2 ? " | Note: very short output" : "";
     const activeModel = resolveActiveModelLabel(session.mode);
 
     // Visual context-usage gauge: how much of the assumed window the prompt consumed this turn.
