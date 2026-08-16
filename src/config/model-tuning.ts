@@ -19,6 +19,11 @@ export interface ModelTuning {
   topK?: number;
   frequencyPenalty?: number;
   presencePenalty?: number;
+  /** HF/vLLM-style multiplicative repetition penalty (1.0 = off). Sent as `repetition_penalty`.
+   *  Non-OpenAI-standard; local runtimes (LM Studio/Ollama) accept it, strict endpoints may not. */
+  repetitionPenalty?: number;
+  /** Min-p nucleus floor (0.0 = off). Sent as `min_p`. Local runtimes accept it, strict endpoints may not. */
+  minP?: number;
   /** Intent, not a raw param — REI maps "off" to the runtime's lever (reasoning_effort:none). */
   thinking?: "on" | "off";
 }

@@ -52,6 +52,9 @@ Precedence: `REI_CONTEXT_WINDOW` > `<PREFIX>_CONTEXT_WINDOW` > runtime default (
 | `REI_INVESTIGATE_BEFORE_PRODUCE` | produce-or-bail nudge threshold | 8 |
 | `REI_VERBATIM_HISTORY_TURNS` | turns kept verbatim before demotion | 3 |
 | `AGENT_EDIT_FORMAT` | edit format | — |
+| CLI `--session <name>` / `-s` | open/create a named session (parallel agents on one repo) | new auto-id |
+| CLI `--continue` / `-c` | resume the most recent session | — |
+| CLI `--force` | steal a session lock held by another/stale instance | — |
 | `REI_SUBAGENT_ENABLED` | expose the `delegate` tool (isolated-context sub-agents) — opt-in | `false` |
 | `REI_SUBAGENT_MODEL` | worker model for `delegate` sub-agents (e.g. a fast reliable executor like ornith) | same as agent model |
 

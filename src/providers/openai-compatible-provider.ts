@@ -269,6 +269,10 @@ export abstract class OpenAiCompatibleProvider implements ModelProvider {
     };
     if (t?.topP !== undefined) requestBody.top_p = t.topP;
     if (t?.topK !== undefined) requestBody.top_k = t.topK;
+    if (t?.minP !== undefined) requestBody.min_p = t.minP;
+    if (t?.repetitionPenalty !== undefined) {
+      requestBody.repetition_penalty = t.repetitionPenalty;
+    }
     if (this.repeatPenalty !== undefined) {
       requestBody.repeat_penalty = this.repeatPenalty;
     }

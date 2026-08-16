@@ -7,6 +7,8 @@ import type { ChatSession } from "../chat/types.js";
 import { getWelcomeMessage } from "./constants/chat.constants.js";
 import { formatContextGauge } from "./markdown-renderer.js";
 import { getContextWindow } from "../config/model-runtime.js";
+import { resolveModelForMode } from "../providers/provider-factory.js";
+import { resolveModelTuning, setActiveModelTuning } from "../config/model-tuning.js";
 import { resolveActiveModelLabel } from "./helpers/input-turn.helpers.js";
 import {
   ChatRendererState,
@@ -347,6 +349,13 @@ export async function runChat(
   // Show the context gauge on startup too (not only after the first turn), so the user sees
   // how full the assumed window already is from the resumed session / system prompt + the
   // function-calling tools array (built-in + MCP schemas), which isn't in the history.
+  // Pre-resolve the active model's tuning so the STARTUP gauge reflects its configured context
+  // window (rei.config.json) instead of the env fallback. The per-turn path (agent.ts) re-sets
+  // this every turn; this just populates it before the first render so the gauge isn't wrong at boot.
+  setActiveModelTuning(
+    resolveModelTuning(resolveModelForMode(session.mode), workspacePath),
+  );
+
   const startupHistoryTokens = Math.round(
     session.messages.reduce((acc, m) => acc + (m.content?.length ?? 0), 0) / 4,
   );
