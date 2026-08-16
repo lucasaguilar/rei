@@ -94,13 +94,14 @@ export class McpRegistry {
   async connect(): Promise<void> {
     if (this.connected) return;
 
+    // Idempotency lives in the flag, not in the config: mark connected BEFORE any early
+    // return so a second connect() is a true no-op (the docstring promises it).
+    this.connected = true;
+
     const config = loadReiConfig(this.workspacePath);
     const entries = Object.entries(config.mcpServers ?? {});
 
     if (entries.length === 0) return;
-
-    // Mark as connected only after confirming there are servers to connect.
-    this.connected = true;
 
     await Promise.all(
       entries.map(async ([serverName, serverConfig]) => {
