@@ -50,12 +50,23 @@ export interface ToolCall {
   };
 }
 
+/**
+ * Token counts reported by the backend for a single completion. All fields are optional:
+ * providers (or backends) that don't report usage leave them absent, and callers fall
+ * back to character-based estimation. Values are the provider's own numbers — never a guess.
+ */
+export interface TokenUsage {
+  promptTokens?: number;      // tokens in the request (context as seen by the backend)
+  completionTokens?: number;  // tokens generated (includes reasoning + tool-call JSON)
+}
+
 export interface ChatCompletionWithTools {
   content: string;        // text portion of the response (may be empty)
   toolCalls: ToolCall[];  // structured tool calls (may be empty)
   finishReason: string;   // "stop" | "tool_calls" | "length" | ...
   reasoning?: string;     // model reasoning (reasoning_content) — present for reasoning models
                           // even when content is empty (e.g. qwen3.6 in tool-calling mode)
+  usage?: TokenUsage;     // real token counts from the backend, when reported (see above)
 }
 
 /** A live fragment surfaced while streaming a tool-calling completion (see streamChatWithTools). */
