@@ -148,6 +148,8 @@ describe("openaiStreamChatWithTools (SSE end-to-end, mocked fetch)", () => {
       'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","fun',
       'ction":{"name":"read_files","arguments":"{}"}}]}}]}\n',
       'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n',
+      // Final usage-only chunk (choices empty) — what OpenAI sends with stream_options.include_usage.
+      'data: {"usage":{"prompt_tokens":120,"completion_tokens":45},"choices":[]}\n',
       "data: [DONE]\n",
     ];
     globalThis.fetch = vi.fn(async () => sseResponse(chunks)) as unknown as typeof fetch;
@@ -176,6 +178,34 @@ describe("openaiStreamChatWithTools (SSE end-to-end, mocked fetch)", () => {
     expect(result.finishReason).toBe("tool_calls");
     expect(result.toolCalls).toHaveLength(1);
     expect(result.toolCalls[0].function.name).toBe("read_files");
+    // Usage from the final chunk survives even though its choices array was empty.
+    expect(result.usage).toEqual({ promptTokens: 120, completionTokens: 45 });
+  });
+
+  it("requests stream_options.include_usage on the wire (and can strip it via omitParams)", async () => {
+    const chunks = [
+      'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n',
+      "data: [DONE]\n",
+    ];
+    let sentBody: Record<string, unknown> = {};
+    globalThis.fetch = vi.fn(async (_url: unknown, init: { body: string }) => {
+      sentBody = JSON.parse(init.body);
+      return sseResponse(chunks);
+    }) as unknown as typeof fetch;
+
+    await openaiStreamChatWithTools(
+      { baseUrl: "http://x/v1", headers: {}, model: "m", messages: [], tools: [], timeoutMs: 1000 },
+      () => {},
+    );
+    expect(sentBody).toHaveProperty("stream_options", { include_usage: true });
+
+    // A backend that 400s on stream_options can strip it — usage then just stays absent.
+    sentBody = {};
+    await openaiStreamChatWithTools(
+      { baseUrl: "http://x/v1", headers: {}, model: "m", messages: [], tools: [], timeoutMs: 1000, omitParams: ["stream_options"] },
+      () => {},
+    );
+    expect(sentBody).not.toHaveProperty("stream_options");
   });
 
   it("throws on a non-ok response", async () => {
@@ -259,5 +289,56 @@ describe("openaiCompleteChatWithTools request body — omitParams (mocked fetch)
     expect(body).toHaveProperty("model", "m");
     expect(body).toHaveProperty("tool_choice", "auto");
     expect(body).toHaveProperty("max_tokens");
+  });
+
+  it("omits stream_options from the NON-streaming body (usage comes in the response, not a request flag)", async () => {
+    const body = await capture();
+    expect(body).not.toHaveProperty("stream_options");
+  });
+});
+
+describe("openaiCompleteChatWithTools usage capture (mocked fetch)", () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  async function call(body: Record<string, unknown>) {
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify(body), { status: 200 })) as unknown as typeof fetch;
+    return openaiCompleteChatWithTools({
+      baseUrl: "http://x/v1",
+      headers: {},
+      model: "m",
+      messages: [],
+      tools: [],
+      timeoutMs: 1000,
+    });
+  }
+
+  it("maps the backend usage block to TokenUsage", async () => {
+    const r = await call({
+      choices: [{ message: { content: "hi" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 150, completion_tokens: 30 },
+    });
+    expect(r.usage).toEqual({ promptTokens: 150, completionTokens: 30 });
+  });
+
+  it("leaves usage absent when the backend reports none", async () => {
+    const r = await call({ choices: [{ message: { content: "hi" }, finish_reason: "stop" }] });
+    expect(r.usage).toBeUndefined();
+  });
+
+  it("drops invalid counts (negative / non-finite) and keeps the valid half", async () => {
+    const r = await call({
+      choices: [{ message: { content: "hi" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: -5, completion_tokens: 12 },
+    });
+    expect(r.usage).toEqual({ completionTokens: 12 });
+
+    const allBad = await call({
+      choices: [{ message: { content: "hi" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: Number.NaN, completion_tokens: -1 },
+    });
+    expect(allBad.usage).toBeUndefined();
   });
 });

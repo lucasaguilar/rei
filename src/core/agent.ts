@@ -1,4 +1,4 @@
-import type { ModelProvider } from "../providers/model-provider.js";
+import type { ModelProvider, TokenUsage } from "../providers/model-provider.js";
 import {
   resolveModelForMode,
   createProviderForMode,
@@ -102,6 +102,15 @@ export class Agent {
   private currentTurnId = "";
   /** Hardware warnings collected during prepareSessionForTurn — emitted at stream start. */
   private pendingHardwareWarnings: string[] = [];
+  /** Token usage reported by the backend for the LAST completed turn (aggregated across its model
+   *  calls). The CLI reads it after the stream ends to show REAL token counts instead of the
+   *  chars/4 estimate. Reset at each turn start; undefined when the provider doesn't report usage. */
+  private lastTurnUsage?: TokenUsage;
+
+  /** Backend-reported token counts for the last turn, when available (else undefined → estimate). */
+  getLastTurnUsage(): TokenUsage | undefined {
+    return this.lastTurnUsage;
+  }
   /** Registry of connected MCP servers — populated lazily via connectMcp(). */
   public readonly mcpRegistry: McpRegistry;
 
@@ -152,6 +161,8 @@ export class Agent {
     this.logger.startTurn();
     this.logger.setCorrelationId(this.correlationId);
     this.currentTurnId = this.logger.getTurnId();
+    // A new turn starts with no backend-reported usage — the provider may not report any.
+    this.lastTurnUsage = undefined;
     // Resolve this turn's per-model tuning (rei.config.json) ONCE; the config resolvers
     // (getContextWindow / resolveAgentSampling / reasoning_effort) read it. See model-config-spec.md.
     setActiveModelTuning(
@@ -235,6 +246,8 @@ export class Agent {
       }
 
       const outcome = await turnPromise;
+      // Stash backend-reported usage for this turn — the CLI reads it after the stream ends.
+      this.lastTurnUsage = outcome.usage;
 
       // Si hay parches válidos, aplicarlos directamente
       if (
@@ -410,6 +423,7 @@ export class Agent {
       }
 
       const outcome = await turnPromise;
+      this.lastTurnUsage = outcome.usage;
       session.messages.push({
         role: "assistant",
         content: cleanResponseForHistory(outcome.response),

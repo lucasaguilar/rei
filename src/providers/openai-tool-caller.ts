@@ -1,9 +1,11 @@
 import type { ChatMessage } from "../chat/types.js";
+import { sanitizeOpenAIUsage, type RawOpenAIUsage } from "./token-usage.js";
 import type {
   ToolDefinition,
   ToolCall,
   ChatCompletionWithTools,
   CompletionOptions,
+  TokenUsage,
   ToolStreamDelta,
 } from "./model-provider.js";
 import {
@@ -44,6 +46,8 @@ interface OpenAIToolCallResponse {
     };
     finish_reason?: string;
   }>;
+  /** OpenAI-standard usage block (present in non-stream responses and, with `stream_options.include_usage`, the final stream chunk). */
+  usage?: RawOpenAIUsage;
   error?: { message?: string };
 }
 
@@ -133,6 +137,9 @@ function buildToolsRequestBody(
     ...(sampling.topK !== undefined ? { top_k: sampling.topK } : {}),
     max_tokens: maxTokens,
     stream,
+    // Real token counts on the streaming path (OpenAI sends a final usage-only chunk).
+    // Backends that 400 on this field can strip it via omitParams.
+    ...(stream ? { stream_options: { include_usage: true } } : {}),
     ...(options?.reasoningEffort
       ? { reasoning_effort: options.reasoningEffort }
       : {}),
@@ -207,12 +214,15 @@ export async function openaiCompleteChatWithTools(
     (typeof msg?.reasoning === "string" ? msg.reasoning : "") ||
     "";
 
+  const usage = sanitizeOpenAIUsage(data.usage);
+
   return {
     content,
     toolCalls,
     finishReason:
       choice?.finish_reason ?? (toolCalls.length > 0 ? "tool_calls" : "stop"),
     ...(reasoning ? { reasoning } : {}),
+    ...(Object.keys(usage).length > 0 ? { usage } : {}),
   };
 }
 
@@ -242,10 +252,16 @@ export class ToolCallAccumulator {
   private contentBuf = "";
   private reasoningBuf = "";
   private finishReason = "";
+  private usage: TokenUsage = {};
   private readonly calls = new Map<
     number,
     { id: string; name: string; args: string }
   >();
+
+  /** Records the backend-reported usage (from the final stream chunk); no-op when it reports nothing valid. */
+  setUsage(raw?: RawOpenAIUsage): void {
+    this.usage = sanitizeOpenAIUsage(raw);
+  }
 
   /** Process one streamed choice; returns the live fragment to surface (empty strings if none). */
   push(
@@ -299,6 +315,7 @@ export class ToolCallAccumulator {
       finishReason:
         this.finishReason || (toolCalls.length > 0 ? "tool_calls" : "stop"),
       ...(this.reasoningBuf ? { reasoning: this.reasoningBuf } : {}),
+      ...(Object.keys(this.usage).length > 0 ? { usage: this.usage } : {}),
     };
   }
 }
@@ -356,6 +373,7 @@ export async function openaiStreamChatWithTools(
 
       let json: {
         error?: { message?: string };
+        usage?: RawOpenAIUsage;
         choices?: Array<{ delta?: StreamChoiceDelta; finish_reason?: string | null }>;
       };
       try {
@@ -368,6 +386,9 @@ export async function openaiStreamChatWithTools(
           `Tool streaming error: ${json.error.message ?? JSON.stringify(json.error)}`,
         );
       }
+      // With stream_options.include_usage, OpenAI sends the counts in a FINAL chunk whose
+      // choices array is empty — capture it before skipping choice-less chunks.
+      if (json.usage) acc.setUsage(json.usage);
       const choice = json.choices?.[0];
       if (!choice) continue;
       const frag = acc.push(choice.delta ?? {}, choice.finish_reason);

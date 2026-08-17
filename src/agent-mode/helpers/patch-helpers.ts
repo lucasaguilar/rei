@@ -1,6 +1,7 @@
 import * as fs from "fs/promises";
 import type { AgentSREdit } from "../../contracts/agent-interaction.types.js";
 import type { AgentLogger } from "../../core/logger.js";
+import type { TokenUsage } from "../../providers/model-provider.js";
 import { applyCreateFileBatchFS } from "../../tools/patch-applier.js";
 import {
   applyVirtualBatch,
@@ -28,6 +29,8 @@ export interface ExecutionResult {
    * "not failed && has patches" heuristic.
    */
   verified?: boolean;
+  /** Aggregated token usage across all model calls in this turn (max prompt / sum completion). */
+  usage?: TokenUsage;
 }
 
 /** Marker prefixing the "N file(s) created" summary appended to a turn response. */

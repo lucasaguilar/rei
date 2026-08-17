@@ -301,17 +301,28 @@ export async function handleInputTurn(
         : Math.max(0, firstTokenTime - startTime);
     const generationMs = Math.max(1, endTime - firstTokenTime);
 
-    // Approximate token counts (1 token ~= 4 chars in mixed code/text prompts)
-    const inputMsgs = session.messages.slice(0, -1);
-    const inputChars = inputMsgs.reduce((acc, m) => acc + m.content.length, 0);
-    const historyTokens = Math.round(inputChars / 4);
-    // The function-calling tools array (built-in + MCP schemas) is sent on every agent
-    // request but is NOT in the message history — include it so the gauge reflects real
-    // context usage. Large MCP servers can occupy a big share of the window invisibly.
-    const toolsTokens = agent.estimateActiveToolsTokens(session.mode);
-    const sentTokens = historyTokens + toolsTokens;
-
-    const recTokens = Math.max(1, Math.round(totalOutputChars / 4));
+    // Token counts: prefer the backend's REAL usage (aggregated across the turn's model calls);
+    // fall back to the chars/4 estimate when the provider doesn't report it.
+    const realUsage = agent.getLastTurnUsage();
+    let sentTokens: number;
+    let recTokens: number;
+    if (realUsage) {
+      // Real numbers from the backend — no `~`, and the tools array is already counted in
+      // promptTokens (the backend tokenized it), so no separate tools estimate is added.
+      sentTokens = realUsage.promptTokens ?? 0;
+      recTokens = realUsage.completionTokens ?? Math.max(1, Math.round(totalOutputChars / 4));
+    } else {
+      // Approximate token counts (1 token ~= 4 chars in mixed code/text prompts)
+      const inputMsgs = session.messages.slice(0, -1);
+      const inputChars = inputMsgs.reduce((acc, m) => acc + m.content.length, 0);
+      const historyTokens = Math.round(inputChars / 4);
+      // The function-calling tools array (built-in + MCP schemas) is sent on every agent
+      // request but is NOT in the message history — include it so the gauge reflects real
+      // context usage. Large MCP servers can occupy a big share of the window invisibly.
+      const toolsTokens = agent.estimateActiveToolsTokens(session.mode);
+      sentTokens = historyTokens + toolsTokens;
+      recTokens = Math.max(1, Math.round(totalOutputChars / 4));
+    }
 
     // Speed = decoded tokens (visible + thinking) / generation time.
     // `generationMs` is clamped to >= 1ms so single-chunk turns never produce Infinity.
@@ -331,8 +342,10 @@ export async function handleInputTurn(
     );
     if (gauge) actions.pushTranscript(`\n${gauge}`);
 
+    // `~` marks estimated counts; real backend-reported numbers are shown bare.
+    const approx = realUsage ? "" : "~";
     actions.pushTranscript(
-      `${gauge ? "" : "\n"}\x1b[90m⏱️  Prep: ${(prepMs / 1000).toFixed(2)}s | TTFT(model): ${(ttftMs / 1000).toFixed(2)}s | Speed: ${speedText} | Tokens: ~${sentTokens} tok in, ~${recTokens} tok out\x1b[0m`,
+      `${gauge ? "" : "\n"}\x1b[90m⏱️  Prep: ${(prepMs / 1000).toFixed(2)}s | TTFT(model): ${(ttftMs / 1000).toFixed(2)}s | Speed: ${speedText} | Tokens: ${approx}${sentTokens} tok in, ${approx}${recTokens} tok out\x1b[0m`,
     );
     actions.pushTranscript("");
   } catch (err: unknown) {

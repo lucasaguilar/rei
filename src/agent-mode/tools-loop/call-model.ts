@@ -91,6 +91,7 @@ export async function callModel(params: {
     toolCalls: result.toolCalls.map((tc) => tc.function.name),
     contentPreview: result.content.slice(0, 120),
     reasoningPreview: result.reasoning?.slice(0, 120),
+    ...(result.usage ? { usage: result.usage } : {}),
   });
 
   // Surface the model's reasoning live. In tool-calling turns, qwen3.6 puts its narration in

@@ -1,7 +1,8 @@
 /** Agent mode generator using structured function/tool calling (provider must implement
  *  completeChatWithTools; falls back to the XML-based generator otherwise). */
 import type { ChatMessage } from "../chat/types.js";
-import type { ModelProvider } from "../providers/model-provider.js";
+import type { ModelProvider, TokenUsage } from "../providers/model-provider.js";
+import { mergeTurnUsage } from "../providers/token-usage.js";
 import type { AgentLogger } from "../core/logger.js";
 import type { McpRegistry } from "../tools/mcp/mcp-registry.js";
 import { mcpToolsToDefinitions } from "../contracts/tool-definitions.js";
@@ -129,6 +130,10 @@ export async function executeAgentTurnWithTools(params: {
   // the native tool path otherwise only reports creation back to the model.
   const createdFiles: string[] = [];
 
+  // Token usage aggregated across this turn's model calls (max prompt / sum completion).
+  // Attached to the final ExecutionResult so the CLI can show REAL token counts.
+  let turnUsage: TokenUsage | undefined;
+
   // run_command loop-guard: command → times executed. The dispatcher blocks an exact repeat (no
   // progress — the classic find/grep loop). Cleared after a turn that edits, so a legit post-edit
   // re-verification (`npx tsc --noEmit`) can run again.
@@ -177,6 +182,10 @@ export async function executeAgentTurnWithTools(params: {
   // REI_EDIT_MODE=sandbox validates the cumulative tree per edit, persisting only green state (heavier).
   const directMode = process.env.REI_EDIT_MODE !== "sandbox";
 
+  // Attaches the turn's aggregated token usage to a final result (no-op when none reported).
+  const attachUsage = (r: ExecutionResult): ExecutionResult =>
+    turnUsage ? { ...r, usage: turnUsage } : r;
+
   // Finalize with whatever was gathered (queued edits + one final verify); reused by turn-limit + loop-guard abandon.
   const finalizeAtLimit = () =>
     buildTurnLimitOutcome({
@@ -188,7 +197,7 @@ export async function executeAgentTurnWithTools(params: {
       virtualEdits,
       firstTurnExplanation,
       appendCreatedSummary,
-    });
+    }).then(attachUsage);
 
   while (loopCount < MAX_TURNS) {
     loopCount++;
@@ -209,6 +218,9 @@ export async function executeAgentTurnWithTools(params: {
         onChunk,
       });
 
+      // Aggregate backend-reported usage for the turn (no-op when the provider doesn't report it).
+      if (result.usage) turnUsage = mergeTurnUsage(turnUsage, result.usage);
+
       // Truncated mid-output with no tool call yet — hit the output-token cap before acting.
       // Continue the partial output back into the loop (bounded) so its tool calls get processed,
       // or finish honestly once the continuation budget is exhausted.
@@ -224,7 +236,7 @@ export async function executeAgentTurnWithTools(params: {
           firstTurnExplanation,
           appendCreatedSummary,
         });
-        if (outcome.action === "finalize") return outcome.result;
+        if (outcome.action === "finalize") return attachUsage(outcome.result);
         currentMessages = outcome.messages;
         truncationContinuations = outcome.truncationContinuations;
         continue;
@@ -261,7 +273,7 @@ export async function executeAgentTurnWithTools(params: {
           createdFiles,
           appendCreatedSummary,
         });
-        if (outcome.action === "finalize") return outcome.result;
+        if (outcome.action === "finalize") return attachUsage(outcome.result);
         currentMessages = outcome.messages;
         formatCorrections = outcome.formatCorrections;
         verifyRetries = outcome.verifyRetries;
