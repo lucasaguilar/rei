@@ -14,7 +14,7 @@ import { scanWorkspace } from "./workspace/workspace-scanner.js";
 import { generateRepoMap } from "./tools/repo-map-generator.js";
 import { startIndexingWorker, hasRagIndex } from "./context/rag/rag-indexer.js";
 
-initTelemetry();
+await initTelemetry();
 
 const PORT = process.env.REI_SERVER_PORT || 3000;
 const WORKSPACE_PATH = process.env.REI_WORKSPACE_PATH || getDefaultWorkspace();

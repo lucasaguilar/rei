@@ -13,6 +13,7 @@
  */
 
 import { Laminar } from "@lmnr-ai/lmnr";
+import * as net from "node:net";
 
 let initialized = false;
 
@@ -26,6 +27,24 @@ export function resetTelemetry(): void {
   initialized = false;
 }
 
+/** Best-effort TCP reachability probe (mirrors the rei-bench harness). Without it, a
+ *  down/unreachable Laminar collector makes the OTLP gRPC exporter throw ECONNREFUSED on
+ *  EVERY span export. The collector is optional, so we skip init when it can't be reached. */
+function canConnect(host: string, port: number, timeoutMs = 600): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    const finish = (ok: boolean) => {
+      socket.destroy();
+      resolve(ok);
+    };
+    socket.setTimeout(timeoutMs);
+    socket.once("connect", () => finish(true));
+    socket.once("timeout", () => finish(false));
+    socket.once("error", () => finish(false));
+    socket.connect(port, host);
+  });
+}
+
 /**
  * Bootstrap Laminar tracing. Idempotent — safe to call from multiple entry points.
  * If `LMNR_PROJECT_API_KEY` is absent, telemetry is disabled (warn + no-op) so rei
@@ -34,7 +53,7 @@ export function resetTelemetry(): void {
  * Respects `REI_TELEMETRY_DISABLED=true` to skip initialization entirely (useful when
  * Laminar is not installed locally and its import-time warnings are undesirable).
  */
-export function initTelemetry(): void {
+export async function initTelemetry(): Promise<void> {
   if (initialized) return;
 
   // Explicit opt-out: skip Laminar entirely, no imports, no warnings.
@@ -50,11 +69,24 @@ export function initTelemetry(): void {
     return;
   }
 
+  // Reachability pre-check: skip init (instead of flooding ECONNREFUSED on every span export)
+  // when the Laminar collector isn't up. Host from LMNR_BASE_URL, port from LMNR_GRPC_PORT.
+  const host = (process.env.LMNR_BASE_URL ?? "http://localhost")
+    .replace(/^https?:\/\//, "")
+    .replace(/[/:].*$/, "");
+  const grpcPort = Number(process.env.LMNR_GRPC_PORT ?? 8001);
+  if (!(await canConnect(host, grpcPort))) {
+    console.warn(
+      `[telemetry] Laminar not reachable at ${host}:${grpcPort} — tracing disabled for this run.`,
+    );
+    return;
+  }
+
   Laminar.initialize({
     projectApiKey,
     baseUrl: process.env.LMNR_BASE_URL ?? "http://localhost",
     httpPort: Number(process.env.LMNR_HTTP_PORT ?? 8000),
-    grpcPort: Number(process.env.LMNR_GRPC_PORT ?? 8001),
+    grpcPort,
     disableBatch: true, // ⇒ SimpleSpanProcessor under the hood (plan §3)
     // Disable Laminar's automatic SDK/fetch instrumentation: rei's telemetry is fully
     // manual (IP-1/IP-4, `observe`-based spans). Without this, Laminar auto-instruments the

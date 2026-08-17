@@ -2,7 +2,7 @@ import "./load-env.js"; // MUST be first: loads workspace .env with override (se
 import { initTelemetry } from "./telemetry/init.js";
 import { runCli } from "./cli/run-cli.js";
 
-initTelemetry();
+await initTelemetry();
 
 const args = process.argv.slice(2);
 await runCli(args);
