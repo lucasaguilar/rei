@@ -31,6 +31,7 @@ import {
   startIndexingWorker,
   hasRagIndex,
 } from "../context/rag/rag-indexer.js";
+import { isRagEnabled } from "../context/rag/rag-enabled.js";
 import {
   resolveStartupSession,
   mostRecentSessionId,
@@ -348,7 +349,7 @@ export async function runChat(
   const startupGauge = renderStartupGauge(agent, session, workspacePath);
   if (startupGauge) pushTranscript(startupGauge);
 
-  if (autoIndex && !hasRagIndex(workspacePath)) {
+  if (autoIndex && isRagEnabled() && !hasRagIndex(workspacePath)) {
     pushTranscript(
       "[RAG] First run detected — starting background indexing...",
     );

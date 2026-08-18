@@ -7,6 +7,7 @@ import {
 } from "../../tools/repo-map-generator.js";
 import { VectorStore } from "../../context/rag/vector-store.js";
 import { generateEmbedding } from "../../context/rag/embedder.js";
+import { isRagEnabled } from "../../context/rag/rag-enabled.js";
 import {
   chunkRepoMap,
   chunkRepoMapString,
@@ -27,8 +28,8 @@ export async function ensureRepoMapIndexed(params: {
 }): Promise<string> {
   const { workspacePath, vectorStore, logger, onStatus } = params;
 
-  if (process.env.REI_SKIP_RAG) {
-    logger.logInfo("Skipping RAG indexing due to REI_SKIP_RAG env var");
+  if (!isRagEnabled()) {
+    logger.logInfo("Skipping RAG indexing (disabled by default; opt in with REI_ENABLE_RAG=1)");
     return await generateRepoMap(workspacePath); // Still generate the map for other purposes like code completion.
   }
 

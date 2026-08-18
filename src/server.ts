@@ -13,6 +13,7 @@ import {
 import { scanWorkspace } from "./workspace/workspace-scanner.js";
 import { generateRepoMap } from "./tools/repo-map-generator.js";
 import { startIndexingWorker, hasRagIndex } from "./context/rag/rag-indexer.js";
+import { isRagEnabled } from "./context/rag/rag-enabled.js";
 
 await initTelemetry();
 
@@ -33,8 +34,8 @@ async function startServer() {
   //const repoMap = generateRepoMap(WORKSPACE_PATH);
   //console.log(`📁 Repo map generated with ${repoMap.length} entries.`);
 
-  // Iniciar RAG en background si es la primera vez
-  if (!hasRagIndex(WORKSPACE_PATH)) {
+  // Iniciar RAG en background si es la primera vez (solo si RAG está habilitado — OFF por default)
+  if (isRagEnabled() && !hasRagIndex(WORKSPACE_PATH)) {
     console.log("[RAG] First run detected — starting background indexing...");
     startIndexingWorker(WORKSPACE_PATH, {
       onProgress: (indexed, total) => {

@@ -50,6 +50,7 @@ import {
   ensureRepoMapIndexed,
   initWatcher,
 } from "./helpers/repo-map-indexer.js";
+import { isRagEnabled } from "../context/rag/rag-enabled.js";
 import {
   stripAllActionTags,
   CREATED_FILES_MARKER,
@@ -507,7 +508,7 @@ export class Agent {
         logger: this.logger,
         onStatus,
       });
-      if (!process.env.REI_SKIP_RAG) {
+      if (isRagEnabled()) {
         this.initWatcher(); // init watcher only if RAG is enabled
       }
     }
@@ -521,7 +522,7 @@ export class Agent {
       // repositorySkeletonMap = relevantMap
       //   ? `### RELEVANT REPOSITORY SKELETON MAP\n\n${relevantMap}`
       //   : undefined;
-      if (process.env.REI_SKIP_RAG) {
+      if (!isRagEnabled()) {
         // No vector store to query — skip semantic retrieval.
         // The flat repo map is still in the system prompt.
         repositorySkeletonMap = undefined;
