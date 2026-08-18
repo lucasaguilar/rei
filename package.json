@@ -49,12 +49,16 @@
     "marked": "^15.0.12",
     "marked-terminal": "^7.3.0",
     "pdf-parse": "^2.4.5",
-    "sharp": "^0.32.6",
+    "sharp": "^0.35.3",
     "tree-sitter-wasms": "^0.1.13",
     "ts-morph": "^27.0.2",
     "tsx": "^4.19.2",
     "web-tree-sitter": "^0.25.0",
     "wrap-ansi": "^9.0.2"
+  },
+  "overrides": {
+    "sharp": "$sharp",
+    "protobufjs": "^7.6.5"
   },
   "devDependencies": {
     "@types/marked-terminal": "^6.1.1",

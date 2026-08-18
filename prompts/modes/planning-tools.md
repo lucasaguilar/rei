@@ -40,6 +40,7 @@ Rules:
 - Number stages sequentially starting from 1.
 - Do NOT use "Step", "Etapa", "Paso", or any other word — always "Stage".
 - Each stage must mention the files it will modify so `/runplan` can detect them.
+- **When you REVISE or CORRECT the plan, re-output the COMPLETE plan (every stage), never just the changed part.** rei captures the plan from your latest full plan message, and `/saveplan` / `/runplan` use that — a partial edit (e.g. "change Stage 2 to…") would be saved/run INSTEAD of the whole plan. Every revision must be self-contained: repeat all stages, with the change applied in place.
 - If the plan has no discrete stages (e.g. it is just analysis or a single action), you may use free-form prose.
 
 ## Project bootstrapping — REQUIRED stages for new projects

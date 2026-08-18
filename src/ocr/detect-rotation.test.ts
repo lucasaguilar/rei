@@ -2,9 +2,11 @@ import { describe, it, expect } from "vitest";
 import { detectRotation, type Rotation } from "./detect-rotation.js";
 import type { TextAxis } from "./text-axis.js";
 
-// A valid 1x1 PNG so the real rotateDataUrl (sharp) can rotate the non-zero candidates.
+// A valid 4x4 PNG so the real rotateDataUrl (sharp) can rotate the non-zero candidates.
+// (The old 1x1 fixture decoded fine on libpng < 1.6.40 but libvips 8.18+ / sharp 0.35 rejects
+// it with "libpng read error" — real rendered pages are never 1x1, so this is fixture-only.)
 const TINY_PNG =
-  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADklEQVQImWOoQAIMxHEASVIWgSs3xboAAAAASUVORK5CYII=";
 
 const COHERENT =
   "Los ataques cuerpo a cuerpo te permiten atacar a un objetivo que esté a tu alcance con un arma.";
