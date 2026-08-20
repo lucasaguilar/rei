@@ -99,10 +99,29 @@ function saveLast(data) {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Returns installed Ollama models from `ollama list`.
- * Falls back to PROVIDER_MODELS.ollama if the command fails or returns nothing.
+ * Returns Ollama models.
+ * If OLLAMA_BASE_URL is set, queries that (possibly remote) server over the OpenAI-compat
+ * /v1/models endpoint — mirroring the mtplx/llmstudio path — so the wizard reflects THAT host
+ * instead of only the local daemon. Sends OLLAMA_API_KEY as a bearer token if present.
+ * Falls back to the local `ollama list` CLI, then to PROVIDER_MODELS.ollama.
  */
-function getOllamaModels() {
+async function getOllamaModels() {
+    const configuredUrl = process.env.OLLAMA_BASE_URL;
+    if (configuredUrl) {
+        try {
+            const raw = configuredUrl.replace(/\/+$/, '');
+            const base = raw.replace(/\/v1$/i, '');
+            const key = process.env.OLLAMA_API_KEY;
+            const res = await fetch(`${base}/v1/models`, key ? { headers: { Authorization: `Bearer ${key}` } } : undefined);
+            if (res.ok) {
+                const data = await res.json();
+                const models = (data.data || []).map(m => m.id).filter(Boolean);
+                if (models.length > 0) return models;
+            }
+        } catch {
+            // Remote unreachable — fall through to the local CLI below.
+        }
+    }
     try {
         const output = execSync('ollama list', { encoding: 'utf8', timeout: 5000 });
         const models = output.trim().split('\n')
@@ -127,7 +146,9 @@ async function getLlmStudioModels() {
         // makes ONE url value work for both the wizard AND the provider, with or without /v1.
         const raw = (process.env.LLM_STUDIO_BASE_URL || 'http://localhost:1234').replace(/\/+$/, '');
         const base = raw.replace(/\/v1$/i, '');
-        const res = await fetch(`${base}/v1/models`);
+        // Send the API key if the server needs one (some OpenAI-compat backends 401 without it).
+        const key = process.env.LLM_STUDIO_API_KEY;
+        const res = await fetch(`${base}/v1/models`, key ? { headers: { Authorization: `Bearer ${key}` } } : undefined);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         const models = (data.data || []).map(m => m.id).filter(Boolean);
@@ -167,9 +188,12 @@ function getEnvPrefix(provider) {
  */
 async function getMtplxModels() {
     try {
-        const raw = (process.env.MTPLX_BASE_URL || 'http://localhost:8000').replace(/\/+$/, '');
+        const raw = (process.env.MTPLX_BASE_URL || 'http://localhost:8000' || 'http://192.168.68.113:8000' ).replace(/\/+$/, '');
         const base = raw.replace(/\/v1$/i, '');
-        const res = await fetch(`${base}/v1/models`);
+        // MTPLX servers require the API key even to list models (→ 401 otherwise).
+        // Send it so the wizard mirrors what the real MtplxProvider does.
+        const key = process.env.MTPLX_API_KEY;
+        const res = await fetch(`${base}/v1/models`, key ? { headers: { Authorization: `Bearer ${key}` } } : undefined);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         const models = (data.data || []).map(m => m.id).filter(Boolean);
@@ -192,7 +216,7 @@ async function pickProvider(message, initialValue) {
 async function pickModel(provider, message, initialModel) {
     let baseList;
     if (provider === 'ollama') {
-        baseList = getOllamaModels();
+        baseList = await getOllamaModels();
     } else if (provider === 'llmstudio') {
         baseList = await getLlmStudioModels();
     } else if (provider === 'mtplx') {
