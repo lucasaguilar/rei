@@ -26,6 +26,28 @@ function wrapDiffForMarkdown(text: string): string {
   return `${lead}**Archivo:** ${file}\n\`\`\`diff\n${diff}\n\`\`\`\n`;
 }
 
+/**
+ * Normalizes an OpenAI message `content` to a plain string. Clients differ: Continue sends a
+ * string, while Cline (and OpenAI's multimodal format) send an array of parts
+ * (`[{ type: "text", text: "…" }, …]`). Without this, `content.trim()` throws
+ * "prompt.trim is not a function". Non-text parts (images) are ignored.
+ */
+function extractText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) =>
+        typeof part === "string"
+          ? part
+          : part && typeof (part as { text?: unknown }).text === "string"
+            ? (part as { text: string }).text
+            : "",
+      )
+      .join("");
+  }
+  return "";
+}
+
 export class ChatHandler {
   constructor(
     private agent: Agent,
@@ -37,8 +59,14 @@ export class ChatHandler {
     onChunk: (chunk: string) => void,
   ): Promise<string> {
     const messages = body.messages || [];
-    const prompt =
-      messages.length > 0 ? messages[messages.length - 1].content : "";
+    // Use the latest user turn (clients append system/assistant/tool messages too), and
+    // normalize its content to a string — Cline sends content as an array of parts.
+    const lastUser = [...messages]
+      .reverse()
+      .find((m: { role?: string }) => m?.role === "user");
+    const prompt = extractText(
+      (lastUser ?? messages[messages.length - 1])?.content,
+    );
     const promptTrimmed = prompt.trim();
 
     if (!promptTrimmed) throw new Error("No prompt provided.");
