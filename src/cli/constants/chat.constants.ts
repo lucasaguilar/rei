@@ -75,6 +75,7 @@ export const COMMANDS: Array<{
   { command: "/tree", description: "list session turns; /tree prune <n> excludes a detour from context, /tree keep <n> restores it" },
   { command: "/role", description: "activate a role posture (e.g. /role auditor); /role off to clear" },
   { command: "/roles", description: "list available roles (auditor, …)" },
+  { command: "/mcp", description: "list MCP servers; /mcp on|off <name> to toggle one live (or all)" },
   { command: "/session", description: "show basic session info (use /session info for full details)" },
   { command: "/session info", description: "show full session info with token usage and repo summary" },
   { command: "/session list", description: "list archived sessions" },

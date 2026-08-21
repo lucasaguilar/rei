@@ -128,6 +128,7 @@ export class ChatHandler {
         session,
         this.workspacePath,
         this.agent.provider,
+        { mcpRegistry: this.agent.mcpRegistry },
       );
 
       if (cmdResult.success) {

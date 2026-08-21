@@ -31,18 +31,25 @@ import * as path from "node:path";
  * }
  * ```
  */
+/** Common fields shared by every transport. `enabled: false` defines a server without
+ *  auto-connecting it at startup — toggle it live with `/mcp on <name>`. Omitted = enabled. */
+interface McpCommonConfig {
+  /** Auto-connect at startup. Defaults to true when omitted. */
+  enabled?: boolean;
+}
+
 export type McpConnectionConfig =
-  | {
+  | (McpCommonConfig & {
       type: "stdio";
       command: string;
       args?: string[];
       env?: Record<string, string>;
-    }
-  | {
+    })
+  | (McpCommonConfig & {
       type: "http";
       url: string;
       headers?: Record<string, string>;
-    };
+    });
 
 export interface ReiConfig {
   mcpServers?: Record<string, McpConnectionConfig>;

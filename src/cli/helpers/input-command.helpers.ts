@@ -95,6 +95,7 @@ export async function handleInputCommand(
     ctx.workspacePath,
     agent.provider,
     {
+      mcpRegistry: agent.mcpRegistry,
       onStatus: (message: string) => {
         actions.pushTranscript(`\x1b[2m${message}\x1b[0m`);
         actions.draw();

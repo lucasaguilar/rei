@@ -1,6 +1,7 @@
 import type { ChatSession } from "./types.js";
 import type { ModelProvider } from "../providers/model-provider.js";
 import type { LiveStatusEvent } from "./commands/command-handler.js";
+import type { McpRegistry } from "../tools/mcp/mcp-registry.js";
 import { dispatchCommand } from "./commands/registry.js";
 
 export interface CommandResult {
@@ -17,6 +18,8 @@ export interface MenuCommandOptions {
   onStatus?: (message: string) => void;
   /** Optional live status callback for long-running operations that need in-place progress (e.g. /index). */
   onLiveStatus?: (event: LiveStatusEvent) => void;
+  /** The active session's MCP registry, so `/mcp` can toggle servers live. */
+  mcpRegistry?: McpRegistry;
 }
 
 export async function processMenuCommand(
@@ -35,6 +38,7 @@ export async function processMenuCommand(
     session,
     workspacePath,
     provider,
+    mcpRegistry: options?.mcpRegistry,
     onStatus: options?.onStatus,
     onLiveStatus: options?.onLiveStatus,
   });

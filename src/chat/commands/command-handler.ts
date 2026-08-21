@@ -1,6 +1,7 @@
 import type { CommandResult } from "../menu-command-processor.js";
 import type { ChatSession } from "../types.js";
 import type { ModelProvider } from "../../providers/model-provider.js";
+import type { McpRegistry } from "../../tools/mcp/mcp-registry.js";
 
 export type { CommandResult };
 
@@ -15,6 +16,9 @@ export interface CommandContext {
   session: ChatSession;
   workspacePath: string;
   provider: ModelProvider;
+  /** The active session's MCP registry — lets `/mcp` toggle servers live. Absent in contexts
+   *  that don't have an agent (rare). */
+  mcpRegistry?: McpRegistry;
   /** Streams live progress to the transcript (for slow commands like /ask-document). */
   onStatus?: (message: string) => void;
   /** Optional live status callback for long-running operations that need in-place progress (e.g. /index). */

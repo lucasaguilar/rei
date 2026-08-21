@@ -27,9 +27,23 @@ interface ConnectedServer {
  *   const tools = registry.getAvailableTools();   // passed to TurnContext
  *   const result = await registry.dispatch("filesystem/readFile", { path: "…" });
  */
+/** One row of `/mcp list`: a configured server and its live state. */
+export interface McpServerStatus {
+  name: string;
+  transport: McpConnectionConfig["type"];
+  /** Auto-connect flag from rei.config.json (enabled !== false). */
+  enabledInConfig: boolean;
+  /** Currently connected in THIS session (reflects runtime /mcp on|off toggles). */
+  connected: boolean;
+  /** Tool count when connected, else 0. */
+  tools: number;
+}
+
 export class McpRegistry {
   private readonly workspacePath: string;
   private servers = new Map<string, ConnectedServer>();
+  /** All servers declared in rei.config.json (connected or not) — the source for /mcp list + toggles. */
+  private configEntries = new Map<string, McpConnectionConfig>();
   private connected = false;
 
   private constructor(workspacePath: string) {
@@ -91,6 +105,12 @@ export class McpRegistry {
    *
    * Safe to call multiple times — subsequent calls are no-ops.
    */
+  /** (Re)reads rei.config.json into `configEntries` — the full set of declared servers. */
+  private loadConfigEntries(): void {
+    const config = loadReiConfig(this.workspacePath);
+    this.configEntries = new Map(Object.entries(config.mcpServers ?? {}));
+  }
+
   async connect(): Promise<void> {
     if (this.connected) return;
 
@@ -98,17 +118,19 @@ export class McpRegistry {
     // return so a second connect() is a true no-op (the docstring promises it).
     this.connected = true;
 
-    const config = loadReiConfig(this.workspacePath);
-    const entries = Object.entries(config.mcpServers ?? {});
+    this.loadConfigEntries();
 
-    if (entries.length === 0) return;
+    // Only auto-connect servers that aren't explicitly disabled. The rest stay declared but off,
+    // ready to be toggled live with `/mcp on <name>`.
+    const toConnect = Array.from(this.configEntries.entries()).filter(
+      ([, cfg]) => cfg.enabled !== false,
+    );
+    if (toConnect.length === 0) return;
 
     await Promise.all(
-      entries.map(async ([serverName, serverConfig]) => {
+      toConnect.map(async ([serverName]) => {
         try {
-          const client = await this.createClient(serverName, serverConfig);
-          const tools = await client.listTools();
-          this.servers.set(serverName, { client, tools });
+          await this.connectServer(serverName);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           console.warn(
@@ -123,8 +145,60 @@ export class McpRegistry {
       .join(", ");
 
     console.log(
-      `[MCP Registry] 🔌 Connected ${this.servers.size}/${entries.length} server(s)${summaries ? `: ${summaries}` : ""}`,
+      `[MCP Registry] 🔌 Connected ${this.servers.size}/${toConnect.length} server(s)${summaries ? `: ${summaries}` : ""}`,
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // Runtime enable/disable (session-scoped — /mcp command). See mcp-commands.ts.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Connects a single declared server on demand and lists its tools. Idempotent (a no-op if already
+   * connected). Its tools become available on the NEXT turn (the agent reads getAvailableTools() live).
+   * @throws if `name` isn't declared in rei.config.json, or the connection/handshake fails.
+   */
+  async connectServer(name: string): Promise<{ tools: number }> {
+    const existing = this.servers.get(name);
+    if (existing) return { tools: existing.tools.length };
+
+    if (this.configEntries.size === 0) this.loadConfigEntries();
+    const config = this.configEntries.get(name);
+    if (!config) {
+      const known = Array.from(this.configEntries.keys()).join(", ") || "none";
+      throw new Error(
+        `No MCP server named "${name}" in rei.config.json. Declared: ${known}.`,
+      );
+    }
+
+    const client = await this.createClient(name, config);
+    const tools = await client.listTools();
+    this.servers.set(name, { client, tools });
+    return { tools: tools.length };
+  }
+
+  /** Disconnects a single server (disposes its transport). Returns false if it wasn't connected. */
+  async disconnectServer(name: string): Promise<boolean> {
+    const entry = this.servers.get(name);
+    if (!entry) return false;
+    await entry.client.dispose();
+    this.servers.delete(name);
+    return true;
+  }
+
+  /** Every declared server + its live state (for `/mcp list`). */
+  listServers(): McpServerStatus[] {
+    if (this.configEntries.size === 0) this.loadConfigEntries();
+    return Array.from(this.configEntries.entries()).map(([name, cfg]) => {
+      const conn = this.servers.get(name);
+      return {
+        name,
+        transport: cfg.type,
+        enabledInConfig: cfg.enabled !== false,
+        connected: !!conn,
+        tools: conn ? conn.tools.length : 0,
+      };
+    });
   }
 
   /**
