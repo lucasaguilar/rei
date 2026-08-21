@@ -15,13 +15,16 @@
 export type NoProduceAction = "abandon" | "nudge" | "continue";
 
 /**
- * Resolve the escalation thresholds. `nudgeAt` = investigate-only turns before the produce nudge
- * (REI_INVESTIGATE_BEFORE_PRODUCE, default 8; 0 disables the whole guard); `bailAt` = a few turns
- * later, finalize instead of burning every turn up to MAX_TURNS.
+ * Resolve the escalation thresholds. `nudgeAt` = investigate-only turns before the produce nudge;
+ * `bailAt` = a few turns later, finalize instead of burning every turn up to MAX_TURNS.
+ *
+ * DISABLED by default (nudgeAt = 0) — the guard counts read-only/MCP tool calls as "investigate-only"
+ * and can prematurely cut off legitimately read-heavy work (e.g. reading a Jira task over MCP, or
+ * exploring a large repo). Re-enable it by setting REI_INVESTIGATE_BEFORE_PRODUCE=<n> (e.g. 8).
  */
 export function produceThresholds(): { nudgeAt: number; bailAt: number } {
   const n = parseInt(process.env.REI_INVESTIGATE_BEFORE_PRODUCE ?? "", 10);
-  const nudgeAt = Number.isFinite(n) && n >= 0 ? n : 8;
+  const nudgeAt = Number.isFinite(n) && n >= 0 ? n : 0; // 0 = off (default)
   return { nudgeAt, bailAt: nudgeAt > 0 ? nudgeAt + 4 : 0 };
 }
 

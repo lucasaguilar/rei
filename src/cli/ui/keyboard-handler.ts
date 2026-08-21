@@ -146,6 +146,20 @@ export class KeyboardHandler {
     const activePalette = actions.getActivePalette();
     const palette = activePalette.items;
 
+    // ESC: if a palette/@-mention overlay is open, just close it; otherwise clear the WHOLE input
+    // draft (discard everything typed, without submitting). Nothing is sent.
+    if (key.name === "escape") {
+      if (palette.length > 0) {
+        state.paletteClosed = true;
+      } else {
+        state.inputBuffer = "";
+        state.inputCursor = 0;
+        state.historyCursor = undefined;
+      }
+      actions.draw();
+      return;
+    }
+
     if (key.name === "up") {
       // Multi-line input: move the cursor UP one visual row (keeping its column) before falling
       // back to history/palette. Only when editing a fresh buffer (not mid-history, no palette) and

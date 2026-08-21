@@ -391,10 +391,10 @@ export async function executeAgentTurnWithTools(params: {
       });
       investigateOnlyTurns = produce.investigateOnlyTurns;
       if (produce.action === "abandon") {
-        emitStatus("⛔  [REI] Demasiada investigación sin producir — cerrando con lo reunido.");
+        emitStatus("⛔  [REI] Too much investigation without producing — wrapping up with what was gathered.");
         return finalizeAtLimit();
       } else if (produce.action === "nudge") {
-        emitStatus("↩️  [REI] Mucha exploración sin producir — pidiéndole que entregue ya.");
+        emitStatus("↩️  [REI] Lots of exploration without producing — asking it to deliver now.");
         currentMessages.push({ role: "user", content: PRODUCE_NOW_MESSAGE });
       }
 
