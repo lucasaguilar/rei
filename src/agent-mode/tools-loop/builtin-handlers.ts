@@ -1,6 +1,9 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { AgentLogger } from "../../core/logger.js";
 import type { ModelProvider } from "../../providers/model-provider.js";
 import { executeCommand, limitCommandOutput } from "../../tools/command-executor.js";
+import { getToolOutput } from "./tool-output-store.js";
 import { searchWeb } from "../../tools/search-tool.js";
 import { getWeather, formatWeatherOutput } from "../../tools/weather-tool.js";
 import type { GitChange } from "../../workspace/git-changes.js";
@@ -31,6 +34,36 @@ function formatGitChanges(changes: GitChange[]): string {
   });
 
   return `\n### 📁 Uncommitted Changes Detected:\n\n${lines.join("\n")}\n`;
+}
+
+/**
+ * save_tool_output → writes a retained tool result's FULL content to a file. The bytes are copied
+ * by the runtime (from the in-memory store), never routed back through the model, so the saved file
+ * is complete even if the model only saw a truncated view. Refuses to write outside the workspace.
+ */
+export function handleSaveToolOutput(
+  args: { path?: unknown; id?: unknown },
+  ctx: { workspacePath: string },
+): string {
+  const dest = String(args.path ?? "").trim();
+  if (!dest) return "ERROR: save_tool_output requires a 'path'.";
+
+  const entry = getToolOutput(args.id ? String(args.id) : undefined);
+  if (!entry) return "ERROR: no prior tool output available to save.";
+
+  const root = path.resolve(ctx.workspacePath);
+  const abs = path.resolve(root, dest);
+  if (abs !== root && !abs.startsWith(root + path.sep)) {
+    return `ERROR: refusing to write outside the workspace: ${dest}`;
+  }
+
+  try {
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, entry.content, "utf8");
+    return `Saved ${entry.content.length} chars from ${entry.tool} → ${dest}`;
+  } catch (err) {
+    return `ERROR: could not write ${dest}: ${err instanceof Error ? err.message : String(err)}`;
+  }
 }
 
 function formatGitStatus(files: string[]): string {

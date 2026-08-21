@@ -56,7 +56,7 @@ export async function runChat(
         createdAt: existing.createdAt,
         summary: existing.summary,
       }
-    : { messages: [], mode: resolveDefaultSessionMode("ask") };
+    : { messages: [], mode: resolveDefaultSessionMode() };
   // Rebuilt after every turn (submitCurrentUserInput): a turn can CREATE files (OCR sidecar writes
   // ocr/*.ocr.md) that must be @-referenceable this session. `let` so getPalette reads the freshest scan.
   let mentionEntries = buildMentionEntries(workspacePath);

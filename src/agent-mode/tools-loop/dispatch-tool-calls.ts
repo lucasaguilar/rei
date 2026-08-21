@@ -11,7 +11,9 @@ import {
   handleAskUser,
   handleRunCommand,
   handleGitChanges,
+  handleSaveToolOutput,
 } from "./builtin-handlers.js";
+import { retainAndMaybeSpill } from "./tool-output-store.js";
 import { nonInteractiveElicit, type ElicitFn } from "../../chat/elicitation.js";
 import { handleDelegate } from "./delegate-handler.js";
 import {
@@ -295,6 +297,16 @@ export async function dispatchToolCalls(
           break;
         }
 
+        // ── save_tool_output (data-plane sink) ───────────────────────
+        case "save_tool_output": {
+          toolResult = handleSaveToolOutput(
+            args as { path?: unknown; id?: unknown },
+            { workspacePath },
+          );
+          toolResultsMap.set(call.id, toolResult);
+          break;
+        }
+
         default: {
           if (call.function.name.startsWith("mcp:") && mcpRegistry) {
             // Strip the "mcp:" namespace prefix added by mcpToolsToDefinitions before
@@ -302,7 +314,14 @@ export async function dispatchToolCalls(
             const qualifiedName = call.function.name.slice(4);
             logger.logInfo(`[tools] mcp: ${qualifiedName}`);
             emitStatus(`🔧  [REI] Tool: ${qualifiedName}`);
-            toolResult = await mcpRegistry.dispatch(qualifiedName, args);
+            // Retain the full result + spill large ones to disk, returning a short receipt to the
+            // model (control plane) instead of the raw bytes (data plane). Prevents a backend like
+            // MTPLX from truncating a big fetched document out of the model's view.
+            toolResult = retainAndMaybeSpill(
+              qualifiedName,
+              await mcpRegistry.dispatch(qualifiedName, args),
+              workspacePath,
+            );
           } else {
             toolResult = `ERROR: Unknown tool "${call.function.name}"`;
             hasToolFailure = true;

@@ -34,13 +34,13 @@ export interface ChatMessage {
 export type SessionMode = "ask" | "planning" | "agent";
 
 /**
- * The mode a FRESH session starts in. Reads `REI_DEFAULT_MODE` (ask|planning|agent); if unset or
- * invalid, uses the caller's `fallback` — so each entry point keeps its own historical default
- * (CLI = ask, server = agent) while a user can force one with the env var (e.g. REI_DEFAULT_MODE=agent).
+ * The mode a FRESH session starts in. Default is "agent" — REI starts ready to act, no config needed.
+ * Override with `REI_DEFAULT_MODE` (ask|planning|agent) if you'd rather start read-only.
  */
-export function resolveDefaultSessionMode(fallback: SessionMode): SessionMode {
+export function resolveDefaultSessionMode(): SessionMode {
   const raw = process.env.REI_DEFAULT_MODE?.trim().toLowerCase();
-  return raw === "ask" || raw === "planning" || raw === "agent" ? raw : fallback;
+  if (raw === "ask" || raw === "planning" || raw === "agent") return raw;
+  return "agent";
 }
 
 export interface ChatSession {

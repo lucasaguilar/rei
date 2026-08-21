@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { CommandHandler, CommandResult } from "./command-handler.js";
-import type { ChatSession } from "../types.js";
+import { resolveDefaultSessionMode, type ChatSession } from "../types.js";
 import {
   archiveCurrentSession,
   currentPath,
@@ -199,7 +199,11 @@ export const sessionCommands: CommandHandler = {
       const customName = sessionNewMatch[1]?.trim();
       const archivedName =
         session.messages.length > 0 ? archiveCurrentSession(workspacePath, customName) : null;
-      const newSession: ChatSession = { messages: [], mode: session.mode };
+      // A new session starts in the default mode (agent), overridable via REI_DEFAULT_MODE.
+      const newSession: ChatSession = {
+        messages: [],
+        mode: resolveDefaultSessionMode(),
+      };
 
       saveSession(workspacePath, newSession.messages, newSession.mode);
       clearCurrentPlan(workspacePath);
@@ -224,7 +228,11 @@ export const sessionCommands: CommandHandler = {
         };
       }
       const archivedName = archiveCurrentSession(workspacePath, customName);
-      const newSession: ChatSession = { messages: [], mode: session.mode };
+      // A new session starts in the default mode (agent), overridable via REI_DEFAULT_MODE.
+      const newSession: ChatSession = {
+        messages: [],
+        mode: resolveDefaultSessionMode(),
+      };
       saveSession(workspacePath, newSession.messages, newSession.mode);
       clearCurrentPlan(workspacePath);
 

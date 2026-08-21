@@ -222,6 +222,34 @@ export const GIT_CHANGES_TOOL: ToolDefinition = {
   },
 };
 
+export const SAVE_TOOL_OUTPUT_TOOL: ToolDefinition = {
+  type: "function",
+  function: {
+    name: "save_tool_output",
+    description:
+      "Write the FULL content of a previous tool's output to a file on disk WITHOUT routing the bytes " +
+      "through you. Use this to persist large fetched content (e.g. a Jira/Confluence document) that " +
+      "would otherwise be truncated — the runtime copies the retained bytes straight to the file, so " +
+      "the saved file is always complete. Call it right after the tool that produced the output.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description:
+            'Destination file path, relative to the workspace (e.g. "task.md" or "docs/JIRA-123.md").',
+        },
+        id: {
+          type: "string",
+          description:
+            "Optional id of the output to save (shown in the tool-output receipt). Defaults to the most recent tool output.",
+        },
+      },
+      required: ["path"],
+    },
+  },
+};
+
 // ── Tool sets ────────────────────────────────────────────────────────────────
 
 /** All tools available in agent mode (editing capabilities). */
@@ -232,6 +260,7 @@ export const AGENT_TOOLS: ToolDefinition[] = [
   REWRITE_FILE_TOOL,
   RUN_COMMAND_TOOL,
   GIT_CHANGES_TOOL,
+  SAVE_TOOL_OUTPUT_TOOL,
 ];
 
 /** Utility tools available in ask/planning modes. */
@@ -253,6 +282,7 @@ export const READONLY_TOOLS: ToolDefinition[] = [
   READ_FILES_TOOL,
   RUN_COMMAND_TOOL,
   GIT_CHANGES_TOOL,
+  SAVE_TOOL_OUTPUT_TOOL,
 ];
 
 /**

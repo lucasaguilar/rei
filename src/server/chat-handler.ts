@@ -90,7 +90,7 @@ export class ChatHandler {
           createdAt: existing.createdAt,
           summary: existing.summary,
         }
-      : { messages: [], mode: resolveDefaultSessionMode("agent") };
+      : { messages: [], mode: resolveDefaultSessionMode() };
 
     // Accumulates everything emitted to the client this request. The helper below
     // applies the same prefix/ANSI cleanup, de-dup and leading-trim used for the
