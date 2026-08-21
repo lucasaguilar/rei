@@ -49,6 +49,9 @@ export type McpConnectionConfig =
       type: "http";
       url: string;
       headers?: Record<string, string>;
+      /** "oauth" → run the MCP OAuth login flow (browser) instead of static headers. Use this for
+       *  servers like Atlassian that require OAuth. Omit for a plain/static-token server. */
+      auth?: "oauth";
     });
 
 export interface ReiConfig {

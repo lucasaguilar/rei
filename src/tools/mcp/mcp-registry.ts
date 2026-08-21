@@ -76,7 +76,7 @@ export class McpRegistry {
           headers[key] = value.replace(/\${([^}]+)}/g, (_, name) => process.env[name] ?? "");
         }
       }
-      return HttpMcpClient.create(serverName, config.url, headers);
+      return HttpMcpClient.create(serverName, config.url, headers, config.auth);
     }
 
     const env: Record<string, string> = {};

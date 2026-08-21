@@ -8,7 +8,9 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
+import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import type { McpClient, McpTool, McpResource, McpPrompt } from "./mcp-client.js";
+import { McpOAuthProvider } from "./oauth-provider.js";
 import {
   setupNotificationHandlers,
   extractTextContent,
@@ -56,7 +58,13 @@ export class HttpMcpClient implements McpClient {
     serverName: string,
     url: string,
     headers?: Record<string, string>,
+    auth?: "oauth",
   ): Promise<HttpMcpClient> {
+    // OAuth servers (e.g. Atlassian) can't use a static token — run the browser login flow instead.
+    if (auth === "oauth") {
+      return HttpMcpClient.createWithOAuth(serverName, url);
+    }
+
     const transportOpts: Record<string, unknown> = {};
 
     if (headers && Object.keys(headers).length > 0) {
@@ -116,6 +124,49 @@ export class HttpMcpClient implements McpClient {
         // ignore
       }
       throw err;
+    }
+
+    return new HttpMcpClient(client, transport, serverName);
+  }
+
+  /**
+   * OAuth variant: connects via the MCP OAuth flow. First run opens a browser to log in; the refresh
+   * token is persisted (~/.rei/mcp-auth/) so later runs — including headless rei-server — reconnect
+   * silently. No 15s timeout here: the human may take a while at the login page.
+   */
+  private static async createWithOAuth(
+    serverName: string,
+    url: string,
+  ): Promise<HttpMcpClient> {
+    const authProvider = new McpOAuthProvider(serverName);
+    await authProvider.start(); // loopback callback server — gives redirectUrl its port
+
+    const transport = new StreamableHTTPClientTransport(new URL(url), {
+      authProvider,
+    });
+    const client = new Client(
+      { name: "rei", version: "0.1.0" },
+      { capabilities: {} },
+    );
+    setupNotificationHandlers(client, serverName);
+
+    try {
+      // Try with any saved token first. If none/expired and refresh fails, the SDK opens the browser
+      // (redirectToAuthorization) and throws UnauthorizedError — we then finish with the callback code.
+      try {
+        await client.connect(transport);
+      } catch (err) {
+        if (!(err instanceof UnauthorizedError)) throw err;
+        const code = await authProvider.waitForCode();
+        await transport.finishAuth(code);
+        await client.connect(transport);
+        console.log(`[MCP/${serverName}] ✅ Authorized.`);
+      }
+    } catch (err) {
+      await transport.close().catch(() => {});
+      throw err;
+    } finally {
+      authProvider.stop();
     }
 
     return new HttpMcpClient(client, transport, serverName);
