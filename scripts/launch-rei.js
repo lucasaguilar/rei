@@ -641,46 +641,99 @@ async function main() {
         LOCAL_PROVIDERS.includes(envVars.AGENT_MODEL_PROVIDER);
 
     if (usesLocal) {
-        // Context window (REI's history-trimming assumption). 0 = no trimming.
+        // Context window (REI's history-trimming assumption). Single prompt; '0' = no trimming.
+        // (Output cap isn't asked here — the per-model maxTokens in rei.config.json already covers it.)
         if (process.env.REI_CONTEXT_WINDOW !== undefined) {
-            // Already set in .env — carry it through silently so the wizard never
-            // overwrites a deliberate choice (and never writes a shadowed value).
+            // Already set — carry through so the wizard never overwrites a deliberate choice.
             envVars.REI_CONTEXT_WINDOW = process.env.REI_CONTEXT_WINDOW;
         } else {
-            const setCtx = await confirm({
-                message: 'Set REI_CONTEXT_WINDOW (history-trimming budget; 0 = no trimming)?',
-                initialValue: last.setCtxWindow ?? false,
+            const ctxValue = await select({
+                message: 'REI_CONTEXT_WINDOW (history-trimming budget; 0 = model manages its own):',
+                options: ['61440', '32768', '16384', '8192', '0'].map(v => ({ value: v, label: v === '0' ? '0 (no trimming)' : v })),
+                initialValue: last.ctxWindow ?? '61440',   // proposed: 60 × 1024
             });
-            if (isCancel(setCtx)) { cancel('Cancelled'); process.exit(0); }
-
-            if (setCtx) {
-                const ctxValue = await select({
-                    message: 'REI_CONTEXT_WINDOW (0 = let the model manage its own window):',
-                    options: ['0', '8192', '16384', '32768', '60000'].map(v => ({ value: v, label: v })),
-                    initialValue: last.ctxWindow ?? '0',
-                });
-                if (isCancel(ctxValue)) { cancel('Cancelled'); process.exit(0); }
-                envVars.REI_CONTEXT_WINDOW = ctxValue;
-                Object.assign(config, { setCtxWindow: true, ctxWindow: ctxValue });
-            } else {
-                Object.assign(config, { setCtxWindow: false });
-            }
+            if (isCancel(ctxValue)) { cancel('Cancelled'); process.exit(0); }
+            envVars.REI_CONTEXT_WINDOW = ctxValue;
+            Object.assign(config, { ctxWindow: ctxValue });
         }
 
-        // Output cap = provider hard limit AND budget reserve (one value). Keep
-        // >= 8192: 4096 truncates long tool calls mid-edit.
-        if (process.env.REI_MAX_OUTPUT_TOKENS !== undefined) {
-            envVars.REI_MAX_OUTPUT_TOKENS = process.env.REI_MAX_OUTPUT_TOKENS;
+        // On-demand file context: ask/planning are always light; the real toggle is AGENT.
+        // Recommended ON for local/small windows (tools discover code instead of proactive dumps).
+        if (process.env.REI_ON_DEMAND_FILE_CONTEXT_AGENT !== undefined) {
+            envVars.REI_ON_DEMAND_FILE_CONTEXT_ASK = process.env.REI_ON_DEMAND_FILE_CONTEXT_ASK ?? '1';
+            envVars.REI_ON_DEMAND_FILE_CONTEXT_PLANNING = process.env.REI_ON_DEMAND_FILE_CONTEXT_PLANNING ?? '1';
+            envVars.REI_ON_DEMAND_FILE_CONTEXT_AGENT = process.env.REI_ON_DEMAND_FILE_CONTEXT_AGENT;
         } else {
-            const outValue = await select({
-                message: 'REI_MAX_OUTPUT_TOKENS (max tokens the model can emit per turn):',
-                options: ['8192', '16384', '32768'].map(v => ({ value: v, label: v })),
-                initialValue: last.maxOutputTokens ?? '8192',
+            const onDemandAll = await confirm({
+                message: 'On-demand file context for ALL modes incl. agent? (recommended for local/small windows)',
+                initialValue: last.onDemandAll ?? true,
             });
-            if (isCancel(outValue)) { cancel('Cancelled'); process.exit(0); }
-            envVars.REI_MAX_OUTPUT_TOKENS = outValue;
-            Object.assign(config, { maxOutputTokens: outValue });
+            if (isCancel(onDemandAll)) { cancel('Cancelled'); process.exit(0); }
+            envVars.REI_ON_DEMAND_FILE_CONTEXT_ASK = '1';
+            envVars.REI_ON_DEMAND_FILE_CONTEXT_PLANNING = '1';
+            envVars.REI_ON_DEMAND_FILE_CONTEXT_AGENT = onDemandAll ? '1' : '0';
+            Object.assign(config, { onDemandAll });
         }
+
+        // Reasoning effort per mode — local models think by default, so ask/planning over-think
+        // (slow) unless capped. This is the OpenAI-standard knob LM Studio honors ("none" disables
+        // thinking). One prompt selects a profile; unsupported backends ignore the param.
+        const REASON_MODES = ['ASK', 'PLANNING', 'AGENT'];
+        const reasoningAlreadySet = REASON_MODES.some(m => process.env[`REI_REASONING_EFFORT_${m}`] !== undefined);
+        if (reasoningAlreadySet) {
+            for (const m of REASON_MODES) {
+                const v = process.env[`REI_REASONING_EFFORT_${m}`];
+                if (v !== undefined) envVars[`REI_REASONING_EFFORT_${m}`] = v;
+            }
+        } else {
+            const profile = await select({
+                message: 'Reasoning effort (thinking) per mode:',
+                options: [
+                    { value: 'balanced', label: 'Balanced — ask/planning fast (none), agent reasons (medium)' },
+                    { value: 'minimal',  label: 'Minimal — none everywhere (fastest, least deliberate)' },
+                    { value: 'full',     label: 'Full — let the model decide (thinks in all modes)' },
+                ],
+                initialValue: last.reasoningProfile ?? 'balanced',
+            });
+            if (isCancel(profile)) { cancel('Cancelled'); process.exit(0); }
+            // 'full' = leave unset so the request omits the field (model's own default).
+            const effort = profile === 'balanced'
+                ? { ASK: 'none', PLANNING: 'none', AGENT: 'medium' }
+                : profile === 'minimal'
+                    ? { ASK: 'none', PLANNING: 'none', AGENT: 'none' }
+                    : null;
+            if (effort) for (const [m, v] of Object.entries(effort)) envVars[`REI_REASONING_EFFORT_${m}`] = v;
+            Object.assign(config, { reasoningProfile: profile });
+        }
+    }
+
+    // ── Step 5b: agent behavior & telemetry (all providers) ────────────────
+    // REI_MAX_TURNS — propose a higher cap than the built-in default (12 is too low for real
+    // agent work). Carried through if already set in the env.
+    if (process.env.REI_MAX_TURNS !== undefined) {
+        envVars.REI_MAX_TURNS = process.env.REI_MAX_TURNS;
+    } else {
+        const turns = await text({
+            message: 'REI_MAX_TURNS (agent tool-loop iterations per turn):',
+            initialValue: last.maxTurns ?? '50',
+            validate: v => (/^\d+$/.test(v.trim()) && +v > 0) ? undefined : 'Enter a positive integer',
+        });
+        if (isCancel(turns)) { cancel('Cancelled'); process.exit(0); }
+        envVars.REI_MAX_TURNS = turns.trim();
+        Object.assign(config, { maxTurns: turns.trim() });
+    }
+
+    // Telemetry (Laminar/LMNR) — proposed OFF unless you run a collector.
+    if (process.env.REI_TELEMETRY_DISABLED !== undefined) {
+        envVars.REI_TELEMETRY_DISABLED = process.env.REI_TELEMETRY_DISABLED;
+    } else {
+        const disableTel = await confirm({
+            message: 'Disable telemetry (Laminar/LMNR)? (recommended unless you run a collector)',
+            initialValue: last.telemetryDisabled ?? true,
+        });
+        if (isCancel(disableTel)) { cancel('Cancelled'); process.exit(0); }
+        envVars.REI_TELEMETRY_DISABLED = disableTel ? 'true' : 'false';
+        Object.assign(config, { telemetryDisabled: disableTel });
     }
 
     // ── Step 6: server env ─────────────────────────────────────────────────
