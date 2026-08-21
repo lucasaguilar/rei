@@ -2,7 +2,7 @@ import * as readline from "readline";
 import * as path from "path";
 import type { Agent } from "../core/agent.js";
 import type { TurnStatus } from "../core/models/agent.types.js";
-import type { ChatSession } from "../chat/types.js";
+import { resolveDefaultSessionMode, type ChatSession } from "../chat/types.js";
 
 import { getWelcomeMessage } from "./constants/chat.constants.js";
 import { renderStartupGauge } from "./helpers/startup-gauge.helper.js";
@@ -56,7 +56,7 @@ export async function runChat(
         createdAt: existing.createdAt,
         summary: existing.summary,
       }
-    : { messages: [], mode: "ask" };
+    : { messages: [], mode: resolveDefaultSessionMode("ask") };
   // Rebuilt after every turn (submitCurrentUserInput): a turn can CREATE files (OCR sidecar writes
   // ocr/*.ocr.md) that must be @-referenceable this session. `let` so getPalette reads the freshest scan.
   let mentionEntries = buildMentionEntries(workspacePath);

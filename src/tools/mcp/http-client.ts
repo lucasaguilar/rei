@@ -92,29 +92,26 @@ export class HttpMcpClient implements McpClient {
     // Streamable HTTP transport uses `start()` then `client.connect(transport)`.
     console.debug(`[MCP/${serverName}] About to call client.connect()`);
     
-    // Use Promise.race with timeout to prevent indefinite hang
-    // When timeout fires, immediately abort the transport's HTTP request
-    const connectPromise = client.connect(transport);
-    
+    // Use Promise.race with a timeout to prevent an indefinite hang. The timeout is cleared in the
+    // `finally` below — NOT by chaining `.finally()` on the connect promise, which would create a
+    // SECOND promise that re-rejects on failure with nobody awaiting it → an unhandled rejection that
+    // crashes the whole process (e.g. when a server returns 401).
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
     const timeoutPromise = new Promise<never>((_, reject) => {
-      const timeoutId = setTimeout(async () => {
+      timeoutId = setTimeout(async () => {
         console.error(`[MCP/${serverName}] ⏱️  TIMEOUT: client.connect() did not complete in 15 seconds!`);
-        // Immediately close the transport to abort any pending HTTP requests
+        // Immediately close the transport to abort any pending HTTP requests.
         try {
           await transport.close();
-          console.error(`[MCP/${serverName}] Transport closed due to timeout`);
         } catch (closeErr) {
           console.error(`[MCP/${serverName}] Error closing transport:`, closeErr);
         }
         reject(new Error(`Connection timeout for ${serverName}`));
       }, 15000);
-      
-      // Clean up timeout if connection succeeds
-      connectPromise.finally(() => clearTimeout(timeoutId));
     });
 
     try {
-      await Promise.race([connectPromise, timeoutPromise]);
+      await Promise.race([client.connect(transport), timeoutPromise]);
       console.debug(`[MCP/${serverName}] ✅ client.connect() completed successfully`);
     } catch (err) {
       console.error(`[MCP/${serverName}] ❌ client.connect() failed:`, err);
@@ -124,6 +121,8 @@ export class HttpMcpClient implements McpClient {
         // ignore
       }
       throw err;
+    } finally {
+      clearTimeout(timeoutId);
     }
 
     return new HttpMcpClient(client, transport, serverName);

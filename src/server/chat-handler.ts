@@ -1,6 +1,10 @@
 import { Agent } from "../core/agent.js";
 import { createModelProvider } from "../providers/provider-factory.js";
-import { SessionMode, type ChatSession } from "../chat/types.js";
+import {
+  SessionMode,
+  resolveDefaultSessionMode,
+  type ChatSession,
+} from "../chat/types.js";
 import { isWorkspaceAllowed } from "../server/workspace-config.js";
 import type { FileMeta } from "../workspace/workspace-scanner.js";
 import { loadCurrentSession, saveSession } from "../chat/session-store.js";
@@ -86,7 +90,7 @@ export class ChatHandler {
           createdAt: existing.createdAt,
           summary: existing.summary,
         }
-      : { messages: [], mode: "agent" };
+      : { messages: [], mode: resolveDefaultSessionMode("agent") };
 
     // Accumulates everything emitted to the client this request. The helper below
     // applies the same prefix/ANSI cleanup, de-dup and leading-trim used for the
