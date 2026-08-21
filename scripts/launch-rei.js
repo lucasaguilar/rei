@@ -153,6 +153,20 @@ function writeGlobalEnv(key, value) {
     }
 }
 
+/**
+ * Persists an env var to ALL the places that matter, so a wizard change actually takes effect:
+ *   1. process.env      — live for this run (probes, preflight, the spawned session).
+ *   2. envVars          — written to the PROJECT .env at Step 7. THIS is the file that WINS
+ *                         (load-env.ts loads the workspace .env with override:true), so without
+ *                         it a new endpoint/key is silently shadowed by the project's old value.
+ *   3. ~/.rei/.env      — global fallback reused by fresh workspaces that have no project value.
+ */
+function persistEnv(envVars, key, value) {
+    process.env[key] = value;
+    if (envVars) envVars[key] = value;
+    writeGlobalEnv(key, value);
+}
+
 async function loadConfiguration() {
     const configPath = path.join(__dirname, 'launch-rei.config.js');
     if (!fs.existsSync(configPath)) {
@@ -286,7 +300,7 @@ async function pickProvider(message, initialValue) {
  * workspace reuses this machine's backend. Returns { models } (live if reached, else []).
  * Retries on connection/auth failure; the caller falls back to known models + custom.
  */
-async function configureLocalEndpoint(provider) {
+async function configureLocalEndpoint(provider, envVars) {
     const prefix = getEnvPrefix(provider);
     let url = process.env[`${prefix}_BASE_URL`] || LOCAL_DEFAULT_URL[provider] || '';
     let key = process.env[`${prefix}_API_KEY`] || '';
@@ -310,10 +324,10 @@ async function configureLocalEndpoint(provider) {
         const storedUrl = providerBaseUrl(provider, url);
         if (r.reachable && r.status === 200 && r.models.length > 0) {
             note(`✓ Connected — ${r.models.length} model(s) found at ${url}`, `${provider} ready`);
-            // Persist the machine-level backend (URL not secret; key is) to the global env.
-            process.env[`${prefix}_BASE_URL`] = storedUrl;
-            writeGlobalEnv(`${prefix}_BASE_URL`, storedUrl);
-            if (key) { process.env[`${prefix}_API_KEY`] = key; writeGlobalEnv(`${prefix}_API_KEY`, key); }
+            // Write to the PROJECT .env (wins) + global (reused). Without the project write the
+            // new endpoint is shadowed by the project's existing value → wizard change has no effect.
+            persistEnv(envVars, `${prefix}_BASE_URL`, storedUrl);
+            if (key) persistEnv(envVars, `${prefix}_API_KEY`, key);
             return { models: r.models };
         }
 
@@ -326,16 +340,16 @@ async function configureLocalEndpoint(provider) {
         if (isCancel(retry)) { cancel('Cancelled'); process.exit(0); }
         if (!retry) {
             note(LOCAL_HINT[provider] ?? '', 'Tip');
-            // Still save what was entered so a later manual fix has a starting point.
-            if (url) { process.env[`${prefix}_BASE_URL`] = storedUrl; writeGlobalEnv(`${prefix}_BASE_URL`, storedUrl); }
-            if (key) { process.env[`${prefix}_API_KEY`] = key; writeGlobalEnv(`${prefix}_API_KEY`, key); }
+            // Still save what was entered (project + global) so a later manual fix has a starting point.
+            if (url) persistEnv(envVars, `${prefix}_BASE_URL`, storedUrl);
+            if (key) persistEnv(envVars, `${prefix}_API_KEY`, key);
             return { models: [] };
         }
     }
 }
 
-/** CLOUD: ensure the provider's API key exists (prompt masked, save to global ~/.rei/.env). */
-async function ensureCloudApiKey(provider) {
+/** CLOUD: ensure the provider's API key exists (prompt masked, save to project .env + global). */
+async function ensureCloudApiKey(provider, envVars) {
     if (!CLOUD_PROVIDERS.includes(provider)) return;
     const keyVar = API_KEY_VAR[provider];
     if (!isPlaceholder(process.env[keyVar])) return; // already have a real key
@@ -343,12 +357,11 @@ async function ensureCloudApiKey(provider) {
     if (isCancel(entered)) { cancel('Cancelled'); process.exit(0); }
     const val = (entered || '').trim();
     if (!val) {
-        note(`⚠️  No key entered — ${provider} calls will fail until you set ${keyVar} in ~/.rei/.env`, 'Missing API key');
+        note(`⚠️  No key entered — ${provider} calls will fail until you set ${keyVar}`, 'Missing API key');
         return;
     }
-    process.env[keyVar] = val;
-    writeGlobalEnv(keyVar, val);
-    note(`Saved ${keyVar} to ~/.rei/.env (global — reused by every workspace).`, 'API key saved');
+    persistEnv(envVars, keyVar, val);
+    note(`Saved ${keyVar} to this project's .env (+ ~/.rei/.env for other workspaces).`, 'API key saved');
 }
 
 /**
@@ -482,10 +495,11 @@ async function runPreflight() {
     };
 }
 
-/** Runs the credential/endpoint setup for a provider; returns its live model list ([] for cloud). */
-async function prepareProvider(provider) {
-    if (CLOUD_PROVIDERS.includes(provider)) { await ensureCloudApiKey(provider); return { models: [] }; }
-    if (LOCAL_PROVIDERS.includes(provider)) return configureLocalEndpoint(provider);
+/** Runs the credential/endpoint setup for a provider; returns its live model list ([] for cloud).
+ *  Writes the resolved endpoint/key into `envVars` (→ project .env) so the wizard's choice wins. */
+async function prepareProvider(provider, envVars) {
+    if (CLOUD_PROVIDERS.includes(provider)) { await ensureCloudApiKey(provider, envVars); return { models: [] }; }
+    if (LOCAL_PROVIDERS.includes(provider)) return configureLocalEndpoint(provider, envVars);
     return { models: [] }; // mock / unknown — nothing to set up
 }
 
@@ -565,7 +579,7 @@ async function main() {
     if (providerSetup === 'single') {
         const provider = await pickProvider('Provider:', last.provider);
         // Cloud → prompt API key; local → prompt endpoint + key and probe for models.
-        const { models: liveModels } = await prepareProvider(provider);
+        const { models: liveModels } = await prepareProvider(provider, envVars);
         const model = await pickModel(provider, 'Model:', last.provider === provider ? last.model : undefined, liveModels);
         selectedModels.push({ provider, model });
 
@@ -604,14 +618,14 @@ async function main() {
         // Multi-provider: ask/planning provider + agent provider
         note('Step 1 of 2: provider for ask and planning modes.', 'Multi-provider setup');
         const askProvider = await pickProvider('Provider (ask + planning):', last.askProvider);
-        const { models: askLive } = await prepareProvider(askProvider);
+        const { models: askLive } = await prepareProvider(askProvider, envVars);
         const askModel = await pickModel(askProvider, 'Model (ask + planning):', last.askProvider === askProvider ? last.askModel : undefined, askLive);
         selectedModels.push({ provider: askProvider, model: askModel });
 
         note('Step 2 of 2: provider for agent mode.', 'Multi-provider setup');
         const agentProvider = await pickProvider('Provider (agent):', last.agentProvider);
         // Reuse the ask probe if it's the same provider; otherwise set the agent provider up too.
-        const { models: agentLive } = agentProvider === askProvider ? { models: askLive } : await prepareProvider(agentProvider);
+        const { models: agentLive } = agentProvider === askProvider ? { models: askLive } : await prepareProvider(agentProvider, envVars);
         const agentModel = await pickModel(agentProvider, 'Model (agent):', last.agentProvider === agentProvider ? last.agentModel : undefined, agentLive);
         selectedModels.push({ provider: agentProvider, model: agentModel });
 

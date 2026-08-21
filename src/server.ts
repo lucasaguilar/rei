@@ -1,7 +1,11 @@
-import "dotenv/config";
+import "./load-env.js"; // MUST be first: loads workspace .env with override (see load-env.ts) —
+// same precedence as the CLI, so the server honors per-project .env even when started standalone.
 import * as http from "node:http";
 import { initTelemetry } from "./telemetry/init.js";
-import { createModelProvider } from "./providers/provider-factory.js";
+import {
+  createModelProvider,
+  resolveModelForMode,
+} from "./providers/provider-factory.js";
 import { Agent } from "./core/agent.js";
 import { ChatHandler } from "./server/chat-handler.js";
 import { REI_LOGO } from "./cli/rei-logo.js";
@@ -64,8 +68,8 @@ async function startServer() {
 
   const server = http.createServer(async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
     if (req.method === "OPTIONS") {
       res.writeHead(204);
@@ -73,7 +77,39 @@ async function startServer() {
       return;
     }
 
-    if (req.url === "/chat/completions" && req.method === "POST") {
+    // Normalize the path so OpenAI-compatible clients work whether or not they add the `/v1`
+    // prefix (Cline appends /v1 → /v1/chat/completions; Continue posts /chat/completions directly).
+    // Also strip query strings and a trailing slash.
+    const routePath =
+      (req.url || "").split("?")[0].replace(/\/+$/, "").replace(/^\/v1/, "") ||
+      "/";
+
+    // GET /models (and /v1/models) — IDE clients probe this on connect to populate the model list.
+    if (routePath === "/models" && req.method === "GET") {
+      const ids = Array.from(
+        new Set(
+          [resolveModelForMode("ask"), resolveModelForMode("agent")].filter(
+            Boolean,
+          ),
+        ),
+      );
+      const created = Math.floor(Date.now() / 1000);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          object: "list",
+          data: ids.map((id) => ({
+            id,
+            object: "model",
+            created,
+            owned_by: "rei",
+          })),
+        }),
+      );
+      return;
+    }
+
+    if (routePath === "/chat/completions" && req.method === "POST") {
       let body = "";
       req.on("data", (chunk) => (body += chunk));
       req.on("end", async () => {
@@ -138,7 +174,9 @@ async function startServer() {
       });
     } else {
       res.writeHead(404, { "Content-Type": "text/plain" });
-      res.end("Not Found. Use /chat/completions endpoint.");
+      res.end(
+        "Not Found. Use POST /chat/completions (or /v1/chat/completions) and GET /models.",
+      );
     }
   });
 
