@@ -112,11 +112,20 @@ fi
 export TMPDIR="$HOME/.tmp"
 mkdir -p "$TMPDIR"
 
-if [ "$want_config" -eq 1 ] || [ "$env_exists" -eq 0 ]; then
+if [ "$want_config" -eq 1 ]; then
 	echo "🔄 Starting interactive configuration wizard..."
 	node "$HOME/.rei/scripts/launch-rei.js"
-else
+elif [ "$env_exists" -eq 0 ]; then
+	echo "🔄 No configuration found — starting setup wizard..."
+	node "$HOME/.rei/scripts/launch-rei.js"
+elif node "$HOME/.rei/scripts/launch-rei.js" --preflight; then
+	# Preflight passed (may have just saved a new API key) — reload env so the launch sees it.
+	[ -f "$HOME/.rei/.env" ] && load_env_file "$HOME/.rei/.env"
+	[ -f .env ] && load_env_file .env
 	REI_WORKSPACE_PATH="${REI_WORKSPACE_PATH:-"$(pwd)"}" node "$HOME/.rei/bin/rei.js" chat "$@"
+else
+	echo "🔄 Launching setup wizard to finish configuration..."
+	node "$HOME/.rei/scripts/launch-rei.js"
 fi
 EOF
 chmod +x "$BIN_DIR/rei"

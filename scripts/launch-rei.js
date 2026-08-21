@@ -1,8 +1,9 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { spawn, execSync } from 'child_process';
-import { select, text, confirm, note, intro, isCancel, cancel } from '@clack/prompts';
-import { fileURLToPath } from 'url';
+import { select, text, password, confirm, note, intro, isCancel, cancel } from '@clack/prompts';
+import { fileURLToPath, pathToFileURL } from 'url';
 import dotenv from 'dotenv';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -14,6 +15,143 @@ let PROJECTS = [];
 let PROVIDER_MODELS = {};
 let PROVIDERS = [];
 const CUSTOM = '[ enter custom model... ]';
+
+// ─── Provider taxonomy & onboarding metadata ────────────────────────────────
+// Cloud providers authenticate with an API key; local providers expose an
+// OpenAI-compatible endpoint we can probe for models (the probe IS the validation).
+const CLOUD_PROVIDERS = ['openrouter', 'gemini', 'groq', 'huggingface'];
+const LOCAL_PROVIDERS = ['ollama', 'llmstudio', 'mtplx'];
+
+// Env var that holds each cloud provider's API key (HF uses HF_TOKEN, not HF_API_KEY).
+const API_KEY_VAR = {
+    openrouter: 'OPENROUTER_API_KEY',
+    gemini: 'GEMINI_API_KEY',
+    groq: 'GROQ_API_KEY',
+    huggingface: 'HF_TOKEN',
+};
+const API_KEY_URL = {
+    openrouter: 'https://openrouter.ai/keys',
+    gemini: 'https://aistudio.google.com/app/apikey',
+    groq: 'https://console.groq.com/keys',
+    huggingface: 'https://huggingface.co/settings/tokens',
+};
+
+// Default endpoint prefilled when configuring a local provider (host + port).
+const LOCAL_DEFAULT_URL = {
+    ollama: 'http://127.0.0.1:11434',
+    llmstudio: 'http://127.0.0.1:1234/v1',
+    mtplx: 'http://127.0.0.1:8000/v1',
+};
+// Concrete "how to get it running" hint shown when a local server can't be reached.
+const LOCAL_HINT = {
+    ollama: 'Ollama: install from https://ollama.com, then `ollama serve` and `ollama pull <model>`.',
+    llmstudio: 'LM Studio: open the app → Developer tab → Start Server (default http://localhost:1234).',
+    mtplx: 'MTPLX: start the server (e.g. :8000) — set the URL + API key when prompted above.',
+};
+
+// Curated last-resort model lists — used ONLY when the live server/list is unreachable.
+// Kept minimal (they age fast); [custom] always lets the user type anything else.
+const KNOWN_MODELS = {
+    ollama: ['qwen3.8:27b-mlx', 'qwen3.6:35b-a3b-coding-nvfp4', 'llama3.2'],
+    llmstudio: ['ornith-1.5-35b-a3b-mlx', 'qwen/qwen3.6-27b', 'qwen/qwen3-vl-4b'],
+    mtplx: ['mtplx-qwen38-27b-optimized-speed'],
+    openrouter: ['qwen/qwen3.6-plus', 'deepseek/deepseek-r1', 'openai/gpt-4o-mini', 'auto'],
+    gemini: ['gemini-2.5-flash', 'gemini-2.5-pro'],
+    groq: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'],
+    huggingface: ['Qwen/Qwen2.5-Coder-32B-Instruct'],
+};
+
+// A value is a "placeholder" (as-if-unset) if empty or matches the .env.example stubs
+// the bash wrapper already filters (your_..._here / placeholder).
+const isPlaceholder = (v) => !v || /_here$|^your_|placeholder/i.test(String(v).trim());
+
+/** User's own curated list (launch-rei.config.js) if non-empty, else the built-in KNOWN_MODELS. */
+function knownFallback(provider) {
+    const own = PROVIDER_MODELS[provider];
+    if (Array.isArray(own) && own.length > 0) return own;
+    return KNOWN_MODELS[provider] ?? [];
+}
+
+/** Accepts "host:port", "http://host:port", with or without a trailing /v1. Normalizes to a
+ *  scheme-qualified base WITHOUT a trailing /v1 (callers append /v1/models). */
+function normalizeEndpoint(input) {
+    let url = String(input || '').trim();
+    if (!url) return '';
+    if (!/^https?:\/\//i.test(url)) url = `http://${url}`;
+    return url.replace(/\/+$/, '').replace(/\/v1$/i, '');
+}
+
+/** The BASE_URL form each provider's runtime client expects to be STORED (env var).
+ *  ollama stores the ROOT (its client appends `/v1` itself); llmstudio/mtplx clients append
+ *  `/chat/completions` directly to the base, so their BASE_URL must END in `/v1`. `normalized` is a
+ *  scheme-qualified base WITHOUT `/v1` (as produced by normalizeEndpoint). */
+function providerBaseUrl(provider, normalized) {
+    return provider === 'ollama' ? normalized : `${normalized}/v1`;
+}
+
+/** Probes an OpenAI-compatible /v1/models endpoint. Returns { models, reachable, status }.
+ *  `reachable:false` distinguishes "server down / bad URL" from "auth failed" (status 401/403). */
+async function probeModels(baseUrl, apiKey) {
+    const base = normalizeEndpoint(baseUrl);
+    if (!base) return { models: [], reachable: false, status: 0 };
+    try {
+        const res = await fetch(`${base}/v1/models`, {
+            headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined,
+            signal: AbortSignal.timeout(4000),
+        });
+        if (!res.ok) return { models: [], reachable: true, status: res.status };
+        const data = await res.json();
+        const models = (data.data || []).map(m => m.id).filter(Boolean);
+        return { models, reachable: true, status: 200 };
+    } catch {
+        return { models: [], reachable: false, status: 0 };
+    }
+}
+
+/** Upserts KEY=value into dotenv-style text. Replaces an existing ACTIVE line (all occurrences, so
+ *  stale duplicates can't linger) or appends. Idempotent: re-running with the same values is a no-op.
+ *  Uses a replacement FUNCTION so a `$` in the value is never interpreted as a regex backreference
+ *  (critical — API keys / tokens can contain `$`). Commented `# KEY=` lines are left untouched. */
+function upsertEnvLine(content, key, value) {
+    const line = `${key}=${value}`;
+    if (!new RegExp(`^${key}=.*$`, 'm').test(content)) {
+        return `${content}${content && !content.endsWith('\n') ? '\n' : ''}${line}\n`;
+    }
+    // Replace the first active occurrence in place; drop any later duplicates so no stale value lingers.
+    let done = false;
+    return content.replace(new RegExp(`^${key}=.*(\\r?\\n|$)`, 'mg'), (_m, nl) => {
+        if (done) return '';
+        done = true;
+        return line + (nl || '\n');
+    });
+}
+
+/** Applies every envVars entry to dotenv text (skips undefined). Non-destructive: any line the
+ *  wizard didn't set — other vars, comments, blank lines — is preserved exactly. */
+function applyEnvVars(content, envVars) {
+    let out = content;
+    for (const [key, value] of Object.entries(envVars)) {
+        if (value === undefined) continue;
+        out = upsertEnvLine(out, key, value);
+    }
+    return out;
+}
+
+/** Writes/updates a single key in the GLOBAL ~/.rei/.env (secrets + machine-level endpoints
+ *  live here so they're reused across every workspace; the wrapper loads it before the repo .env). */
+function writeGlobalEnv(key, value) {
+    const dir = path.join(os.homedir(), '.rei');
+    const file = path.join(dir, '.env');
+    try {
+        fs.mkdirSync(dir, { recursive: true });
+        const content = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+        fs.writeFileSync(file, upsertEnvLine(content, key, value).trimEnd() + '\n', 'utf8');
+        return true;
+    } catch (err) {
+        console.error(`⚠️  Could not save ${key} to ~/.rei/.env:`, err.message);
+        return false;
+    }
+}
 
 async function loadConfiguration() {
     const configPath = path.join(__dirname, 'launch-rei.config.js');
@@ -99,66 +237,6 @@ function saveLast(data) {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Returns Ollama models.
- * If OLLAMA_BASE_URL is set, queries that (possibly remote) server over the OpenAI-compat
- * /v1/models endpoint — mirroring the mtplx/llmstudio path — so the wizard reflects THAT host
- * instead of only the local daemon. Sends OLLAMA_API_KEY as a bearer token if present.
- * Falls back to the local `ollama list` CLI, then to PROVIDER_MODELS.ollama.
- */
-async function getOllamaModels() {
-    const configuredUrl = process.env.OLLAMA_BASE_URL;
-    if (configuredUrl) {
-        try {
-            const raw = configuredUrl.replace(/\/+$/, '');
-            const base = raw.replace(/\/v1$/i, '');
-            const key = process.env.OLLAMA_API_KEY;
-            const res = await fetch(`${base}/v1/models`, key ? { headers: { Authorization: `Bearer ${key}` } } : undefined);
-            if (res.ok) {
-                const data = await res.json();
-                const models = (data.data || []).map(m => m.id).filter(Boolean);
-                if (models.length > 0) return models;
-            }
-        } catch {
-            // Remote unreachable — fall through to the local CLI below.
-        }
-    }
-    try {
-        const output = execSync('ollama list', { encoding: 'utf8', timeout: 5000 });
-        const models = output.trim().split('\n')
-            .slice(1)                              // skip header row
-            .map(line => line.trim().split(/\s+/)[0])
-            .filter(name => name && name.length > 0);
-        return models.length > 0 ? models : (PROVIDER_MODELS.ollama ?? []);
-    } catch {
-        return PROVIDER_MODELS.ollama ?? [];       // fallback: ollama not running or not in PATH
-    }
-}
-
-/**
- * Returns available models from a running OpenAI-compatible local server (LM Studio, MTPLX, …).
- * Falls back to PROVIDER_MODELS.llmstudio if the request fails.
- */
-async function getLlmStudioModels() {
-    try {
-        // The provider convention (and the /model command) is that LLM_STUDIO_BASE_URL already ENDS
-        // in /v1 — e.g. http://127.0.0.1:8000/v1 for MTPLX. Strip a trailing /v1 (and slashes) before
-        // re-appending, so we don't fetch a doubled ".../v1/v1/models" (→ 404, listing nothing). This
-        // makes ONE url value work for both the wizard AND the provider, with or without /v1.
-        const raw = (process.env.LLM_STUDIO_BASE_URL || 'http://localhost:1234').replace(/\/+$/, '');
-        const base = raw.replace(/\/v1$/i, '');
-        // Send the API key if the server needs one (some OpenAI-compat backends 401 without it).
-        const key = process.env.LLM_STUDIO_API_KEY;
-        const res = await fetch(`${base}/v1/models`, key ? { headers: { Authorization: `Bearer ${key}` } } : undefined);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const models = (data.data || []).map(m => m.id).filter(Boolean);
-        return models.length > 0 ? models : (PROVIDER_MODELS.llmstudio ?? []);
-    } catch {
-        return PROVIDER_MODELS.llmstudio ?? [];
-    }
-}
-
-/**
  * Builds a display summary of Ollama performance env vars.
  * Shows which are set (from system env or wizard) and which aren't.
  */
@@ -182,47 +260,106 @@ function getEnvPrefix(provider) {
     return provider.toUpperCase();
 }
 
-/**
- * Returns available models from a running MTPLX server (OpenAI-compatible).
- * Falls back to PROVIDER_MODELS.mtplx if the request fails.
- */
-async function getMtplxModels() {
-    try {
-        const raw = (process.env.MTPLX_BASE_URL || 'http://localhost:8000' || 'http://192.168.68.113:8000' ).replace(/\/+$/, '');
-        const base = raw.replace(/\/v1$/i, '');
-        // MTPLX servers require the API key even to list models (→ 401 otherwise).
-        // Send it so the wizard mirrors what the real MtplxProvider does.
-        const key = process.env.MTPLX_API_KEY;
-        const res = await fetch(`${base}/v1/models`, key ? { headers: { Authorization: `Bearer ${key}` } } : undefined);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const models = (data.data || []).map(m => m.id).filter(Boolean);
-        return models.length > 0 ? models : (PROVIDER_MODELS.mtplx ?? []);
-    } catch {
-        return PROVIDER_MODELS.mtplx ?? [];
+/** Decorates a provider option so the user sees, at a glance, what each choice needs. */
+function providerLabel(p) {
+    if (CLOUD_PROVIDERS.includes(p)) {
+        const hasKey = !isPlaceholder(process.env[API_KEY_VAR[p]]);
+        return `${p}  ${hasKey ? '✓ key set' : '☁ cloud · needs API key'}`;
     }
+    if (LOCAL_PROVIDERS.includes(p)) return `${p}  ⌂ local server`;
+    return p;
 }
 
 async function pickProvider(message, initialValue) {
     const provider = await select({
         message,
-        options: PROVIDERS.map(p => ({ value: p, label: p })),
+        options: PROVIDERS.map(p => ({ value: p, label: providerLabel(p) })),
         initialValue,
     });
     if (isCancel(provider)) { cancel('Cancelled'); process.exit(0); }
     return provider;
 }
 
-async function pickModel(provider, message, initialModel) {
-    let baseList;
-    if (provider === 'ollama') {
-        baseList = await getOllamaModels();
-    } else if (provider === 'llmstudio') {
-        baseList = await getLlmStudioModels();
-    } else if (provider === 'mtplx') {
-        baseList = await getMtplxModels();
-    } else {
-        baseList = PROVIDER_MODELS[provider] ?? [];
+/**
+ * LOCAL endpoint-first setup: ask URL + API key, probe /v1/models, and treat a successful
+ * listing AS the validation. Persists <PREFIX>_BASE_URL + key to the global ~/.rei/.env so every
+ * workspace reuses this machine's backend. Returns { models } (live if reached, else []).
+ * Retries on connection/auth failure; the caller falls back to known models + custom.
+ */
+async function configureLocalEndpoint(provider) {
+    const prefix = getEnvPrefix(provider);
+    let url = process.env[`${prefix}_BASE_URL`] || LOCAL_DEFAULT_URL[provider] || '';
+    let key = process.env[`${prefix}_API_KEY`] || '';
+
+    while (true) {
+        const urlIn = await text({
+            message: `${provider} endpoint (host:port or full URL):`,
+            initialValue: url,
+            validate: v => v.trim().length === 0 ? 'Endpoint cannot be empty' : undefined,
+        });
+        if (isCancel(urlIn)) { cancel('Cancelled'); process.exit(0); }
+        url = normalizeEndpoint(urlIn);
+
+        const keyIn = await password({ message: `${provider} API key (blank if the server needs none):` });
+        if (isCancel(keyIn)) { cancel('Cancelled'); process.exit(0); }
+        key = (keyIn || '').trim();
+
+        const r = await probeModels(url, key);
+        // Store in the form the runtime client expects (with /v1 for mtplx/llmstudio), NOT the
+        // probe form. Storing the bare host caused the provider to POST to /chat/completions → 404.
+        const storedUrl = providerBaseUrl(provider, url);
+        if (r.reachable && r.status === 200 && r.models.length > 0) {
+            note(`✓ Connected — ${r.models.length} model(s) found at ${url}`, `${provider} ready`);
+            // Persist the machine-level backend (URL not secret; key is) to the global env.
+            process.env[`${prefix}_BASE_URL`] = storedUrl;
+            writeGlobalEnv(`${prefix}_BASE_URL`, storedUrl);
+            if (key) { process.env[`${prefix}_API_KEY`] = key; writeGlobalEnv(`${prefix}_API_KEY`, key); }
+            return { models: r.models };
+        }
+
+        const reason = !r.reachable
+            ? `Could not reach ${url} (server down, wrong host/port, or timeout).`
+            : r.status === 401 || r.status === 403
+                ? `Auth failed (HTTP ${r.status}) — the API key looks wrong.`
+                : `Server responded (HTTP ${r.status}) but listed no models.`;
+        const retry = await confirm({ message: `${reason}\nRetry with a different URL/key?`, initialValue: true });
+        if (isCancel(retry)) { cancel('Cancelled'); process.exit(0); }
+        if (!retry) {
+            note(LOCAL_HINT[provider] ?? '', 'Tip');
+            // Still save what was entered so a later manual fix has a starting point.
+            if (url) { process.env[`${prefix}_BASE_URL`] = storedUrl; writeGlobalEnv(`${prefix}_BASE_URL`, storedUrl); }
+            if (key) { process.env[`${prefix}_API_KEY`] = key; writeGlobalEnv(`${prefix}_API_KEY`, key); }
+            return { models: [] };
+        }
+    }
+}
+
+/** CLOUD: ensure the provider's API key exists (prompt masked, save to global ~/.rei/.env). */
+async function ensureCloudApiKey(provider) {
+    if (!CLOUD_PROVIDERS.includes(provider)) return;
+    const keyVar = API_KEY_VAR[provider];
+    if (!isPlaceholder(process.env[keyVar])) return; // already have a real key
+    const entered = await password({ message: `${keyVar} for ${provider} (get one at ${API_KEY_URL[provider]}):` });
+    if (isCancel(entered)) { cancel('Cancelled'); process.exit(0); }
+    const val = (entered || '').trim();
+    if (!val) {
+        note(`⚠️  No key entered — ${provider} calls will fail until you set ${keyVar} in ~/.rei/.env`, 'Missing API key');
+        return;
+    }
+    process.env[keyVar] = val;
+    writeGlobalEnv(keyVar, val);
+    note(`Saved ${keyVar} to ~/.rei/.env (global — reused by every workspace).`, 'API key saved');
+}
+
+/**
+ * Model picker. For local providers pass `preFetched` (the live list from configureLocalEndpoint)
+ * to avoid re-probing. Falls back to curated known models + a free-text custom entry.
+ */
+async function pickModel(provider, message, initialModel, preFetched) {
+    const live = Array.isArray(preFetched) ? preFetched : [];
+    const baseList = live.length ? live : knownFallback(provider);
+    if (!live.length && LOCAL_PROVIDERS.includes(provider)) {
+        note(`Showing known models — you can also type one.\n${LOCAL_HINT[provider] ?? ''}`, `${provider} (not connected)`);
     }
     const choices = [...baseList, CUSTOM];
     const choice = await select({
@@ -241,6 +378,117 @@ async function pickModel(provider, message, initialModel) {
     return custom.trim();
 }
 
+/** Family-aware default sampling for a local model — a sane starting point the user can calibrate. */
+function defaultTuning(modelId) {
+    const n = modelId.toLowerCase();
+    const base = { id: modelId, contextWindow: 32768, maxTokens: 16384, temperature: 0.6, topP: 0.9, topK: 40, presencePenalty: 0.0, frequencyPenalty: 0.0, minP: 0.0, repetitionPenalty: 1.05 };
+    if (n.includes('qwen'))    return { ...base, temperature: 0.4, topP: 0.9,  topK: 40, minP: 0.05, repetitionPenalty: 1.03 };
+    if (n.includes('deepseek'))return { ...base, temperature: 0.6, topP: 0.95, topK: 40 };
+    if (n.includes('gemma'))   return { ...base, temperature: 0.7, topP: 0.95, topK: 64 };
+    return base;
+}
+
+/**
+ * Pure merge: returns { cfg, added } where cfg has a default-tuning block for each (provider, model)
+ * pair not already tuned. Preserves every existing entry AND every other top-level key (mcpServers, …)
+ * — nothing is dropped or reordered destructively. Idempotent: re-running with already-tuned models
+ * yields added === 0 and a structurally-equal cfg.
+ */
+function mergeReiConfig(cfg, pairs) {
+    const next = { ...cfg, providers: { ...(cfg.providers || {}) } };
+    let added = 0;
+    for (const { provider, model } of pairs) {
+        const existing = next.providers[provider] || {};
+        const models = Array.isArray(existing.models) ? existing.models.slice() : [];
+        const has = models.some(m => (m.id || '').trim().toLowerCase() === model.trim().toLowerCase());
+        if (!has) { models.push(defaultTuning(model)); added++; }
+        next.providers[provider] = { ...existing, models };
+    }
+    return { cfg: next, added };
+}
+
+/**
+ * Ensures rei.config.json (in the workspace) has a tuning block for each selected LOCAL model.
+ * Non-destructive (see mergeReiConfig). Only rewrites the file when something was actually added,
+ * so a re-run over an already-configured repo leaves it byte-for-byte untouched.
+ */
+function ensureReiConfig(projectPath, localModels) {
+    const pairs = localModels.filter(m => m && m.model && LOCAL_PROVIDERS.includes(m.provider));
+    if (pairs.length === 0) return;
+
+    const file = path.join(projectPath, 'rei.config.json');
+    let cfg = {};
+    if (fs.existsSync(file)) {
+        try { cfg = JSON.parse(fs.readFileSync(file, 'utf8')); }
+        catch { note('rei.config.json exists but is not valid JSON — leaving it untouched.', 'Skipped tuning'); return; }
+    }
+    const { cfg: merged, added } = mergeReiConfig(cfg, pairs);
+    if (added > 0) {
+        try {
+            fs.writeFileSync(file, JSON.stringify(merged, null, 2) + '\n', 'utf8');
+            note(`Added default tuning for ${added} local model(s) → ${file}\nEdit sampling/context there to calibrate.`, 'rei.config.json');
+        } catch (err) {
+            console.error('⚠️  Could not write rei.config.json:', err.message);
+        }
+    }
+}
+
+/**
+ * Fast startup gate (invoked as `launch-rei.js --preflight`). Decides whether the ALREADY-resolved
+ * env (global ~/.rei/.env + repo .env) can actually run here — the file's mere existence is not
+ * enough. Checks provider + model + (cloud: API key | local: server reachable). If only a cloud key
+ * is missing it prompts for JUST that key (saved to ~/.rei/.env) and passes. Returns { ok, reason }.
+ * ok → wrapper launches chat/server; not ok → wrapper drops into the full wizard.
+ */
+async function runPreflight() {
+    const provider = process.env.MODEL_PROVIDER;
+    if (!provider) return { ok: false, reason: 'no MODEL_PROVIDER set' };
+    if (provider === 'mock') return { ok: true };
+    if (!CLOUD_PROVIDERS.includes(provider) && !LOCAL_PROVIDERS.includes(provider)) {
+        return { ok: false, reason: `unknown MODEL_PROVIDER "${provider}"` };
+    }
+
+    const prefix = getEnvPrefix(provider);
+    const model = process.env[`${prefix}_MODEL`] || process.env[`${prefix}_MODEL_AGENT`];
+    if (!model) return { ok: false, reason: `no ${prefix}_MODEL set for provider "${provider}"` };
+
+    // Cloud: the only hard requirement is a real API key. Prompt for just that if missing.
+    if (CLOUD_PROVIDERS.includes(provider)) {
+        const keyVar = API_KEY_VAR[provider];
+        if (isPlaceholder(process.env[keyVar])) {
+            note(`${provider} needs an API key to run.`, 'One more thing');
+            await ensureCloudApiKey(provider);
+        }
+        return isPlaceholder(process.env[keyVar])
+            ? { ok: false, reason: `missing ${keyVar}` }
+            : { ok: true };
+    }
+
+    // Local: probe the endpoint (the reachability check the user asked for).
+    if (provider === 'ollama' && !process.env.OLLAMA_BASE_URL) {
+        const r = await probeModels(LOCAL_DEFAULT_URL.ollama, undefined);
+        if (r.reachable) return { ok: true };
+        try { execSync('ollama list', { timeout: 3000, stdio: 'ignore' }); return { ok: true }; }
+        catch { return { ok: false, reason: 'Ollama server not reachable (start it with `ollama serve`)' }; }
+    }
+    const baseUrl = process.env[`${prefix}_BASE_URL`] || LOCAL_DEFAULT_URL[provider];
+    const r = await probeModels(baseUrl, process.env[`${prefix}_API_KEY`]);
+    if (r.reachable && r.status === 200) return { ok: true };
+    return {
+        ok: false,
+        reason: r.reachable
+            ? `${provider} server at ${baseUrl} returned HTTP ${r.status}`
+            : `cannot reach ${provider} server at ${baseUrl}`,
+    };
+}
+
+/** Runs the credential/endpoint setup for a provider; returns its live model list ([] for cloud). */
+async function prepareProvider(provider) {
+    if (CLOUD_PROVIDERS.includes(provider)) { await ensureCloudApiKey(provider); return { models: [] }; }
+    if (LOCAL_PROVIDERS.includes(provider)) return configureLocalEndpoint(provider);
+    return { models: [] }; // mock / unknown — nothing to set up
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -248,6 +496,13 @@ async function main() {
     const initialWorkspace = process.cwd();
 
     intro('REI Launcher');
+
+    note(
+        'REI needs one model provider:\n' +
+        '  ☁ Cloud (openrouter/gemini/groq/huggingface) — asks for an API key, works instantly.\n' +
+        '  ⌂ Local (ollama/llmstudio/mtplx) — free & private; you give the endpoint and we list its models.',
+        'Choose your path',
+    );
 
     // ── Step 1: workspace ──────────────────────────────────────────────────
     let project;
@@ -277,6 +532,19 @@ async function main() {
     });
     if (isCancel(launchMode)) { cancel('Cancelled'); process.exit(0); }
 
+    // Server mode binds its own HTTP port (separate from the model endpoint). Ask for it here so
+    // the setup is complete for server launches too; harmless/unused for the CLI.
+    let serverPort;
+    if (launchMode === 'server') {
+        const portIn = await text({
+            message: 'REI_SERVER_PORT (HTTP port for the REI server):',
+            initialValue: process.env.REI_SERVER_PORT || last.serverPort || '3000',
+            validate: v => (/^\d+$/.test(v.trim()) && +v > 0 && +v < 65536) ? undefined : 'Enter a port between 1 and 65535',
+        });
+        if (isCancel(portIn)) { cancel('Cancelled'); process.exit(0); }
+        serverPort = portIn.trim();
+    }
+
     // ── Step 3: provider setup ─────────────────────────────────────────────
     const providerSetup = await select({
         message: 'Provider setup:',
@@ -291,10 +559,15 @@ async function main() {
     // ── Step 4: model selection ────────────────────────────────────────────
     const envVars = {};
     const config = { project, launchMode, providerSetup };
+    // (provider, model) pairs chosen — used to seed rei.config.json tuning for local models.
+    const selectedModels = [];
 
     if (providerSetup === 'single') {
         const provider = await pickProvider('Provider:', last.provider);
-        const model    = await pickModel(provider, 'Model:', last.provider === provider ? last.model : undefined);
+        // Cloud → prompt API key; local → prompt endpoint + key and probe for models.
+        const { models: liveModels } = await prepareProvider(provider);
+        const model = await pickModel(provider, 'Model:', last.provider === provider ? last.model : undefined, liveModels);
+        selectedModels.push({ provider, model });
 
         Object.assign(config, { provider, model });
         envVars.MODEL_PROVIDER = provider;
@@ -314,8 +587,10 @@ async function main() {
 
         if (perMode) {
             note('ask + planning use the model selected above.\nagent will use this second model.', 'Per-mode models');
-            const agentModel = await pickModel(provider, 'Model for agent:', last.singleAgentModel ?? model);
+            // Same provider → endpoint already configured; reuse the live list (no re-probe).
+            const agentModel = await pickModel(provider, 'Model for agent:', last.singleAgentModel ?? model, liveModels);
             envVars[`${prefix}_MODEL_AGENT`] = agentModel;
+            selectedModels.push({ provider, model: agentModel });
             Object.assign(config, { singlePerMode: true, singleAgentModel: agentModel });
         } else {
             // No dedicated agent model: write the SAME model (never an empty string — an
@@ -329,18 +604,23 @@ async function main() {
         // Multi-provider: ask/planning provider + agent provider
         note('Step 1 of 2: provider for ask and planning modes.', 'Multi-provider setup');
         const askProvider = await pickProvider('Provider (ask + planning):', last.askProvider);
-        const askModel    = await pickModel(askProvider, 'Model (ask + planning):', last.askProvider === askProvider ? last.askModel : undefined);
+        const { models: askLive } = await prepareProvider(askProvider);
+        const askModel = await pickModel(askProvider, 'Model (ask + planning):', last.askProvider === askProvider ? last.askModel : undefined, askLive);
+        selectedModels.push({ provider: askProvider, model: askModel });
 
         note('Step 2 of 2: provider for agent mode.', 'Multi-provider setup');
         const agentProvider = await pickProvider('Provider (agent):', last.agentProvider);
-        const agentModel    = await pickModel(agentProvider, 'Model (agent):', last.agentProvider === agentProvider ? last.agentModel : undefined);
+        // Reuse the ask probe if it's the same provider; otherwise set the agent provider up too.
+        const { models: agentLive } = agentProvider === askProvider ? { models: askLive } : await prepareProvider(agentProvider);
+        const agentModel = await pickModel(agentProvider, 'Model (agent):', last.agentProvider === agentProvider ? last.agentModel : undefined, agentLive);
+        selectedModels.push({ provider: agentProvider, model: agentModel });
 
         Object.assign(config, { askProvider, askModel, agentProvider, agentModel });
         envVars.MODEL_PROVIDER = askProvider;
-        
+
         const askPrefix = getEnvPrefix(askProvider);
         const agentPrefix = getEnvPrefix(agentProvider);
-        
+
         // ask/planning → <askPrefix>_MODEL; agent → <agentPrefix>_MODEL_AGENT. Uniform
         // across providers, so ask/planning never inherit the agent model.
         envVars[`${askPrefix}_MODEL`]              = askModel;
@@ -407,6 +687,13 @@ async function main() {
     // Always set workspace path vars — used by server; harmless for CLI.
     envVars.REI_WORKSPACE_PATH  = projectPath;
     envVars.ALLOWED_WORKSPACES  = projectPath;
+    if (serverPort) {
+        envVars.REI_SERVER_PORT = serverPort;
+        Object.assign(config, { serverPort });
+    }
+
+    // Seed rei.config.json with default tuning for any LOCAL model chosen (non-destructive).
+    ensureReiConfig(projectPath, selectedModels);
 
     // ── Step 7: save + launch ──────────────────────────────────────────────
     saveLast(config);
@@ -425,15 +712,7 @@ async function main() {
             }
         }
 
-        for (const [key, value] of Object.entries(envVars)) {
-            if (value === undefined) continue;
-            const regex = new RegExp(`^${key}=.*$`, 'm');
-            if (regex.test(envContent)) {
-                envContent = envContent.replace(regex, `${key}=${value}`);
-            } else {
-                envContent += `\n${key}=${value}`;
-            }
-        }
+        envContent = applyEnvVars(envContent, envVars);
         fs.writeFileSync(envFilePath, envContent.trim() + '\n', 'utf8');
         console.log(`📝 Persisted complete configuration template to: ${envFilePath}`);
     } catch (err) {
@@ -474,8 +753,21 @@ async function main() {
 }
 
 async function start() {
+    // Preflight mode: called by the `rei` wrapper to decide chat/server vs wizard. Exits WITHOUT
+    // running the interactive wizard. May prompt for a single missing cloud API key.
+    if (process.argv.includes('--preflight')) {
+        const { ok, reason } = await runPreflight();
+        if (!ok) console.error(`⚠️  REI not configured to run here: ${reason}`);
+        process.exit(ok ? 0 : 1);
+    }
     await loadConfiguration();
     await main();
 }
 
-start();
+// Pure, side-effect-free helpers exported for unit tests (idempotency / non-destructive merges).
+export { upsertEnvLine, applyEnvVars, mergeReiConfig, normalizeEndpoint, defaultTuning };
+
+// Only auto-run when executed directly (as the wrapper does), not when imported by a test.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+    start();
+}

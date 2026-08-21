@@ -68,6 +68,27 @@ load_env_file() {
   done < "$env_file"
 }
 
+# Detect --config / --help flags
+want_config=0
+want_help=0
+for arg in "$@"; do
+  if [ "$arg" = "--config" ]; then
+    want_config=1
+  elif [ "$arg" = "--help" ] || [ "$arg" = "-h" ] || [ "$arg" = "help" ]; then
+    want_help=1
+  fi
+done
+
+if [ "$want_help" -eq 1 ]; then
+  echo "REI Server — HTTP + IDE integration"
+  echo ""
+  echo "Usage:"
+  echo "  rei-server                  Start the REI HTTP server (uses your configured provider)"
+  echo "  rei-server --config         Launch the interactive configuration wizard"
+  echo "  rei-server --help, -h       Show this help text"
+  exit 0
+fi
+
 # Check if .env files exist
 env_exists=0
 if [ -f "$HOME/.rei/.env" ]; then
@@ -84,7 +105,21 @@ fi
 export TMPDIR="$HOME/.tmp"
 mkdir -p "$TMPDIR"
 
-REI_WORKSPACE_PATH="${REI_WORKSPACE_PATH:-"$(pwd)"}" node "$HOME/.rei/dist/server.js" "$@"
+if [ "$want_config" -eq 1 ]; then
+  echo "🔄 Starting interactive configuration wizard..."
+  node "$HOME/.rei/scripts/launch-rei.js"
+elif [ "$env_exists" -eq 0 ]; then
+  echo "🔄 No configuration found — starting setup wizard..."
+  node "$HOME/.rei/scripts/launch-rei.js"
+elif node "$HOME/.rei/scripts/launch-rei.js" --preflight; then
+  # Preflight passed (may have just saved a new API key) — reload env so the launch sees it.
+  [ -f "$HOME/.rei/.env" ] && load_env_file "$HOME/.rei/.env"
+  [ -f .env ] && load_env_file .env
+  REI_WORKSPACE_PATH="${REI_WORKSPACE_PATH:-"$(pwd)"}" node "$HOME/.rei/dist/server.js" "$@"
+else
+  echo "🔄 Launching setup wizard to finish configuration..."
+  node "$HOME/.rei/scripts/launch-rei.js"
+fi
 EOF
 
 chmod +x "$BIN_DIR/rei-server"
