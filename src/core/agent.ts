@@ -602,11 +602,14 @@ export class Agent {
     // }
 
     onStatus?.("building_context");
-    const repositorySkeletonMap = await this.updateSystemContextWithRepoMap(
-      session,
-      userInput,
-      onStatus,
-    );
+    // On-demand mode never injects the proactive repo map (see below), so skip GENERATING it too —
+    // otherwise every turn re-scans the whole repo and rewrites a large
+    // .rei/logs/repo-skeleton-map.txt (can be MBs) for nothing. The model discovers structure with
+    // tools instead. Only the explicit opt-out (REI_ON_DEMAND_FILE_CONTEXT_<MODE>=0) builds the map.
+    const onDemand = isOnDemandFileContextEnabled(session.mode);
+    const repositorySkeletonMap = onDemand
+      ? undefined
+      : await this.updateSystemContextWithRepoMap(session, userInput, onStatus);
     this.logger.logUserPrompt({
       mode: session.mode,
       prompt: userInput,
@@ -688,12 +691,12 @@ export class Agent {
       );
     }
 
-    // On-demand modes (ask/planning) get PURE on-demand orientation — like Pi/Hermes/OpenCode, we
-    // inject NO proactive repo map or file tree. Sending a partial/collapsed view misleads the model
-    // (it concludes unseen files "don't exist") and defeats caching; instead the model discovers the
-    // structure with tools (ls / find / git ls-files / read_files, per the directive). Agent mode
-    // (on-demand off) keeps both for one-turn proactive context.
-    const onDemand = isOnDemandFileContextEnabled(session.mode);
+    // On-demand mode (the default for ALL modes) gives PURE on-demand orientation — like
+    // Pi/Hermes/OpenCode, we inject NO proactive repo map or file tree. Sending a partial/collapsed
+    // view misleads the model (it concludes unseen files "don't exist") and defeats caching; instead
+    // the model discovers structure with tools (ls / find / git ls-files / read_files). Only a mode
+    // explicitly opted out (REI_ON_DEMAND_FILE_CONTEXT_<MODE>=0) injects the proactive map + tree.
+    // `onDemand` was computed above (it also gated the map generation).
     const enrichedMessage = buildTurnUserMessage({
       userInput,
       context,

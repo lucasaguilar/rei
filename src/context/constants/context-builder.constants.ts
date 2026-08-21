@@ -56,8 +56,9 @@ export function isOnDemandFileContextEnabled(mode: string): boolean {
     return process.env.REI_ON_DEMAND_FILE_CONTEXT === "1";
   }
 
-  // Valores predeterminados inteligentes:
-  // - En modos de solo lectura (ask / planning): true por defecto (más rápido/ligero en local)
-  // - En modo agente (agent): false por defecto (más proactivo en 1 solo turno)
-  return mode === "ask" || mode === "planning";
+  // Default: on-demand for ALL modes (ask / planning / agent). The model discovers repo structure
+  // with tools (ls / grep / read_file) instead of REI injecting a proactive skeleton map — essential
+  // for large repos where that map can be hundreds of thousands of tokens. Opt a mode back into the
+  // proactive map with REI_ON_DEMAND_FILE_CONTEXT_<MODE>=0.
+  return true;
 }
