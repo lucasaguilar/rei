@@ -14,6 +14,7 @@ import {
   handleSaveToolOutput,
 } from "./builtin-handlers.js";
 import { retainAndMaybeSpill } from "./tool-output-store.js";
+import { grepCode, listFiles } from "../../tools/code-search.js";
 import { nonInteractiveElicit, type ElicitFn } from "../../chat/elicitation.js";
 import { handleDelegate } from "./delegate-handler.js";
 import {
@@ -135,16 +136,38 @@ export async function dispatchToolCalls(
       switch (call.function.name) {
         // ── read_files ───────────────────────────────────────────────
         case "read_files": {
-          const rf = await handleReadFiles((args.paths as string[]) ?? [], {
-            workspacePath,
-            logger,
-            emitStatus,
-            toRel,
-            currentContent,
-            virtualFiles,
-          });
+          const rf = await handleReadFiles(
+            (args.paths as string[]) ?? [],
+            { workspacePath, logger, emitStatus, toRel, currentContent, virtualFiles },
+            { offset: args.offset as number | undefined, limit: args.limit as number | undefined },
+          );
           toolResult = rf.text;
           // No re-read guard: read_files always serves the file. If the model asks for it, it gets it.
+          toolResultsMap.set(call.id, toolResult);
+          break;
+        }
+
+        // ── grep_code (repo search) ──────────────────────────────────
+        case "grep_code": {
+          emitStatus(`🔎  [REI] grep_code: ${(args.pattern as string) ?? ""}`);
+          toolResult = await grepCode(workspacePath, {
+            pattern: (args.pattern as string) ?? "",
+            path: args.path as string | undefined,
+            glob: args.glob as string | undefined,
+            maxResults: args.max_results as number | undefined,
+          });
+          toolResultsMap.set(call.id, toolResult);
+          break;
+        }
+
+        // ── list_files (glob) ────────────────────────────────────────
+        case "list_files": {
+          emitStatus(`📁  [REI] list_files: ${(args.glob as string) ?? "*"}`);
+          toolResult = await listFiles(workspacePath, {
+            glob: args.glob as string | undefined,
+            path: args.path as string | undefined,
+            maxResults: args.max_results as number | undefined,
+          });
           toolResultsMap.set(call.id, toolResult);
           break;
         }

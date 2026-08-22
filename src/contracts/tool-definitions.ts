@@ -7,7 +7,11 @@ export const READ_FILES_TOOL: ToolDefinition = {
   type: "function",
   function: {
     name: "read_files",
-    description: "Read the contents of one or more workspace files before editing. Use this when you need to see exact code before proposing changes.",
+    description:
+      "Read one or more workspace files before editing. Large files are returned in pages: if the " +
+      "result ends with '[N more lines — continue with offset=...]', call read_files again with that " +
+      "offset to read the next page. This guarantees you receive the WHOLE file (in pieces), never a " +
+      "silently truncated view. Prefer this over shell (cat/head), whose output is capped.",
     parameters: {
       type: "object",
       properties: {
@@ -16,8 +20,56 @@ export const READ_FILES_TOOL: ToolDefinition = {
           items: { type: "string" },
           description: "List of relative workspace file paths to read (max 4 at a time).",
         },
+        offset: {
+          type: "integer",
+          description: "1-based start line for paging a large file (default 1). Use the value from a previous page's continue hint.",
+        },
+        limit: {
+          type: "integer",
+          description: "Max lines to return this call (default from REI_READ_MAX_LINES). Omit to use the default page size.",
+        },
       },
       required: ["paths"],
+    },
+  },
+};
+
+export const GREP_CODE_TOOL: ToolDefinition = {
+  type: "function",
+  function: {
+    name: "grep_code",
+    description:
+      "Search the repository for a regex pattern (ripgrep). Returns bounded `file:line: text` matches " +
+      "plus a total count — the fast way to LOCATE code in a large repo without reading whole files. " +
+      "Prefer this over shell grep (whose output gets capped mid-result). Scope with 'path'/'glob'.",
+    parameters: {
+      type: "object",
+      properties: {
+        pattern: { type: "string", description: "Regex to search for (e.g. \"class SmartForm\" or \"function\\\\s+load\")." },
+        path: { type: "string", description: "Optional subdirectory or file to limit the search to (relative to workspace)." },
+        glob: { type: "string", description: "Optional file glob, e.g. \"*.ts\" or \"src/**/*.tsx\"." },
+        max_results: { type: "integer", description: "Max matches to return (default 50)." },
+      },
+      required: ["pattern"],
+    },
+  },
+};
+
+export const LIST_FILES_TOOL: ToolDefinition = {
+  type: "function",
+  function: {
+    name: "list_files",
+    description:
+      "List workspace files matching a glob (ripgrep --files). The fast way to DISCOVER files by name " +
+      "in a large repo (e.g. all \"*.component.ts\"). Bounded output with a total count.",
+    parameters: {
+      type: "object",
+      properties: {
+        glob: { type: "string", description: "File glob, e.g. \"**/*.service.ts\" or \"*.md\". Omit to list everything (bounded)." },
+        path: { type: "string", description: "Optional subdirectory to limit to (relative to workspace)." },
+        max_results: { type: "integer", description: "Max paths to return (default 200)." },
+      },
+      required: [],
     },
   },
 };
@@ -255,6 +307,8 @@ export const SAVE_TOOL_OUTPUT_TOOL: ToolDefinition = {
 /** All tools available in agent mode (editing capabilities). */
 export const AGENT_TOOLS: ToolDefinition[] = [
   READ_FILES_TOOL,
+  GREP_CODE_TOOL,
+  LIST_FILES_TOOL,
   EDIT_FILE_TOOL,
   CREATE_FILE_TOOL,
   REWRITE_FILE_TOOL,
@@ -280,6 +334,8 @@ export const UTILITY_TOOLS: ToolDefinition[] = [
  */
 export const READONLY_TOOLS: ToolDefinition[] = [
   READ_FILES_TOOL,
+  GREP_CODE_TOOL,
+  LIST_FILES_TOOL,
   RUN_COMMAND_TOOL,
   GIT_CHANGES_TOOL,
   SAVE_TOOL_OUTPUT_TOOL,
