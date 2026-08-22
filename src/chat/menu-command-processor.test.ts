@@ -74,11 +74,11 @@ describe("menu-command-processor session commands", () => {
 
     expect(result.success).toBe(true);
     expect(result.recordInSession).toBe(false);
-    expect(result.newSession).toEqual({ messages: [], mode: "ask" });
+    expect(result.newSession).toEqual({ messages: [], mode: "agent" });
 
     const current = loadCurrentSession(tmpWorkspace);
     expect(current?.messages).toEqual([]);
-    expect(current?.mode).toBe("ask");
+    expect(current?.mode).toBe("agent");
 
     const archived = listSessions(tmpWorkspace);
     expect(archived).toHaveLength(1);
@@ -101,7 +101,7 @@ describe("menu-command-processor session commands", () => {
 
     expect(result.success).toBe(true);
     expect(result.response).toContain("agregar-login-social.json");
-    expect(result.newSession).toEqual({ messages: [], mode: "ask" });
+    expect(result.newSession).toEqual({ messages: [], mode: "agent" });
 
     const archived = listSessions(tmpWorkspace);
     expect(archived).toHaveLength(1);

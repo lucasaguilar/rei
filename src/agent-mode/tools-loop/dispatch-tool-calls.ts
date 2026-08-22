@@ -28,7 +28,7 @@ import { handleSearchTools, handleUseSkill } from "./meta-handlers.js";
 type McpTool = ReturnType<McpRegistry["getAvailableTools"]>[number];
 
 /** Everything the per-call dispatch needs from the loop. Maps/sets are mutated BY REFERENCE
- *  (activeMcp grows via search_tools; virtualFiles/alreadyProvided/createdFiles via the handlers). */
+ *  (activeMcp grows via search_tools; virtualFiles/createdFiles via the handlers). */
 export interface DispatchContext {
   workspacePath: string;
   logger: AgentLogger;
@@ -42,7 +42,6 @@ export interface DispatchContext {
   toRel: (raw: string) => string;
   currentContent: (file: string) => Promise<string>;
   virtualFiles: Map<string, string>;
-  alreadyProvided: Map<string, string>;
   // meta-tools
   allMcpTools: McpTool[];
   activeMcp: Set<string>;
@@ -89,7 +88,6 @@ export async function dispatchToolCalls(
     toRel,
     currentContent,
     virtualFiles,
-    alreadyProvided,
     allMcpTools,
     activeMcp,
     skills,
@@ -144,17 +142,9 @@ export async function dispatchToolCalls(
             toRel,
             currentContent,
             virtualFiles,
-            alreadyProvided,
           });
           toolResult = rf.text;
-          // Re-reading ONLY files it already has = no progress. Count it as a blocked repeat so the
-          // loop-guard (nudge → abandon) catches the "re-read the same file forever" loop FAST,
-          // instead of grinding until produce-or-bail at turn 8/12.
-          if (rf.allUnchanged) {
-            blockedRepeatCount += 1;
-            logger.logInfo("[tools] read_files loop-guard: blocked re-read (all files unchanged)");
-            emitStatus("↩️  [REI] Re-lectura sin cambios bloqueada — el archivo ya está arriba; editá o respondé.");
-          }
+          // No re-read guard: read_files always serves the file. If the model asks for it, it gets it.
           toolResultsMap.set(call.id, toolResult);
           break;
         }

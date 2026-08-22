@@ -12,13 +12,12 @@ const MAX_INLINE_EDIT_RESULT_CHARS = 24000;
  * After a successful apply, build each edit's tool result INCLUDING the file's updated content, so
  * the model can compose further edits without re-reading it. This kills the read-after-edit churn
  * (edit → read same file → edit → read again …) that multiplies model calls and dominates agent-turn
- * latency. `alreadyProvided` is refreshed so a re-read short-circuits to "unchanged since shown".
+ * latency.
  */
 export function setEditResults(
   editTasks: EditTask[],
   candidate: Map<string, string>,
   toolResultsMap: Map<string, string>,
-  alreadyProvided: Map<string, string>,
 ): void {
   const inlined = new Set<string>();
   for (const task of editTasks) {
@@ -33,8 +32,7 @@ export function setEditResults(
     }
     inlined.add(f);
     if (updated.length <= MAX_INLINE_EDIT_RESULT_CHARS) {
-      // The model now has the post-edit content → a re-read is deduped to "reuse what you saw".
-      alreadyProvided.set(f, updated);
+      // The model now has the post-edit content inline in this result.
       toolResultsMap.set(
         task.callId,
         `OK: edit to ${f} applied. The file now contains exactly:\n\`\`\`\n${updated}\n\`\`\`\n` +
@@ -44,7 +42,7 @@ export function setEditResults(
           `task are done, reply with a brief summary (no tool call).`,
       );
     } else {
-      // Too large to inline; do NOT refresh alreadyProvided (model hasn't seen the new state).
+      // Too large to inline; the model hasn't seen the new state (it can re-read if it needs it).
       toolResultsMap.set(
         task.callId,
         `OK: edit to ${f} applied to disk. (File is large — not inlined.) Avoid re-reading it ` +
@@ -72,7 +70,6 @@ export interface BatchContext {
   logger: AgentLogger;
   virtualFiles: Map<string, string>;
   toolResultsMap: Map<string, string>;
-  alreadyProvided: Map<string, string>;
   readDisk: (file: string) => Promise<string>;
   persistToDisk: (files: string[]) => Promise<void>;
 }
@@ -89,7 +86,7 @@ export interface BatchOutcome {
 /**
  * Applies a batch of queued edits to the virtual file tree, then either persists (direct mode) or
  * validates-then-persists (sandbox mode). Extracted from executeAgentTurnWithTools (Phase 2). The
- * maps in `ctx` (virtualFiles / toolResultsMap / alreadyProvided) are mutated by reference; the
+ * maps in `ctx` (virtualFiles / toolResultsMap) are mutated by reference; the
  * loop-local failure flags + mismatch escalation are RETURNED for the caller to apply.
  */
 export async function applyEditBatch(
@@ -143,7 +140,7 @@ export async function applyEditBatch(
     // run_command (it sees the real disk) and REI does ONE final verify when it finishes.
     for (const [f, c] of candidate) ctx.virtualFiles.set(f, c);
     await ctx.persistToDisk(editedFiles);
-    setEditResults(editTasks, candidate, ctx.toolResultsMap, ctx.alreadyProvided);
+    setEditResults(editTasks, candidate, ctx.toolResultsMap);
     return { failed: false, mismatchStreak: 0, mismatchEscalation: null };
   }
 
@@ -164,7 +161,7 @@ export async function applyEditBatch(
     for (const [f, c] of candidate) ctx.virtualFiles.set(f, c); // commit to virtual tree
     // Persist on-green so the model's OWN run_command (ngc/head/tests) sees its work.
     await ctx.persistToDisk(editedFiles);
-    setEditResults(editTasks, candidate, ctx.toolResultsMap, ctx.alreadyProvided);
+    setEditResults(editTasks, candidate, ctx.toolResultsMap);
     return { failed: false, mismatchStreak: 0, mismatchEscalation: null };
   }
 

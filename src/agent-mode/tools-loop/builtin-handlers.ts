@@ -3,6 +3,7 @@ import * as path from "node:path";
 import type { AgentLogger } from "../../core/logger.js";
 import type { ModelProvider } from "../../providers/model-provider.js";
 import { executeCommand, limitCommandOutput } from "../../tools/command-executor.js";
+import { getAllowedDirs } from "../../tools/sandbox-config.js";
 import { getToolOutput } from "./tool-output-store.js";
 import { searchWeb } from "../../tools/search-tool.js";
 import { getWeather, formatWeatherOutput } from "../../tools/weather-tool.js";
@@ -51,10 +52,16 @@ export function handleSaveToolOutput(
   const entry = getToolOutput(args.id ? String(args.id) : undefined);
   if (!entry) return "ERROR: no prior tool output available to save.";
 
-  const root = path.resolve(ctx.workspacePath);
-  const abs = path.resolve(root, dest);
-  if (abs !== root && !abs.startsWith(root + path.sep)) {
-    return `ERROR: refusing to write outside the workspace: ${dest}`;
+  // Resolve against the workspace (relative paths) or honor an absolute path. Allowed if it lands
+  // inside the workspace, ~/.rei, or any REI_ALLOWED_DIRS entry — same policy as run_command.
+  const abs = path.resolve(ctx.workspacePath, dest);
+  const allowed = getAllowedDirs(ctx.workspacePath);
+  const isAllowed = allowed.some((d) => abs === d || abs.startsWith(d + path.sep));
+  if (!isAllowed) {
+    return (
+      `ERROR: refusing to write outside allowed directories: ${dest}\n` +
+      `Allowed roots: ${allowed.join(", ")}. Add a dir to REI_ALLOWED_DIRS to permit it.`
+    );
   }
 
   try {

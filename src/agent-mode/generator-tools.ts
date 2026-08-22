@@ -161,13 +161,11 @@ export async function executeAgentTurnWithTools(params: {
   // component's .ts and its .html template) be validated TOGETHER, instead of validating each
   // turn's edits one-against-disk — which made cross-file edits split across turns impossible
   // to satisfy and sent the model into edit loops.
-  // The in-memory file state for this turn — virtualFiles/diskCache/alreadyProvided maps plus the
-  // read/resolve/persist helpers (extracted, Phase 2). The maps are mutated BY REFERENCE by the
-  // tool handlers below.
+  // The in-memory file state for this turn — virtualFiles/diskCache maps plus the read/resolve/persist
+  // helpers (extracted, Phase 2). The maps are mutated BY REFERENCE by the tool handlers below.
   const {
     virtualFiles,
     diskCache,
-    alreadyProvided,
     toRel,
     resolveTarget,
     readDisk,
@@ -304,7 +302,6 @@ export async function executeAgentTurnWithTools(params: {
           toRel,
           currentContent,
           virtualFiles,
-          alreadyProvided,
           allMcpTools,
           activeMcp,
           skills,
@@ -334,7 +331,6 @@ export async function executeAgentTurnWithTools(params: {
         logger,
         virtualFiles,
         toolResultsMap,
-        alreadyProvided,
         readDisk,
         persistToDisk,
       });

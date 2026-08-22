@@ -31,7 +31,6 @@ describe("dispatchToolCalls", () => {
       toRel: tree.toRel,
       currentContent: tree.currentContent,
       virtualFiles: tree.virtualFiles,
-      alreadyProvided: tree.alreadyProvided,
       allMcpTools: [],
       activeMcp: new Set<string>(),
       skills: [],

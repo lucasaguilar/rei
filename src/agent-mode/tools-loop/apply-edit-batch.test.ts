@@ -25,7 +25,6 @@ describe("applyEditBatch (direct mode)", () => {
       logger: fakeLogger,
       virtualFiles: tree.virtualFiles,
       toolResultsMap: new Map(),
-      alreadyProvided: tree.alreadyProvided,
       readDisk: tree.readDisk,
       persistToDisk: tree.persistToDisk,
     };

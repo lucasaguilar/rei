@@ -21,26 +21,24 @@ describe("handleReadFiles", () => {
       toRel: tree.toRel,
       currentContent: tree.currentContent,
       virtualFiles: tree.virtualFiles,
-      alreadyProvided: tree.alreadyProvided,
     };
   });
   afterEach(() => fs.rmSync(ws, { recursive: true, force: true }));
 
-  it("returns disk content for a fresh file, records it, and is NOT allUnchanged", async () => {
+  it("returns full disk content and is never allUnchanged", async () => {
     fs.writeFileSync(path.join(ws, "a.ts"), "const a = 1;");
     const out = await handleReadFiles(["a.ts"], ctx);
     expect(out.text).toContain("const a = 1;");
     expect(out.allUnchanged).toBe(false);
-    expect(ctx.alreadyProvided.get("a.ts")).toBe("const a = 1;");
   });
 
-  it("dedups a re-read of an unchanged file and flags allUnchanged (→ loop-guard)", async () => {
+  it("always serves the file on re-read (no dedup guard)", async () => {
     fs.writeFileSync(path.join(ws, "a.ts"), "const a = 1;");
-    await handleReadFiles(["a.ts"], ctx); // first read records it
+    await handleReadFiles(["a.ts"], ctx);
     const second = await handleReadFiles(["a.ts"], ctx);
-    expect(second.text).toContain("ALREADY have the full content");
-    expect(second.text).not.toContain("const a = 1;");
-    expect(second.allUnchanged).toBe(true);
+    expect(second.text).toContain("const a = 1;");
+    expect(second.text).not.toContain("ALREADY have the full content");
+    expect(second.allUnchanged).toBe(false);
   });
 
   it("is NOT allUnchanged when at least one file is fresh (mixed read)", async () => {

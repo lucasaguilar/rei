@@ -10,17 +10,14 @@ import {
 /**
  * The in-memory file state for one native agent turn (extracted from executeAgentTurnWithTools —
  * Phase 2). Edits accumulate in `virtualFiles` (path → pending content) instead of touching disk
- * per-edit; disk is read once and cached (`diskCache`); `alreadyProvided` dedups re-reads of files
- * whose shown content hasn't changed. The loop's tool handlers mutate these maps BY REFERENCE, so
- * the factory returns them directly.
+ * per-edit; disk is read once and cached (`diskCache`). The loop's tool handlers mutate these maps
+ * BY REFERENCE, so the factory returns them directly.
  */
 export interface VirtualFileTree {
   /** path → pending (edited) content, applied to disk only at the end. */
   virtualFiles: Map<string, string>;
   /** path → original on-disk content (read once; disk isn't mutated during the loop). */
   diskCache: Map<string, string>;
-  /** path → exact content already shown to the model, so read_files can skip re-dumping it. */
-  alreadyProvided: Map<string, string>;
   /** Normalize a model-supplied path to a canonical workspace-relative key (reads). */
   toRel: (raw: string) => string;
   /** Like toRel but enforces workspace containment — throws for missing/escaping paths (writes). */
@@ -38,7 +35,6 @@ export interface VirtualFileTree {
 export function createVirtualFileTree(workspacePath: string): VirtualFileTree {
   const virtualFiles = new Map<string, string>();
   const diskCache = new Map<string, string>();
-  const alreadyProvided = new Map<string, string>();
 
   // Accepts both relative ("django/forms.py") and absolute in-workspace ("/testbed/django/forms.py")
   // forms — the latter is common when the workspace itself is an absolute path. Used as the virtual
@@ -95,7 +91,6 @@ export function createVirtualFileTree(workspacePath: string): VirtualFileTree {
   return {
     virtualFiles,
     diskCache,
-    alreadyProvided,
     toRel,
     resolveTarget,
     readDisk,
