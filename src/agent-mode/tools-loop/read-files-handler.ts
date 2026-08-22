@@ -47,11 +47,21 @@ export async function handleReadFiles(
       continue;
     }
 
-    const lines = cur.split("\n");
+    // Drop a single trailing newline before counting so a POSIX file (which ends in "\n") reports its
+    // real line count — otherwise split() adds a spurious empty last line (off-by-one → false paging).
+    const lines = (cur.endsWith("\n") ? cur.slice(0, -1) : cur).split("\n");
     const total = lines.length;
-    const start = Math.min(offset - 1, total);
+
+    if (offset > total) {
+      parts.push(
+        `--- File: ${f} ---\n(offset ${offset} is past the end — the file has ${total} line${total === 1 ? "" : "s"}.)`,
+      );
+      continue;
+    }
+
+    const start = offset - 1;
     const slice = lines.slice(start, start + limit);
-    const end = start + slice.length; // last line delivered (1-based == end)
+    const end = start + slice.length; // 1-based line number of the last line delivered
 
     const paged = offset > 1 || end < total;
     const header = paged ? `--- File: ${f} (lines ${offset}-${end} of ${total}) ---` : `--- File: ${f} ---`;
