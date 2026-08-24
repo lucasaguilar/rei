@@ -38,7 +38,10 @@ vi.mock("node:fs", async (importOriginal) => {
   };
 });
 // Mock child_process and fs for the runTypeScriptCompileCheck tests
-vi.mock("node:child_process", () => ({
+// Mock PARCIAL: la factory sin importOriginal reemplazaba el modulo entero y dejaba `spawn`
+// undefined para cualquier otro test del mismo worker (rompia code-search.test.ts).
+vi.mock("node:child_process", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:child_process")>()),
   exec: vi.fn((cmd, options, callback) => {
     // If it's a successful mock, we simulate it
     if (cmd.includes("fail")) {

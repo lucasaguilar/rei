@@ -60,20 +60,6 @@ function run(cmd: string, args: string[], cwd: string, timeoutMs = 15_000): Prom
   });
 }
 
-/** Dirs ripgrep skips via .gitignore that the POSIX fallback would otherwise walk. Without these a
- *  single minified line (e.g. .rei/rag-index.json) can consume the whole output budget. */
-const FALLBACK_EXCLUDED_DIRS = [
-  "node_modules", ".git", "dist", "build", "out", "coverage",
-  ".next", ".rei", ".venv", "__pycache__", ".cache",
-];
-
-/** POSIX grep/find match a glob against the BASENAME, so "src/**\/*.ts" becomes "*.ts".
- *  Returns the basename portion plus whether anything was dropped (the caller warns). */
-function toBasenameGlob(glob: string): { pattern: string; approximated: boolean } {
-  const base = glob.replace(/^.*\//, "");
-  return { pattern: base, approximated: base !== glob };
-}
-
 export interface GrepParams {
   pattern: string;
   /** Restrict to a subdirectory or file (relative to the workspace). */
@@ -91,35 +77,35 @@ export async function grepCode(workspacePath: string, params: GrepParams): Promi
   const max = params.maxResults && params.maxResults > 0 ? Math.floor(params.maxResults) : 50;
 
   // Try ripgrep first — fast, respects .gitignore, bounded columns.
-  const rgArgs = ["--line-number", "--no-heading", "--color", "never", "--max-columns", "240"];
+  // --no-require-git: ripgrep only applies .gitignore inside a git repo. A workspace that isn't one
+  // (a plain folder, a worktree export) would otherwise have node_modules/ walked despite listing it.
+  const rgArgs = ["--line-number", "--no-heading", "--color", "never", "--max-columns", "240", "--no-require-git"];
   if (params.glob) rgArgs.push("--glob", params.glob);
   rgArgs.push("--regexp", pattern);
-  if (params.path) rgArgs.push("--", params.path);
+  // ALWAYS pass a search path. With none, ripgrep reads STDIN when stdin isn't a TTY — inside a
+  // server/sub-agent/non-interactive run that means grep_code hangs until the timeout and then
+  // reports "no matches", which reads to the model as a confident (and wrong) answer.
+  rgArgs.push("--", params.path || "./");
 
   let res = await run("rg", rgArgs, workspacePath);
-  // Set when the POSIX fallback could only approximate a path-shaped glob (it matches basenames).
-  let approximatedGlob: string | undefined;
+  // Set when ripgrep is missing and we fall back to POSIX grep, which ignores `glob` and walks
+  // ignored dirs. The model must be TOLD — a filter that silently didn't apply is worse than none.
+  let degraded = false;
 
   if (res.missing) {
     // Fallback: POSIX grep. -r recursive, -n line numbers, -E extended regex, -I skip binary.
     // BSD (macOS) and GNU grep both accept --include / --exclude-dir, so the fallback can honor the
     // glob and skip vendor dirs instead of silently searching everything.
-    const grepArgs = ["-rnIE"];
-    if (params.glob) {
-      const g = toBasenameGlob(params.glob);
-      grepArgs.push(`--include=${g.pattern}`);
-      if (g.approximated) approximatedGlob = params.glob;
-    }
-    for (const dir of FALLBACK_EXCLUDED_DIRS) grepArgs.push(`--exclude-dir=${dir}`);
-    grepArgs.push("--", pattern, params.path || ".");
+    const grepArgs = ["-rnIE", "--", pattern, params.path || "."];
+    degraded = true;
     res = await run("grep", grepArgs, workspacePath);
     if (res.missing) {
       return "ERROR: neither ripgrep (rg) nor grep is available to search.";
     }
   }
 
-  // grep prefixes paths with "./" when handed a "." root; rg does not. Normalize so the model sees
-  // the same shape either way (and can pass the path straight back to read_files).
+  // Both search roots ("./" for rg, "." for the grep fallback) echo back a "./" prefix on every
+  // path. Strip it so what the model gets can be handed straight to read_files.
   const allLines = res.stdout
     .split("\n")
     .map((l) => l.replace(/^\.\//, ""))
@@ -139,8 +125,8 @@ export async function grepCode(workspacePath: string, params: GrepParams): Promi
   } else if (allLines.length > max) {
     out += `\n… and ${allLines.length - max} more — narrow the pattern, or pass a 'path'/'glob' to scope the search.`;
   }
-  if (approximatedGlob) {
-    out += `\n(note: ripgrep is not installed — the glob "${approximatedGlob}" was applied by file name only.)`;
+  if (degraded) {
+    out += `\n(WARNING: ripgrep is not installed — this used POSIX grep, which IGNORED any 'glob' and searched ignored dirs. Install ripgrep for accurate results.)`;
   }
   return out;
 }
@@ -158,18 +144,15 @@ export interface ListFilesParams {
 export async function listFiles(workspacePath: string, params: ListFilesParams): Promise<string> {
   const max = params.maxResults && params.maxResults > 0 ? Math.floor(params.maxResults) : 200;
 
-  const rgArgs = ["--files"];
+  const rgArgs = ["--files", "--no-require-git"];
   if (params.glob) rgArgs.push("--glob", params.glob);
-  if (params.path) rgArgs.push("--", params.path);
+  rgArgs.push("--", params.path || "./"); // explicit path — never let ripgrep fall back to stdin
   let res = await run("rg", rgArgs, workspacePath);
 
   if (res.missing) {
     // Fallback: find. Approximate a glob with -name on the basename pattern.
     const findArgs = [params.path || ".", "-type", "f"];
-    if (params.glob) findArgs.push("-name", toBasenameGlob(params.glob).pattern);
-    for (const dir of FALLBACK_EXCLUDED_DIRS) {
-      findArgs.push("-not", "-path", `*/${dir}/*`);
-    }
+    if (params.glob) findArgs.push("-name", params.glob.replace(/^.*\//, ""));
     res = await run("find", findArgs, workspacePath);
     if (res.missing) return "ERROR: neither ripgrep (rg) nor find is available to list files.";
   }

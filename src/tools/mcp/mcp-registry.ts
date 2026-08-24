@@ -9,7 +9,7 @@
 import type { McpClient, McpTool } from "./mcp-client.js";
 import { StdioMcpClient } from "./stdio-client.js";
 import { HttpMcpClient } from "./http-client.js";
-import { loadReiConfig, type McpConnectionConfig } from "./mcp-config.js";
+import { loadReiConfig, type McpConnectionConfig, mcpTransportOf } from "./mcp-config.js";
 import { withToolSpan } from "../../telemetry/spans.js";
 
 interface ConnectedServer {
@@ -69,7 +69,12 @@ export class McpRegistry {
     serverName: string,
     config: McpConnectionConfig,
   ): Promise<McpClient> {
-    if (config.type === "http") {
+    if (mcpTransportOf(config) === "http") {
+      if (!("url" in config)) {
+        throw new Error(
+          `MCP server '${serverName}': http transport requires a 'url'.`,
+        );
+      }
       const headers: Record<string, string> = {};
       if (config.headers) {
         for (const [key, value] of Object.entries(config.headers)) {
@@ -77,6 +82,13 @@ export class McpRegistry {
         }
       }
       return HttpMcpClient.create(serverName, config.url, headers, config.auth);
+    }
+
+    // Neither shape matched — say so instead of failing later on an undefined command.
+    if (!("command" in config)) {
+      throw new Error(
+        `MCP server '${serverName}': entry has neither 'command' (stdio) nor 'url' (http).`,
+      );
     }
 
     const env: Record<string, string> = {};
@@ -193,7 +205,7 @@ export class McpRegistry {
       const conn = this.servers.get(name);
       return {
         name,
-        transport: cfg.type,
+        transport: mcpTransportOf(cfg),
         enabledInConfig: cfg.enabled !== false,
         connected: !!conn,
         tools: conn ? conn.tools.length : 0,

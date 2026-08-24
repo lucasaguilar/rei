@@ -38,15 +38,24 @@ interface McpCommonConfig {
   enabled?: boolean;
 }
 
+/** Resolved transport for a server entry. `type` is OPTIONAL in the wild — Claude-Desktop-style
+ *  configs declare only `command`/`url` — so the shape is the real discriminant and `type` is just
+ *  a hint. Inferring it here keeps every consumer (connect, list) agreeing on one answer. */
+export function mcpTransportOf(cfg: McpConnectionConfig): "stdio" | "http" {
+  if (cfg.type === "http" || cfg.type === "sse") return "http";
+  if (cfg.type === "stdio") return "stdio";
+  return "url" in cfg && cfg.url ? "http" : "stdio";
+}
+
 export type McpConnectionConfig =
   | (McpCommonConfig & {
-      type: "stdio";
+      type?: "stdio";
       command: string;
       args?: string[];
       env?: Record<string, string>;
     })
   | (McpCommonConfig & {
-      type: "http";
+      type?: "http" | "sse";
       url: string;
       headers?: Record<string, string>;
       /** "oauth" → run the MCP OAuth login flow (browser) instead of static headers. Use this for

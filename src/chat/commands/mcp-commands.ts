@@ -41,7 +41,10 @@ function renderList(registry: McpRegistry): string {
       ? `🟢 on   ${s.tools} tool${s.tools === 1 ? "" : "s"}`
       : "⚪ off";
     const cfg = s.enabledInConfig ? "" : "  (enabled:false)";
-    return `  ${s.name.padEnd(18)} ${s.transport.padEnd(6)} ${state}${cfg}`;
+    // Defensive: a malformed entry must not take the whole CLI down — /mcp used to throw here
+    // (TypeError on undefined.padEnd) and the crash escaped the dispatcher, killing the session.
+    const transport = (s.transport ?? "?").padEnd(6);
+    return `  ${String(s.name).padEnd(18)} ${transport} ${state}${cfg}`;
   });
   return (
     `[REI] MCP servers:\n${rows.join("\n")}\n\n` +

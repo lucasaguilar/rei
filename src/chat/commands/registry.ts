@@ -29,13 +29,28 @@ const COMMAND_HANDLERS = [
   mcpCommands,
 ];
 
-/** Runs the first handler that owns the input, or null when none does (→ legacy fallback). */
+/**
+ * Runs the first handler that owns the input, or null when none does (→ legacy fallback).
+ *
+ * A handler that throws is reported as a failed command, NOT propagated: an unhandled rejection here
+ * escapes to the top level and kills the whole CLI (a malformed rei.config.json entry once took the
+ * session down through `/mcp`). Losing one command is recoverable; losing the session is not.
+ */
 export async function dispatchCommand(
   ctx: CommandContext,
 ): Promise<CommandResult | null> {
   for (const handler of COMMAND_HANDLERS) {
     if (handler.match(ctx.command)) {
-      return await handler.run(ctx);
+      try {
+        return await handler.run(ctx);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        return {
+          success: false,
+          response: `[REI] ❌ '${ctx.command.split(/\s+/)[0]}' failed: ${detail}`,
+          recordInSession: false,
+        };
+      }
     }
   }
   return null;
