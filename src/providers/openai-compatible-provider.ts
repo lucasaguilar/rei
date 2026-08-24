@@ -64,9 +64,31 @@ export abstract class OpenAiCompatibleProvider implements ModelProvider {
   protected frequencyPenalty!: number;
   protected presencePenalty!: number;
 
+  /**
+   * Whether this backend forwards `chat_template_kwargs` into the chat template's Jinja context.
+   * Qwen3.8's reasoning level (low/medium/xhigh) is a TEMPLATE variable, not an engine param — the
+   * template renders it into a system instruction. Backends that forward the field (vLLM, SGLang,
+   * MTPLX) let a client set it per request; LM Studio does not (verified: an invalid value never
+   * reaches the template's raise_exception), and needs a model.yaml customField instead.
+   * Subclasses opt in; the base stays off so nothing new is sent to backends that would ignore it.
+   */
+  protected forwardsTemplateKwargs = false;
+
   /** The provider's default model id — lets callers resolve its per-model tuning (rei.config.json). */
   getModel(): string {
     return this.model;
+  }
+
+  /**
+   * `chat_template_kwargs` for one request, or undefined when the backend doesn't forward them.
+   * Kept separate from the top-level `reasoning_effort` (which is still sent): the two are
+   * different doors to the same setting and backends implement one, the other, or neither.
+   */
+  protected templateKwargs(
+    reasoningEffort?: string,
+  ): Record<string, unknown> | undefined {
+    if (!this.forwardsTemplateKwargs || !reasoningEffort) return undefined;
+    return { reasoning_effort: reasoningEffort };
   }
 
   async complete(prompt: string, options?: CompletionOptions): Promise<string> {
@@ -223,6 +245,7 @@ export abstract class OpenAiCompatibleProvider implements ModelProvider {
       timeoutMs: this.requestTimeoutMs,
       maxTokens: getMaxOutputTokens(),
       options,
+      chatTemplateKwargs: this.templateKwargs(options?.reasoningEffort),
     });
   }
 
@@ -242,6 +265,7 @@ export abstract class OpenAiCompatibleProvider implements ModelProvider {
         timeoutMs: this.requestTimeoutMs,
         maxTokens: getMaxOutputTokens(),
         options,
+        chatTemplateKwargs: this.templateKwargs(options?.reasoningEffort),
       },
       onDelta,
     );
@@ -278,6 +302,10 @@ export abstract class OpenAiCompatibleProvider implements ModelProvider {
     }
     if (reasoningEffort) {
       requestBody.reasoning_effort = reasoningEffort;
+    }
+    const tplKwargs = this.templateKwargs(reasoningEffort);
+    if (tplKwargs) {
+      requestBody.chat_template_kwargs = tplKwargs;
     }
 
     return fetchWithRetry(

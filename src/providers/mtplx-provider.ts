@@ -26,6 +26,11 @@ export class MtplxProvider extends OpenAiCompatibleProvider {
       params?.baseUrl ?? process.env.MTPLX_BASE_URL ?? DEFAULT_MTPLX_BASE_URL,
     );
     this.apiKey = params?.apiKey ?? process.env.MTPLX_API_KEY ?? "";
+    // MTPLX SÍ reenvía chat_template_kwargs al template (verificado: enable_thinking:false apagó el
+    // thinking por completo, reasoning_tokens=0). Es la única vía para mandarle a Qwen3.8 el nivel
+    // de razonamiento, porque es una variable del template y no un parámetro del motor.
+    // Se puede desactivar con MTPLX_TEMPLATE_KWARGS=false si el server cambia de comportamiento.
+    this.forwardsTemplateKwargs = process.env.MTPLX_TEMPLATE_KWARGS !== "false";
     this.model = params?.model ?? process.env.MTPLX_MODEL ?? "";
     this.requestTimeoutMs = parseRequestTimeoutMs(
       process.env.MTPLX_REQUEST_TIMEOUT_MS,

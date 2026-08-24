@@ -60,6 +60,20 @@ function run(cmd: string, args: string[], cwd: string, timeoutMs = 15_000): Prom
   });
 }
 
+/** Dirs ripgrep skips via .gitignore that the POSIX fallback would otherwise walk. Without these a
+ *  single minified line (e.g. .rei/rag-index.json) can consume the whole output budget. */
+const FALLBACK_EXCLUDED_DIRS = [
+  "node_modules", ".git", "dist", "build", "out", "coverage",
+  ".next", ".rei", ".venv", "__pycache__", ".cache",
+];
+
+/** POSIX grep/find match a glob against the BASENAME, so "src/**\/*.ts" becomes "*.ts".
+ *  Returns the basename portion plus whether anything was dropped (the caller warns). */
+function toBasenameGlob(glob: string): { pattern: string; approximated: boolean } {
+  const base = glob.replace(/^.*\//, "");
+  return { pattern: base, approximated: base !== glob };
+}
+
 export interface GrepParams {
   pattern: string;
   /** Restrict to a subdirectory or file (relative to the workspace). */
@@ -83,17 +97,33 @@ export async function grepCode(workspacePath: string, params: GrepParams): Promi
   if (params.path) rgArgs.push("--", params.path);
 
   let res = await run("rg", rgArgs, workspacePath);
+  // Set when the POSIX fallback could only approximate a path-shaped glob (it matches basenames).
+  let approximatedGlob: string | undefined;
 
   if (res.missing) {
     // Fallback: POSIX grep. -r recursive, -n line numbers, -E extended regex, -I skip binary.
-    const grepArgs = ["-rnIE", "--", pattern, params.path || "."];
+    // BSD (macOS) and GNU grep both accept --include / --exclude-dir, so the fallback can honor the
+    // glob and skip vendor dirs instead of silently searching everything.
+    const grepArgs = ["-rnIE"];
+    if (params.glob) {
+      const g = toBasenameGlob(params.glob);
+      grepArgs.push(`--include=${g.pattern}`);
+      if (g.approximated) approximatedGlob = params.glob;
+    }
+    for (const dir of FALLBACK_EXCLUDED_DIRS) grepArgs.push(`--exclude-dir=${dir}`);
+    grepArgs.push("--", pattern, params.path || ".");
     res = await run("grep", grepArgs, workspacePath);
     if (res.missing) {
       return "ERROR: neither ripgrep (rg) nor grep is available to search.";
     }
   }
 
-  const allLines = res.stdout.split("\n").filter((l) => l.trim().length > 0);
+  // grep prefixes paths with "./" when handed a "." root; rg does not. Normalize so the model sees
+  // the same shape either way (and can pass the path straight back to read_files).
+  const allLines = res.stdout
+    .split("\n")
+    .map((l) => l.replace(/^\.\//, ""))
+    .filter((l) => l.trim().length > 0);
   if (allLines.length === 0) {
     return `grep_code "${pattern}"${params.glob ? ` (glob ${params.glob})` : ""}${params.path ? ` in ${params.path}` : ""} — no matches.`;
   }
@@ -108,6 +138,9 @@ export async function grepCode(workspacePath: string, params: GrepParams): Promi
     out += `\n… TOO MANY matches (output capped) — narrow the pattern, or pass a 'path'/'glob' to scope the search.`;
   } else if (allLines.length > max) {
     out += `\n… and ${allLines.length - max} more — narrow the pattern, or pass a 'path'/'glob' to scope the search.`;
+  }
+  if (approximatedGlob) {
+    out += `\n(note: ripgrep is not installed — the glob "${approximatedGlob}" was applied by file name only.)`;
   }
   return out;
 }
@@ -133,7 +166,10 @@ export async function listFiles(workspacePath: string, params: ListFilesParams):
   if (res.missing) {
     // Fallback: find. Approximate a glob with -name on the basename pattern.
     const findArgs = [params.path || ".", "-type", "f"];
-    if (params.glob) findArgs.push("-name", params.glob.replace(/^.*\//, ""));
+    if (params.glob) findArgs.push("-name", toBasenameGlob(params.glob).pattern);
+    for (const dir of FALLBACK_EXCLUDED_DIRS) {
+      findArgs.push("-not", "-path", `*/${dir}/*`);
+    }
     res = await run("find", findArgs, workspacePath);
     if (res.missing) return "ERROR: neither ripgrep (rg) nor find is available to list files.";
   }

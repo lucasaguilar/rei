@@ -102,6 +102,15 @@ export interface OpenAIToolsParams {
    * `presence_penalty` / `reasoning_effort`. Defaults to omitting nothing.
    */
   omitParams?: readonly string[];
+  /**
+   * Extra variables for the SERVER-SIDE chat template (`chat_template_kwargs`). Some params are not
+   * engine params at all but Jinja variables the template reads — Qwen3.8's reasoning level is one:
+   * the template turns `reasoning_effort` into a system-prompt instruction. Backends differ on how
+   * they let a client reach that context: vLLM/SGLang/MTPLX forward `chat_template_kwargs`, while
+   * LM Studio drops it (it needs a model.yaml customField instead). Providers whose backend forwards
+   * it set this; the rest leave it undefined and the field is never sent.
+   */
+  chatTemplateKwargs?: Record<string, unknown>;
 }
 
 /**
@@ -142,6 +151,10 @@ function buildToolsRequestBody(
     ...(stream ? { stream_options: { include_usage: true } } : {}),
     ...(options?.reasoningEffort
       ? { reasoning_effort: options.reasoningEffort }
+      : {}),
+    ...(params.chatTemplateKwargs &&
+    Object.keys(params.chatTemplateKwargs).length > 0
+      ? { chat_template_kwargs: params.chatTemplateKwargs }
       : {}),
   };
   // Drop fields a specific compat endpoint rejects (e.g. Gemini 400s on frequency_penalty).
