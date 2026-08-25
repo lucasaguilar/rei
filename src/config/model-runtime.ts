@@ -204,10 +204,13 @@ export interface AgentSampling {
   temperature: number;
   frequencyPenalty: number;
   presencePenalty: number;
-  /** From per-model tuning only (config-only, no env knob). Sent to the model when defined. top_k
-   *  is a non-OpenAI-standard extension local runtimes accept; omitted unless configured. */
+  /** From per-model tuning only (config-only, no env knob). Sent to the model when defined. top_k,
+   *  min_p and repetition_penalty are non-OpenAI-standard extensions local runtimes accept;
+   *  all are omitted unless configured, so an unset field is never invented. */
   topP?: number;
   topK?: number;
+  minP?: number;
+  repetitionPenalty?: number;
 }
 
 /**
@@ -238,6 +241,8 @@ export function resolveAgentSampling(): AgentSampling {
     presencePenalty: pick(t?.presencePenalty, process.env.REI_AGENT_PRESENCE_PENALTY),
     topP: t?.topP,
     topK: t?.topK,
+    minP: t?.minP,
+    repetitionPenalty: t?.repetitionPenalty,
   };
 }
 

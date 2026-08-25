@@ -144,6 +144,12 @@ function buildToolsRequestBody(
       : {}),
     ...(sampling.topP !== undefined ? { top_p: sampling.topP } : {}),
     ...(sampling.topK !== undefined ? { top_k: sampling.topK } : {}),
+    // min_p / repetition_penalty reached only the non-tools chat path before, so a per-model block
+    // configuring them was silently inert in AGENT mode — the one place loops actually bite.
+    ...(sampling.minP !== undefined ? { min_p: sampling.minP } : {}),
+    ...(sampling.repetitionPenalty !== undefined
+      ? { repetition_penalty: sampling.repetitionPenalty }
+      : {}),
     max_tokens: maxTokens,
     stream,
     // Real token counts on the streaming path (OpenAI sends a final usage-only chunk).
