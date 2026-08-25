@@ -25,6 +25,8 @@ beforeAll(() => {
   writeFileSync(join(ws, "src/beta.ts"), "// needleToken appears here too\n");
   writeFileSync(join(ws, "src/config/gamma.ts"), "export const needleToken = 3;\n");
   writeFileSync(join(ws, "src/notes.md"), "needleToken in markdown, must not match a *.ts glob\n");
+  // Minified-file shape: one enormous line that matches.
+  writeFileSync(join(ws, "src/bundle.min.ts"), `const x="${"needleToken ".repeat(20000)}";\n`);
   writeFileSync(join(ws, "node_modules/pkg/vendor.ts"), "needleToken in vendor code\n");
   // El caso real: una sola linea gigante que sin exclusion se come toda la salida.
   writeFileSync(join(ws, ".rei/rag-index.json"), `{"chunks":["${"needleToken ".repeat(4000)}"]}\n`);
@@ -65,6 +67,15 @@ describe("grepCode", () => {
     const hits = out.split("\n").filter((l) => /:\d+:/.test(l));
     expect(hits).toHaveLength(1);
     expect(out).toMatch(/more|capped/);
+  });
+
+  it("clamps a huge single line so it cannot starve the output budget", async () => {
+    // A minified file is one enormous line; unclamped, a single match there fills MAX_OUTPUT_BYTES
+    // and every real result is lost. ripgrep caps via --max-columns; the POSIX fallback does not.
+    const out = await grepCode(ws, { pattern: "needleToken", glob: "*.ts", maxResults: 100 });
+    const longest = Math.max(...out.split("\n").map((l) => l.length));
+    expect(longest).toBeLessThan(400);
+    expect(out).toContain("alpha.ts"); // el archivo chico sigue apareciendo
   });
 
   it("reports no matches instead of returning an empty string", async () => {

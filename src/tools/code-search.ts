@@ -20,6 +20,9 @@ interface RunResult {
  *  millions of matches blowing V8's string limit (RangeError). ~2 MB is plenty for a bounded list. */
 const MAX_OUTPUT_BYTES = 2_000_000;
 
+/** Per-line cap, matching the `--max-columns` value passed to ripgrep. */
+const MAX_LINE_CHARS = 240;
+
 function run(cmd: string, args: string[], cwd: string, timeoutMs = 15_000): Promise<RunResult> {
   return new Promise((resolve) => {
     let stdout = "";
@@ -106,9 +109,15 @@ export async function grepCode(workspacePath: string, params: GrepParams): Promi
 
   // Both search roots ("./" for rg, "." for the grep fallback) echo back a "./" prefix on every
   // path. Strip it so what the model gets can be handed straight to read_files.
+  //
+  // The length clamp mirrors ripgrep's --max-columns for the POSIX fallback, which has no equivalent:
+  // one match inside a minified file (this repo's .rei/rag-index.json is 13.5 MB on a SINGLE line)
+  // otherwise consumes the whole MAX_OUTPUT_BYTES budget and starves every real result. Capping the
+  // line beats excluding directories — it holds for a minified bundle anywhere, listed or not.
   const allLines = res.stdout
     .split("\n")
     .map((l) => l.replace(/^\.\//, ""))
+    .map((l) => (l.length > MAX_LINE_CHARS ? `${l.slice(0, MAX_LINE_CHARS)}…` : l))
     .filter((l) => l.trim().length > 0);
   if (allLines.length === 0) {
     return `grep_code "${pattern}"${params.glob ? ` (glob ${params.glob})` : ""}${params.path ? ` in ${params.path}` : ""} — no matches.`;

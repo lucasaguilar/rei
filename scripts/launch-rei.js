@@ -91,6 +91,17 @@ function providerBaseUrl(provider, normalized) {
 
 /** Probes an OpenAI-compatible /v1/models endpoint. Returns { models, reachable, status }.
  *  `reachable:false` distinguishes "server down / bad URL" from "auth failed" (status 401/403). */
+/** model id (lowercased) → context length the server reported during the probe, when it exposes one.
+ *  Populated by probeModels and read by defaultTuning, so a fresh config starts with the REAL window
+ *  instead of a guess. Module-level because the wizard is one short-lived run. */
+const PROBED_CONTEXT = new Map();
+
+/** Fallback window when the server doesn't publish one. 32768 was too tight: REI sends the agent's
+ *  context untrimmed, and a cramped window is what broke tool-calling before (it looked like a bad
+ *  quantization until the window turned out to be the cause). Every local model REI targets today
+ *  handles 64k. It must NOT exceed what the server actually loaded — the note at Step 7 says so. */
+const DEFAULT_LOCAL_CONTEXT = 65536;
+
 async function probeModels(baseUrl, apiKey) {
     const base = normalizeEndpoint(baseUrl);
     if (!base) return { models: [], reachable: false, status: 0 };
@@ -101,7 +112,15 @@ async function probeModels(baseUrl, apiKey) {
         });
         if (!res.ok) return { models: [], reachable: true, status: res.status };
         const data = await res.json();
-        const models = (data.data || []).map(m => m.id).filter(Boolean);
+        const models = (data.data || []).map(m => {
+            // Some servers (MTPLX, vLLM) publish the loaded context length here; LM Studio and
+            // Ollama do not. When it's there it beats any guess — it's what's ACTUALLY loaded.
+            const ctx = Number(m.context_length ?? m.max_context_length ?? m.max_model_len);
+            if (m.id && Number.isFinite(ctx) && ctx > 0) {
+                PROBED_CONTEXT.set(String(m.id).trim().toLowerCase(), ctx);
+            }
+            return m.id;
+        }).filter(Boolean);
         return { models, reachable: true, status: 200 };
     } catch {
         return { models: [], reachable: false, status: 0 };
@@ -393,12 +412,49 @@ async function pickModel(provider, message, initialModel, preFetched) {
 
 /** Family-aware default sampling for a local model — a sane starting point the user can calibrate. */
 function defaultTuning(modelId) {
-    const n = modelId.toLowerCase();
-    const base = { id: modelId, contextWindow: 32768, maxTokens: 16384, temperature: 0.6, topP: 0.9, topK: 40, presencePenalty: 0.0, frequencyPenalty: 0.0, minP: 0.0, repetitionPenalty: 1.05 };
-    if (n.includes('qwen'))    return { ...base, temperature: 0.4, topP: 0.9,  topK: 40, minP: 0.05, repetitionPenalty: 1.03 };
+    const n = modelId.trim().toLowerCase();
+    // Anti-loop ON by default. Decoding with every penalty at zero is the #1 cause of repetition
+    // loops on local models — the same reason resolveAgentSampling() defaults to 0.3/0.3 instead of
+    // greedy (src/config/model-runtime.ts). Writing 0.0 here would OVERRIDE that global protection
+    // back off, because a per-model value always wins. No repetition_penalty on top: stacking the
+    // multiplicative penalty with presence/frequency tends to degrade the output.
+    const base = {
+        id: modelId,
+        contextWindow: PROBED_CONTEXT.get(n) || DEFAULT_LOCAL_CONTEXT,
+        maxTokens: 16384,
+        temperature: 0.6, topP: 0.9, topK: 40,
+        presencePenalty: 0.3, frequencyPenalty: 0.3, minP: 0.02,
+    };
+    // Qwen publishes its own sampling recipe (temp 0.6 / topP 0.95 / topK 20) and recommends a
+    // presence_penalty between 0 and 2 when a quantized build falls into endless repetitions.
+    if (n.includes('qwen'))    return { ...base, temperature: 0.6, topP: 0.95, topK: 20, presencePenalty: 1.0 };
     if (n.includes('deepseek'))return { ...base, temperature: 0.6, topP: 0.95, topK: 40 };
     if (n.includes('gemma'))   return { ...base, temperature: 0.7, topP: 0.95, topK: 64 };
     return base;
+}
+
+/** Mirror of `normalize()` in src/config/model-tuning.ts — lowercase, drop the org prefix
+ *  ("orcarouter/…") and a trailing "-thinking". This script is plain JS that ships standalone
+ *  (~/.rei/scripts), so it cannot import the TS source; parity is pinned by a test instead
+ *  (src/config/wizard-matching-parity.test.ts). Change one side and that test fails. */
+function normalizeModelId(modelId) {
+    return String(modelId || '').toLowerCase().replace(/^.*\//, '').replace(/-thinking$/, '');
+}
+
+/** Same predicate `matchModel()` uses at runtime: exact full id first, then normalized. The two
+ *  MUST agree — when the wizard's check was stricter (exact only), selecting a model the server
+ *  reports with an org prefix ("orcarouter/qwen3.8-27b-mlx@4bit") did not recognize a hand-tuned
+ *  entry stored under the short id, so it appended a DUPLICATE with default sampling. That duplicate
+ *  then won at runtime (matchModel tries the exact id first), silently reverting the user's tuning. */
+function isModelTuned(models, model) {
+    const target = String(model || '').trim().toLowerCase();
+    if (models.some(m => String(m.id || '').trim().toLowerCase() === target)) return true;
+    const norm = normalizeModelId(target);
+    if (!norm) return false;
+    return models.some(m => {
+        const id = normalizeModelId(m.id);
+        return id.length > 0 && id === norm;
+    });
 }
 
 /**
@@ -413,8 +469,7 @@ function mergeReiConfig(cfg, pairs) {
     for (const { provider, model } of pairs) {
         const existing = next.providers[provider] || {};
         const models = Array.isArray(existing.models) ? existing.models.slice() : [];
-        const has = models.some(m => (m.id || '').trim().toLowerCase() === model.trim().toLowerCase());
-        if (!has) { models.push(defaultTuning(model)); added++; }
+        if (!isModelTuned(models, model)) { models.push(defaultTuning(model)); added++; }
         next.providers[provider] = { ...existing, models };
     }
     return { cfg: next, added };
@@ -439,7 +494,12 @@ function ensureReiConfig(projectPath, localModels) {
     if (added > 0) {
         try {
             fs.writeFileSync(file, JSON.stringify(merged, null, 2) + '\n', 'utf8');
-            note(`Added default tuning for ${added} local model(s) → ${file}\nEdit sampling/context there to calibrate.`, 'rei.config.json');
+            note(
+                `Added default tuning for ${added} local model(s) → ${file}\n` +
+                `Context defaults to what the server reported, else ${DEFAULT_LOCAL_CONTEXT}. Make sure your\n` +
+                `model is LOADED with at least that window, or lower contextWindow there.`,
+                'rei.config.json',
+            );
         } catch (err) {
             console.error('⚠️  Could not write rei.config.json:', err.message);
         }
