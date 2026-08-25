@@ -476,11 +476,17 @@ function mergeReiConfig(cfg, pairs) {
 }
 
 /**
- * Ensures rei.config.json (in the workspace) has a tuning block for each selected LOCAL model.
- * Non-destructive (see mergeReiConfig). Only rewrites the file when something was actually added,
- * so a re-run over an already-configured repo leaves it byte-for-byte untouched.
+ * Offers a tuning block in rei.config.json for each selected LOCAL model that doesn't have one.
+ *
+ * ASKS before writing, and shows the exact JSON first. This file is hand-tuned — sampling values are
+ * calibrated per model against real loop/quality behavior — so silently appending to it is the wrong
+ * default: the user cannot review what changed, and a generated block sitting next to a curated one
+ * is indistinguishable. Declining still prints the block so it can be pasted and edited by hand.
+ *
+ * Non-destructive either way (see mergeReiConfig): existing entries are never modified or reordered,
+ * and a model already covered is skipped, so re-running over a configured repo asks nothing at all.
  */
-function ensureReiConfig(projectPath, localModels) {
+async function ensureReiConfig(projectPath, localModels) {
     const pairs = localModels.filter(m => m && m.model && LOCAL_PROVIDERS.includes(m.provider));
     if (pairs.length === 0) return;
 
@@ -490,16 +496,40 @@ function ensureReiConfig(projectPath, localModels) {
         try { cfg = JSON.parse(fs.readFileSync(file, 'utf8')); }
         catch { note('rei.config.json exists but is not valid JSON — leaving it untouched.', 'Skipped tuning'); return; }
     }
-    const { cfg: merged, added } = mergeReiConfig(cfg, pairs);
+
+    // What's missing, decided with the SAME rule matchModel uses at runtime (see isModelTuned).
+    const missing = pairs.filter(({ provider, model }) => {
+        const models = cfg.providers?.[provider]?.models;
+        return !isModelTuned(Array.isArray(models) ? models : [], model);
+    });
+    const covered = pairs.length - missing.length;
+    if (missing.length === 0) {
+        if (covered > 0) note(`All ${covered} selected model(s) already tuned — nothing to change.`, 'rei.config.json');
+        return;
+    }
+
+    const preview = missing.map(({ provider, model }) =>
+        `providers.${provider}.models[] +=\n${JSON.stringify(defaultTuning(model), null, 2)}`).join('\n\n');
+    note(
+        `${preview}\n\n` +
+        `Context comes from what the server reported, else ${DEFAULT_LOCAL_CONTEXT}. Your model must be\n` +
+        `LOADED with at least that window. Sampling is a starting point — tune it in the file.`,
+        `Proposed tuning for ${missing.length} model(s)`,
+    );
+    const ok = await confirm({
+        message: `Add ${missing.length} tuning block(s) to ${file}?`,
+        initialValue: true,
+    });
+    if (isCancel(ok) || !ok) {
+        note('Nothing written. Copy the block above into rei.config.json when you want it.', 'Skipped');
+        return;
+    }
+
+    const { cfg: merged, added } = mergeReiConfig(cfg, missing);
     if (added > 0) {
         try {
             fs.writeFileSync(file, JSON.stringify(merged, null, 2) + '\n', 'utf8');
-            note(
-                `Added default tuning for ${added} local model(s) → ${file}\n` +
-                `Context defaults to what the server reported, else ${DEFAULT_LOCAL_CONTEXT}. Make sure your\n` +
-                `model is LOADED with at least that window, or lower contextWindow there.`,
-                'rei.config.json',
-            );
+            note(`Added tuning for ${added} model(s) → ${file}`, 'rei.config.json');
         } catch (err) {
             console.error('⚠️  Could not write rei.config.json:', err.message);
         }
@@ -820,7 +850,7 @@ async function main() {
     }
 
     // Seed rei.config.json with default tuning for any LOCAL model chosen (non-destructive).
-    ensureReiConfig(projectPath, selectedModels);
+    await ensureReiConfig(projectPath, selectedModels);
 
     // ── Step 7: save + launch ──────────────────────────────────────────────
     saveLast(config);
