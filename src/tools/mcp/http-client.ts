@@ -10,7 +10,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import type { McpClient, McpTool, McpResource, McpPrompt } from "./mcp-client.js";
-import { McpOAuthProvider } from "./oauth-provider.js";
+import { McpOAuthProvider, LOGIN_TIMEOUT_MS } from "./oauth-provider.js";
 import {
   setupNotificationHandlers,
   extractTextContent,
@@ -156,6 +156,12 @@ export class HttpMcpClient implements McpClient {
         await client.connect(transport);
       } catch (err) {
         if (!(err instanceof UnauthorizedError)) throw err;
+        // Say what's happening before blocking. Startup awaits connectMcp(), so without this the CLI
+        // just sits there mute while the browser waits — indistinguishable from a hang.
+        console.log(
+          `[MCP/${serverName}] 🔐 Waiting for browser login (up to ${Math.round(LOGIN_TIMEOUT_MS / 60_000)} min). ` +
+            `REI will start without this server if it times out.`,
+        );
         const code = await authProvider.waitForCode();
         await transport.finishAuth(code);
         await client.connect(transport);

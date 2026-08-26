@@ -79,13 +79,18 @@ function isRtkAvailable(): boolean {
  * quoted strings. Quotes are stripped from the resulting tokens.
  * Example: `grep -r "some pattern" src` → ["grep", "-r", "some pattern", "src"]
  */
+/** `$NAME` / `${NAME}` — a shell-style variable name, never a positional like `$1`. Keeping the
+ *  first character alphabetic is what leaves `awk "{print $1}"` and `curl -w "%{http_code}"` alone. */
+const ENV_VAR_RE = /^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?/;
+
 function parseCommandLine(commandLine: string): string[] {
   const tokens: string[] = [];
   let current = "";
   let inSingle = false;
   let inDouble = false;
 
-  for (const ch of commandLine) {
+  for (let i = 0; i < commandLine.length; i++) {
+    const ch = commandLine[i];
     if (ch === "'" && !inDouble) {
       inSingle = !inSingle;
     } else if (ch === '"' && !inSingle) {
@@ -94,6 +99,22 @@ function parseCommandLine(commandLine: string): string[] {
       if (current) {
         tokens.push(current);
         current = "";
+      }
+    } else if (ch === "$" && !inSingle) {
+      // Env expansion with SHELL SEMANTICS: unquoted and double-quoted expand, single-quoted does
+      // not. We run commands with `shell: false`, so without this `curl -H "Authorization: Bearer
+      // $TOKEN"` sends the literal string and the model gets an unexplained 401. The single-quote
+      // rule is not cosmetic — `awk '{print $1}'` and `sed 's/$x/y/'` are allow-listed and would
+      // break under naive expansion. Deliberate deviation from the shell: an UNDEFINED variable
+      // stays literal instead of becoming empty, so the failure names the missing variable in the
+      // output rather than silently sending `Bearer `.
+      const m = ENV_VAR_RE.exec(commandLine.slice(i));
+      const value = m ? process.env[m[1]] : undefined;
+      if (m && value !== undefined) {
+        current += value;
+        i += m[0].length - 1;
+      } else {
+        current += ch;
       }
     } else {
       current += ch;
@@ -336,6 +357,13 @@ function prepareCommand(
   const [cmd, ...args] = cleanArgs;
 
   if (!cmd) return { ok: false, error: "Empty command." };
+
+  // Re-check the keywords AFTER expansion: the scan above reads the raw segment, so a variable
+  // holding "rm -rf" would have slipped past it by indirection.
+  const expanded = cleanArgs.join(" ");
+  if (expanded !== segment && DENIED_KEYWORDS.some((k) => expanded.includes(k))) {
+    return { ok: false, error: "Security Error: Command contains forbidden keywords or operators." };
+  }
 
   const allowed = getAllowedCommands();
   if (!allowed.includes(cmd)) {

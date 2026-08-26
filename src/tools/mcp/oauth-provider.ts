@@ -33,7 +33,7 @@ interface AuthStore {
 }
 
 /** How long to wait for the user to finish the browser login before giving up. */
-const LOGIN_TIMEOUT_MS = 5 * 60_000;
+export const LOGIN_TIMEOUT_MS = 5 * 60_000;
 
 function openBrowser(url: string): void {
   const cmd =
@@ -126,13 +126,22 @@ export class McpOAuthProvider implements OAuthClientProvider {
   /** Resolves with the authorization code once the browser redirect hits the callback. */
   waitForCode(): Promise<string> {
     if (!this.codePromise) return Promise.reject(new Error("callback server not started"));
-    const timeout = new Promise<string>((_, reject) =>
-      setTimeout(
+    // The timer is unref'd AND cleared once the race settles. Left running, a 5-minute timeout keeps
+    // Node's event loop alive long after a successful 10-second login — harmless in the interactive
+    // CLI, but it stops a one-shot command (`rei plan "…"`) from ever exiting.
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<string>((_, reject) => {
+      timeoutId = setTimeout(
         () => reject(new Error("Timed out waiting for browser login")),
         LOGIN_TIMEOUT_MS,
-      ),
+      );
+      timeoutId.unref?.();
+    });
+    // `.finally` here is safe (unlike chaining it onto a bare connect promise): the promise it
+    // returns IS the one the caller awaits, so a rejection can never go unhandled.
+    return Promise.race([this.codePromise, timeout]).finally(() =>
+      clearTimeout(timeoutId),
     );
-    return Promise.race([this.codePromise, timeout]);
   }
 
   /** Closes the callback server. Call once the flow is done (success or failure). */
