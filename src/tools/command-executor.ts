@@ -287,7 +287,7 @@ function expandEnvVars(text: string): string {
  */
 function extractHeredoc(
   commandLine: string,
-): { command: string; body: string; expand: boolean } | null {
+): { command: string; body: string; expand: boolean; rest: string } | null {
   const m = /<<(-?)\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/.exec(commandLine);
   if (!m) return null;
 
@@ -309,6 +309,9 @@ function extractHeredoc(
     command: `${before} ${trailing}`.trim(),
     body: bodyLines.join("\n") + "\n",
     expand: quote === "",
+    // Everything after the terminator line is ordinary follow-up work (`wc -l out.txt`). Dropping
+    // it silently would make the model believe a step ran when it never did.
+    rest: lines.slice(endIndex + 1).join("\n").trim(),
   };
 }
 
@@ -676,6 +679,7 @@ async function executeStatement(
   statement: string,
   startCwd: string,
   workspaceRoot: string,
+  stdinInput?: string,
 ): Promise<{ result: CommandResult; cwd: string }> {
   const { segments, operators } = splitOnLogicalOps(statement.trim());
 
@@ -719,10 +723,13 @@ async function executeStatement(
     // A pipeline within this segment (cmd1 | cmd2 | ...) runs as a wired chain;
     // a single command runs directly.
     const stages = splitOnPipe(seg);
+    // A heredoc body feeds the LAST segment — `cd dir && python3 - <<'PY'` attaches the script to
+    // python3, not to cd.
+    const segStdin = i === segments.length - 1 ? stdinInput : undefined;
     last =
       stages.length > 1
         ? await runPipeline(stages, cwd, workspaceRoot)
-        : await executeSingleSegment(seg, cwd, workspaceRoot);
+        : await executeSingleSegment(seg, cwd, workspaceRoot, segStdin);
     appendOut(last.stdout);
     appendErr(last.stderr);
   }
@@ -764,20 +771,23 @@ async function executeCommandImpl(
   commandLine: string,
   workspacePath: string,
 ): Promise<CommandResult> {
-  // A heredoc is resolved FIRST and never split: its body is data, not commands.
+  // A heredoc is resolved FIRST so its body is never split — the body is data, not commands. What
+  // stays is a normal statement list, so `cd`, `&&` and pipes keep working around it.
   const heredoc = extractHeredoc(commandLine.trim());
-  if (heredoc) {
-    return executeSingleSegment(
-      heredoc.command,
-      workspacePath,
-      workspacePath,
-      heredoc.expand ? expandEnvVars(heredoc.body) : heredoc.body,
-    );
-  }
-
-  // `;` (lowest precedence) splits sequential statements that run regardless of
-  // each other's exit code; `cd` state threads across them.
-  const statements = splitOnSemicolon(commandLine.trim());
+  const statements: { text: string; stdin?: string }[] = heredoc
+    ? [
+        {
+          text: heredoc.command,
+          stdin: heredoc.expand ? expandEnvVars(heredoc.body) : heredoc.body,
+        },
+        // Lines after the terminator are separate statements (a heredoc ends at its own line, so a
+        // newline is the separator there — unlike the single-line `;` case).
+        ...heredoc.rest
+          .split("\n")
+          .flatMap((line) => splitOnSemicolon(line))
+          .map((text) => ({ text })),
+      ]
+    : splitOnSemicolon(commandLine.trim()).map((text) => ({ text }));
 
   let cwd = workspacePath;
   let combinedStdout = "";
@@ -787,8 +797,8 @@ async function executeCommandImpl(
   const appendOut = (s: string) => { if (s) combinedStdout += (combinedStdout ? "\n" : "") + s; };
   const appendErr = (s: string) => { if (s) combinedStderr += (combinedStderr ? "\n" : "") + s; };
 
-  for (const statement of statements) {
-    const { result, cwd: nextCwd } = await executeStatement(statement, cwd, workspacePath);
+  for (const { text: statement, stdin: statementStdin } of statements) {
+    const { result, cwd: nextCwd } = await executeStatement(statement, cwd, workspacePath, statementStdin);
     cwd = nextCwd; // carry `cd` across `;`
     last = result;
     appendOut(result.stdout);

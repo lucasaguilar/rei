@@ -68,6 +68,27 @@ describe("heredoc", () => {
     expect(r.stderr).toMatch(/allow-list/);
   });
 
+  it("works inside a && chain — the heredoc feeds the LAST command, not the cd", async () => {
+    const r = await run(`cd . && python3 - <<'PY'\nprint("chained")\nPY`);
+    expect(r.stderr).not.toMatch(/allow-list/);
+    expect(r.stdout.trim()).toBe("chained");
+  });
+
+  it("runs commands that FOLLOW the terminator instead of dropping them", async () => {
+    const r = await run(`python3 - <<'PY'\nprint("first")\nPY\necho second`);
+    expect(r.stdout).toContain("first");
+    expect(r.stdout).toContain("second");
+  });
+
+  it("the full shape from the reported log: cd && redirect + follow-up", async () => {
+    const r = await run(
+      `cd . && python3 - > s.txt <<'PY'\nstrong=False; code=False\nprint("D", strong, code)\nPY\nwc -l s.txt`,
+    );
+    expect(r.stderr).not.toMatch(/allow-list/);
+    expect(r.stdout.trim()).toMatch(/^1\b/); // wc counted the redirected line
+    expect(readFileSync(join(ws, "s.txt"), "utf8").trim()).toBe("D False False");
+  });
+
   it("leaves ordinary commands untouched", async () => {
     const r = await run(`echo hola`);
     expect(r.stdout.trim()).toBe("hola");
