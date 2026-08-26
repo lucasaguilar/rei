@@ -261,17 +261,79 @@ function writeRedirectFile(
   }
 }
 
-/** Spawns a single validated command (no operators/redirects) in the given cwd. */
-function runSpawn(finalCmd: string, finalArgs: string[], cwd: string): Promise<CommandResult> {
+/** Expands `$VAR` / `${VAR}` in an unquoted heredoc body — the same rule parseCommandLine applies
+ *  to the command line. A quoted delimiter (<<'EOF') skips this entirely. */
+function expandEnvVars(text: string): string {
+  return text.replace(/\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?/g, (whole, name) => {
+    const value = process.env[name];
+    return value === undefined ? whole : value;
+  });
+}
+
+/**
+ * Splits `cmd <<'EOF' … EOF` into the command line and the heredoc body.
+ *
+ * Heredocs MUST be handled before any splitting. Commands run with `shell: false`, so nothing
+ * interprets `<<` — the body used to be tokenized as ARGUMENTS, the process got an empty stdin, and
+ * a `python3 - <<EOF` script exited 0 having done nothing (a silent no-op the model reads as
+ * success). Worse, `;`, `&&` and `/` inside the body were treated as command separators, producing
+ * confusing failures like `Security Error: Command 'break' is not in the allow-list.` — the `;` in
+ * a Python line `end = i; break`.
+ *
+ * Supports `<<WORD`, `<<'WORD'`, `<<"WORD"` and `<<-WORD`. Quoting the delimiter is the shell's way
+ * of saying "don't expand anything in here", which is what the body of a script always wants;
+ * unquoted delimiters expand `$VAR` the same way the rest of the command line does.
+ * Returns null when there's no heredoc, so the normal path is untouched.
+ */
+function extractHeredoc(
+  commandLine: string,
+): { command: string; body: string; expand: boolean } | null {
+  const m = /<<(-?)\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/.exec(commandLine);
+  if (!m) return null;
+
+  const [matched, dash, quote, delimiter] = m;
+  const before = commandLine.slice(0, m.index).trimEnd();
+  const after = commandLine.slice(m.index + matched.length);
+  const lines = after.split("\n");
+  // The body starts on the NEXT line; anything trailing on the same line stays with the command
+  // (e.g. `cat <<'EOF' > out.txt`).
+  const trailing = lines.shift() ?? "";
+
+  const endIndex = lines.findIndex(
+    (l) => (dash ? l.trimStart() : l).trimEnd() === delimiter,
+  );
+  if (endIndex === -1) return null; // no closing delimiter — not a heredoc we can honor
+
+  const bodyLines = dash ? lines.slice(0, endIndex).map((l) => l.replace(/^\t+/, "")) : lines.slice(0, endIndex);
+  return {
+    command: `${before} ${trailing}`.trim(),
+    body: bodyLines.join("\n") + "\n",
+    expand: quote === "",
+  };
+}
+
+/** Spawns a single validated command (no operators/redirects) in the given cwd.
+ *  `stdinInput` feeds a heredoc body to the child; without it stdin stays /dev/null. */
+function runSpawn(
+  finalCmd: string,
+  finalArgs: string[],
+  cwd: string,
+  stdinInput?: string,
+): Promise<CommandResult> {
   return new Promise((resolve) => {
     const child = spawn(finalCmd, finalArgs, {
       cwd,
       shell: false,
-      // stdin = ignore (/dev/null): a script that reads stdin — input(), sys.stdin, a bare
-      // `python3`/`cat` — gets immediate EOF instead of blocking the turn forever waiting for input.
-      stdio: ["ignore", "pipe", "pipe"],
+      // stdin = ignore (/dev/null) by default: a script that reads stdin — input(), sys.stdin, a
+      // bare `python3`/`cat` — gets immediate EOF instead of blocking the turn forever waiting for
+      // input. A heredoc is the one case with real input to deliver, so it gets a pipe.
+      stdio: [stdinInput === undefined ? "ignore" : "pipe", "pipe", "pipe"],
       env: { ...process.env, FORCE_COLOR: "0" },
     });
+    if (stdinInput !== undefined) {
+      child.stdin!.on("error", () => {}); // child exited before reading — EPIPE is not our problem
+      child.stdin!.end(stdinInput);
+    }
 
     let stdout = "";
     let stderr = "";
@@ -449,11 +511,12 @@ async function executeSingleSegment(
   segment: string,
   cwd: string,
   workspaceRoot: string,
+  stdinInput?: string,
 ): Promise<CommandResult> {
   const prep = prepareCommand(segment, cwd, workspaceRoot);
   if (!prep.ok) return { success: false, exitCode: -1, stdout: "", stderr: prep.error };
 
-  const result = await runSpawn(prep.prepared.finalCmd, prep.prepared.finalArgs, cwd);
+  const result = await runSpawn(prep.prepared.finalCmd, prep.prepared.finalArgs, cwd, stdinInput);
   return applyRedirects(result, prep.prepared.redir, cwd, workspaceRoot);
 }
 
@@ -701,6 +764,17 @@ async function executeCommandImpl(
   commandLine: string,
   workspacePath: string,
 ): Promise<CommandResult> {
+  // A heredoc is resolved FIRST and never split: its body is data, not commands.
+  const heredoc = extractHeredoc(commandLine.trim());
+  if (heredoc) {
+    return executeSingleSegment(
+      heredoc.command,
+      workspacePath,
+      workspacePath,
+      heredoc.expand ? expandEnvVars(heredoc.body) : heredoc.body,
+    );
+  }
+
   // `;` (lowest precedence) splits sequential statements that run regardless of
   // each other's exit code; `cd` state threads across them.
   const statements = splitOnSemicolon(commandLine.trim());
