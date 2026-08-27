@@ -48,6 +48,18 @@ function inlineLimit(): number {
   return Number.isFinite(n) && n > 0 ? n : 2000;
 }
 
+/**
+ * How much of a spilled output is echoed back to the model. 160 chars was far too little: for JSON
+ * it showed only the opening metadata (`{"expand":"renderedFields,names,…`) and for prose it cut off
+ * mid-sentence, so the model could not tell what it had fetched and re-read the whole file to find
+ * out. 2000 matches the ~2KB preview other agents converged on. Override with
+ * REI_TOOL_OUTPUT_PREVIEW.
+ */
+function previewLimit(): number {
+  const n = parseInt(process.env.REI_TOOL_OUTPUT_PREVIEW ?? "", 10);
+  return Number.isFinite(n) && n > 0 ? n : 2000;
+}
+
 function writeSpillFile(
   workspacePath: string,
   tool: string,
@@ -78,13 +90,16 @@ export function retainAndMaybeSpill(
   }
   const savedPath = writeSpillFile(workspacePath, tool, content);
   const id = recordToolOutput(tool, content, savedPath);
-  const preview = content.slice(0, 160).replace(/\s+$/, "");
+  const shown = content.slice(0, previewLimit()).replace(/\s+$/, "");
+  const omitted = content.length - shown.length;
   return (
     `[REI] Large tool output (${content.length} chars) — full content written to disk:\n` +
     `  path: ${savedPath}\n` +
     `  id:   ${id}\n` +
     `To copy it elsewhere, call save_tool_output(id="${id}", path="<dest>") — the runtime moves the ` +
     `bytes, not through you, so nothing is truncated.\n` +
-    `--- preview ---\n${preview}…`
+    `--- preview (${shown.length} of ${content.length} chars) ---\n${shown}` +
+    (omitted > 0 ? `\n… ${omitted} more chars are in the file above.` : "")
   );
 }
+
