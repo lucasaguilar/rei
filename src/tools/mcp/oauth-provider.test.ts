@@ -30,7 +30,7 @@ describe("waitForCode", () => {
     expect(res.status).toBe(200);
     await expect(waiting).resolves.toBe("abc123");
 
-    // Lo que importa: el timer de 5 minutos no queda vivo sosteniendo el event loop.
+    // What matters: the 5-minute timer is not left alive holding the event loop open.
     expect(clearSpy).toHaveBeenCalled();
   });
 

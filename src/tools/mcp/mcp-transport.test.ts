@@ -13,19 +13,19 @@ describe("mcpTransportOf", () => {
     ["explicit stdio", { type: "stdio", command: "x" }, "stdio"],
     ["explicit http", { type: "http", url: "http://h/mcp" }, "http"],
     ["sse counts as http", { type: "sse", url: "http://h/sse" }, "http"],
-    ["no type + command → stdio", { command: "/usr/bin/thing", args: ["mcp"] } as McpConnectionConfig, "stdio"],
-    ["no type + url → http", { url: "http://h/mcp" } as McpConnectionConfig, "http"],
+    ["no type + command -> stdio", { command: "/usr/bin/thing", args: ["mcp"] } as McpConnectionConfig, "stdio"],
+    ["no type + url -> http", { url: "http://h/mcp" } as McpConnectionConfig, "http"],
   ];
   for (const [name, cfg, expected] of cases) {
     it(name, () => expect(mcpTransportOf(cfg)).toBe(expected));
   }
 });
 
-describe("dispatchCommand no tumba la sesion", () => {
-  it("convierte un throw del handler en un CommandResult fallido", async () => {
+describe("dispatchCommand does not take the session down", () => {
+  it("turns a handler throw into a failed CommandResult", async () => {
     const exploding = {
       listServers() {
-        throw new Error("boom desde el registry");
+        throw new Error("boom from the registry");
       },
     };
     const res = await dispatchCommand({
@@ -33,6 +33,6 @@ describe("dispatchCommand no tumba la sesion", () => {
       mcpRegistry: exploding,
     } as unknown as CommandContext);
     expect(res?.success).toBe(false);
-    expect(res?.response).toContain("boom desde el registry");
+    expect(res?.response).toContain("boom from the registry");
   });
 });

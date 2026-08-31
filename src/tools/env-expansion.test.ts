@@ -37,48 +37,48 @@ afterAll(() => {
 
 const run = (cmd: string) => executeCommand(cmd, process.cwd());
 
-describe("expansión de variables en run_command", () => {
-  it("expande dentro de comillas dobles — el caso del token", async () => {
+describe("env-var expansion in run_command", () => {
+  it("expands inside double quotes — the token case", async () => {
     const r = await run(`curl -s -H "Authorization: Bearer $REI_TEST_TOKEN" ${url}`);
     expect(JSON.parse(r.stdout).auth).toBe("Bearer tok_secret_123");
   });
 
-  it("expande sin comillas", async () => {
+  it("expands when unquoted", async () => {
     const r = await run(`curl -s -H Authorization:$REI_TEST_TOKEN ${url}`);
     expect(JSON.parse(r.stdout).auth).toBe("tok_secret_123");
   });
 
-  it("expande la forma ${VAR}", async () => {
+  it("expands the ${VAR} form", async () => {
     const r = await run(`curl -s -H "Authorization: Bearer ${"${REI_TEST_TOKEN}"}" ${url}`);
     expect(JSON.parse(r.stdout).auth).toBe("Bearer tok_secret_123");
   });
 
-  it("NO expande dentro de comillas simples", async () => {
+  it("does NOT expand inside single quotes", async () => {
     const r = await run(`curl -s -H 'Authorization: Bearer $REI_TEST_TOKEN' ${url}`);
     expect(JSON.parse(r.stdout).auth).toBe("Bearer $REI_TEST_TOKEN");
   });
 
-  it("una variable indefinida queda literal, no vacía", async () => {
+  it("an undefined variable stays literal, not empty", async () => {
     const r = await run(`curl -s -H "Authorization: Bearer $REI_NO_EXISTE_XYZ" ${url}`);
     expect(JSON.parse(r.stdout).auth).toBe("Bearer $REI_NO_EXISTE_XYZ");
   });
 
-  it("no rompe awk con $1 entre comillas simples", async () => {
+  it("does not break awk's $1 inside single quotes", async () => {
     const r = await run(`echo "a b c" | awk '{print $1}'`);
     expect(r.stdout.trim()).toBe("a");
   });
 
-  it("no toca $1 ni siquiera entre comillas dobles (no es nombre de variable)", async () => {
+  it("leaves $1 alone even in double quotes — it is not a variable name", async () => {
     const r = await run(`echo "a b c" | awk "{print $1}"`);
     expect(r.stdout.trim()).toBe("a");
   });
 
-  it("no toca el %{...} de curl -w", async () => {
+  it("leaves curl -w's %{...} alone", async () => {
     const r = await run(`curl -s -o /dev/null -w "%{http_code}" ${url}`);
     expect(r.stdout.trim()).toBe("200");
   });
 
-  it("expande en un POST con json entre comillas simples sin tocar el body", async () => {
+  it("expands in a POST while leaving the single-quoted json body intact", async () => {
     const r = await run(
       `curl -s -X POST -H "Authorization: Bearer $REI_TEST_TOKEN" -d '{"a":1,"b":"x y"}' ${url}`,
     );
@@ -87,7 +87,7 @@ describe("expansión de variables en run_command", () => {
     expect(got.body).toBe('{"a":1,"b":"x y"}');
   });
 
-  it("una variable no puede colar un keyword prohibido por indirección", async () => {
+  it("a variable cannot smuggle a forbidden keyword by indirection", async () => {
     process.env.REI_TEST_EVIL = "rm -rf /tmp/whatever";
     const r = await run(`echo $REI_TEST_EVIL`);
     delete process.env.REI_TEST_EVIL;

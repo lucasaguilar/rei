@@ -36,10 +36,10 @@ const TUNED: ModelTuning = {
   id: "m", temperature: 1, topP: 0.95, topK: 20, minP: 0.02, repetitionPenalty: 1.1,
 };
 
-describe("sampling: agent y chat mandan lo mismo", () => {
+describe("sampling: the agent and chat paths send the same set", () => {
   for (const tools of [true, false]) {
     const path = tools ? "tools" : "chat";
-    it(`${path}: manda min_p y repetition_penalty cuando estan configurados`, async () => {
+    it(`${path}: sends min_p and repetition_penalty when configured`, async () => {
       const body = await capture(TUNED, tools);
       expect(body.min_p).toBe(0.02);
       expect(body.repetition_penalty).toBe(1.1);
@@ -48,7 +48,7 @@ describe("sampling: agent y chat mandan lo mismo", () => {
       expect(body.temperature).toBe(1);
     });
 
-    it(`${path}: lo que no esta configurado NO se inventa`, async () => {
+    it(`${path}: never invents a field that was not configured`, async () => {
       const body = await capture({ id: "m" }, tools);
       for (const field of ["top_p", "top_k", "min_p", "repetition_penalty"]) {
         expect(body, field).not.toHaveProperty(field);
@@ -56,7 +56,7 @@ describe("sampling: agent y chat mandan lo mismo", () => {
     });
   }
 
-  it("un 0 explicito se manda como 0 (no se confunde con ausente)", async () => {
+  it("an explicit 0 is sent as 0 — not confused with absent", async () => {
     const body = await capture({ id: "m", minP: 0, repetitionPenalty: 1.0 }, true);
     expect(body.min_p).toBe(0);
     expect(body.repetition_penalty).toBe(1.0);

@@ -156,7 +156,28 @@ const REASONING_EFFORTS = new Set([
  * undefined when unset/invalid, so the request omits the field and the model uses its own
  * default. Models/backends that don't support the param simply ignore it.
  */
+/** Set by `/think`, cleared by `/think off`. Module-level for the same reason setActiveModelTuning
+ *  is: the call sites resolve per turn and don't carry the session. In-memory only — a restart
+ *  falls back to the .env, which is the intent (a hot override shouldn't outlive the session). */
+let thinkingOverride: string | undefined;
+
+/** `/think <level>`; pass undefined to clear. Value is validated by the caller. */
+export function setThinkingOverride(effort: string | undefined): void {
+  thinkingOverride = effort;
+}
+
+export function getThinkingOverride(): string | undefined {
+  return thinkingOverride;
+}
+
+/** The values the OpenAI-compatible `reasoning_effort` field accepts, for a UI to offer. */
+export function reasoningEffortValues(): string[] {
+  return [...REASONING_EFFORTS];
+}
+
 export function resolveReasoningEffort(mode?: string): string | undefined {
+  // A live `/think` beats everything: it is the most recent explicit instruction from the user.
+  if (thinkingOverride) return thinkingOverride;
   if (!mode) return undefined;
   // Defensive: tolerate a trailing inline comment (" #...") that a naive .env loader may
   // have left in the value (e.g. the bash wrapper used to export `none   # note` verbatim,

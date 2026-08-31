@@ -28,7 +28,7 @@ beforeAll(() => {
   // Minified-file shape: one enormous line that matches.
   writeFileSync(join(ws, "src/bundle.min.ts"), `const x="${"needleToken ".repeat(20000)}";\n`);
   writeFileSync(join(ws, "node_modules/pkg/vendor.ts"), "needleToken in vendor code\n");
-  // El caso real: una sola linea gigante que sin exclusion se come toda la salida.
+  // The real case: one enormous line that eats the whole output budget when unclamped.
   writeFileSync(join(ws, ".rei/rag-index.json"), `{"chunks":["${"needleToken ".repeat(4000)}"]}\n`);
 });
 
@@ -75,7 +75,7 @@ describe("grepCode", () => {
     const out = await grepCode(ws, { pattern: "needleToken", glob: "*.ts", maxResults: 100 });
     const longest = Math.max(...out.split("\n").map((l) => l.length));
     expect(longest).toBeLessThan(400);
-    expect(out).toContain("alpha.ts"); // el archivo chico sigue apareciendo
+    expect(out).toContain("alpha.ts"); // the small file still shows up
   });
 
   it("reports no matches instead of returning an empty string", async () => {

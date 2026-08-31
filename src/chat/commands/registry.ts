@@ -9,6 +9,7 @@ import { providerCommands } from "./provider-commands.js";
 import { treeCommands } from "./tree-commands.js";
 import { roleCommands } from "./role-commands.js";
 import { mcpCommands } from "./mcp-commands.js";
+import { thinkCommands } from "./think-commands.js";
 
 /**
  * The command registry. Commands are migrated out of menu-command-processor's big if/else into
@@ -27,6 +28,7 @@ const COMMAND_HANDLERS = [
   treeCommands,
   roleCommands,
   mcpCommands,
+  thinkCommands,
 ];
 
 /**
