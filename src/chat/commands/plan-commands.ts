@@ -113,6 +113,24 @@ export const runPlanCommand: CommandHandler = {
       "or a prose description, and do NOT load planning skills — make the actual edits, then " +
       "verify with the project's verify command.";
 
+    // A spec-driven plan ends with a stage whose product IS a report (see the
+    // micro-task-decomposition skill). EXECUTE_DIRECTIVE would fight it head-on — it forbids exactly
+    // the prose that stage exists to produce — so such a stage gets its own directive.
+    const REPORT_DIRECTIVE =
+      "\n\n⚙️ REPORT NOW — this stage produces a REPORT, not edits. Follow the skill named above " +
+      "and emit its report as your answer. Read files and run commands to gather evidence, but do " +
+      "NOT call edit_file / create_file: fixing findings here would make the report describe a " +
+      "moving target. Report what you find, including what fails.";
+
+    // Stages whose contract is to report rather than edit. Kept as an explicit list (not inferred
+    // from an empty "Files to modify") because an action-only stage — "run npm install" — also has
+    // no files yet must still execute.
+    const REPORT_ONLY_SKILLS = ["verify-against-spec"];
+    const isReportStage = REPORT_ONLY_SKILLS.some((skill) =>
+      new RegExp(`^\\s*Skill:.*\\b${skill}\\b`, "im").test(targetContent),
+    );
+    const directive = isReportStage ? REPORT_DIRECTIVE : EXECUTE_DIRECTIVE;
+
     const newMode = "agent" as SessionMode;
 
     if (files.length === 0) {
@@ -120,7 +138,7 @@ export const runPlanCommand: CommandHandler = {
       const planPrompt =
         (stageNum
           ? `[RUNPLAN STAGE ${stageNum}] Execute Stage ${stageNum} of the implementation plan.\n\nSUB-PLAN:\n${targetContent}`
-          : `Execute the following plan:\n\nPLAN:\n${planContent}`) + EXECUTE_DIRECTIVE;
+          : `Execute the following plan:\n\nPLAN:\n${planContent}`) + directive;
 
       const responseMsg = stageNum
         ? `[REI] Switching to AGENT mode to execute stage ${stageNum}. No target files detected (action-only stage).`
@@ -140,7 +158,7 @@ export const runPlanCommand: CommandHandler = {
       (stageNum
         ? `[RUNPLAN STAGE ${stageNum}] Execute Stage ${stageNum} of the implementation plan.\n\nSUB-PLAN:\n${targetContent}\n\nFILES TO MODIFY:\n${files.join(", ")}`
         : `Execute the following plan over these files:\n\nPLAN:\n${planContent}\n\nFILES:\n${files.join(", ")}`) +
-      EXECUTE_DIRECTIVE;
+      directive;
 
     const responseMsg = stageNum
       ? `[REI] Switching to AGENT mode to execute stage ${stageNum}. Target files: ${files.join(", ")}`

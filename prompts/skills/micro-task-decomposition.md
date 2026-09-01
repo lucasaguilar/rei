@@ -22,8 +22,32 @@ in the conversation or context, it governs the plan:
    optional and not only for the final stage. A stage that traces to nothing in the spec does not belong.
 2. **Never plan an Out-of-scope item.** If the work seems to need one, STOP and raise it as an open
    question instead of silently adding it. This is the guard against scope creep.
-3. **Verify the acceptance criteria, not just compilation.** Add final verification stage(s) that
-   actually check each acceptance criterion (a test, a manual check), beyond `ngc`/`tsc` passing.
+3. **Verify the acceptance criteria, not just compilation.** A passing `ngc`/`tsc` answers "did I
+   break anything?", never "did I build what was asked?" — a criterion can be dropped or half-built
+   with the build fully green. So ALWAYS close the plan with these two stages, in this order:
+
+   ```
+   ## Stage N-1: Write one test per acceptance criterion
+   Files to modify: <the repo's test file(s) for the changed code>
+   Change: Add a test per acceptance criterion, named so the mapping is visible (`criterion 3: …`).
+   Satisfies: AC-1..AC-M
+   Verify: <the repo's test command>
+   Skill: write-tests
+   Depends on: <the last implementation stage>
+
+   ## Stage N: Verify the implementation against the spec
+   Files to modify: (none — this stage reports, it does not edit)
+   Change: Judge every acceptance criterion MET / NOT MET / UNVERIFIED with evidence.
+   Satisfies: (all)
+   Verify: (none — the output IS the verification)
+   Skill: verify-against-spec
+   Depends on: <Stage N-1>
+   ```
+
+   These two are not optional and not merged into an implementation stage: tests written alongside a
+   change tend to assert what the code does, while tests written from the criteria assert what was
+   asked. Criteria that cannot be unit-tested (visual, performance, third-party) still belong in the
+   final stage — they come back as UNVERIFIED, which is a real result, not a gap to hide.
 4. **Do NOT silently resolve the spec's Open Questions.** If an Open Question affects the plan (e.g.
    "integrate into the existing page OR a new route?"), do not just pick an answer and bury it in a
    stage. Either (a) STOP and ask the user to decide before decomposing, or (b) if you must proceed,
@@ -105,3 +129,5 @@ Rules for the output:
   → two logical changes; split into two stages.
 - "Update all components to use the new signal" → one stage per component.
 - Bundling the implementation and its tests in one stage → separate stages (implement, then test).
+- A plan that ends at the last implementation stage when a spec exists → it never checks whether the
+  spec was satisfied; append the two closing stages from "If a spec is present".
