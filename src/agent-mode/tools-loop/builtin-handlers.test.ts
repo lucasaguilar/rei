@@ -19,7 +19,7 @@ vi.mock("../../workspace/git-changes.js", () => ({
   getGitStatus: vi.fn(async () => ["src/file1.ts", "src/file2.ts"]),
 }));
 
-import { handleWebSearch, handleWeather, handleAskUser, handleRunCommand, handleGitChanges, describeDestructive } from "./builtin-handlers.js";
+import { handleWebSearch, handleWeather, handleAskUser, handleRunCommand, handleGitChanges, describeDestructive, describeGitMutant } from "./builtin-handlers.js";
 import type { Elicitation } from "../../chat/elicitation.js";
 import { searchWeb } from "../../tools/search-tool.js";
 import { executeCommand } from "../../tools/command-executor.js";
@@ -108,6 +108,49 @@ describe("builtin handlers", () => {
   it("handleRunCommand runs a destructive command when confirmed", async () => {
     const elicit = async (e: Elicitation) => ({ id: e.id, value: "yes" });
     await handleRunCommand("rm src/foo.ts", { ...statusCtx, workspacePath: "/w", elicit });
+    expect(executeCommand).toHaveBeenCalled();
+  });
+
+  it("describeGitMutant flags state-changing git but not read-only or branch switches", () => {
+    expect(describeGitMutant("git commit -m 'fix: x'")).toBeTruthy();
+    expect(describeGitMutant("git push origin main")).toBeTruthy();
+    expect(describeGitMutant("git merge feature/x")).toBeTruthy();
+    expect(describeGitMutant("git rebase main")).toBeTruthy();
+    expect(describeGitMutant("git reset HEAD~1")).toBeTruthy(); // soft/mixed — still moves pointer
+    expect(describeGitMutant("git clean -fd")).toBeTruthy(); // also destructive, but still a mutant
+    expect(describeGitMutant("git checkout -- src/a.ts")).toBeTruthy(); // also destructive
+    // read-only / non-mutating:
+    expect(describeGitMutant("git status")).toBeNull();
+    expect(describeGitMutant("git diff --stat")).toBeNull();
+    expect(describeGitMutant("git log -5")).toBeNull();
+    expect(describeGitMutant("git checkout main")).toBeNull(); // branch switch, not discard
+    expect(describeGitMutant("ls src")).toBeNull(); // not git at all
+  });
+
+  it("handleRunCommand confirms a git-mutant command and does NOT run it when declined", async () => {
+    const elicit = async (e: Elicitation) => ({ id: e.id, value: "no" });
+    const out = await handleRunCommand("git commit -m 'feat: x'", { ...statusCtx, workspacePath: "/w", elicit });
+    expect(out).toContain("DECLINED");
+    expect(executeCommand).not.toHaveBeenCalled();
+  });
+
+  it("handleRunCommand runs a git-mutant command when confirmed", async () => {
+    const elicit = async (e: Elicitation) => ({ id: e.id, value: "yes" });
+    await handleRunCommand("git push origin main", { ...statusCtx, workspacePath: "/w", elicit });
+    expect(executeCommand).toHaveBeenCalled();
+  });
+
+  it("handleRunCommand does NOT double-prompt a destructive git command (reset --hard)", async () => {
+    const elicit = vi.fn(async (e: Elicitation) => ({ id: e.id, value: "yes" }));
+    await handleRunCommand("git reset --hard HEAD~1", { ...statusCtx, workspacePath: "/w", elicit });
+    // The destructive gate fires first and the git-mutant gate is skipped → exactly ONE prompt.
+    expect(elicit).toHaveBeenCalledTimes(1);
+  });
+
+  it("handleRunCommand does NOT gate a read-only git command", async () => {
+    const elicit = vi.fn();
+    await handleRunCommand("git status", { ...statusCtx, workspacePath: "/w", elicit });
+    expect(elicit).not.toHaveBeenCalled();
     expect(executeCommand).toHaveBeenCalled();
   });
 
