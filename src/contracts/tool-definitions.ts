@@ -341,13 +341,23 @@ export const READONLY_TOOLS: ToolDefinition[] = [
   SAVE_TOOL_OUTPUT_TOOL,
 ];
 
+/** Read-only plus file writes, for `planning`. WHICH paths it may write is enforced when the write
+ *  executes — see agent-mode/tools-loop/write-scope for the scope and the reasoning. */
+export const PLANNING_TOOLS: ToolDefinition[] = [
+  ...READONLY_TOOLS,
+  CREATE_FILE_TOOL,
+  EDIT_FILE_TOOL,
+];
+
 /**
- * The base built-in tool set a mode is allowed to use. The native loop layers web_search/weather,
- * MCP and skills on top of this; this only governs the file/command capabilities. agent → full
- * (can edit); ask/planning → read-only (investigate + run commands, no direct file mutation).
+ * The base built-in tool set a mode may use. The native loop layers web_search/weather, MCP and
+ * skills on top; this governs only file/command capabilities. agent → full; planning → read-only
+ * plus scoped writes; ask → read-only.
  */
 export function toolsForMode(mode: "agent" | "planning" | "ask"): ToolDefinition[] {
-  return mode === "agent" ? AGENT_TOOLS : READONLY_TOOLS;
+  if (mode === "agent") return AGENT_TOOLS;
+  if (mode === "planning") return PLANNING_TOOLS;
+  return READONLY_TOOLS;
 }
 
 /** All tools combined (agent + utility). */

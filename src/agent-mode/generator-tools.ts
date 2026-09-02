@@ -294,6 +294,7 @@ export async function executeAgentTurnWithTools(params: {
         result.toolCalls,
         {
           workspacePath,
+          mode,
           logger,
           emitStatus,
           elicit,

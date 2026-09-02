@@ -41,6 +41,57 @@ describe("dispatchToolCalls", () => {
   });
   afterEach(() => fs.rmSync(ws, { recursive: true, force: true }));
 
+  describe("write scope by mode", () => {
+    // The gate runs on EXECUTION, so these go through the real dispatch — a unit test of the
+    // predicate alone would not prove the three write tools are actually behind it.
+    const planningCtx = () => ({ ...ctx, mode: "planning" });
+
+    it("lets planning write the spec-driven flow's artifacts", async () => {
+      const { editTasks, hasToolFailure } = await dispatchToolCalls(
+        [call("create_file", { file: ".rei/specs/feature.md", content: "# Spec" })],
+        planningCtx(),
+      );
+      expect(hasToolFailure).toBe(false);
+      expect(editTasks.length + ctx.createdFiles.length).toBeGreaterThan(0);
+    });
+
+    for (const tool of ["create_file", "edit_file", "rewrite_file"] as const) {
+      it(`blocks ${tool} on source in planning, with a refusal the model can act on`, async () => {
+        const { toolResultsMap, hasToolFailure } = await dispatchToolCalls(
+          [call(tool, { file: "src/index.ts", content: "x", search: "a", replace: "b" })],
+          planningCtx(),
+        );
+        expect(hasToolFailure).toBe(true);
+        expect(toolResultsMap.get(tool)).toContain("not allowed in this mode");
+        expect(toolResultsMap.get(tool)).toContain(".rei/specs");
+      });
+    }
+
+    it("blocks a '..' walk out of an allowed directory", async () => {
+      const { hasToolFailure } = await dispatchToolCalls(
+        [call("create_file", { file: "docs/../src/evil.ts", content: "x" })],
+        planningCtx(),
+      );
+      expect(hasToolFailure).toBe(true);
+    });
+
+    it("writes nothing to disk when a write is refused", async () => {
+      await dispatchToolCalls(
+        [call("create_file", { file: "src/index.ts", content: "x" })],
+        planningCtx(),
+      );
+      expect(fs.existsSync(path.join(ws, "src/index.ts"))).toBe(false);
+    });
+
+    it("agent still writes source — the gate must not leak into it", async () => {
+      const { hasToolFailure } = await dispatchToolCalls(
+        [call("edit_file", { file: "a.ts", search: "x", replace: "y" })],
+        { ...ctx, mode: "agent" },
+      );
+      expect(hasToolFailure).toBe(false);
+    });
+  });
+
   it("runs read_files and returns its result keyed by call id", async () => {
     fs.writeFileSync(path.join(ws, "a.ts"), "const a = 1;");
     const { toolResultsMap, hasToolFailure } = await dispatchToolCalls(

@@ -38,22 +38,35 @@ describe("setupToolSelection", () => {
     expect(sel.useToolSearch).toBe(false);
   });
 
-  it("ask/planning modes get a READ-ONLY built-in set (no edit/create/rewrite)", () => {
-    for (const mode of ["ask", "planning"] as const) {
-      const names = setupToolSelection({ ...base, mode })
-        .buildTools()
-        .map((t) => t.function.name);
-      // Investigation + commands stay available...
-      expect(names).toContain("read_files");
-      expect(names).toContain("run_command");
-      expect(names).toContain("git_changes");
-      expect(names).toContain("web_search");
-      expect(names).toContain("weather");
-      // ...but the mutating tools are gated out.
-      expect(names).not.toContain("edit_file");
-      expect(names).not.toContain("create_file");
-      expect(names).not.toContain("rewrite_file");
-    }
+  it("ask mode gets a READ-ONLY built-in set (no edit/create/rewrite)", () => {
+    const names = setupToolSelection({ ...base, mode: "ask" })
+      .buildTools()
+      .map((t) => t.function.name);
+    // Investigation + commands stay available...
+    expect(names).toContain("read_files");
+    expect(names).toContain("run_command");
+    expect(names).toContain("git_changes");
+    expect(names).toContain("web_search");
+    expect(names).toContain("weather");
+    // ...but the mutating tools are gated out.
+    expect(names).not.toContain("edit_file");
+    expect(names).not.toContain("create_file");
+    expect(names).not.toContain("rewrite_file");
+  });
+
+  it("planning gets create/edit — scoped at execution, not by hiding the tool", () => {
+    const names = setupToolSelection({ ...base, mode: "planning" })
+      .buildTools()
+      .map((t) => t.function.name);
+    // It must be able to persist the spec-driven flow's artifacts (specs, plans, docs). WHERE it may
+    // write is enforced by write-scope when the call runs, so the tool is offered and the path is
+    // judged — see write-scope.test.ts.
+    expect(names).toContain("create_file");
+    expect(names).toContain("edit_file");
+    // Whole-file overwrite stays an agent capability.
+    expect(names).not.toContain("rewrite_file");
+    expect(names).toContain("read_files");
+    expect(names).toContain("run_command");
   });
 
   it("defaults to the agent profile (edits allowed) when no mode is passed", () => {

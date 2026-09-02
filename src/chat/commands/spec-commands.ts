@@ -29,7 +29,8 @@ export const specCommands: CommandHandler = {
         return {
           success: false,
           response:
-            "[REI] No spec was found in this session to save. Use the write-spec skill first.",
+            "[REI] No spec was found in this session to save. Run /spec <task> to write one " +
+            "(it also saves it to .rei/specs/), or /loadspec <name> to bring an existing one in.",
         };
       }
 

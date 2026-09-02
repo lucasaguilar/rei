@@ -14,6 +14,7 @@ import {
   handleSaveToolOutput,
 } from "./builtin-handlers.js";
 import { retainAndMaybeSpill } from "./tool-output-store.js";
+import { isWriteAllowed, writeDeniedMessage, writeScopeForMode } from "./write-scope.js";
 import { grepCode, listFiles } from "../../tools/code-search.js";
 import { nonInteractiveElicit, type ElicitFn } from "../../chat/elicitation.js";
 import { handleDelegate } from "./delegate-handler.js";
@@ -32,6 +33,8 @@ type McpTool = ReturnType<McpRegistry["getAvailableTools"]>[number];
  *  (activeMcp grows via search_tools; virtualFiles/createdFiles via the handlers). */
 export interface DispatchContext {
   workspacePath: string;
+  /** Active session mode — decides which paths this turn may write to (see write-scope). */
+  mode?: string;
   logger: AgentLogger;
   emitStatus: (msg: string) => void;
   /** Asks the user a question mid-turn (ask_user tool). Frontend-provided; defaults to the
@@ -81,6 +84,7 @@ export async function dispatchToolCalls(
 ): Promise<DispatchResult> {
   const {
     workspacePath,
+    mode,
     logger,
     emitStatus,
     elicit,
@@ -241,27 +245,35 @@ export async function dispatchToolCalls(
           break;
         }
 
-        // ── edit_file ────────────────────────────────────────────────
-        case "edit_file": {
-          const r = handleEditFile(args, call.id, editCtx);
-          if (r.toolResult) toolResultsMap.set(call.id, r.toolResult);
-          if (r.failed) hasToolFailure = true;
-          break;
-        }
-
-        // ── rewrite_file ─────────────────────────────────────────────
-        case "rewrite_file": {
-          const r = await handleRewriteFile(args, call.id, editCtx);
-          if (r.toolResult) toolResultsMap.set(call.id, r.toolResult);
-          if (r.failed) hasToolFailure = true;
-          break;
-        }
-
-        // ── create_file ──────────────────────────────────────────────
+        // ── file writes: one scope check for all three ───────────────
+        // planning may persist the spec-driven flow's artifacts (specs/plans/docs) and nothing else;
+        // agent is unrestricted. Checked on EXECUTION so the model gets a readable refusal naming
+        // the writable dirs, instead of a tool that mysteriously isn't offered.
+        case "edit_file":
+        case "rewrite_file":
         case "create_file": {
-          const r = await handleCreateFile(args, editCtx);
-          if (r.toolResult) toolResultsMap.set(call.id, r.toolResult);
-          if (r.failed) hasToolFailure = true;
+          const scope = writeScopeForMode(mode);
+          const target = String(args.file ?? args.path ?? "");
+          if (!isWriteAllowed(target, workspacePath, scope)) {
+            logger.logInfo(`[tools] write denied (${mode}): ${target}`);
+            emitStatus(`🚫  [REI] Write blocked in ${mode} mode: ${target}`);
+            toolResultsMap.set(call.id, writeDeniedMessage(target, scope));
+            hasToolFailure = true;
+            break;
+          }
+          if (call.function.name === "edit_file") {
+            const r = handleEditFile(args, call.id, editCtx);
+            if (r.toolResult) toolResultsMap.set(call.id, r.toolResult);
+            if (r.failed) hasToolFailure = true;
+          } else if (call.function.name === "rewrite_file") {
+            const r = await handleRewriteFile(args, call.id, editCtx);
+            if (r.toolResult) toolResultsMap.set(call.id, r.toolResult);
+            if (r.failed) hasToolFailure = true;
+          } else {
+            const r = await handleCreateFile(args, editCtx);
+            if (r.toolResult) toolResultsMap.set(call.id, r.toolResult);
+            if (r.failed) hasToolFailure = true;
+          }
           break;
         }
 
