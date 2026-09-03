@@ -1,6 +1,7 @@
 import type { CommandHandler, CommandResult } from "./command-handler.js";
 import type { SessionMode } from "../types.js";
 import { saveSession } from "../session-store.js";
+import { readActivePlan, setActivePlan, getActive } from "../active-artifacts.js";
 import {
   saveCurrentPlanContent,
   loadCurrentPlanContent,
@@ -44,11 +45,55 @@ export const runPlanCommand: CommandHandler = {
           m.sourceMode !== "agent" &&
           isPlanMessage(m.content),
       );
-    const planContent = lastPlanMsg?.content ?? loadCurrentPlanContent(workspacePath);
+    // Precedence, most explicit first. The active plan is a NAME the user set (by saving, loading or
+    // decomposing), so it beats the session heuristic — under which any message quoting a plan could
+    // outrank the plan itself, and saving a plan did not make it the one that ran.
+    const active = getActive(workspacePath);
+    const activeContent = readActivePlan(workspacePath);
+    const planContent =
+      activeContent ?? lastPlanMsg?.content ?? loadCurrentPlanContent(workspacePath);
 
     if (!planContent) {
-      return { success: false, response: "[RUNPLAN] No plan was found in this session." };
+      // "No plan" also fires when a plan IS on screen but its stage headings don't parse — a model
+      // that writes "**Stage 1**" instead of "## Stage 1" produces exactly this, and the bare
+      // message sends the user looking for a missing plan instead of a formatting mismatch.
+      return {
+        success: false,
+        response:
+          "[RUNPLAN] No plan was found in this session.\n" +
+          '  Stages must be headings: "## Stage 1: title" (also Etapa/Step/Paso, or "## 1. title"). ' +
+          'A bold-only "**Stage 1**" is not recognised.\n' +
+          "  If the plan is saved, run /loadplan <name> to make it the active source.",
+      };
     }
+
+    // Say WHICH plan is about to run. The source is picked by heuristic — the newest session message
+    // containing a `## Stage N` line — so any message that merely quotes the plan (a summary, a
+    // recap) can win over the plan itself. When that happens the failure is silent: a stage "is not
+    // found" in a plan the user never meant to run. Naming the source and its stages turns that into
+    // something visible before anything executes.
+    const planSource = activeContent
+      ? `active plan "${active.plan}" (.rei/plans/${active.plan}.md)`
+      : lastPlanMsg
+        ? "this session (no active plan set)"
+        : ".rei/current-plan-content.md";
+    const stageNumbers = planContent
+      .split("\n")
+      .map((line) => line.match(STAGE_REGEX))
+      .filter((m): m is RegExpMatchArray => m !== null)
+      .map((m) => parseInt(m[3], 10));
+    const firstLine = planContent.split("\n").find((l) => l.trim().length > 0)?.trim() ?? "";
+    const planHeader =
+      `[RUNPLAN] Plan source: ${planSource} — ` +
+      `${stageNumbers.length} stage${stageNumbers.length === 1 ? "" : "s"}` +
+      (stageNumbers.length > 0 ? ` (${stageNumbers.join(", ")})` : "") +
+      `\n  ${firstLine.slice(0, 80)}${firstLine.length > 80 ? "…" : ""}` +
+      (activeContent || lastPlanMsg
+        ? ""
+        : "\n  (no plan in this session — using the persisted fallback)") +
+      (!activeContent && active.plan
+        ? `\n  (active plan "${active.plan}" is set but .rei/plans/${active.plan}.md is missing)`
+        : "");
     let targetContent = planContent;
     let stageTitle = "";
 
@@ -78,7 +123,14 @@ export const runPlanCommand: CommandHandler = {
       if (startIndex === -1) {
         return {
           success: false,
-          response: `[RUNPLAN] Stage ${stageNum} was not found in the plan.`,
+          response:
+            `${planHeader}\n` +
+            `[RUNPLAN] Stage ${stageNum} was not found in THAT plan.\n` +
+            (stageNumbers.length > 0
+              ? `  It has stages: ${stageNumbers.join(", ")}.\n`
+              : `  No stage headings matched — they must look like "## Stage 1: title" ` +
+                `(also Etapa/Step/Paso, or "## 1. title"). Bold-only "**Stage 1**" does NOT match.\n`) +
+            `  Wrong plan? Run /loadplan <name> to make the saved one the active source.`,
         };
       }
 
@@ -103,7 +155,13 @@ export const runPlanCommand: CommandHandler = {
     void stageTitle;
 
     const fileRegex = buildFileMatcherRegex();
-    const files = Array.from(new Set(targetContent.match(fileRegex) || []));
+    // REI's own artifacts are never a stage's target. The matcher accepts any known extension,
+    // `.md` included, so a plan that mentions its own path — plans routinely say where they were
+    // saved — turned that path into a "file to modify". The execute directive then told the model to
+    // edit "the file(s) above", and it dutifully rewrote the plan instead of the code.
+    const files = Array.from(new Set(targetContent.match(fileRegex) || [])).filter(
+      (f) => !/(^|\/)\.?rei\//i.test(f),
+    );
 
     // Forces EXECUTION on /runplan: the model otherwise reads "Execute Stage N" + a plan and
     // narrates/re-plans instead of calling edit_file. This directive snaps it into acting.
@@ -140,9 +198,11 @@ export const runPlanCommand: CommandHandler = {
           ? `[RUNPLAN STAGE ${stageNum}] Execute Stage ${stageNum} of the implementation plan.\n\nSUB-PLAN:\n${targetContent}`
           : `Execute the following plan:\n\nPLAN:\n${planContent}`) + directive;
 
-      const responseMsg = stageNum
-        ? `[REI] Switching to AGENT mode to execute stage ${stageNum}. No target files detected (action-only stage).`
-        : `[REI] Switching to AGENT mode to execute the entire plan. No target files detected.`;
+      const responseMsg =
+        `${planHeader}\n` +
+        (stageNum
+          ? `[REI] Switching to AGENT mode to execute stage ${stageNum}. No target files detected (action-only stage).`
+          : `[REI] Switching to AGENT mode to execute the entire plan. No target files detected.`);
 
       saveSession(workspacePath, session.messages, newMode, session.summary, session.createdAt);
 
@@ -160,9 +220,11 @@ export const runPlanCommand: CommandHandler = {
         : `Execute the following plan over these files:\n\nPLAN:\n${planContent}\n\nFILES:\n${files.join(", ")}`) +
       directive;
 
-    const responseMsg = stageNum
-      ? `[REI] Switching to AGENT mode to execute stage ${stageNum}. Target files: ${files.join(", ")}`
-      : `[REI] Switching to AGENT mode to execute the entire plan. Target files: ${files.join(", ")}`;
+    const responseMsg =
+      `${planHeader}\n` +
+      (stageNum
+        ? `[REI] Switching to AGENT mode to execute stage ${stageNum}. Target files: ${files.join(", ")}`
+        : `[REI] Switching to AGENT mode to execute the entire plan. Target files: ${files.join(", ")}`);
 
     saveSession(workspacePath, session.messages, newMode, session.summary, session.createdAt);
 
@@ -234,6 +296,8 @@ export const planFileCommands: CommandHandler = {
 
       try {
         const savedPath = savePlanToFile(workspacePath, planName, lastPlanMsg.content);
+        // Saving ACTIVATES: the previous split between "saved" and "what runs" was the whole bug.
+        setActivePlan(workspacePath, planName.replace(/[^a-zA-Z0-9_\-]/g, "_"));
         return { success: true, response: `[REI] Full plan saved successfully to: ${savedPath}` };
       } catch (err) {
         return {
@@ -252,6 +316,7 @@ export const planFileCommands: CommandHandler = {
       const planName = loadMatch[1];
       try {
         const planContent = loadPlanFromFile(workspacePath, planName);
+        setActivePlan(workspacePath, planName.trim().replace(/^@/, "").replace(/\.md$/, "").replace(/^.*\//, ""));
 
         // Ingest the loaded plan as a planning-mode assistant message so /runplan picks it up as
         // the SOURCE (latest planning plan in the session).

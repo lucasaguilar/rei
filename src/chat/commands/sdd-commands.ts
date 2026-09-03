@@ -4,6 +4,7 @@ import type { CommandContext, CommandHandler, CommandResult } from "./command-ha
 import { saveSession } from "../session-store.js";
 import { isSpecMessage } from "../spec-tracker.js";
 import { findSkill, loadSkills } from "../../skills/skill-loader.js";
+import { getActive, setActivePlan, setActiveSpec } from "../active-artifacts.js";
 import type { SessionMode } from "../types.js";
 
 /**
@@ -23,6 +24,18 @@ import type { SessionMode } from "../types.js";
 
 const SPEC_RE = /^\/spec\s+(.+)$/is;
 const DECOMPOSE_RE = /^\/decompose\s*$/i;
+
+/** A short, filesystem-safe name derived from the task — the spec and its plan share it. */
+function slug(task: string): string {
+  const base = task
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 5)
+    .join("-");
+  return base.length > 0 ? base.slice(0, 48) : "spec";
+}
 
 /** Loads a skill's full body, or null when it isn't installed. */
 function skillBody(workspacePath: string, name: string): string | null {
@@ -79,18 +92,25 @@ export const sddCommands: CommandHandler = {
       const body = skillBody(workspacePath, "write-spec");
       if (!body) return missingSkill("write-spec");
 
+      // The COMMAND picks the name and marks it active, then tells the model exactly where to write.
+      // Letting the model choose would leave REI guessing which file it meant — the ambiguity the
+      // active pointer exists to remove.
+      const specName = slug(task);
+      setActiveSpec(workspacePath, specName);
+
       const prompt =
         `[SPEC] Write the spec for this request. This is the SPEC step — not a plan, not code.\n\n` +
         `REQUEST:\n${task}\n\n` +
         `Follow this recipe exactly:\n\n${body}\n\n` +
         `⚙️ Ground the spec in the real code first (read_files / grep_code), then emit ONLY the spec ` +
         `in the format above. Do NOT decompose it into stages and do NOT implement anything. ` +
-        `Also save it with create_file to .rei/specs/<short-kebab-name>.md so it survives this session.`;
+        `Also save it with create_file to .rei/specs/${specName}.md — that exact path — so it survives ` +
+        `this session and REI knows which spec is active.`;
 
       saveSession(workspacePath, session.messages, planning, session.summary, session.createdAt);
       return {
         success: true,
-        response: "[REI] Switching to PLANNING mode to write the spec.",
+        response: `[REI] Switching to PLANNING mode to write the spec → .rei/specs/${specName}.md (now the active spec).`,
         newSession: { ...session, mode: planning },
         autoExecute: { prompt },
       };
@@ -113,18 +133,26 @@ export const sddCommands: CommandHandler = {
     const body = skillBody(workspacePath, "micro-task-decomposition");
     if (!body) return missingSkill("micro-task-decomposition");
 
+    // The plan inherits the spec's name, so the pair is obvious on disk and `/runplan` has an active
+    // plan without anyone remembering to `/saveplan`.
+    const planName = getActive(workspacePath).spec ?? "current";
+    setActivePlan(workspacePath, planName);
+
     const prompt =
       `[DECOMPOSE] Turn this spec into an implementation plan. This is the PLAN step — do not implement.\n\n` +
       `SPEC (from ${spec.origin}):\n${spec.content}\n\n` +
       `Follow this recipe exactly:\n\n${body}\n\n` +
       `⚙️ Emit ONLY the plan. Every stage carries a \`Satisfies:\` line naming the acceptance ` +
       `criterion it serves, and the plan closes with the two verification stages the recipe requires. ` +
-      `Do NOT edit source files — this step produces the plan, not the change.`;
+      `Save the plan with create_file to .rei/plans/${planName}.md — that exact path, so /runplan ` +
+      `picks it up. Do NOT edit source files — this step produces the plan, not the change.`;
 
     saveSession(workspacePath, session.messages, planning, session.summary, session.createdAt);
     return {
       success: true,
-      response: `[REI] Switching to PLANNING mode to decompose the spec (${spec.origin}).`,
+      response:
+        `[REI] Switching to PLANNING mode to decompose the spec (${spec.origin}) ` +
+        `→ .rei/plans/${planName}.md (now the active plan).`,
       newSession: { ...session, mode: planning },
       autoExecute: { prompt },
     };

@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { ChatMessage } from './types.js';
+import { readActivePlan } from './active-artifacts.js';
 
 // The active plan's content — the SOURCE fallback for /runplan when the session
 // has no in-memory plan (e.g. cross-session). There is intentionally NO progress
@@ -14,7 +15,9 @@ function getPlanContentPath(workspacePath: string): string {
 }
 
 export function getTotalStagesInPlan(workspacePath: string): number {
-  const content = loadCurrentPlanContent(workspacePath);
+  // Count over the ACTIVE plan when one is set; the current-plan copy is only a fallback for
+  // sessions that predate the pointer (see chat/active-artifacts).
+  const content = readActivePlan(workspacePath) ?? loadCurrentPlanContent(workspacePath);
   if (!content) return 0;
   const stageNums = new Set<number>();
   for (const line of content.split('\n')) {

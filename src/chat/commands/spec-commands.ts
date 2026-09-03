@@ -1,5 +1,6 @@
 import type { CommandHandler, CommandResult } from "./command-handler.js";
 import { saveSession } from "../session-store.js";
+import { setActiveSpec } from "../active-artifacts.js";
 import {
   saveSpecToFile,
   loadSpecFromFile,
@@ -36,6 +37,7 @@ export const specCommands: CommandHandler = {
 
       try {
         const savedPath = saveSpecToFile(workspacePath, specName, lastSpecMsg.content);
+        setActiveSpec(workspacePath, specName.replace(/[^a-zA-Z0-9_\-]/g, "_"));
         return { success: true, response: `[REI] Spec saved successfully to: ${savedPath}` };
       } catch (err) {
         return {
@@ -54,6 +56,7 @@ export const specCommands: CommandHandler = {
       const specName = loadMatch[1];
       try {
         const specContent = loadSpecFromFile(workspacePath, specName);
+        setActiveSpec(workspacePath, specName.trim().replace(/^@/, "").replace(/\.md$/, "").replace(/^.*\//, ""));
 
         // Ingest the spec as an assistant message so the next planning turn
         // (micro-task-decomposition) consumes it as the scope contract.
