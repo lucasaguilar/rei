@@ -1,3 +1,4 @@
+import { commandInsertText } from "../constants/chat.constants.js";
 import * as readline from "readline";
 import { ChatUIState, KeyboardActions } from "../models/chat.types.js";
 import {
@@ -285,7 +286,7 @@ export class KeyboardHandler {
           activePalette.items[
             clamp(state.selectedCommandIndex, 0, activePalette.items.length - 1)
           ];
-        state.inputBuffer = selected.command;
+        state.inputBuffer = commandInsertText(selected.command);
         state.inputCursor = state.inputBuffer.length;
         state.paletteClosed = false;
       }

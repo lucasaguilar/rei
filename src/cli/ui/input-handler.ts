@@ -1,3 +1,4 @@
+import { commandInsertText } from "../constants/chat.constants.js";
 import { ActivePalette } from "../models/chat.types.js";
 import type { InputHandlerContext } from "../models/input-handler.types.js";
 import { clamp } from "../helpers/terminal.helpers.js";
@@ -83,7 +84,7 @@ export class InputHandler {
       ];
 
     if (selected.requiresArgs) {
-      state.inputBuffer = selected.command;
+      state.inputBuffer = commandInsertText(selected.command);
       state.inputCursor = state.inputBuffer.length;
       state.selectedCommandIndex = 0;
       state.paletteClosed = true;

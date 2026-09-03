@@ -47,6 +47,21 @@ export const SPINNER_FRAMES = ["|", "/", "-", "\\"];
 export const SHORTCUT_HINT =
   "\x1b[90mShortcuts: Up/Down history | / commands | @ files | Tab complete | Esc clear/close | Ctrl+R search\x1b[0m";
 
+/**
+ * What tab-completion should actually type: the invocable part of an entry, without its usage hint.
+ *
+ * A COMMANDS entry doubles as its own help line — `/runplan [stage <num>]` — so inserting it verbatim
+ * left the placeholder in the input for the user to delete by hand every time. Everything from the
+ * first `[` or `<` is documentation, not something to type.
+ *
+ * Entries that take an argument get a trailing space so the cursor is ready for it; the rest are
+ * inserted as-is and can be submitted straight away.
+ */
+export function commandInsertText(command: string): string {
+  const invocable = command.replace(/\s+[[<].*$/, "").trim();
+  return invocable === command.trim() ? invocable : `${invocable} `;
+}
+
 export const COMMANDS: Array<{
   command: string;
   description: string;
