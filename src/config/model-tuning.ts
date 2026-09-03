@@ -26,6 +26,29 @@ export interface ModelTuning {
   minP?: number;
   /** Intent, not a raw param — REI maps "off" to the runtime's lever (reasoning_effort:none). */
   thinking?: "on" | "off";
+  /**
+   * This model's default reasoning level (none|minimal|low|medium|high|xhigh). Every other per-model
+   * setting — temperature, topP, contextWindow — lives here; the reasoning level used to be stuck in
+   * the global `.env`, so switching models meant editing it or re-running `/think` each time.
+   *
+   * Beats `REI_REASONING_EFFORT_<MODE>`, matching how the rest of the tuning beats its env knob
+   * (see resolveAgentSampling). `/think` still wins over both — it is the most recent explicit
+   * instruction. The binary `thinking: "off"` remains the shortcut for "no thinking at all".
+   */
+  reasoningEffort?: string;
+  /**
+   * Maps REI's reasoning levels to what THIS model accepts. `null` marks a level the model does not
+   * support; an absent key passes through untouched, so the map is additive and can never disable a
+   * level by omission.
+   *
+   * REI's whitelist is the OpenAI-standard set (none|minimal|low|medium|high|xhigh), but a model's
+   * real range is narrower — Qwen3.8's chat template only knows low/medium/xhigh, and asking for
+   * `high` is silently dropped (LM Studio falls back to the field's default), so the request looks
+   * fine and nothing changed. Declaring the range makes that visible instead of invisible.
+   *
+   * A translation like `"high": "xhigh"` is the USER's declared equivalence, not one REI invents.
+   */
+  thinkingLevelMap?: Record<string, string | null>;
 }
 
 type ProvidersConfig = Record<string, { models?: ModelTuning[] }>;

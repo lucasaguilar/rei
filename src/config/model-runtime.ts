@@ -147,8 +147,27 @@ const REASONING_EFFORTS = new Set([
 ]);
 
 /**
- * Resolves the per-mode `reasoning_effort` from `REI_REASONING_EFFORT_<MODE>`
- * (e.g. REI_REASONING_EFFORT_ASK=none, REI_REASONING_EFFORT_AGENT=medium).
+ * Translates a level through the active model's `thinkingLevelMap`.
+ * Returns the value to send, or undefined when the model declares the level unsupported (`null`) —
+ * sending it anyway would be dropped by the backend and read as "applied".
+ */
+export function mapThinkingLevel(
+  level: string,
+  map?: Record<string, string | null>,
+): string | undefined {
+  if (!map || !(level in map)) return level; // no map, or not listed → send as-is
+  const mapped = map[level];
+  return mapped === null ? undefined : mapped;
+}
+
+/**
+ * Resolves the reasoning level to send, in precedence order:
+ *   1. `/think <level>`                     — the most recent explicit instruction
+ *   2. the model's `reasoningEffort`        — rei.config.json, per model
+ *   3. `REI_REASONING_EFFORT_<MODE>`        — the per-mode default
+ *   4. the model's `thinking: "off"`        — the binary shortcut, meaning "none"
+ * The winner is then translated through the model's `thinkingLevelMap`, which can rewrite it or
+ * drop it when the model does not support that level.
  *
  * This is the OpenAI-standard knob LM Studio honors to cap/disable a reasoning model's
  * thinking phase ("none" disables it entirely). Lets you keep agent turns thinking while
@@ -176,21 +195,34 @@ export function reasoningEffortValues(): string[] {
 }
 
 export function resolveReasoningEffort(mode?: string): string | undefined {
+  const levelMap = getActiveModelTuning()?.thinkingLevelMap;
   // A live `/think` beats everything: it is the most recent explicit instruction from the user.
-  if (thinkingOverride) return thinkingOverride;
+  // The override stores the ABSTRACT level; translation happens here, so switching models switches
+  // the translation with it.
+  if (thinkingOverride) return mapThinkingLevel(thinkingOverride, levelMap);
   if (!mode) return undefined;
-  // Defensive: tolerate a trailing inline comment (" #...") that a naive .env loader may
-  // have left in the value (e.g. the bash wrapper used to export `none   # note` verbatim,
-  // which failed the set check → reasoning silently stayed ON). reasoning_effort values
-  // never contain '#', so splitting on it is safe.
+
+  // 2. The model's own default (rei.config.json). Beats the env for the same reason every other
+  //    per-model value does (see resolveAgentSampling): the point of tuning a model is that it needs
+  //    something different from the global default. A heavy reasoner wanting xhigh and a fast one
+  //    wanting low can now coexist without editing .env on every model switch.
+  const tuned = getActiveModelTuning()?.reasoningEffort?.trim().toLowerCase();
+  if (tuned && REASONING_EFFORTS.has(tuned)) return mapThinkingLevel(tuned, levelMap);
+
+  // 3. The per-mode env default.
+  //    Defensive: tolerate a trailing inline comment (" #...") that a naive .env loader may
+  //    have left in the value (e.g. the bash wrapper used to export `none   # note` verbatim,
+  //    which failed the set check → reasoning silently stayed ON). reasoning_effort values
+  //    never contain '#', so splitting on it is safe.
   const raw = process.env[`REI_REASONING_EFFORT_${mode.toUpperCase()}`]
     ?.split("#")[0]
     .trim()
     .toLowerCase();
-  if (raw && REASONING_EFFORTS.has(raw)) return raw;
-  // No explicit env → honor the active model's `thinking` intent. "off" → reasoning_effort:none
-  // (the lever LM Studio honors). "on"/unset → the model's own default (undefined). The mlx_lm
-  // /no_think lever is a later phase; see docs/model-config-spec.md.
+  if (raw && REASONING_EFFORTS.has(raw)) return mapThinkingLevel(raw, levelMap);
+
+  // 4. The binary `thinking` intent. "off" → reasoning_effort:none (the lever LM Studio honors);
+  //    "on"/unset → the model's own default (undefined). The mlx_lm /no_think lever is a later
+  //    phase; see docs/model-config-spec.md.
   const thinking = getActiveModelTuning()?.thinking;
   if (thinking === "off") return "none";
   return undefined;
