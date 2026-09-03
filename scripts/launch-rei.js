@@ -595,6 +595,286 @@ async function prepareProvider(provider, envVars) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
+/**
+ * Local-provider runtime budget. Cloud models have large fixed windows and rarely need REI's
+ * overrides, so these prompts are skipped for them entirely.
+ *
+ * Each sub-step follows the same contract: if the variable is ALREADY set in the environment it is
+ * carried through untouched — the wizard must never overwrite a deliberate choice — otherwise it
+ * asks. Returns { envVars, config } patches for the caller to merge.
+ */
+async function configureLocalRuntime(last) {
+    const patches = [
+        await askContextWindow(last),
+        await askOnDemandFileContext(last),
+        await askReasoningEffort(last),
+    ];
+    return {
+        envVars: Object.assign({}, ...patches.map(p => p.envVars)),
+        config: Object.assign({}, ...patches.map(p => p.config)),
+    };
+}
+
+/** REI's history-trimming budget. Writes the provider-agnostic REI_* name that
+ *  src/config/model-runtime.ts resolves — it takes precedence over OLLAMA_NUM_CTX /
+ *  LLM_STUDIO_MAX_TOKENS, so writing anything else would be silently shadowed. */
+async function askContextWindow(last) {
+    const envVars = {};
+    const config = {};
+    // Context window (REI's history-trimming assumption). Single prompt; '0' = no trimming.
+    // (Output cap isn't asked here — the per-model maxTokens in rei.config.json already covers it.)
+    if (process.env.REI_CONTEXT_WINDOW !== undefined) {
+        // Already set — carry through so the wizard never overwrites a deliberate choice.
+        envVars.REI_CONTEXT_WINDOW = process.env.REI_CONTEXT_WINDOW;
+    } else {
+        const ctxValue = await select({
+            message: 'REI_CONTEXT_WINDOW (history-trimming budget; 0 = model manages its own):',
+            options: ['61440', '32768', '16384', '8192', '0'].map(v => ({ value: v, label: v === '0' ? '0 (no trimming)' : v })),
+            initialValue: last.ctxWindow ?? '61440',   // proposed: 60 × 1024
+        });
+        if (isCancel(ctxValue)) { cancel('Cancelled'); process.exit(0); }
+        envVars.REI_CONTEXT_WINDOW = ctxValue;
+        Object.assign(config, { ctxWindow: ctxValue });
+    }
+    return { envVars, config };
+}
+
+/** On-demand file context: ask/planning are always light, so the real toggle is AGENT.
+ *  Recommended ON for local/small windows — tools discover code instead of proactive dumps. */
+async function askOnDemandFileContext(last) {
+    const envVars = {};
+    const config = {};
+    // On-demand file context: ask/planning are always light; the real toggle is AGENT.
+    // Recommended ON for local/small windows (tools discover code instead of proactive dumps).
+    if (process.env.REI_ON_DEMAND_FILE_CONTEXT_AGENT !== undefined) {
+        envVars.REI_ON_DEMAND_FILE_CONTEXT_ASK = process.env.REI_ON_DEMAND_FILE_CONTEXT_ASK ?? '1';
+        envVars.REI_ON_DEMAND_FILE_CONTEXT_PLANNING = process.env.REI_ON_DEMAND_FILE_CONTEXT_PLANNING ?? '1';
+        envVars.REI_ON_DEMAND_FILE_CONTEXT_AGENT = process.env.REI_ON_DEMAND_FILE_CONTEXT_AGENT;
+    } else {
+        const onDemandAll = await confirm({
+            message: 'On-demand file context for ALL modes incl. agent? (recommended for local/small windows)',
+            initialValue: last.onDemandAll ?? true,
+        });
+        if (isCancel(onDemandAll)) { cancel('Cancelled'); process.exit(0); }
+        envVars.REI_ON_DEMAND_FILE_CONTEXT_ASK = '1';
+        envVars.REI_ON_DEMAND_FILE_CONTEXT_PLANNING = '1';
+        envVars.REI_ON_DEMAND_FILE_CONTEXT_AGENT = onDemandAll ? '1' : '0';
+        Object.assign(config, { onDemandAll });
+    }
+    return { envVars, config };
+}
+
+/** Reasoning effort per mode. Local models think by default, so ask/planning over-think (slow)
+ *  unless capped. Whether the backend honors the param is model-dependent; unsupported ones
+ *  ignore it. */
+async function askReasoningEffort(last) {
+    const envVars = {};
+    const config = {};
+    // Reasoning effort per mode — local models think by default, so ask/planning over-think
+    // (slow) unless capped. This is the OpenAI-standard knob LM Studio honors ("none" disables
+    // thinking). One prompt selects a profile; unsupported backends ignore the param.
+    const REASON_MODES = ['ASK', 'PLANNING', 'AGENT'];
+    const reasoningAlreadySet = REASON_MODES.some(m => process.env[`REI_REASONING_EFFORT_${m}`] !== undefined);
+    if (reasoningAlreadySet) {
+        for (const m of REASON_MODES) {
+            const v = process.env[`REI_REASONING_EFFORT_${m}`];
+            if (v !== undefined) envVars[`REI_REASONING_EFFORT_${m}`] = v;
+        }
+    } else {
+        const profile = await select({
+            message: 'Reasoning effort (thinking) per mode:',
+            options: [
+                { value: 'balanced', label: 'Balanced — ask/planning fast (none), agent reasons (medium)' },
+                { value: 'minimal',  label: 'Minimal — none everywhere (fastest, least deliberate)' },
+                { value: 'full',     label: 'Full — let the model decide (thinks in all modes)' },
+            ],
+            initialValue: last.reasoningProfile ?? 'balanced',
+        });
+        if (isCancel(profile)) { cancel('Cancelled'); process.exit(0); }
+        // 'full' = leave unset so the request omits the field (model's own default).
+        const effort = profile === 'balanced'
+            ? { ASK: 'none', PLANNING: 'none', AGENT: 'medium' }
+            : profile === 'minimal'
+                ? { ASK: 'none', PLANNING: 'none', AGENT: 'none' }
+                : null;
+        if (effort) for (const [m, v] of Object.entries(effort)) envVars[`REI_REASONING_EFFORT_${m}`] = v;
+        Object.assign(config, { reasoningProfile: profile });
+    }
+    return { envVars, config };
+}
+
+/**
+ * Model selection, single-provider branch: one provider serves ask, planning and agent, with an
+ * optional heavier model for agent alone.
+ *
+ * Returns its own contributions instead of mutating shared state, so the caller can see exactly what
+ * this branch decides: `envVars` (written to the project .env), `config` (remembered for the next
+ * run's defaults) and `selectedModels` (the (provider, model) pairs that seed rei.config.json tuning).
+ */
+async function configureSingleProvider(last) {
+    const envVars = {};
+    const config = {};
+    const selectedModels = [];
+
+    const provider = await pickProvider('Provider:', last.provider);
+    // Cloud → prompt API key; local → prompt endpoint + key and probe for models.
+    const { models: liveModels } = await prepareProvider(provider, envVars);
+    const model = await pickModel(provider, 'Model:', last.provider === provider ? last.model : undefined, liveModels);
+    selectedModels.push({ provider, model });
+
+    Object.assign(config, { provider, model });
+    envVars.MODEL_PROVIDER = provider;
+    const prefix = getEnvPrefix(provider);
+    envVars[`${prefix}_MODEL`] = model;
+    // Explicitly clear AGENT_MODEL_PROVIDER to prevent .env bleed-through in single provider mode
+    envVars.AGENT_MODEL_PROVIDER = '';
+
+    // Uniform across providers: <PREFIX>_MODEL (set above) covers ask + planning AND
+    // agent (agent falls back to it). Optionally pick a different/heavier agent model
+    // on the same provider — written to <PREFIX>_MODEL_AGENT.
+    const perMode = await confirm({
+        message: 'Use a different model for agent mode (vs ask/planning)?',
+        initialValue: last.singlePerMode ?? false,
+    });
+    if (isCancel(perMode)) { cancel('Cancelled'); process.exit(0); }
+
+    if (perMode) {
+        note('ask + planning use the model selected above.\nagent will use this second model.', 'Per-mode models');
+        // Same provider → endpoint already configured; reuse the live list (no re-probe).
+        const agentModel = await pickModel(provider, 'Model for agent:', last.singleAgentModel ?? model, liveModels);
+        envVars[`${prefix}_MODEL_AGENT`] = agentModel;
+        selectedModels.push({ provider, model: agentModel });
+        Object.assign(config, { singlePerMode: true, singleAgentModel: agentModel });
+    } else {
+        // No dedicated agent model: write the SAME model (never an empty string — an
+        // empty <PREFIX>_MODEL_AGENT would be sent as a blank model name → 400). This
+        // also overwrites any stale value already in the .env.
+        envVars[`${prefix}_MODEL_AGENT`] = model;
+        Object.assign(config, { singlePerMode: false });
+    }
+
+    return { envVars, config, selectedModels };
+}
+
+/**
+ * Model selection, multi-provider branch: one provider for ask + planning, another for agent — the
+ * "fast local model to explore, heavier model to execute" split.
+ *
+ * Same contract as configureSingleProvider: returns { envVars, config, selectedModels }.
+ */
+async function configureMultiProvider(last) {
+    const envVars = {};
+    const config = {};
+    const selectedModels = [];
+
+    note('Step 1 of 2: provider for ask and planning modes.', 'Multi-provider setup');
+    const askProvider = await pickProvider('Provider (ask + planning):', last.askProvider);
+    const { models: askLive } = await prepareProvider(askProvider, envVars);
+    const askModel = await pickModel(askProvider, 'Model (ask + planning):', last.askProvider === askProvider ? last.askModel : undefined, askLive);
+    selectedModels.push({ provider: askProvider, model: askModel });
+
+    note('Step 2 of 2: provider for agent mode.', 'Multi-provider setup');
+    const agentProvider = await pickProvider('Provider (agent):', last.agentProvider);
+    // Reuse the ask probe if it's the same provider; otherwise set the agent provider up too.
+    const { models: agentLive } = agentProvider === askProvider ? { models: askLive } : await prepareProvider(agentProvider, envVars);
+    const agentModel = await pickModel(agentProvider, 'Model (agent):', last.agentProvider === agentProvider ? last.agentModel : undefined, agentLive);
+    selectedModels.push({ provider: agentProvider, model: agentModel });
+
+    Object.assign(config, { askProvider, askModel, agentProvider, agentModel });
+    envVars.MODEL_PROVIDER = askProvider;
+
+    const askPrefix = getEnvPrefix(askProvider);
+    const agentPrefix = getEnvPrefix(agentProvider);
+
+    // ask/planning → <askPrefix>_MODEL; agent → <agentPrefix>_MODEL_AGENT. Uniform
+    // across providers, so ask/planning never inherit the agent model.
+    envVars[`${askPrefix}_MODEL`]              = askModel;
+    envVars.AGENT_MODEL_PROVIDER               = agentProvider;
+    envVars[`${agentPrefix}_MODEL_AGENT`]      = agentModel;
+
+    return { envVars, config, selectedModels };
+}
+
+/**
+ * Writes the wizard's answers into the project's `.env`. An existing file is UPDATED key-by-key
+ * (applyEnvVars), never overwritten, so variables the user added by hand survive; a missing one
+ * starts from the fully-commented `.env.example` so they get a documented file rather than five
+ * bare lines.
+ *
+ * Never throws: a failed write is reported and the launch still proceeds with the env this process
+ * already holds. Returns the path written, or null if it could not be written.
+ *
+ * Exported for tests — importing this module does not run the wizard (see the guard at the bottom).
+ */
+export function writeProjectEnv(projectPath, envVars) {
+    try {
+        const envFilePath = path.join(projectPath, '.env');
+        let envContent = '';
+        if (fs.existsSync(envFilePath)) {
+            envContent = fs.readFileSync(envFilePath, 'utf8');
+        } else {
+            const exampleEnvPath = path.join(ROOT, '.env.example');
+            if (fs.existsSync(exampleEnvPath)) {
+                envContent = fs.readFileSync(exampleEnvPath, 'utf8');
+            }
+        }
+        envContent = applyEnvVars(envContent, envVars);
+        fs.writeFileSync(envFilePath, envContent.trim() + '\n', 'utf8');
+        console.log(`📝 Persisted complete configuration template to: ${envFilePath}`);
+        return envFilePath;
+    } catch (err) {
+        console.error('⚠️ Could not save configuration to .env:', err.message);
+        return null;
+    }
+}
+
+/** Persists everything the wizard decided: the last-selection cache (pre-fills the next run) plus
+ *  the project's `.env`. */
+function persistConfiguration(projectPath, envVars, config) {
+    saveLast(config);
+    return writeProjectEnv(projectPath, envVars);
+}
+
+/**
+ * Spawns the configured REI build and hands it the terminal (stdio: inherit) — this is the last
+ * thing the wizard does.
+ *
+ * Runs the COMPILED build (dist), not tsx/src: faster startup (no per-launch TypeScript
+ * transpilation) and consistent with the plain `rei` command. Requires `npm run build` (the
+ * installer does this). Devs editing source can switch back to `npm run dev -- ...` /
+ * `npm run server:dev`.
+ */
+function launchRei({ launchMode, project, projectPath, envVars, usesOllama }) {
+    // Show the Ollama env summary so the user knows what's active before the screen is handed over.
+    if (usesOllama) {
+        note(buildOllamaSummary(envVars), 'Ollama environment');
+    }
+
+    const isServer  = launchMode === 'server';
+    const modeLabel = isServer ? 'server' : 'cli';
+    // NOT the module-level providerLabel() helper — this is the ask/agent pair for the banner.
+    const providerSummary = envVars.AGENT_MODEL_PROVIDER
+        ? `${envVars.MODEL_PROVIDER} (ask/plan) + ${envVars.AGENT_MODEL_PROVIDER} (agent)`
+        : envVars.MODEL_PROVIDER;
+
+    console.log(`\nLaunching REI [${modeLabel}] [${providerSummary}] → ${project}\n`);
+
+    const projectArg = projectPath.includes(' ') ? `"${projectPath}"` : projectPath;
+    const cmd = isServer
+        ? 'node dist/server.js'
+        : `node dist/main.js --workspace ${projectArg} chat`;
+
+    const child = spawn(cmd, {
+        cwd: ROOT,
+        env: { ...process.env, ...envVars },
+        stdio: 'inherit',
+        shell: true,
+    });
+
+    child.on('error', err => { console.error(`Failed to launch REI: ${err.message}`); process.exit(1); });
+    child.on('close', code => { if (code !== 0) console.log(`REI exited with code ${code}`); });
+}
+
 async function main() {
     const last = loadLast();
     const initialWorkspace = process.cwd();
@@ -661,154 +941,22 @@ async function main() {
     if (isCancel(providerSetup)) { cancel('Cancelled'); process.exit(0); }
 
     // ── Step 4: model selection ────────────────────────────────────────────
-    const envVars = {};
-    const config = { project, launchMode, providerSetup };
-    // (provider, model) pairs chosen — used to seed rei.config.json tuning for local models.
-    const selectedModels = [];
-
-    if (providerSetup === 'single') {
-        const provider = await pickProvider('Provider:', last.provider);
-        // Cloud → prompt API key; local → prompt endpoint + key and probe for models.
-        const { models: liveModels } = await prepareProvider(provider, envVars);
-        const model = await pickModel(provider, 'Model:', last.provider === provider ? last.model : undefined, liveModels);
-        selectedModels.push({ provider, model });
-
-        Object.assign(config, { provider, model });
-        envVars.MODEL_PROVIDER = provider;
-        const prefix = getEnvPrefix(provider);
-        envVars[`${prefix}_MODEL`] = model;
-        // Explicitly clear AGENT_MODEL_PROVIDER to prevent .env bleed-through in single provider mode
-        envVars.AGENT_MODEL_PROVIDER = '';
-
-        // Uniform across providers: <PREFIX>_MODEL (set above) covers ask + planning AND
-        // agent (agent falls back to it). Optionally pick a different/heavier agent model
-        // on the same provider — written to <PREFIX>_MODEL_AGENT.
-        const perMode = await confirm({
-            message: 'Use a different model for agent mode (vs ask/planning)?',
-            initialValue: last.singlePerMode ?? false,
-        });
-        if (isCancel(perMode)) { cancel('Cancelled'); process.exit(0); }
-
-        if (perMode) {
-            note('ask + planning use the model selected above.\nagent will use this second model.', 'Per-mode models');
-            // Same provider → endpoint already configured; reuse the live list (no re-probe).
-            const agentModel = await pickModel(provider, 'Model for agent:', last.singleAgentModel ?? model, liveModels);
-            envVars[`${prefix}_MODEL_AGENT`] = agentModel;
-            selectedModels.push({ provider, model: agentModel });
-            Object.assign(config, { singlePerMode: true, singleAgentModel: agentModel });
-        } else {
-            // No dedicated agent model: write the SAME model (never an empty string — an
-            // empty <PREFIX>_MODEL_AGENT would be sent as a blank model name → 400). This
-            // also overwrites any stale value already in the .env.
-            envVars[`${prefix}_MODEL_AGENT`] = model;
-            Object.assign(config, { singlePerMode: false });
-        }
-
-    } else {
-        // Multi-provider: ask/planning provider + agent provider
-        note('Step 1 of 2: provider for ask and planning modes.', 'Multi-provider setup');
-        const askProvider = await pickProvider('Provider (ask + planning):', last.askProvider);
-        const { models: askLive } = await prepareProvider(askProvider, envVars);
-        const askModel = await pickModel(askProvider, 'Model (ask + planning):', last.askProvider === askProvider ? last.askModel : undefined, askLive);
-        selectedModels.push({ provider: askProvider, model: askModel });
-
-        note('Step 2 of 2: provider for agent mode.', 'Multi-provider setup');
-        const agentProvider = await pickProvider('Provider (agent):', last.agentProvider);
-        // Reuse the ask probe if it's the same provider; otherwise set the agent provider up too.
-        const { models: agentLive } = agentProvider === askProvider ? { models: askLive } : await prepareProvider(agentProvider, envVars);
-        const agentModel = await pickModel(agentProvider, 'Model (agent):', last.agentProvider === agentProvider ? last.agentModel : undefined, agentLive);
-        selectedModels.push({ provider: agentProvider, model: agentModel });
-
-        Object.assign(config, { askProvider, askModel, agentProvider, agentModel });
-        envVars.MODEL_PROVIDER = askProvider;
-
-        const askPrefix = getEnvPrefix(askProvider);
-        const agentPrefix = getEnvPrefix(agentProvider);
-
-        // ask/planning → <askPrefix>_MODEL; agent → <agentPrefix>_MODEL_AGENT. Uniform
-        // across providers, so ask/planning never inherit the agent model.
-        envVars[`${askPrefix}_MODEL`]              = askModel;
-        envVars.AGENT_MODEL_PROVIDER               = agentProvider;
-        envVars[`${agentPrefix}_MODEL_AGENT`]      = agentModel;
-    }
+    const picked = providerSetup === 'single'
+        ? await configureSingleProvider(last)
+        : await configureMultiProvider(last);
+    const { envVars, selectedModels } = picked;
+    const config = { project, launchMode, providerSetup, ...picked.config };
 
     // ── Step 5: Context & token budget (unified) ───────────────────────────
-    // Writes the provider-agnostic REI_* names that src/config/model-runtime.ts
-    // resolves. These take precedence over OLLAMA_NUM_CTX / LLM_STUDIO_MAX_TOKENS,
-    // so the wizard must use them — otherwise a value it writes gets shadowed and
-    // silently ignored. Prompted only for local providers (cloud models have large
-    // fixed windows and rarely need REI's budget overrides).
     const usesOllama = envVars.MODEL_PROVIDER === 'ollama' || envVars.AGENT_MODEL_PROVIDER === 'ollama';
-    const LOCAL_PROVIDERS = ['ollama', 'llmstudio', 'mtplx'];
     const usesLocal =
         LOCAL_PROVIDERS.includes(envVars.MODEL_PROVIDER) ||
         LOCAL_PROVIDERS.includes(envVars.AGENT_MODEL_PROVIDER);
 
     if (usesLocal) {
-        // Context window (REI's history-trimming assumption). Single prompt; '0' = no trimming.
-        // (Output cap isn't asked here — the per-model maxTokens in rei.config.json already covers it.)
-        if (process.env.REI_CONTEXT_WINDOW !== undefined) {
-            // Already set — carry through so the wizard never overwrites a deliberate choice.
-            envVars.REI_CONTEXT_WINDOW = process.env.REI_CONTEXT_WINDOW;
-        } else {
-            const ctxValue = await select({
-                message: 'REI_CONTEXT_WINDOW (history-trimming budget; 0 = model manages its own):',
-                options: ['61440', '32768', '16384', '8192', '0'].map(v => ({ value: v, label: v === '0' ? '0 (no trimming)' : v })),
-                initialValue: last.ctxWindow ?? '61440',   // proposed: 60 × 1024
-            });
-            if (isCancel(ctxValue)) { cancel('Cancelled'); process.exit(0); }
-            envVars.REI_CONTEXT_WINDOW = ctxValue;
-            Object.assign(config, { ctxWindow: ctxValue });
-        }
-
-        // On-demand file context: ask/planning are always light; the real toggle is AGENT.
-        // Recommended ON for local/small windows (tools discover code instead of proactive dumps).
-        if (process.env.REI_ON_DEMAND_FILE_CONTEXT_AGENT !== undefined) {
-            envVars.REI_ON_DEMAND_FILE_CONTEXT_ASK = process.env.REI_ON_DEMAND_FILE_CONTEXT_ASK ?? '1';
-            envVars.REI_ON_DEMAND_FILE_CONTEXT_PLANNING = process.env.REI_ON_DEMAND_FILE_CONTEXT_PLANNING ?? '1';
-            envVars.REI_ON_DEMAND_FILE_CONTEXT_AGENT = process.env.REI_ON_DEMAND_FILE_CONTEXT_AGENT;
-        } else {
-            const onDemandAll = await confirm({
-                message: 'On-demand file context for ALL modes incl. agent? (recommended for local/small windows)',
-                initialValue: last.onDemandAll ?? true,
-            });
-            if (isCancel(onDemandAll)) { cancel('Cancelled'); process.exit(0); }
-            envVars.REI_ON_DEMAND_FILE_CONTEXT_ASK = '1';
-            envVars.REI_ON_DEMAND_FILE_CONTEXT_PLANNING = '1';
-            envVars.REI_ON_DEMAND_FILE_CONTEXT_AGENT = onDemandAll ? '1' : '0';
-            Object.assign(config, { onDemandAll });
-        }
-
-        // Reasoning effort per mode — local models think by default, so ask/planning over-think
-        // (slow) unless capped. This is the OpenAI-standard knob LM Studio honors ("none" disables
-        // thinking). One prompt selects a profile; unsupported backends ignore the param.
-        const REASON_MODES = ['ASK', 'PLANNING', 'AGENT'];
-        const reasoningAlreadySet = REASON_MODES.some(m => process.env[`REI_REASONING_EFFORT_${m}`] !== undefined);
-        if (reasoningAlreadySet) {
-            for (const m of REASON_MODES) {
-                const v = process.env[`REI_REASONING_EFFORT_${m}`];
-                if (v !== undefined) envVars[`REI_REASONING_EFFORT_${m}`] = v;
-            }
-        } else {
-            const profile = await select({
-                message: 'Reasoning effort (thinking) per mode:',
-                options: [
-                    { value: 'balanced', label: 'Balanced — ask/planning fast (none), agent reasons (medium)' },
-                    { value: 'minimal',  label: 'Minimal — none everywhere (fastest, least deliberate)' },
-                    { value: 'full',     label: 'Full — let the model decide (thinks in all modes)' },
-                ],
-                initialValue: last.reasoningProfile ?? 'balanced',
-            });
-            if (isCancel(profile)) { cancel('Cancelled'); process.exit(0); }
-            // 'full' = leave unset so the request omits the field (model's own default).
-            const effort = profile === 'balanced'
-                ? { ASK: 'none', PLANNING: 'none', AGENT: 'medium' }
-                : profile === 'minimal'
-                    ? { ASK: 'none', PLANNING: 'none', AGENT: 'none' }
-                    : null;
-            if (effort) for (const [m, v] of Object.entries(effort)) envVars[`REI_REASONING_EFFORT_${m}`] = v;
-            Object.assign(config, { reasoningProfile: profile });
-        }
+        const local = await configureLocalRuntime(last);
+        Object.assign(envVars, local.envVars);
+        Object.assign(config, local.config);
     }
 
     // ── Step 5b: agent behavior & telemetry (all providers) ────────────────
@@ -853,60 +1001,8 @@ async function main() {
     await ensureReiConfig(projectPath, selectedModels);
 
     // ── Step 7: save + launch ──────────────────────────────────────────────
-    saveLast(config);
-
-    // Persist environment variables to the project's .env file
-    try {
-        const envFilePath = path.join(projectPath, '.env');
-        let envContent = '';
-        if (fs.existsSync(envFilePath)) {
-            envContent = fs.readFileSync(envFilePath, 'utf8');
-        } else {
-            // If .env doesn't exist, load the fully-commented .env.example as a base template
-            const exampleEnvPath = path.join(ROOT, '.env.example');
-            if (fs.existsSync(exampleEnvPath)) {
-                envContent = fs.readFileSync(exampleEnvPath, 'utf8');
-            }
-        }
-
-        envContent = applyEnvVars(envContent, envVars);
-        fs.writeFileSync(envFilePath, envContent.trim() + '\n', 'utf8');
-        console.log(`📝 Persisted complete configuration template to: ${envFilePath}`);
-    } catch (err) {
-        console.error('⚠️ Could not save configuration to .env:', err.message);
-    }
-
-    // Show Ollama env summary so the user knows what's active before launch
-    if (usesOllama) {
-        note(buildOllamaSummary(envVars), 'Ollama environment');
-    }
-
-    const isServer    = launchMode === 'server';
-    const modeLabel   = isServer ? 'server' : 'cli';
-    const providerLabel = envVars.AGENT_MODEL_PROVIDER
-        ? `${envVars.MODEL_PROVIDER} (ask/plan) + ${envVars.AGENT_MODEL_PROVIDER} (agent)`
-        : envVars.MODEL_PROVIDER;
-
-    console.log(`\nLaunching REI [${modeLabel}] [${providerLabel}] → ${project}\n`);
-
-    const projectArg = projectPath.includes(' ') ? `"${projectPath}"` : projectPath;
-    // Launch the COMPILED build (dist), not tsx/src: faster startup (no per-launch
-    // TypeScript transpilation) and consistent with the plain `rei` command. Requires
-    // `npm run build` (the installer does this). Devs editing source can switch back to
-    // `npm run dev -- ...` / `npm run server:dev`.
-    const cmd = isServer
-        ? 'node dist/server.js'
-        : `node dist/main.js --workspace ${projectArg} chat`;
-
-    const child = spawn(cmd, {
-        cwd: ROOT,
-        env: { ...process.env, ...envVars },
-        stdio: 'inherit',
-        shell: true,
-    });
-
-    child.on('error', err => { console.error(`Failed to launch REI: ${err.message}`); process.exit(1); });
-    child.on('close', code => { if (code !== 0) console.log(`REI exited with code ${code}`); });
+    persistConfiguration(projectPath, envVars, config);
+    launchRei({ launchMode, project, projectPath, envVars, usesOllama });
 }
 
 async function start() {
