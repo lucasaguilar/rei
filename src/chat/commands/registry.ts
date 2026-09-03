@@ -11,6 +11,7 @@ import { roleCommands } from "./role-commands.js";
 import { mcpCommands } from "./mcp-commands.js";
 import { thinkCommands } from "./think-commands.js";
 import { sddCommands } from "./sdd-commands.js";
+import { activeCommands } from "./active-commands.js";
 
 /**
  * The command registry. Commands are migrated out of menu-command-processor's big if/else into
@@ -31,6 +32,7 @@ const COMMAND_HANDLERS = [
   mcpCommands,
   thinkCommands,
   sddCommands,
+  activeCommands,
 ];
 
 /**

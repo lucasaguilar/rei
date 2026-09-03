@@ -68,6 +68,25 @@ export function setActivePlan(workspacePath: string, name: string): void {
   update(workspacePath, { plan: name });
 }
 
+/**
+ * Clears one or both pointers. Finishing a plan does NOT clear it automatically — re-running a stage
+ * is normal — but leaving it set forever is how the plan from a FINISHED feature ends up executing
+ * against the next one. This is the explicit way out.
+ */
+export function clearActive(workspacePath: string, what: "spec" | "plan" | "both"): void {
+  const current = getActive(workspacePath);
+  const next: ActiveArtifacts = {
+    spec: what === "plan" ? current.spec : undefined,
+    plan: what === "spec" ? current.plan : undefined,
+  };
+  try {
+    fs.mkdirSync(path.dirname(activePath(workspacePath)), { recursive: true });
+    fs.writeFileSync(activePath(workspacePath), JSON.stringify(next, null, 2) + "\n", "utf8");
+  } catch {
+    /* best-effort */
+  }
+}
+
 /** Absolute path of the active plan's file, or null when none is set or the file is gone. */
 export function activePlanPath(workspacePath: string): string | null {
   const { plan } = getActive(workspacePath);

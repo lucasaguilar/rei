@@ -65,6 +65,7 @@ export const COMMANDS: Array<{
   { command: "/loadplan <name>", description: "load a plan from disk and update active checklist" },
   { command: "/spec <task>", description: "SDD step 1 — write the spec for a task (forces the write-spec recipe)" },
   { command: "/decompose", description: "SDD step 2 — turn the current spec into a traceable plan" },
+  { command: "/active [clear]", description: "show the active spec/plan, or unset them (/active clear [spec|plan])" },
   { command: "/savespec <name>", description: "save the write-spec spec to disk as .rei/specs/<name>.md" },
   { command: "/think [level]", description: "set the reasoning level for this session (none|minimal|low|medium|high|xhigh)" },
   { command: "/loadspec <name>", description: "load a spec from disk into the session for decomposition" },
