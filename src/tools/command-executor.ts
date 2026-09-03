@@ -404,6 +404,56 @@ interface PreparedCommand {
 }
 
 /**
+ * Shell features REI cannot run, and what to do instead.
+ *
+ * Commands are spawned with `shell: false` and each segment is allow-list checked — that is what the
+ * sandbox rests on, so these are not oversights to be fixed by adding a name to a list.
+ *
+ * They failed in two different ways, and the quieter one was worse:
+ *   - Control flow (`for`, `while`, `if`) hit "Command 'for' is not in the allow-list", which reads
+ *     as "add it to the list" and sends the model down a dead end. Loud but misleading.
+ *   - Command substitution `$(…)` / backticks passed through LITERALLY with exit 0. `curl -H
+ *     "Bearer $(cat token)"` sent the text `$(cat token)` as the token: no error, wrong result, and
+ *     the 401 that follows points nowhere near the cause.
+ *
+ * Both now return an explanation naming a real alternative — heredocs work (see extractHeredoc), so
+ * a loop can run inside a script.
+ */
+function unsupportedShellFeature(segment: string): string | null {
+  const firstWord = segment.trim().split(/\s+/)[0];
+  if (["for", "while", "until", "if", "case", "select", "function"].includes(firstWord)) {
+    return (
+      `ERROR: shell control flow ('${firstWord}') is not available — commands run without a shell.\n` +
+      `Instead: one command per call (chain with && or |), or 'find … -exec', or put the loop in a ` +
+      `script via a heredoc, e.g.  python3 - <<'PY' … PY`
+    );
+  }
+  // Only OUTSIDE single quotes: inside them it is literal text, the same rule env expansion follows.
+  if (hasUnquotedSubstitution(segment)) {
+    return (
+      `ERROR: command substitution ($(…) or backticks) is not available — commands run without a ` +
+      `shell, so it would be sent as literal text rather than executed.\n` +
+      `Instead: run the inner command first and use its output, or do both steps in one script via ` +
+      `a heredoc, e.g.  python3 - <<'PY' … PY`
+    );
+  }
+  return null;
+}
+
+/** True when `$(` or a backtick appears outside single quotes. */
+function hasUnquotedSubstitution(segment: string): boolean {
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < segment.length; i++) {
+    const ch = segment[i];
+    if (ch === "'" && !inDouble) inSingle = !inSingle;
+    else if (ch === '"' && !inSingle) inDouble = !inDouble;
+    else if (!inSingle && (ch === "`" || (ch === "$" && segment[i + 1] === "("))) return true;
+  }
+  return false;
+}
+
+/**
  * Validates a single command segment (keywords, allow-list, rm safety) and
  * resolves redirects + the rtk wrapper. Shared by the single-command and
  * pipeline execution paths.
@@ -417,6 +467,7 @@ function prepareCommand(
   if (DENIED_KEYWORDS.some((keyword) => segment.includes(keyword))) {
     return { ok: false, error: "Security Error: Command contains forbidden keywords or operators." };
   }
+
 
   const { args: cleanArgs, redir } = extractRedirects(segment);
   const [cmd, ...args] = cleanArgs;
@@ -771,6 +822,19 @@ async function executeCommandImpl(
   commandLine: string,
   workspacePath: string,
 ): Promise<CommandResult> {
+  // Unsupported shell features are rejected ONCE, over the whole line and before any splitting.
+  // Per-segment it produced three messages for one construct — `for …` explained properly, then
+  // `do` and `done` each blaming the allow-list — which buries the explanation in noise.
+  // Checked after the heredoc split below would be too late for control flow, and before it would
+  // scan the heredoc BODY, where `$(` and backticks are ordinary script text. So: check the command
+  // portion only.
+  const heredocForCheck = extractHeredoc(commandLine.trim());
+  const lineToCheck = heredocForCheck ? heredocForCheck.command : commandLine.trim();
+  const unsupported = unsupportedShellFeature(lineToCheck);
+  if (unsupported) {
+    return { success: false, exitCode: -1, stdout: "", stderr: unsupported };
+  }
+
   // A heredoc is resolved FIRST so its body is never split — the body is data, not commands. What
   // stays is a normal statement list, so `cd`, `&&` and pipes keep working around it.
   const heredoc = extractHeredoc(commandLine.trim());
