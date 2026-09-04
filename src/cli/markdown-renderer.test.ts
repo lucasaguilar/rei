@@ -64,4 +64,16 @@ describe("renderMarkdown — tables fit the terminal width", () => {
     expect(out).not.toContain("`c`"); // backticks consumed by the codespan renderer
     expect(out).toContain("c");
   });
+
+  it("restores colons escaped inside inline code by marked-terminal", () => {
+    // marked-terminal rewrites every ":" in a codespan to "*#COLON|*" so its emoji pass cannot
+    // eat ":word:", and undoes it in the transform its own table renderer applies. This renderer
+    // replaces that one, so without an explicit restore the placeholder reaches the screen.
+    const out = withColumns(100, () =>
+      renderMarkdown("| campo | valor |\n|---|---|\n| `arrayBuffer:` | `{buffer: x}` |\n"),
+    );
+    expect(out).not.toContain("COLON");
+    expect(out).toContain("arrayBuffer:");
+    expect(out).toContain("{buffer: x}");
+  });
 });

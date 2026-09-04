@@ -121,8 +121,15 @@ function renderTable(this: { parser: { parseInline(tokens: unknown): string } },
   rows: Array<Array<{ tokens: unknown }>>;
   align: Array<"left" | "center" | "right" | null>;
 }): string {
+  // marked-terminal escapes every ":" inside inline code (its emoji pass would otherwise turn
+  // ":word:" into a glyph) and undoes it in the transform chain its own table renderer applies.
+  // This renderer replaces that one, so the colons have to be restored here or the placeholder
+  // reaches the screen. REI sets emoji:false, so the escape protects nothing to begin with.
   const inline = (cell: { tokens: unknown }) =>
-    this.parser.parseInline(cell.tokens).replace(/\n/g, " ");
+    this.parser
+      .parseInline(cell.tokens)
+      .replace(/\n/g, " ")
+      .replace(/\*#COLON\|\*/g, ":");
   const header = token.header.map(inline);
   const rows = token.rows.map((r) => r.map(inline));
   const n = header.length;
