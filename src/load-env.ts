@@ -15,7 +15,7 @@ import * as fs from "fs";
 
 // 1. Base defaults from cwd/.env (the install's ~/.rei/.env under the wizard, or the
 //    workspace itself on a direct `rei` run from inside it).
-dotenv.config();
+dotenv.config({ quiet: true });
 
 // 2. Resolve the workspace: --workspace <path> arg (the wizard always passes it) → REI_WORKSPACE_PATH.
 const argv = process.argv;
@@ -28,6 +28,6 @@ if (wsDir) {
   const wsResolved = path.resolve(wsDir);
   const wsEnv = path.join(wsResolved, ".env");
   if (wsResolved !== process.cwd() && fs.existsSync(wsEnv)) {
-    dotenv.config({ path: wsEnv, override: true });
+    dotenv.config({ path: wsEnv, override: true, quiet: true });
   }
 }

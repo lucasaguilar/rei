@@ -156,7 +156,9 @@ export class McpRegistry {
       .map(([name, s]) => `${name} (${s.tools.length} tools)`)
       .join(", ");
 
-    console.log(
+    // stderr, not stdout: this is startup progress, and a one-shot run (`rei ask … > out.txt`) must
+    // capture only the answer.
+    console.error(
       `[MCP Registry] 🔌 Connected ${this.servers.size}/${toConnect.length} server(s)${summaries ? `: ${summaries}` : ""}`,
     );
   }
