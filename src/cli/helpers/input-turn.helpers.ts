@@ -172,9 +172,12 @@ export async function handleInputTurn(
     let lastStatus: TurnStatus | undefined;
     // buffer accumulates non-thinking content (text + status/raw agent yields)
     let buffer = "";
-    // Tracks raw feedback chunks (command output, tool results) that were already
-    // shown live via streamText — excluded from the final markdown render to avoid duplication.
-    let liveDisplayedFeedback = "";
+    // Accumulates ONLY what was not already shown live, which is what the final markdown render
+    // gets. Built by complement rather than by subtracting the live chunks afterwards: live and
+    // buffered chunks interleave, so a concatenation of the live ones is not a contiguous substring
+    // of `buffer` and the subtraction silently removed nothing — leaking command output (and its
+    // diff, whose leading -/+ markdown reads as bullet markers) into the rendered answer.
+    let renderBuffer = "";
     // total output chars including thinking (for tok/s metrics)
     let totalOutputChars = 0;
     // track whether any thinking or status content was shown live
@@ -235,7 +238,9 @@ export async function handleInputTurn(
           state.activeStatus = undefined;
         }
 
-        if (!isText && !isNowInside && !wasInside && cleanToken.trim()) {
+        const shownLive =
+          !isText && !isNowInside && !wasInside && Boolean(cleanToken.trim());
+        if (shownLive) {
           // status / agent raw response: show live — skip whitespace-only tokens
           if (!liveContentShown) {
             actions.stopSpinner();
@@ -243,8 +248,8 @@ export async function handleInputTurn(
             liveContentShown = true;
           }
           actions.streamText(cleanToken);
-          // Track what was shown live so we can exclude it from the final markdown render
-          liveDisplayedFeedback += cleanToken;
+        } else {
+          renderBuffer += cleanToken;
         }
         // \x11 text tokens: silently buffered, rendered as markdown after stream ends
       }
@@ -256,10 +261,7 @@ export async function handleInputTurn(
     // Also remove any feedback that was already shown live (command output, tool results)
     // to prevent it from appearing twice on screen.
     const edits = extractSREdits(buffer);
-    let cleanBuffer = buffer;
-    if (liveDisplayedFeedback) {
-      cleanBuffer = cleanBuffer.replace(liveDisplayedFeedback, "");
-    }
+    const cleanBuffer = renderBuffer;
     const finalContent = stripNativeToolSyntax(
       stripAnsiKeepingFences(cleanBuffer) // strip ANSI except inside ``` fences (colored diffs)
         .replace(/<think>[\s\S]*?<\/think>/gi, "") // safety strip
