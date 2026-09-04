@@ -40,10 +40,7 @@ import {
   cleanResponseForHistory,
 } from "./helpers/turn-message.helpers.js";
 import type { StreamTurnOptions } from "./models/agent.types.js";
-import {
-  executeAgentToolsAndCommands,
-  formatBatchPatchResult,
-} from "./helpers/action-executor.js";
+import { formatBatchPatchResult } from "./helpers/action-executor.js";
 import { type SkillMode } from "../skills/skill-loader.js";
 import { loadRole } from "../skills/role-loader.js";
 import {
@@ -300,40 +297,11 @@ export class Agent {
         return;
       }
 
-      // Interceptación de herramientas y comandos antes de finalizar el turno
-      const feedback = await executeAgentToolsAndCommands(
-        outcome.response,
-        this.workspacePath,
-        this.provider,
-        this.logger,
-        this.mcpRegistry,
-      );
+      // No XML interception here. Actions arrive as structured tool_calls; scanning the model's
+      // prose for <execute_command>/<call_tool> would run whatever a mention of the legacy syntax
+      // happened to look like — and no prompt emits it (formats/agent-format-tools.md forbids it).
 
-      if (feedback) {
-        const cleanExplanation = stripAllActionTags(
-          stripThinkingBlock(outcome.response),
-        );
-        session.messages.push({
-          role: "assistant",
-          content: cleanResponseForHistory(outcome.response + feedback),
-          turnId: this.currentTurnId,
-        });
-        options?.onStatus?.("producing_response");
-        if (cleanExplanation && !hasStreamedText)
-          yield `\x11${cleanExplanation}`;
-        yield feedback.trimStart();
-        const stageNumFb = extractStageNumberFromPrompt(userInput);
-        if (
-          stageNumFb !== null &&
-          isStageSuccessful(outcome.response + feedback)
-        ) {
-          const total = getTotalStagesInPlan(this.workspacePath);
-          yield buildStageCompletionMessage(stageNumFb, total, true);
-        }
-        return;
-      }
-
-      // Si no hay parches ni comandos, solo responde
+      // Si no hay parches, solo responde
       session.messages.push({
         role: "assistant",
         content: cleanResponseForHistory(outcome.response),
