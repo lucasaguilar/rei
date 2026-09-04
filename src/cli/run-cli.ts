@@ -1,8 +1,9 @@
 import * as fs from "fs";
 import * as path from "path";
 import { Agent } from "../core/agent.js";
+import type { SessionMode } from "../chat/types.js";
 import { createModelProvider } from "../providers/provider-factory.js";
-import { planningSkill } from "../skills/planning-skill.js";
+import { runOneShot } from "./run-oneshot.js";
 import { runChat } from "./run-chat.js";
 import { getVersion } from "./version.js";
 
@@ -21,7 +22,7 @@ export async function runCli(args: string[]): Promise<void> {
 
   if (!command) {
     console.error("Usage: rei [--workspace <path>] <command>");
-    console.error("Available commands: plan, chat");
+    console.error("Available commands: ask, plan, agent, chat");
     process.exit(1);
   }
 
@@ -48,16 +49,24 @@ export async function runCli(args: string[]): Promise<void> {
   }
 
   try {
-    if (command === "plan") {
+    // One-shot modes. They run the REAL turn pipeline (system prompt, repo context, tools, skills),
+    // unlike the old `plan`, which called provider.complete() directly and so measured the bare
+    // model rather than REI.
+    const ONE_SHOT: Record<string, SessionMode> = {
+      ask: "ask",
+      plan: "planning",
+      agent: "agent",
+    };
+    if (command in ONE_SHOT) {
       const task = rest.join(" ");
       if (!task) {
-        console.error(
-          'Usage: rei [--workspace <path>] plan "<task description>"',
-        );
+        console.error(`Usage: rei [--workspace <path>] ${command} "<prompt>"`);
         process.exit(1);
       }
-      const result = await planningSkill(agent, task);
-      console.log(result);
+      await runOneShot(agent, workspacePath, ONE_SHOT[command], task, {
+        metrics: parsed.metrics,
+        verbose: parsed.verbose,
+      });
       return;
     }
 
@@ -72,7 +81,7 @@ export async function runCli(args: string[]): Promise<void> {
     }
 
     console.error(`Unknown command: ${command}`);
-    console.error("Available commands: plan, chat");
+    console.error("Available commands: ask, plan, agent, chat");
     process.exit(1);
   } finally {
     await agent.disposeMcp();
@@ -85,6 +94,8 @@ function parseCliArgs(args: string[]): {
   commandArgs: string[];
   noAutoIndex: boolean;
   version: boolean;
+  metrics: boolean;
+  verbose: boolean;
   sessionName?: string;
   continueSession: boolean;
   forceSession: boolean;
@@ -93,6 +104,8 @@ function parseCliArgs(args: string[]): {
   let workspaceInput: string | undefined;
   let noAutoIndex = false;
   let version = false;
+  let metrics = false;
+  let verbose = false;
   let sessionName: string | undefined;
   let continueSession = false;
   let forceSession = false;
@@ -164,6 +177,18 @@ function parseCliArgs(args: string[]): {
       continue;
     }
 
+    // Metrics go to stderr so stdout stays pure content — that split is what makes a one-shot run
+    // scriptable for A/B comparison against another agent.
+    if (arg === "--metrics") {
+      metrics = true;
+      continue;
+    }
+
+    if (arg === "--verbose") {
+      verbose = true;
+      continue;
+    }
+
     positional.push(arg);
   }
 
@@ -173,6 +198,8 @@ function parseCliArgs(args: string[]): {
     commandArgs: positional.slice(1),
     noAutoIndex,
     version,
+    metrics,
+    verbose,
     sessionName,
     continueSession,
     forceSession,
