@@ -39,5 +39,6 @@ rei.config-backup-all.json
 opencode.json
 
 docs-previous/
+bench/
 
 .continue/
