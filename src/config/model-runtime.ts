@@ -133,6 +133,14 @@ export function subAgentsEnabled(): boolean {
   return process.env.REI_SUBAGENT_ENABLED === "true";
 }
 
+/** Whether `/runplan` executes each stage in an isolated sub-agent instead of the main session.
+ *  Default ON: a plan stage is already the self-contained unit delegation wants, and running the
+ *  whole plan in one session makes the last stage reason through every earlier stage's exploration.
+ *  Set REI_RUNPLAN_DELEGATE=false to fall back to single-session execution. */
+export function runplanDelegationEnabled(): boolean {
+  return process.env.REI_RUNPLAN_DELEGATE !== "false";
+}
+
 // Values the OpenAI-compatible `reasoning_effort` param accepts (LM Studio rejects others,
 // e.g. "on"/"off", with a 400). NOTE: a model may internally collapse these to on/off —
 // e.g. qwen3.6-35b-a3b maps "none"→off and low/medium/high→on (a harmless server WARN),

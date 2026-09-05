@@ -2,6 +2,7 @@ import type { CommandHandler, CommandResult } from "./command-handler.js";
 import type { SessionMode } from "../types.js";
 import { saveSession } from "../session-store.js";
 import { readActivePlan, setActivePlan, getActive } from "../active-artifacts.js";
+import { tryDelegateStages } from "./runplan-delegate.js";
 import {
   saveCurrentPlanContent,
   loadCurrentPlanContent,
@@ -18,10 +19,23 @@ import { buildFileMatcherRegex } from "../../language/language-capabilities.js";
  * `/runplan [stage <n>]` — switch to AGENT mode and execute the active plan (whole, or one stage)
  * via `autoExecute`. Extracted verbatim from menu-command-processor (Phase 1 — no behavior change).
  */
+/**
+ * A spec-driven plan ends with a stage whose product IS a report (see the micro-task-decomposition
+ * skill). The execute directive would fight it head-on — it forbids exactly the prose that stage
+ * exists to produce — so such a stage gets its own. At module scope because the delegation branch
+ * needs it too: a report stage is never delegated and runs through the normal turn.
+ */
+const REPORT_DIRECTIVE =
+  "\n\n⚙️ REPORT NOW — this stage produces a REPORT, not edits. Follow the skill named above " +
+  "and emit its report as your answer. Read files and run commands to gather evidence, but do " +
+  "NOT call edit_file / create_file: fixing findings here would make the report describe a " +
+  "moving target. Report what you find, including what fails.";
+
 export const runPlanCommand: CommandHandler = {
   match: (c) => c.startsWith("/runplan"),
 
-  run: ({ command: trimmed, session, workspacePath }): CommandResult => {
+  run: async (ctx): Promise<CommandResult> => {
+    const { command: trimmed, session, workspacePath } = ctx;
     // Filter optional placeholder: [stage <num>]
     const normTrimmed = trimmed.replace(/\s+\[stage\s+<num>\]$/i, "");
     const runPlanMatch = normTrimmed.match(/^\/runplan(?:\s+(?:stage)\s+(\d+))?$/i);
@@ -104,6 +118,16 @@ export const runPlanCommand: CommandHandler = {
     // in-memory plan). No progress checklist — the agent executes holistically.
     saveCurrentPlanContent(workspacePath, planContent);
 
+    // Each stage runs in an isolated sub-agent unless that is turned off or there is no provider
+    // to delegate to. Returns null when the plan should run the single-session way instead.
+    const delegated = await tryDelegateStages(ctx, {
+      planContent,
+      stageNum,
+      planHeader,
+      reportDirective: REPORT_DIRECTIVE,
+    });
+    if (delegated) return delegated;
+
     if (stageNum !== null) {
       const lines = planContent.split("\n");
 
@@ -165,20 +189,11 @@ export const runPlanCommand: CommandHandler = {
 
     // Forces EXECUTION on /runplan: the model otherwise reads "Execute Stage N" + a plan and
     // narrates/re-plans instead of calling edit_file. This directive snaps it into acting.
-    const EXECUTE_DIRECTIVE =
+    const EXECUTE_DIRECTIVE_LOCAL =
       "\n\n⚙️ EXECUTE NOW — this is EXECUTION, not planning. Apply the change by emitting " +
       "edit_file / create_file tool calls for the file(s) above. Do NOT write a plan, a spec, " +
       "or a prose description, and do NOT load planning skills — make the actual edits, then " +
       "verify with the project's verify command.";
-
-    // A spec-driven plan ends with a stage whose product IS a report (see the
-    // micro-task-decomposition skill). EXECUTE_DIRECTIVE would fight it head-on — it forbids exactly
-    // the prose that stage exists to produce — so such a stage gets its own directive.
-    const REPORT_DIRECTIVE =
-      "\n\n⚙️ REPORT NOW — this stage produces a REPORT, not edits. Follow the skill named above " +
-      "and emit its report as your answer. Read files and run commands to gather evidence, but do " +
-      "NOT call edit_file / create_file: fixing findings here would make the report describe a " +
-      "moving target. Report what you find, including what fails.";
 
     // Stages whose contract is to report rather than edit. Kept as an explicit list (not inferred
     // from an empty "Files to modify") because an action-only stage — "run npm install" — also has
@@ -187,7 +202,7 @@ export const runPlanCommand: CommandHandler = {
     const isReportStage = REPORT_ONLY_SKILLS.some((skill) =>
       new RegExp(`^\\s*Skill:.*\\b${skill}\\b`, "im").test(targetContent),
     );
-    const directive = isReportStage ? REPORT_DIRECTIVE : EXECUTE_DIRECTIVE;
+    const directive = isReportStage ? REPORT_DIRECTIVE : EXECUTE_DIRECTIVE_LOCAL;
 
     const newMode = "agent" as SessionMode;
 
