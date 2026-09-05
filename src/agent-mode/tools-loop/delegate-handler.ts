@@ -29,7 +29,7 @@ export async function handleDelegate(
 
   ctx.logger.logInfo(`[tools] delegate: "${task}"`, { files });
   const short = task.length > 80 ? `${task.slice(0, 79)}…` : task;
-  ctx.emitStatus(`🤖  [REI] Delegando a sub-agente: ${short}`);
+  ctx.emitStatus(`🤖  [REI] Delegating to sub-agent: ${short}`);
 
   const summary = await runSubAgent({
     task,
@@ -42,6 +42,6 @@ export async function handleDelegate(
     elicit: ctx.elicit,
   });
 
-  ctx.emitStatus(`   ↳ sub-agente terminó.`);
+  ctx.emitStatus(`   ↳ sub-agent finished.`);
   return `Sub-agent completed the delegated task. Its summary:\n${summary}`;
 }
