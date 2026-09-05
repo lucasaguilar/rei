@@ -93,6 +93,13 @@ const PROVIDER_ENV_PREFIX: Record<string, string> = {
   mtplx: "MTPLX",
 };
 
+/** Per-mode model override suffix, appended to the provider prefix. */
+const MODE_ENV_SUFFIX: Record<SessionMode, string> = {
+  ask: "_MODEL_ASK",
+  planning: "_MODEL_PLANNING",
+  agent: "_MODEL_AGENT",
+};
+
 /** Trims a value and treats "" / whitespace as unset (so empty env vars fall back). */
 function cleanEnvModel(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -100,16 +107,19 @@ function cleanEnvModel(value: string | undefined): string | undefined {
 }
 
 /**
- * Resolves the model name for a given session mode — uniformly across ALL providers:
- *   - ask / planning → `<PROVIDER>_MODEL`
- *   - agent          → `<PROVIDER>_MODEL_AGENT` (falls back to `<PROVIDER>_MODEL`)
+ * Resolves the model name for a given session mode — uniformly across ALL providers. Every mode
+ * has its own optional override, each falling back to the shared `<PROVIDER>_MODEL`:
+ *   - ask      → `<PROVIDER>_MODEL_ASK`
+ *   - planning → `<PROVIDER>_MODEL_PLANNING`
+ *   - agent    → `<PROVIDER>_MODEL_AGENT`
  *
- * Agent mode may target a dedicated provider via AGENT_MODEL_PROVIDER; ask/planning
- * always use MODEL_PROVIDER. Returns undefined for unknown providers, so the provider
- * falls back to its own constructor default.
+ * Modes want different things: ask is interactive and wants a fast model, planning wants the
+ * strongest reasoner, agent wants a reliable tool-caller. Setting none of the overrides keeps the
+ * single `<PROVIDER>_MODEL` for everything, so existing configs behave exactly as before.
  *
- * Note: OLLAMA_MODEL_ASK / OLLAMA_MODEL_PLANNING are deprecated (Ollama used to be the
- * only provider with per-mode overrides) — ask/planning now use OLLAMA_MODEL like the rest.
+ * Agent mode may target a dedicated provider via AGENT_MODEL_PROVIDER; ask/planning always use
+ * MODEL_PROVIDER. Returns undefined for unknown providers, so the provider falls back to its own
+ * constructor default.
  */
 export function resolveModelForMode(mode: SessionMode): string | undefined {
   const primaryProvider = (process.env.MODEL_PROVIDER ?? "llmstudio")
@@ -129,8 +139,5 @@ export function resolveModelForMode(mode: SessionMode): string | undefined {
   // written by the config wizard when no dedicated agent model is chosen) falls back to
   // <PREFIX>_MODEL instead of sending an empty model name to the backend.
   const base = cleanEnvModel(process.env[`${prefix}_MODEL`]);
-  if (mode === "agent") {
-    return cleanEnvModel(process.env[`${prefix}_MODEL_AGENT`]) ?? base;
-  }
-  return base;
+  return cleanEnvModel(process.env[`${prefix}${MODE_ENV_SUFFIX[mode]}`]) ?? base;
 }

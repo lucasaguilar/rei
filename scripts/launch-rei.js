@@ -729,32 +729,51 @@ async function configureSingleProvider(last) {
     // Explicitly clear AGENT_MODEL_PROVIDER to prevent .env bleed-through in single provider mode
     envVars.AGENT_MODEL_PROVIDER = '';
 
-    // Uniform across providers: <PREFIX>_MODEL (set above) covers ask + planning AND
-    // agent (agent falls back to it). Optionally pick a different/heavier agent model
-    // on the same provider — written to <PREFIX>_MODEL_AGENT.
+    // <PREFIX>_MODEL (set above) is the fallback for every mode. Optionally give each mode its own
+    // model on the same provider — the modes want different things: ask is interactive and wants a
+    // fast model, planning wants the strongest reasoner, agent wants a reliable tool-caller.
     const perMode = await confirm({
-        message: 'Use a different model for agent mode (vs ask/planning)?',
+        message: 'Pick a different model per mode (ask / planning / agent)?',
         initialValue: last.singlePerMode ?? false,
     });
     if (isCancel(perMode)) { cancel('Cancelled'); process.exit(0); }
 
     if (perMode) {
-        note('ask + planning use the model selected above.\nagent will use this second model.', 'Per-mode models');
+        note(
+            'ask      — interactive, favours a fast model\n' +
+            'planning — favours the strongest reasoner\n' +
+            'agent    — favours a reliable tool-caller\n\n' +
+            'Keep the model selected above for any mode you do not want to change.',
+            'Per-mode models',
+        );
         // Same provider → endpoint already configured; reuse the live list (no re-probe).
-        const agentModel = await pickModel(provider, 'Model for agent:', last.singleAgentModel ?? model, liveModels);
-        envVars[`${prefix}_MODEL_AGENT`] = agentModel;
-        selectedModels.push({ provider, model: agentModel });
-        Object.assign(config, { singlePerMode: true, singleAgentModel: agentModel });
+        const perModeModels = {};
+        for (const mode of MODES) {
+            perModeModels[mode] = await pickModel(
+                provider,
+                `Model for ${mode}:`,
+                last.singleModeModels?.[mode] ?? model,
+                liveModels,
+            );
+            envVars[`${prefix}${MODE_SUFFIX[mode]}`] = perModeModels[mode];
+            selectedModels.push({ provider, model: perModeModels[mode] });
+        }
+        Object.assign(config, { singlePerMode: true, singleModeModels: perModeModels });
     } else {
-        // No dedicated agent model: write the SAME model (never an empty string — an
-        // empty <PREFIX>_MODEL_AGENT would be sent as a blank model name → 400). This
-        // also overwrites any stale value already in the .env.
-        envVars[`${prefix}_MODEL_AGENT`] = model;
-        Object.assign(config, { singlePerMode: false });
+        // No per-mode split: write the SAME model to every suffix (never an empty string — an empty
+        // <PREFIX>_MODEL_<MODE> would be sent as a blank model name → 400). This also overwrites
+        // stale values already in the .env, which is how a mode silently kept an old model.
+        for (const mode of MODES) envVars[`${prefix}${MODE_SUFFIX[mode]}`] = model;
+        Object.assign(config, { singlePerMode: false, singleModeModels: undefined });
     }
 
     return { envVars, config, selectedModels };
 }
+
+/** The session modes, and the env suffix each one's model override uses. Mirrors
+ *  MODE_ENV_SUFFIX in src/providers/provider-factory.ts — keep the two in step. */
+const MODES = ['ask', 'planning', 'agent'];
+const MODE_SUFFIX = { ask: '_MODEL_ASK', planning: '_MODEL_PLANNING', agent: '_MODEL_AGENT' };
 
 /**
  * Model selection, multi-provider branch: one provider for ask + planning, another for agent — the
@@ -770,8 +789,14 @@ async function configureMultiProvider(last) {
     note('Step 1 of 2: provider for ask and planning modes.', 'Multi-provider setup');
     const askProvider = await pickProvider('Provider (ask + planning):', last.askProvider);
     const { models: askLive } = await prepareProvider(askProvider, envVars);
-    const askModel = await pickModel(askProvider, 'Model (ask + planning):', last.askProvider === askProvider ? last.askModel : undefined, askLive);
+    const askModel = await pickModel(askProvider, 'Model (ask):', last.askProvider === askProvider ? last.askModel : undefined, askLive);
     selectedModels.push({ provider: askProvider, model: askModel });
+
+    // ask and planning share a provider here, but not necessarily a model: ask is interactive and
+    // favours a fast model, planning favours the strongest reasoner. Default to the ask model so
+    // pressing through leaves them identical.
+    const planningModel = await pickModel(askProvider, 'Model (planning):', last.planningModel ?? askModel, askLive);
+    if (planningModel !== askModel) selectedModels.push({ provider: askProvider, model: planningModel });
 
     note('Step 2 of 2: provider for agent mode.', 'Multi-provider setup');
     const agentProvider = await pickProvider('Provider (agent):', last.agentProvider);
@@ -780,15 +805,17 @@ async function configureMultiProvider(last) {
     const agentModel = await pickModel(agentProvider, 'Model (agent):', last.agentProvider === agentProvider ? last.agentModel : undefined, agentLive);
     selectedModels.push({ provider: agentProvider, model: agentModel });
 
-    Object.assign(config, { askProvider, askModel, agentProvider, agentModel });
+    Object.assign(config, { askProvider, askModel, planningModel, agentProvider, agentModel });
     envVars.MODEL_PROVIDER = askProvider;
 
     const askPrefix = getEnvPrefix(askProvider);
     const agentPrefix = getEnvPrefix(agentProvider);
 
-    // ask/planning → <askPrefix>_MODEL; agent → <agentPrefix>_MODEL_AGENT. Uniform
-    // across providers, so ask/planning never inherit the agent model.
+    // Each mode gets its own override so none can inherit another's model. <askPrefix>_MODEL stays
+    // the shared fallback for anything that reads it directly.
     envVars[`${askPrefix}_MODEL`]              = askModel;
+    envVars[`${askPrefix}_MODEL_ASK`]          = askModel;
+    envVars[`${askPrefix}_MODEL_PLANNING`]     = planningModel;
     envVars.AGENT_MODEL_PROVIDER               = agentProvider;
     envVars[`${agentPrefix}_MODEL_AGENT`]      = agentModel;
 
