@@ -1,4 +1,8 @@
 import type { AgentLogger } from "../../core/logger.js";
+import {
+  isSensitiveFile,
+  sensitiveReadsAllowed,
+} from "../constants/context-resolution.constants.js";
 import { buildFileContextMessage } from "../helpers/patch-helpers.js";
 
 /** Dependencies the read_files handler needs from the loop's virtual-file state. */
@@ -41,6 +45,17 @@ export async function handleReadFiles(
   const parts: string[] = [];
   for (const raw of paths) {
     const f = toRel(raw); // normalize absolute in-workspace paths to the virtual-tree key
+
+    // Credentials are not context. Refusing NAMES the file and says how to allow it, so the model
+    // can move on (and the user can opt in) instead of retrying the same read.
+    if (isSensitiveFile(f) && !sensitiveReadsAllowed()) {
+      logger.logInfo(`[tools] read_files: refused sensitive file ${f}`);
+      parts.push(
+        `--- File: ${f} ---\n(refused: this file holds credentials, so REI does not serve it to ` +
+          `the model. Set REI_ALLOW_SENSITIVE_READS=true to override for this session.)`,
+      );
+      continue;
+    }
     const cur = await currentContent(f); // pending virtual edit if any, else disk
     if (cur === "") {
       parts.push((await buildFileContextMessage(workspacePath, [f])).trimStart());
