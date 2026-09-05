@@ -111,6 +111,7 @@ export async function handleInputCommand(
         actions.draw();
       },
       onLiveStatus,
+      elicit: ctx.elicit,
     },
   );
 

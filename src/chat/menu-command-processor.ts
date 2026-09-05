@@ -3,6 +3,7 @@ import type { ModelProvider } from "../providers/model-provider.js";
 import type { LiveStatusEvent } from "./commands/command-handler.js";
 import type { McpRegistry } from "../tools/mcp/mcp-registry.js";
 import { dispatchCommand } from "./commands/registry.js";
+import type { ElicitFn } from "./elicitation.js";
 
 export interface CommandResult {
   success: boolean;
@@ -16,6 +17,7 @@ export interface CommandResult {
 export interface MenuCommandOptions {
   /** Streams live progress to the transcript (for slow commands like /ask-document). */
   onStatus?: (message: string) => void;
+  elicit?: ElicitFn;
   /** Optional live status callback for long-running operations that need in-place progress (e.g. /index). */
   onLiveStatus?: (event: LiveStatusEvent) => void;
   /** The active session's MCP registry, so `/mcp` can toggle servers live. */
@@ -41,6 +43,7 @@ export async function processMenuCommand(
     mcpRegistry: options?.mcpRegistry,
     onStatus: options?.onStatus,
     onLiveStatus: options?.onLiveStatus,
+    elicit: options?.elicit,
   });
   if (dispatched) return dispatched;
 

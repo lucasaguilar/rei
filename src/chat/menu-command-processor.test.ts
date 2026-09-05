@@ -13,6 +13,11 @@ import * as fsSync from "node:fs";
 import type { ChatSession } from "./types.js";
 import type { ModelProvider } from "../providers/model-provider.js";
 
+// The /runplan tests below cover plan ROUTING — which plan, which stage, which files — on the
+// single-session path. Stage delegation is on by default and would hand each stage to a sub-agent
+// that this stub provider cannot answer; it has its own tests in agent-mode/plan-delegation.test.ts.
+process.env.REI_RUNPLAN_DELEGATE = "false";
+
 describe("menu-command-processor session commands", () => {
   let tmpWorkspace: string;
   const provider = {} as ModelProvider;

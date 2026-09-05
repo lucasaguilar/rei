@@ -2,6 +2,7 @@ import type { CommandResult } from "../menu-command-processor.js";
 import type { ChatSession } from "../types.js";
 import type { ModelProvider } from "../../providers/model-provider.js";
 import type { McpRegistry } from "../../tools/mcp/mcp-registry.js";
+import type { ElicitFn } from "../elicitation.js";
 
 export type { CommandResult };
 
@@ -21,6 +22,9 @@ export interface CommandContext {
   mcpRegistry?: McpRegistry;
   /** Streams live progress to the transcript (for slow commands like /ask-document). */
   onStatus?: (message: string) => void;
+  /** Asks the user a question mid-command. Required for anything that runs tools on the user's
+   *  behalf (/runplan's sub-agents): without it the destructive-command gate never fires. */
+  elicit?: ElicitFn;
   /** Optional live status callback for long-running operations that need in-place progress (e.g. /index). */
   onLiveStatus?: (event: LiveStatusEvent) => void;
 }
