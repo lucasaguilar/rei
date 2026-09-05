@@ -77,8 +77,10 @@ tree only.)
 ### Done (2026-06-30, third pass) — run_command loop-guard
 First live PLANNING run looped: the model re-ran the SAME `find … | grep -i agent` 5+ times (identical
 reasoning "Let me find this file first") after already locating `src/core/agent.ts`, instead of
-calling `read_files` — a classic local-model repetition loop. The native loop deduped read_files but
-had NO guard on repeated `run_command`.
+calling `read_files` — a classic local-model repetition loop. At the time the native loop deduped
+read_files but had NO guard on repeated `run_command`. (NOTE: the read_files dedup was later removed —
+read_files now always serves the file, since a re-request usually means the content fell out of the
+model's context in a large repo; see tools-loop/read-files-handler.ts.)
 
 Fix:
 - `tools-loop/dispatch-tool-calls.ts` — `DispatchContext.commandHistory: Map<string, number>`; the
