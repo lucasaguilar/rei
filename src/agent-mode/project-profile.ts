@@ -26,9 +26,13 @@ function deriveOverview(workspacePath: string): string {
     lines.push(`- Verification command: \`${detection.verifyCommand}\`.`);
   }
 
+  // Only for JS/TS projects. A package.json says nothing about the module system of a codebase
+  // written in another language — a Roblox repo keeps one for its JS tooling, and reading it there
+  // told the model to "use `require`/`module.exports`" in a .luau codebase.
+  const JS_MODULE_TYPES = new Set(["typescript", "javascript", "angular"]);
   try {
     const pkgPath = path.join(workspacePath, "package.json");
-    if (fs.existsSync(pkgPath)) {
+    if (JS_MODULE_TYPES.has(detection.type) && fs.existsSync(pkgPath)) {
       const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8")) as {
         type?: string;
       };

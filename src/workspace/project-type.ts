@@ -11,6 +11,7 @@ export type ProjectType =
   | "rust"
   | "php"
   | "java"
+  | "luau"
   | "empty"
   | "unknown";
 
@@ -63,7 +64,25 @@ export function detectProjectType(workspacePath: string): ProjectDetection {
   let type: ProjectType = "unknown";
   let command = SKIP_VERIFY;
 
-  if (has("angular.json")) {
+  // Roblox/Luau BEFORE the package.json branch: these repos routinely carry a package.json for
+  // JS tooling, and matching it first told the model the project was JavaScript — so it was
+  // instructed to write CommonJS `require`/`module.exports` into a .luau codebase.
+  if (
+    has("default.project.json") ||
+    has(".luaurc") ||
+    has("selene.toml") ||
+    hasExt(".luau")
+  ) {
+    type = "luau";
+    // Only real checkers. `rojo build` parses every source file and fails on a syntax error, so it
+    // is a genuine oracle even without a Luau analyser installed. When none of them is configured
+    // we fall through to SKIP_VERIFY rather than invent a command: the JavaScript branch's
+    // `node --check index.js 2>/dev/null || echo ok` ALWAYS printed ok, which is worse than no
+    // verification at all — the agent got a green light no matter what it wrote.
+    if (has(".luaurc")) command = "luau-analyze src";
+    else if (has("selene.toml")) command = "selene .";
+    else if (has("default.project.json")) command = "rojo build --output /dev/null";
+  } else if (has("angular.json")) {
     type = "angular";
     // Use the Angular compiler (ngc), NOT bare tsc: tsc type-checks .ts files but
     // is blind to template errors (e.g. NG5002 in .html) — it would pass a broken

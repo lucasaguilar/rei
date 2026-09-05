@@ -93,6 +93,19 @@ const LANGUAGE_CAPABILITIES: readonly LanguageCapability[] = [
     supportsAstDependencyExtraction: true,
     supportsSemanticValidation: false,
   },
+  {
+    // Roblox projects. `.luau` is the primary extension; `.lua` appears in older repos and in
+    // Lua tooling generally. No AST support here — the point is that these files are RECOGNISED:
+    // without an entry the file matcher rejects every path, so a plan's "Files to modify" came
+    // back empty and the repo map indexed nothing.
+    id: "luau",
+    extensions: [".luau", ".lua"],
+    preferredSourceFile: true,
+    supportsAstIndexing: false,
+    supportsCallerDiscovery: false,
+    supportsAstDependencyExtraction: false,
+    supportsSemanticValidation: false,
+  },
 ];
 
 const DEFAULT_LANGUAGE_CAPABILITY: LanguageCapability = {
