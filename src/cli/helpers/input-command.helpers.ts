@@ -13,6 +13,16 @@ import { saveSession } from "../../chat/session-store.js";
 import * as fs from "fs";
 import { LiveStatusEvent } from "../../chat/commands/command-handler.js";
 
+/**
+ * The label shown above an auto-executed turn. Every autoExecute prompt opens with its own tag —
+ * `[SPEC]`, `[DECOMPOSE]`, `[RUNPLAN]`, `[RUNPLAN STAGE n]` — so it is read from the prompt rather
+ * than assumed to be runplan, which used to print "[RUNPLAN]" over a /spec or /decompose turn.
+ * Falls back to the command the user typed when a prompt carries no tag.
+ */
+export function autoExecuteLabel(prompt: string, typed: string): string {
+  return prompt.match(/^\[[^\]\n]+\]/)?.[0] ?? typed;
+}
+
 export async function handleInputCommand(
   trimmed: string,
   ctx: InputHandlerContext,
@@ -145,11 +155,9 @@ export async function handleInputCommand(
     // so patch diffs and live output are shown correctly.
     if (result.autoExecute) {
       const { prompt } = result.autoExecute;
-      const stageMatch = prompt.match(/\[RUNPLAN STAGE (\d+)\]/i);
-      const displayText = stageMatch
-        ? `[RUNPLAN STAGE ${stageMatch[1]}]`
-        : "[RUNPLAN]";
-      await handleInputTurn(prompt, ctx, { displayText });
+      await handleInputTurn(prompt, ctx, {
+        displayText: autoExecuteLabel(prompt, trimmed),
+      });
     }
     return true;
   }
