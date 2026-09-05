@@ -85,6 +85,8 @@ export async function runSubAgent(params: SubAgentParams): Promise<string> {
   // Swap the ACTIVE per-model tuning to the worker model for the duration of the sub-run (so its
   // sampling / context window / thinking come from ITS rei.config.json entry, not the orchestrator's),
   // then restore. See docs/model-config-spec.md + sub-agent-spec.md.
+  /** Text since the last tool status — the final block is the worker's summary. */
+  let tail = "";
   const prevTuning = getActiveModelTuning();
   const providerKey = (process.env.AGENT_MODEL_PROVIDER ?? process.env.MODEL_PROVIDER ?? "")
     .toLowerCase()
@@ -104,10 +106,23 @@ export async function runSubAgent(params: SubAgentParams): Promise<string> {
       depth: 1, // sub-agent → tool-selection omits `delegate` (no nesting)
       elicit,
       onChunk: (event) => {
-        if (event.type === "status") emitStatus?.(event.content);
+        if (event.type === "status") {
+          emitStatus?.(event.content);
+          // A status means a tool ran, so whatever text preceded it was narration about work still
+          // to come ("I'll start by reading cart.ts…"), not the summary. Only the block written
+          // after the LAST tool call is.
+          tail = "";
+          return;
+        }
+        if (event.type === "text") tail += event.content;
       },
     });
-    const summary = (result.response ?? "").trim();
+    // `result.response` is the whole turn — narration included, plus REI's own "N file(s) created"
+    // footer appended after streaming. Feeding that forward matters: the summary becomes the next
+    // stage's only view of this one (see plan-delegation's `Depends on:` handling), so narration
+    // here compounds down the plan. Fall back to the full response only when nothing streamed
+    // (a non-streaming provider), where the tail would be empty rather than merely narration-free.
+    const summary = (tail.trim() || (result.response ?? "").trim()).trim();
     return summary || "(sub-agent finished but produced no summary)";
   } finally {
     setActiveModelTuning(prevTuning); // restore the orchestrator's tuning
