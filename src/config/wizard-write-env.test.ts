@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, chmodSync, existsSync } from "fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, chmodSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 // Importing the wizard is safe: it only auto-runs when executed directly (guard at the bottom).
@@ -25,17 +25,20 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const readEnv = () => readFileSync(join(ws, ".env"), "utf8");
+// The wizard writes to the canonical <ws>/.rei/.env.
+const envPath = () => join(ws, ".rei", ".env");
+const readEnv = () => readFileSync(envPath(), "utf8");
 
 describe("writeProjectEnv", () => {
-  it("creates .env in the selected workspace and returns its path", () => {
+  it("creates .env inside the workspace's .rei/ and returns its path", () => {
     const out = writeProjectEnv(ws, { MODEL_PROVIDER: "llmstudio" });
-    expect(out).toBe(join(ws, ".env"));
+    expect(out).toBe(envPath());
     expect(readEnv()).toMatch(/^MODEL_PROVIDER=llmstudio$/m);
   });
 
   it("updates an existing key in place instead of appending a duplicate", () => {
-    writeFileSync(join(ws, ".env"), "MODEL_PROVIDER=ollama\nMY_OWN_VAR=keepme\n");
+    mkdirSync(join(ws, ".rei"), { recursive: true });
+    writeFileSync(envPath(), "MODEL_PROVIDER=ollama\nMY_OWN_VAR=keepme\n");
     writeProjectEnv(ws, { MODEL_PROVIDER: "mtplx" });
     const env = readEnv();
     expect(env).toMatch(/^MODEL_PROVIDER=mtplx$/m);
@@ -43,7 +46,8 @@ describe("writeProjectEnv", () => {
   });
 
   it("preserves variables the user added by hand", () => {
-    writeFileSync(join(ws, ".env"), "MY_SECRET=abc123\nGITHUB_TOKEN=ghp_xyz\n");
+    mkdirSync(join(ws, ".rei"), { recursive: true });
+    writeFileSync(envPath(), "MY_SECRET=abc123\nGITHUB_TOKEN=ghp_xyz\n");
     writeProjectEnv(ws, { MODEL_PROVIDER: "llmstudio" });
     const env = readEnv();
     expect(env).toMatch(/^MY_SECRET=abc123$/m);
@@ -67,6 +71,6 @@ describe("writeProjectEnv", () => {
     expect(() => { out = writeProjectEnv(ws, { MODEL_PROVIDER: "llmstudio" }); }).not.toThrow();
     expect(out).toBeNull();
     expect(console.error).toHaveBeenCalled();
-    expect(existsSync(join(ws, ".env"))).toBe(false);
+    expect(existsSync(envPath())).toBe(false);
   });
 });

@@ -835,16 +835,25 @@ async function configureMultiProvider(last) {
  */
 export function writeProjectEnv(projectPath, envVars) {
     try {
-        const envFilePath = path.join(projectPath, '.env');
+        // Canonical location: <ws>/.rei/.env — grouped with REI's other per-project state and
+        // covered by the `.rei/` line projects already gitignore.
+        const reiDir = path.join(projectPath, '.rei');
+        const envFilePath = path.join(reiDir, '.env');
+        const legacyEnvPath = path.join(projectPath, '.env');
         let envContent = '';
         if (fs.existsSync(envFilePath)) {
             envContent = fs.readFileSync(envFilePath, 'utf8');
+        } else if (fs.existsSync(legacyEnvPath)) {
+            // Migrating: seed from the old file so nothing configured by hand is lost. The old one
+            // is left in place — deleting a file holding API keys is the user's call, not ours.
+            envContent = fs.readFileSync(legacyEnvPath, 'utf8');
         } else {
             const exampleEnvPath = path.join(ROOT, '.env.example');
             if (fs.existsSync(exampleEnvPath)) {
                 envContent = fs.readFileSync(exampleEnvPath, 'utf8');
             }
         }
+        fs.mkdirSync(reiDir, { recursive: true });
         envContent = applyEnvVars(envContent, envVars);
         fs.writeFileSync(envFilePath, envContent.trim() + '\n', 'utf8');
         console.log(`📝 Persisted complete configuration template to: ${envFilePath}`);
