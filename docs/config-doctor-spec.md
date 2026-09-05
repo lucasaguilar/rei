@@ -97,6 +97,7 @@ REI_PRESERVE_THINKING=false                       # re-fed reasoning loops local
 REI_ON_DEMAND_FILE_CONTEXT_ASK=1
 REI_ON_DEMAND_FILE_CONTEXT_PLANNING=1
 REI_ON_DEMAND_FILE_CONTEXT_AGENT=1               # local: on-demand in ALL modes keeps the small window from overflowing (AGENT=0 = proactive full context, only safe on big windows)
+# REI_ENABLE_RAG unset                           # RAG semantic index is OFF by default — on-demand modes don't use it; set =1 only for proactive agent (AGENT=0) wanting semantic file selection
 # REI_VISION_MODEL=qwen/qwen3-vl-4b              # optional: image / PDF OCR
 ```
 
@@ -169,6 +170,7 @@ Full env audit lives in `docs/config-reference.md` (companion). The checks the a
 | 🟡 | `REI_PRESERVE_THINKING` | `=== "true"` | re-fed reasoning echoes → repetition loops |
 | 🟡 | `REI_EDIT_MODE` | `=== "sandbox"` | per-edit reject loop saturates weak local models; `direct` optimal |
 | 🟡 | `REI_ON_DEMAND_FILE_CONTEXT_ASK/_PLANNING` | `=0` on local | dumps whole files → small window overflow. (NOTE: `AGENT=1` is NOT flagged — on local it's the recommended way to keep the window small; `AGENT=0` = proactive full context, only for big windows.) |
+| 🟢 | `REI_ENABLE_RAG` / `REI_SKIP_RAG` | RAG is OFF by default | no action needed on local — on-demand modes don't use the semantic index, so a lighter repo entry is the default. `REI_SKIP_RAG=true` is now redundant (harmless). Only advise `REI_ENABLE_RAG=1` when `REI_ON_DEMAND_FILE_CONTEXT_AGENT=0` (proactive agent) AND the user wants semantic file selection. Do NOT flag its absence. |
 | 🟢 | reasoning_effort / `REI_MAX_TURNS` | extreme | fine tuning; later |
 
 ## 8. Implementation phases

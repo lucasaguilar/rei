@@ -34,10 +34,28 @@ Precedence: `REI_CONTEXT_WINDOW` > `<PREFIX>_CONTEXT_WINDOW` > runtime default (
 
 ## Routing & model
 
-`MODEL_PROVIDER` · `AGENT_MODEL_PROVIDER` · `<PREFIX>_MODEL` (ask+planning) ·
-`<PREFIX>_MODEL_AGENT` (agent) · `<PREFIX>_BASE_URL` · `<PREFIX>_API_KEY` ·
+`MODEL_PROVIDER` · `AGENT_MODEL_PROVIDER` · `<PREFIX>_BASE_URL` · `<PREFIX>_API_KEY` ·
 `<PREFIX>_REQUEST_TIMEOUT_MS`.
-(`OLLAMA_MODEL_ASK/_PLANNING` deprecated → use `OLLAMA_MODEL`.)
+
+**One model per mode.** Each mode has an optional override; all fall back to `<PREFIX>_MODEL`,
+so setting none keeps a single model for everything:
+
+| Var | Mode | Typically |
+|---|---|---|
+| `<PREFIX>_MODEL` | fallback for all three | — |
+| `<PREFIX>_MODEL_ASK` | ask | interactive — favours a fast model |
+| `<PREFIX>_MODEL_PLANNING` | planning | favours the strongest reasoner |
+| `<PREFIX>_MODEL_AGENT` | agent | favours a reliable tool-caller |
+
+An empty or whitespace value counts as unset and falls back, so the wizard can write every key
+without a blank model name ever reaching the backend.
+
+`AGENT_MODEL_PROVIDER` additionally lets agent mode run on a *different provider*; ask and planning
+always use `MODEL_PROVIDER`, so their overrides are read off that provider's prefix.
+
+(`OLLAMA_MODEL_ASK` / `OLLAMA_MODEL_PLANNING` were deprecated while Ollama was the only provider
+with per-mode overrides. Every provider has them now, so they are live again — an existing `.env`
+carrying them will start taking effect.)
 
 ## Agent behavior (agnostic)
 
@@ -57,6 +75,8 @@ Precedence: `REI_CONTEXT_WINDOW` > `<PREFIX>_CONTEXT_WINDOW` > runtime default (
 | CLI `--force` | steal a session lock held by another/stale instance | — |
 | `REI_SUBAGENT_ENABLED` | expose the `delegate` tool (isolated-context sub-agents) — opt-in | `false` |
 | `REI_SUBAGENT_MODEL` | worker model for `delegate` sub-agents (e.g. a fast reliable executor like ornith) | same as agent model |
+| `REI_RUNPLAN_DELEGATE` | `/runplan` executes each stage in an isolated sub-agent (report stages excepted) | `true` |
+| `REI_ALLOW_SENSITIVE_READS` | let `read_files` serve credential files (.env, .pem, .key, .netrc…) | `false` |
 
 ## Execution / tools (agnostic)
 
@@ -79,6 +99,11 @@ Precedence: `REI_CONTEXT_WINDOW` > `<PREFIX>_CONTEXT_WINDOW` > runtime default (
 
 ## RAG / embeddings · doc · server · misc
 
+`REI_ENABLE_RAG` (opt-in — the semantic vector index is **OFF by default**: building it on repo
+entry is heavy (embeds every file + pulls `sharp`) and it's unused in on-demand file-context
+modes; set `=1` only for proactive agent that wants semantic file selection. Legacy
+`REI_SKIP_RAG` still forces it OFF and takes precedence). The flat repo map is generated
+regardless; a manual `/index` still builds it on demand. ·
 `REI_EMBEDDER_PROVIDER/_MODEL/_BASE_URL/_API_KEY` · `REI_TOOL_RAG` · `REI_DOC_VERIFY` ·
 `REI_WORKSPACE_PATH` · `ALLOWED_WORKSPACES` · `REI_SERVER_PORT` · `REI_TELEMETRY_DISABLED` ·
 `COMPACTOR_MODEL` · Laminar telemetry `LMNR_*`.
