@@ -74,12 +74,74 @@ describe("workspace env resolution", () => {
     expect(resolve(["REI_TEST_MODEL"]).REI_TEST_MODEL).toBe("from-project");
   });
 
-  it("keeps install values the project does not override (API keys live there)", () => {
-    writeCwd("REI_TEST_KEY=sk-install\nREI_TEST_MODEL=from-install\n");
+  it("takes credentials and endpoints from the install, and the model from the project", () => {
+    // The install describes the MACHINE — keys, where a backend listens, which backend exists.
+    writeCwd(
+      "REI_TEST_API_KEY=sk-install\nREI_TEST_BASE_URL=http://localhost:1234\n" +
+        "REI_TEST_MODEL=from-install\n",
+    );
     writeRei("REI_TEST_MODEL=from-project\n");
-    const env = resolve(["REI_TEST_KEY", "REI_TEST_MODEL"]);
-    expect(env.REI_TEST_KEY).toBe("sk-install");
+    const env = resolve(["REI_TEST_API_KEY", "REI_TEST_BASE_URL", "REI_TEST_MODEL"]);
+    expect(env.REI_TEST_API_KEY).toBe("sk-install");
+    expect(env.REI_TEST_BASE_URL).toBe("http://localhost:1234");
     expect(env.REI_TEST_MODEL).toBe("from-project");
+  });
+
+  it("does NOT inherit a model or its tuning from the install — the ghost-config case", () => {
+    // Opening REI in a folder that says nothing about a model must not quietly reuse another
+    // project's: the model, its sampling and its context window are per-project decisions.
+    writeCwd(
+      "REI_TEST_MODEL=ghost-model\nREI_TEST_TEMPERATURE=0.9\nREI_MAX_TURNS=29\n",
+    );
+    const env = resolve(["REI_TEST_MODEL", "REI_TEST_TEMPERATURE", "REI_MAX_TURNS"]);
+    expect(env.REI_TEST_MODEL).toBe("");
+    expect(env.REI_TEST_TEMPERATURE).toBe("");
+    expect(env.REI_MAX_TURNS).toBe("");
+  });
+
+  it("inherits which backend runs on this machine", () => {
+    writeCwd("MODEL_PROVIDER=llmstudio\nAGENT_MODEL_PROVIDER=ollama\n");
+    const env = resolve(["MODEL_PROVIDER", "AGENT_MODEL_PROVIDER"]);
+    expect(env.MODEL_PROVIDER).toBe("llmstudio");
+    expect(env.AGENT_MODEL_PROVIDER).toBe("ollama");
+  });
+
+  it("lets a real shell variable beat both files", () => {
+    writeCwd("REI_TEST_API_KEY=sk-from-file\n");
+    // Simulated by pre-setting it in the child's environment — set deliberately, for this run.
+    const probe = join(cwdDir, "probe-shell.mjs");
+    writeFileSync(
+      probe,
+      `import ${JSON.stringify(LOADER)};\nconsole.log(process.env.REI_TEST_API_KEY ?? "");\n`,
+    );
+    const out = execFileSync(process.execPath, [probe, "--workspace", ws], {
+      cwd: cwdDir,
+      encoding: "utf8",
+      env: { PATH: process.env.PATH ?? "", REI_TEST_API_KEY: "sk-from-shell" },
+    });
+    expect(out.trim()).toBe("sk-from-shell");
+  });
+
+  it("restores wholesale inheritance behind REI_INHERIT_ALL_ENV", () => {
+    writeCwd("REI_TEST_MODEL=ghost-model\n");
+    const probe = join(cwdDir, "probe-inherit.mjs");
+    writeFileSync(
+      probe,
+      `import ${JSON.stringify(LOADER)};\nconsole.log(process.env.REI_TEST_MODEL ?? "");\n`,
+    );
+    const out = execFileSync(process.execPath, [probe, "--workspace", ws], {
+      cwd: cwdDir,
+      encoding: "utf8",
+      env: { PATH: process.env.PATH ?? "", REI_INHERIT_ALL_ENV: "true" },
+    });
+    expect(out.trim()).toBe("ghost-model");
+  });
+
+  it("takes the whole install file when the project IS the cwd", () => {
+    // Running `rei` from inside the project, cwd/.env is that project's own legacy file — not an
+    // install layer — so filtering it would drop the project's own configuration.
+    writeLegacy("REI_TEST_MODEL=my-own-project-model\n");
+    expect(resolve(["REI_TEST_MODEL"], ws).REI_TEST_MODEL).toBe("my-own-project-model");
   });
 
   it("reads .rei/.env even when run from inside the project", () => {
