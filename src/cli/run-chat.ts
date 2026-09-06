@@ -174,6 +174,10 @@ export async function runChat(
       busy: state.busy,
       activeStatus: state.activeStatus,
       activeStatusText: state.activeStatusText,
+      statusStartedAt: state.statusStartedAt,
+      contextTokens: state.contextTokens,
+      contextWindow: state.contextWindow,
+      modelLabel: state.modelLabel,
       spinnerIndex: state.spinnerIndex,
       sessionMode: session.mode,
       inputBuffer: state.inputBuffer,
@@ -347,7 +351,10 @@ export async function runChat(
   // how full the assumed window already is from the resumed session / system prompt + the
   // function-calling tools array (built-in + MCP schemas), which isn't in the history.
   const startupGauge = renderStartupGauge(agent, session, workspacePath);
-  if (startupGauge) pushTranscript(startupGauge);
+  if (startupGauge.line) pushTranscript(startupGauge.line);
+  state.contextTokens = startupGauge.tokens;
+  state.contextWindow = startupGauge.window;
+  state.modelLabel = startupGauge.model;
 
   if (autoIndex && isRagEnabled() && !hasRagIndex(workspacePath)) {
     pushTranscript(

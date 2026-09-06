@@ -33,17 +33,39 @@ export const MODE_PROMPTS: Record<SessionMode, string> = {
   agent: "🧠 agent » ",
 };
 
+/** What each phase is called on the status line. Lowercase and short: it sits under a wall of tool
+ *  lines and should read as a state, not as an announcement. */
 export const THINKING_TEXT: Record<TurnStatus, string> = {
-  building_context: "Building context...",
-  fetching_external_knowledge: "Searching official docs...",
-  calling_model: "Calling model...",
-  producing_response: "Producing response...",
-  compacting_memory: "Compacting memory...",
-  indexing_repository: "Indexing repository (generating local embeddings)...",
-  checking_hardware: "Checking hardware resources...",
+  building_context: "reading the repo",
+  fetching_external_knowledge: "searching the docs",
+  calling_model: "thinking",
+  producing_response: "writing",
+  compacting_memory: "compacting memory",
+  indexing_repository: "indexing the repo",
+  checking_hardware: "checking hardware",
 };
 
-export const SPINNER_FRAMES = ["|", "/", "-", "\\"];
+/** Braille dots: smooth at the 100ms tick and one column wide, unlike the |/-\\ cycle it replaces,
+ *  which visibly jerked and changed the line's width on every frame. */
+export const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+/**
+ * The status line: a spinner, what REI is doing, and how long it has been doing it.
+ *
+ * The elapsed count is the point. A local model can think for thirty seconds with nothing on
+ * screen, and a frozen label is indistinguishable from a hung process — the seconds ticking up are
+ * what say "still working" rather than "stuck".
+ */
+export function formatStatusLine(
+  frame: string,
+  label: string,
+  elapsedMs: number,
+): string {
+  const secs = Math.floor(elapsedMs / 1000);
+  const elapsed =
+    secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2, "0")}s`;
+  return `\x1b[36m${frame}\x1b[0m \x1b[2m${label}\x1b[0m \x1b[2m·\x1b[0m \x1b[2m${elapsed}\x1b[0m`;
+}
 export const SHORTCUT_HINT =
   "\x1b[90mShortcuts: Up/Down history | / commands | @ files | Tab complete | Esc clear/close | Ctrl+R search\x1b[0m";
 
@@ -82,6 +104,7 @@ export const COMMANDS: Array<{
   { command: "/decompose", description: "SDD step 2 — turn the current spec into a traceable plan" },
   { command: "/active [clear]", description: "show the active spec/plan, or unset them (/active clear [spec|plan])" },
   { command: "/trace", description: "SDD check — cross the active spec's criteria against the plan's Satisfies: lines, both ways" },
+  { command: "/verbose [on|off]", description: "show or hide full command output, diffs and the model's reasoning" },
   { command: "/savespec <name>", description: "save the write-spec spec to disk as .rei/specs/<name>.md" },
   { command: "/think [level]", description: "set the reasoning level for this session (none|minimal|low|medium|high|xhigh)" },
   { command: "/loadspec <name>", description: "load a spec from disk into the session for decomposition" },

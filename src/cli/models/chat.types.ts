@@ -36,6 +36,13 @@ export interface ChatRendererState {
   busy: boolean;
   activeStatus?: string; // TurnStatus
   activeStatusText?: string;
+  /** When the current phase began — the status line counts up from it. */
+  statusStartedAt?: number;
+  /** Last turn's prompt size and the window it was measured against — the sticky context bar reads
+   *  these. Stale by one turn on purpose: measuring live would re-estimate on every keystroke. */
+  contextTokens?: number;
+  contextWindow?: number;
+  modelLabel?: string;
   spinnerIndex: number;
   sessionMode: string; // SessionMode
   inputBuffer: string;
@@ -49,6 +56,13 @@ export interface ChatUIState {
   busy: boolean;
   activeStatus?: string; // TurnStatus
   activeStatusText?: string;
+  /** When the current phase began — the status line counts up from it. */
+  statusStartedAt?: number;
+  /** Last turn's prompt size and the window it was measured against — the sticky context bar reads
+   *  these. Stale by one turn on purpose: measuring live would re-estimate on every keystroke. */
+  contextTokens?: number;
+  contextWindow?: number;
+  modelLabel?: string;
   spinnerIndex: number;
 
   historySearchMode: boolean;

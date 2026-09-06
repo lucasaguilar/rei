@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import { setVerboseOutput } from "../config/output-verbosity.js";
 import * as path from "path";
 import { Agent } from "../core/agent.js";
 import type { SessionMode } from "../chat/types.js";
@@ -33,6 +34,10 @@ export async function runCli(args: string[]): Promise<void> {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
   }
+
+  // `--verbose` applies to the interactive session too, not just the one-shots: it is the same
+  // question either way — show the machinery, or only what it produced.
+  if (parsed.verbose) setVerboseOutput(true);
 
   const provider = createModelProvider();
   const agent = new Agent(provider, workspacePath);
