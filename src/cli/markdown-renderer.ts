@@ -83,6 +83,30 @@ export function formatContextGauge(
 }
 
 /**
+ * The same reading, compressed to one short line for the STICKY status bar.
+ *
+ * The full gauge is printed once per turn and scrolls away with everything else, so the number you
+ * want when deciding whether to `/clear` is never the one on screen. This version lives in the
+ * redrawn block above the prompt, where it stays: `12.4k/100k · 12% · llmstudio/ornith`.
+ *
+ * Returns null when no window is configured — a bar with no denominator says nothing.
+ */
+export function formatContextBar(
+  promptTokens: number,
+  ctxWindow: number,
+  modelLabel?: string,
+): string | null {
+  if (ctxWindow <= 0) return null;
+  const pct = Math.min(100, Math.round((promptTokens / ctxWindow) * 100));
+  // Colour carries the urgency so the line itself can stay short: dim until it matters.
+  const tone = pct > 85 ? "\x1b[31m" : pct > 60 ? "\x1b[33m" : "\x1b[2m";
+  const compact = (n: number): string =>
+    n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(n);
+  const model = modelLabel ? ` \x1b[2m·\x1b[0m \x1b[2m${modelLabel}\x1b[0m` : "";
+  return `${tone}${compact(promptTokens)}/${compact(ctxWindow)} · ${pct}%\x1b[0m${model}`;
+}
+
+/**
  * Styles heading text that arrives with its "#" prefix already included
  * by marked-terminal (showSectionPrefix: true by default).
  *   H1 → firstHeading()

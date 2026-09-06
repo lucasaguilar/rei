@@ -1,3 +1,4 @@
+import { formatContextBar } from "../markdown-renderer.js";
 import {
   ActivePalette,
   CommandEntry,
@@ -7,6 +8,7 @@ import {
 import {
   MODE_PROMPTS,
   SPINNER_FRAMES,
+  formatStatusLine,
   THINKING_TEXT,
   SHORTCUT_HINT,
 } from "../constants/chat.constants.js";
@@ -119,9 +121,13 @@ export class ChatRenderer {
           return `${head}${state.inputHistory[state.historySearchIndex]}`;
         })()
       : state.activeStatus || state.activeStatusText
-        ? `\x1b[1;36m[REI] ${SPINNER_FRAMES[state.spinnerIndex % SPINNER_FRAMES.length]} ${
-            state.activeStatusText ?? THINKING_TEXT[state.activeStatus as TurnStatus] ?? state.activeStatus
-          }\x1b[0m`
+        ? formatStatusLine(
+            SPINNER_FRAMES[state.spinnerIndex % SPINNER_FRAMES.length],
+            state.activeStatusText ??
+              THINKING_TEXT[state.activeStatus as TurnStatus] ??
+              String(state.activeStatus),
+            Date.now() - (state.statusStartedAt ?? Date.now()),
+          )
         : SHORTCUT_HINT;
 
     const uiLines: string[] = [];
@@ -202,6 +208,14 @@ export class ChatRenderer {
     // Active-document indicator: a dim 📄 line right above the prompt. It's part of uiLines (so the
     // tracked line count + clearUI stay correct) and sits ABOVE the input rows, leaving the cursor
     // math below untouched.
+    // Sticky context bar: the one reading you want when deciding whether to /clear, kept where it
+    // cannot scroll away. Part of uiLines so the tracked line count and clearUI stay correct.
+    const contextBar =
+      state.contextTokens !== undefined && state.contextWindow !== undefined
+        ? formatContextBar(state.contextTokens, state.contextWindow, state.modelLabel)
+        : null;
+    if (contextBar) uiLines.push(contextBar);
+
     if (state.activeDocument) {
       const docName = state.activeDocument.split("/").pop() ?? state.activeDocument;
       uiLines.push(`\x1b[2m📄 ${docName}\x1b[0m`);
