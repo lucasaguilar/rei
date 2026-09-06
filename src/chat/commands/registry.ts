@@ -13,6 +13,7 @@ import { thinkCommands } from "./think-commands.js";
 import { sddCommands } from "./sdd-commands.js";
 import { activeCommands } from "./active-commands.js";
 import { traceCommands } from "./trace-commands.js";
+import { verboseCommands } from "./verbose-commands.js";
 
 /**
  * The command registry. Commands are migrated out of menu-command-processor's big if/else into
@@ -35,6 +36,7 @@ const COMMAND_HANDLERS = [
   sddCommands,
   activeCommands,
   traceCommands,
+  verboseCommands,
 ];
 
 /**

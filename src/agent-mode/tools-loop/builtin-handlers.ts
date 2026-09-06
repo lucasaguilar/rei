@@ -1,4 +1,8 @@
 import * as fs from "node:fs";
+import {
+  FAILED_COMMAND_TAIL_LINES,
+  isVerboseOutput,
+} from "../../config/output-verbosity.js";
 import * as path from "node:path";
 import type { AgentLogger } from "../../core/logger.js";
 import type { ModelProvider } from "../../providers/model-provider.js";
@@ -201,7 +205,7 @@ export async function handleRunCommand(
       default: "no",
     });
     if (value !== "yes") {
-      ctx.emitStatus(`🛑  [REI] Comando destructivo cancelado por el usuario: ${cmd}`);
+      ctx.emitStatus(`🛑  [REI] Destructive command cancelled by the user: ${cmd}`);
       return (
         `The user DECLINED to run this command (it would ${danger}): ${cmd}\n` +
         `Do NOT run it again. Continue without it, or ask the user how to proceed.`
@@ -221,7 +225,7 @@ export async function handleRunCommand(
       default: "no",
     });
     if (value !== "yes") {
-      ctx.emitStatus(`🛑  [REI] Comando git cancelado por el usuario: ${cmd}`);
+      ctx.emitStatus(`🛑  [REI] Git command cancelled by the user: ${cmd}`);
       return (
         `The user DECLINED to run this git command (it would ${gitMutant}): ${cmd}\n` +
         `Do NOT run it again. Continue without it, or ask the user how to proceed.`
@@ -235,14 +239,33 @@ export async function handleRunCommand(
   const stdout = limitCommandOutput(cmdResult.stdout ?? "");
   const stderr = limitCommandOutput(cmdResult.stderr ?? "");
 
-  // Surface the output to the USER too (not just the model). Otherwise a script's result — e.g. a
-  // reconciliation report a script prints to stdout — stays invisible unless the model restates it,
-  // and if the model runs out of turns the user sees only file patches, never the answer. Show a
-  // trimmed tail so it's informative without flooding the transcript.
+  // Surface the outcome to the USER too (not just the model). A script's result — e.g. a
+  // reconciliation report printed to stdout — would otherwise stay invisible unless the model
+  // restates it, and if the model runs out of turns the user sees only file patches.
+  //
+  // Quiet mode shows the exit code and a one-line hint of size; the OUTPUT itself only when the
+  // command FAILED, because that is the case that has to be read. Twenty lines per command was the
+  // single biggest source of screen noise, and almost all of it was successful output nobody needs.
   const shown = (stdout || stderr).trim();
-  if (shown) {
-    const tail = shown.split("\n").slice(-20).join("\n");
-    ctx.emitStatus(`   ↳ exit ${cmdResult.exitCode}\n${tail}`);
+  const failed = cmdResult.exitCode !== 0;
+  if (shown || failed) {
+    const lines = shown ? shown.split("\n") : [];
+    if (isVerboseOutput()) {
+      ctx.emitStatus(`   ↳ exit ${cmdResult.exitCode}\n${lines.slice(-20).join("\n")}`);
+    } else if (failed) {
+      const tail = lines.slice(-FAILED_COMMAND_TAIL_LINES);
+      const elided = lines.length - tail.length;
+      ctx.emitStatus(
+        `   ↳ exit ${cmdResult.exitCode}` +
+          (elided > 0 ? `  (last ${tail.length} of ${lines.length} lines)` : "") +
+          (tail.length > 0 ? `\n${tail.join("\n")}` : ""),
+      );
+    } else {
+      ctx.emitStatus(
+        `   ↳ exit 0` +
+          (lines.length > 0 ? `  (${lines.length} line${lines.length === 1 ? "" : "s"} of output)` : ""),
+      );
+    }
   }
 
   return (
