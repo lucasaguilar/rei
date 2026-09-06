@@ -4,7 +4,9 @@ import { renderMarkdown } from "../markdown-renderer.js";
 import type { InputHandlerContext } from "../models/input-handler.types.js";
 import { saveSession } from "../../chat/session-store.js";
 import { extractSREdits } from "../../agent-mode/response-handler.js";
-import { formatCodeDiff, formatContextGauge } from "../markdown-renderer.js";
+import { formatContextGauge } from "../markdown-renderer.js";
+import { isVerboseOutput } from "../../config/output-verbosity.js";
+import { beginPhase, formatEdits, formatThinkingSummary, publishContextReading } from "./turn-display.helpers.js";
 import { estimateMessagesTokens } from "../../chat/helpers/token-estimator.js";
 import { getContextWindow } from "../../config/model-runtime.js";
 import { stripNativeToolSyntax } from "../../core/helpers/turn-message.helpers.js";
@@ -101,7 +103,7 @@ export async function handleInputTurn(
   // synchronously here — before the first await — prevents a second prompt from starting
   // concurrently and interleaving turns. There is no command queue yet.
   state.busy = true;
-  state.activeStatus = "building_context";
+  beginPhase(state, "building_context");
   state.spinnerIndex = 0;
   actions.startSpinner();
   actions.draw();
@@ -163,7 +165,7 @@ export async function handleInputTurn(
   }
 
   state.busy = true;
-  state.activeStatus = "building_context";
+  beginPhase(state, "building_context");
   state.spinnerIndex = 0;
   actions.startSpinner();
   actions.draw();
@@ -182,6 +184,8 @@ export async function handleInputTurn(
     let totalOutputChars = 0;
     // track whether any thinking or status content was shown live
     let liveContentShown = false;
+    /** Reasoning characters seen while quiet — reported once instead of streamed. */
+    let thinkingChars = 0;
     let firstTokenTime = -1;
     let callingModelTime = -1;
     const startTime = Date.now();
@@ -193,7 +197,7 @@ export async function handleInputTurn(
         if (status === "producing_response") return;
 
         lastStatus = status;
-        state.activeStatus = status;
+        beginPhase(state, status);
         state.busy = true;
         actions.draw();
 
@@ -219,6 +223,15 @@ export async function handleInputTurn(
         // init, creating leading blank lines). Once content is flowing, preserve
         // whitespace so paragraph breaks in the reasoning render correctly.
         if (!liveContentShown && !cleanToken.trim()) continue;
+
+        // Quiet mode does not print the reasoning — on a reasoning model it is most of the screen,
+        // and it buries the tool calls and the answer. It is still COUNTED, and reported as one
+        // line per block, so the length of the thinking stays visible without being readable.
+        if (!isVerboseOutput()) {
+          thinkingChars += cleanToken.length;
+          continue; // the spinner keeps saying REI is working — see onStatus below
+        }
+
         if (!liveContentShown) {
           actions.stopSpinner();
           state.activeStatus = undefined;
@@ -247,7 +260,22 @@ export async function handleInputTurn(
             state.activeStatus = undefined;
             liveContentShown = true;
           }
+          // Report the reasoning that ran before this tool call as ONE line. Quiet mode does not
+          // print the reasoning itself, and silence about it would hide that most of the wait was
+          // the model thinking rather than the tool running.
+          if (thinkingChars > 0) {
+            actions.streamText(formatThinkingSummary(thinkingChars));
+            thinkingChars = 0;
+          }
           actions.streamText(cleanToken);
+          // Re-arm the spinner: the next stretch is the model working again, and without this the
+          // screen went dead after the first tool call — the spinner stopped and never restarted,
+          // so the only sign of life was the reasoning stream we just stopped printing.
+          // The label describes what comes NEXT, and after a tool that is the model reasoning
+          // again — not a fresh "calling model" announcement each of the twenty times.
+          beginPhase(state, "calling_model");
+          actions.startSpinner();
+          actions.draw();
         } else {
           renderBuffer += cleanToken;
         }
@@ -285,13 +313,8 @@ export async function handleInputTurn(
     }
 
     // Display formatted S&R diffs (ANSI diff, already styled by formatCodeDiff)
-    if (edits.length > 0 && session.mode === "agent") {
-      actions.pushTranscript(`\n\x1b[1;33mCambios propuestos:\x1b[0m`);
-      for (const edit of edits) {
-        actions.pushTranscript(
-          `\x1b[1mArchivo:\x1b[0m ${edit.file}\n${formatCodeDiff(edit.search, edit.replace)}`,
-        );
-      }
+    for (const line of session.mode === "agent" ? formatEdits(edits) : []) {
+      actions.pushTranscript(line);
     }
 
     if (firstTokenTime < 0) firstTokenTime = endTime;
@@ -343,6 +366,7 @@ export async function handleInputTurn(
       activeModel,
     );
     if (gauge) actions.pushTranscript(`\n${gauge}`);
+    publishContextReading(state, sentTokens, getContextWindow(), activeModel);
 
     // `~` marks estimated counts; real backend-reported numbers are shown bare.
     const approx = realUsage ? "" : "~";
