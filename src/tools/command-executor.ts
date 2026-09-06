@@ -91,11 +91,24 @@ function parseCommandLine(commandLine: string): string[] {
 
   for (let i = 0; i < commandLine.length; i++) {
     const ch = commandLine[i];
-    if (ch === "'" && !inDouble) {
+    if (ch === "\\" && !inSingle && /[\r\n]/.test(commandLine[i + 1] ?? "")) {
+      // Line continuation. A model writing a long chain formats it the way it would in a shell —
+      // `git add … && \` then a newline — and without this the backslash and the newline stayed
+      // glued to the next word, so the command NAME became "\<newline>git" and the allow-list
+      // rejected a command nobody had typed. Single quotes keep it literal, as a shell does.
+      i += commandLine[i + 1] === "\r" && commandLine[i + 2] === "\n" ? 2 : 1;
+      // A continuation joins the two lines into one word boundary, not into one word.
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+    } else if (ch === "'" && !inDouble) {
       inSingle = !inSingle;
     } else if (ch === '"' && !inSingle) {
       inDouble = !inDouble;
-    } else if (ch === " " && !inSingle && !inDouble) {
+    } else if (/[ \t\r\n]/.test(ch) && !inSingle && !inDouble) {
+      // Any unquoted whitespace separates, not just a space: a multi-line command otherwise carried
+      // its newline into the token.
       if (current) {
         tokens.push(current);
         current = "";
