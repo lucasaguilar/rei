@@ -1,4 +1,5 @@
 import type { ChatMessage } from "../chat/types.js";
+import { explainBackendError } from "./backend-error.js";
 import { sanitizeOpenAIUsage, type RawOpenAIUsage } from "./token-usage.js";
 import type {
   ToolDefinition,
@@ -189,15 +190,20 @@ export async function openaiCompleteChatWithTools(
 
   if (!response.ok) {
     const details = await response.text().catch(() => "");
+    // A local backend answers with ITS error — for MLX, a Python traceback from inside
+    // `.lmstudio/extensions`. explainBackendError rewrites the two failures whose cause is known
+    // (out of GPU memory, cancelled model load) and passes everything else through untouched.
     throw new Error(
-      `Tool calling request failed (${response.status} ${response.statusText})${details ? `: ${details.trim()}` : ""}`,
+      `Tool calling request failed (${response.status} ${response.statusText})${
+        details ? `: ${explainBackendError(details.trim())}` : ""
+      }`,
     );
   }
 
   const data = (await response.json()) as OpenAIToolCallResponse;
   if (data.error) {
     throw new Error(
-      `Tool calling error: ${data.error.message ?? JSON.stringify(data.error)}`,
+      `Tool calling error: ${explainBackendError(data.error.message ?? JSON.stringify(data.error))}`,
     );
   }
 
@@ -363,7 +369,9 @@ export async function openaiStreamChatWithTools(
   if (!response.ok) {
     const details = await response.text().catch(() => "");
     throw new Error(
-      `Tool streaming request failed (${response.status} ${response.statusText})${details ? `: ${details.trim()}` : ""}`,
+      `Tool streaming request failed (${response.status} ${response.statusText})${
+        details ? `: ${explainBackendError(details.trim())}` : ""
+      }`,
     );
   }
   if (!response.body) {
@@ -402,7 +410,7 @@ export async function openaiStreamChatWithTools(
       }
       if (json.error) {
         throw new Error(
-          `Tool streaming error: ${json.error.message ?? JSON.stringify(json.error)}`,
+          `Tool streaming error: ${explainBackendError(json.error.message ?? JSON.stringify(json.error))}`,
         );
       }
       // With stream_options.include_usage, OpenAI sends the counts in a FINAL chunk whose
