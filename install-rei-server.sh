@@ -44,8 +44,25 @@ fi
 cat > "$BIN_DIR/rei-server" << 'EOF'
 #!/bin/bash
 # Load global ~/.rei/.env first, then local .env (filtering placeholders)
+# is_machine_scoped KEY — mirrors INSTALL_SCOPED in src/load-env.ts. The install's .env describes
+# the MACHINE (credentials, where a backend listens, which backend exists); models, sampling,
+# context and REI_* behaviour are per-project. Exporting the whole install file made every one of
+# those a shell variable, and a shell variable beats both .env files — so a fresh project silently
+# inherited another project's model. Keep this list in step with load-env.ts.
+is_machine_scoped() {
+  case "$1" in
+    *_API_KEY|*_TOKEN|*_SECRET|*_CLIENT_ID|*_BASE_URL|*_REQUEST_TIMEOUT_MS) return 0 ;;
+    MODEL_PROVIDER|AGENT_MODEL_PROVIDER|ALLOWED_WORKSPACES) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# load_env_file FILE [machine]
+#   machine → export only machine-scoped keys (used for the install's ~/.rei/.env)
+#   omitted → export everything (the project's own file)
 load_env_file() {
   local env_file="$1"
+  local scope="${2:-all}"
   while IFS= read -r line; do
     [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
     local key="${line%%=*}"
@@ -62,6 +79,9 @@ load_env_file() {
     val="${val%"${val##*[![:space:]]}"}"
 
     if [[ "$val" == *"_here"* || "$val" == "your_"* || "$val" == *"placeholder"* || -z "$val" ]]; then
+      continue
+    fi
+    if [ "$scope" = "machine" ] && ! is_machine_scoped "$key"; then
       continue
     fi
     export "$key=$val"
@@ -90,15 +110,23 @@ if [ "$want_help" -eq 1 ]; then
 fi
 
 # Check if .env files exist
-env_exists=0
-if [ -f "$HOME/.rei/.env" ]; then
-  env_exists=1
-  load_env_file "$HOME/.rei/.env"
+# Resolve configuration. The install file supplies ONLY machine-scoped keys; the project's own
+# file supplies everything else. `env_exists` asks "is this project configured?", so the install's
+# keys alone do not answer it — a machine with API keys but a brand-new project still needs setup.
+[ -f "$HOME/.rei/.env" ] && load_env_file "$HOME/.rei/.env" machine
+
+# Canonical per-project location is .rei/.env; a root .env is the legacy one and still honoured.
+project_env=""
+if [ -f .rei/.env ]; then
+  project_env=".rei/.env"
+elif [ -f .env ]; then
+  project_env=".env"
 fi
 
-if [ -f .env ]; then
+env_exists=0
+if [ -n "$project_env" ]; then
   env_exists=1
-  load_env_file .env
+  load_env_file "$project_env"
 fi
 
 # Force local TMPDIR to avoid permission issues
@@ -113,8 +141,8 @@ elif [ "$env_exists" -eq 0 ]; then
   node "$HOME/.rei/scripts/launch-rei.js"
 elif node "$HOME/.rei/scripts/launch-rei.js" --preflight; then
   # Preflight passed (may have just saved a new API key) — reload env so the launch sees it.
-  [ -f "$HOME/.rei/.env" ] && load_env_file "$HOME/.rei/.env"
-  [ -f .env ] && load_env_file .env
+  [ -f "$HOME/.rei/.env" ] && load_env_file "$HOME/.rei/.env" machine
+  [ -n "$project_env" ] && load_env_file "$project_env"
   REI_WORKSPACE_PATH="${REI_WORKSPACE_PATH:-"$(pwd)"}" node "$HOME/.rei/dist/server.js" "$@"
 else
   echo "🔄 Launching setup wizard to finish configuration..."
