@@ -11,11 +11,19 @@ import { resolveActiveModelLabel } from "./input-turn.helpers.js";
  * (agent.ts) re-sets tuning every turn; this just populates it before the first render so the
  * gauge reflects the configured context window (rei.config.json) instead of the env fallback.
  */
+export interface StartupGauge {
+  /** The full one-line gauge for the transcript, or null when no window is configured. */
+  line: string | null;
+  tokens: number;
+  window: number;
+  model: string;
+}
+
 export function renderStartupGauge(
   agent: Agent,
   session: ChatSession,
   workspacePath = process.cwd(),
-): string | null {
+): StartupGauge {
   setActiveModelTuning(
     resolveModelTuning(resolveModelForMode(session.mode), workspacePath),
   );
@@ -25,9 +33,14 @@ export function renderStartupGauge(
   );
   const startupTokens = historyTokens + agent.estimateActiveToolsTokens(session.mode);
 
-  return formatContextGauge(
-    startupTokens,
-    getContextWindow(),
-    resolveActiveModelLabel(session.mode),
-  );
+  const window = getContextWindow();
+  const model = resolveActiveModelLabel(session.mode);
+  // The numbers come back too: they seed the sticky bar so it is populated BEFORE the first turn,
+  // rather than appearing only once a turn has finished.
+  return {
+    line: formatContextGauge(startupTokens, window, model),
+    tokens: startupTokens,
+    window,
+    model,
+  };
 }
