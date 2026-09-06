@@ -14,10 +14,13 @@
  * @module rei/providers/with-telemetry
  */
 
-import { observe, Laminar, LaminarAttributes } from "@lmnr-ai/lmnr";
+// TYPE-only (erased at compile time): the SDK calls `dotenv.config()` when imported, which would
+// refill every env key load-env.ts deliberately leaves unset. It is fetched from the telemetry
+// module instead, which loads it only when tracing is actually on.
+import type * as Lmnr from "@lmnr-ai/lmnr";
 import { SpanName } from "../contracts/execution-contract.js";
 import type { ModelProvider } from "./model-provider.js";
-import { isTelemetryInitialized } from "../telemetry/init.js";
+import { getLaminarSdk, isTelemetryInitialized } from "../telemetry/init.js";
 
 const LLM_METHODS = new Set([
   "complete",
@@ -49,6 +52,10 @@ export function withTelemetry(
   providerName: string,
 ): ModelProvider {
   if (!isTelemetryInitialized()) return provider;
+  const lmnr: typeof Lmnr | undefined = getLaminarSdk();
+  // initialized implies loaded; the guard keeps this honest rather than asserting.
+  if (!lmnr) return provider;
+  const { observe, Laminar, LaminarAttributes } = lmnr;
   return new Proxy(provider, {
     get(target, prop, receiver) {
       const orig = Reflect.get(target, prop, receiver);

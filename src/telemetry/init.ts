@@ -12,10 +12,24 @@
  * @module rei/telemetry/init
  */
 
-import { Laminar } from "@lmnr-ai/lmnr";
+// TYPE-only: erased at compile time, so importing this module does not pull the SDK in. The real
+// import happens inside initTelemetry(), after the opt-out gates.
+//
+// The SDK calls `dotenv.config()` at import time, which reads `cwd/.env` and fills in every key REI
+// deliberately left unset — defeating the install/workspace split in load-env.ts. Loading it only
+// when telemetry is actually on keeps an observability library from rewriting the app's config, and
+// keeps it out of the startup path of every run that never traces anything.
+import type * as Lmnr from "@lmnr-ai/lmnr";
 import * as net from "node:net";
 
 let initialized = false;
+/** The SDK, once loaded. Defined only when telemetry initialized successfully. */
+let sdk: typeof Lmnr | undefined;
+
+/** The loaded SDK, or undefined when telemetry is off. Callers must handle undefined. */
+export function getLaminarSdk(): typeof Lmnr | undefined {
+  return sdk;
+}
 
 /** Whether Laminar has been successfully initialized. */
 export function isTelemetryInitialized(): boolean {
@@ -25,6 +39,7 @@ export function isTelemetryInitialized(): boolean {
 /** Reset internal state — used by tests to re-initialize between runs. */
 export function resetTelemetry(): void {
   initialized = false;
+  sdk = undefined;
 }
 
 /** Best-effort TCP reachability probe (mirrors the rei-bench harness). Without it, a
@@ -82,7 +97,9 @@ export async function initTelemetry(): Promise<void> {
     return;
   }
 
-  Laminar.initialize({
+  // Loaded here, not at module scope — see the note on the type-only import above.
+  sdk = await import("@lmnr-ai/lmnr");
+  sdk.Laminar.initialize({
     projectApiKey,
     baseUrl: process.env.LMNR_BASE_URL ?? "http://localhost",
     httpPort: Number(process.env.LMNR_HTTP_PORT ?? 8000),
@@ -98,7 +115,8 @@ export async function initTelemetry(): Promise<void> {
 
 /** Flush and tear down tracing on process exit. No-op if never initialized. */
 export async function shutdownTelemetry(): Promise<void> {
-  if (!initialized) return;
-  await Laminar.shutdown();
+  if (!initialized || !sdk) return;
+  await sdk.Laminar.shutdown();
   initialized = false;
+  sdk = undefined;
 }
