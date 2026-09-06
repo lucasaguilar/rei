@@ -95,6 +95,7 @@ carrying them will start taking effect.)
 | `REI_SUBAGENT_MODEL` | worker model for `delegate` sub-agents (e.g. a fast reliable executor like ornith) | same as agent model |
 | `REI_RUNPLAN_DELEGATE` | `/runplan` executes each stage in an isolated sub-agent (report stages excepted) | `true` |
 | `REI_ALLOW_SENSITIVE_READS` | let `read_files` serve credential files (.env, .pem, .key, .netrc…) | `false` |
+| `REI_VERBOSE` | stream the model's reasoning, full command output and full diffs | `false` |
 
 ## Execution / tools (agnostic)
 
