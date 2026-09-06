@@ -65,6 +65,42 @@ describe("renderMarkdown — tables fit the terminal width", () => {
     expect(out).toContain("c");
   });
 
+  it("keeps a file path whole instead of truncating it to fit", () => {
+    // Widths were shared in proportion to natural width, so a short "Archivo" column beside a long
+    // description got ~9 chars — and a path has no space to wrap on, so cli-table3 cut it to
+    // "install-…". Each column now claims at least its longest unwrappable token.
+    const md =
+      "| Archivo | Descripción |\n|---|---|\n" +
+      "| install-rei-cli-local.sh | Añade el parámetro scope y carga el install filtrado, " +
+      "lee la ubicación canónica y mantiene la legada. |\n";
+    const out = withColumns(76, () => renderMarkdown(md));
+    expect(out).toContain("install-rei-cli-local.sh");
+    expect(out).not.toContain("install-…");
+  });
+
+  it("does not let one long-token column swallow the table", () => {
+    // The floor is capped, so a very long identifier cannot starve the other columns.
+    const md =
+      "| Symbol | Note |\n|---|---|\n" +
+      "| aVeryLongUnbreakableIdentifierThatGoesOnAndOnForever | short |\n";
+    const out = withColumns(60, () => renderMarkdown(md));
+    expect(maxLineWidth(out)).toBeLessThanOrEqual(60);
+    expect(out).toContain("short");
+  });
+
+  it("never breaks an ANSI escape across lines", () => {
+    // cli-table3's break-anywhere wrapping is not ANSI-aware and prints a raw "[0m" into the cell,
+    // so it is deliberately not used as a fallback.
+    const md =
+      "| Archivo | Descripción |\n|---|---|\n" +
+      "| src/some/very/long/path/to/a/file.ts | Usa `is_machine_scoped()` y `load_env_file()` " +
+      "para filtrar el entorno del install. |\n";
+    const out = withColumns(44, () => renderMarkdown(md));
+    // A split escape leaves the tail visible as literal text once the complete codes are stripped.
+    // eslint-disable-next-line no-control-regex
+    expect(out.replace(/\x1b\[[0-9;]*m/g, "")).not.toMatch(/\[\d+m/);
+  });
+
   it("restores colons escaped inside inline code by marked-terminal", () => {
     // marked-terminal rewrites every ":" in a codespan to "*#COLON|*" so its emoji pass cannot
     // eat ":word:", and undoes it in the transform its own table renderer applies. This renderer

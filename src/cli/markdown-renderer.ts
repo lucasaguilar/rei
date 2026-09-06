@@ -103,6 +103,18 @@ function visibleWidth(s: string): number {
   return [...s.replace(/\x1b\[[0-9;]*m/g, "")].length;
 }
 
+/**
+ * Width of the longest run without spaces — the narrowest a column can get before its content stops
+ * being wrappable. A file path or an identifier has no word boundary to break on, so cli-table3
+ * TRUNCATES it ("install-…") instead of wrapping. Prose has boundaries everywhere and wraps fine.
+ */
+function atomicWidth(s: string): number {
+  const plain = s.replace(/\x1b\[[0-9;]*m/g, "");
+  let longest = 0;
+  for (const token of plain.split(/\s+/)) longest = Math.max(longest, [...token].length);
+  return longest;
+}
+
 /** Fallback terminal width when stdout isn't a TTY (piped output, tests). */
 const FALLBACK_COLS = 80;
 /** Never shrink a column below this many content chars, even on a very narrow terminal. */
@@ -158,7 +170,32 @@ function renderTable(this: { parser: { parseInline(tokens: unknown): string } },
     const avail = Math.max(termWidth - overhead, n * MIN_COL_CONTENT);
     const totalContent = natural.reduce((a, b) => a + b, 0) || 1;
     const raw = natural.map((w) => (w / totalContent) * avail);
-    const widths = raw.map((x) => Math.max(MIN_COL_CONTENT, Math.floor(x)));
+
+    // Proportional shares alone starve a narrow column of unbreakable content: a "Archivo" column
+    // next to a long description got ~9 chars and every path came out as "install-…". Each column
+    // therefore claims at least its longest unwrappable token — capped so one column cannot take
+    // the table, and never more than the column actually needs.
+    const atomics = header.map((h, i) =>
+      Math.max(atomicWidth(h), ...rows.map((r) => atomicWidth(r[i] ?? ""))),
+    );
+    // Two thirds, not a half: a column of file paths sitting next to a prose column needs most of
+    // what it asks for, and prose survives a narrow column far better than a path does.
+    const atomicCap = Math.max(MIN_COL_CONTENT, Math.floor((avail * 2) / 3));
+    const floors = atomics.map((a, i) =>
+      Math.max(MIN_COL_CONTENT, Math.min(atomicCap, natural[i], a)),
+    );
+    // When the floors do not fit, they are scaled down together rather than dropped — the widest
+    // gives up the most, and the fallback below keeps the overflow readable.
+    const floorTotal = floors.reduce((a, b) => a + b, 0);
+    const scaled =
+      floorTotal > avail
+        ? floors.map((f) => Math.max(MIN_COL_CONTENT, Math.floor((f / floorTotal) * avail)))
+        : floors;
+
+    const widths = raw.map((x, i) => Math.max(scaled[i], Math.floor(x)));
+    // NOT falling back to wrapOnWordBoundary:false when a token still overflows: cli-table3's
+    // break-anywhere path is not ANSI-aware and splits colour escapes mid-sequence, printing the
+    // raw "[0m" into the cell. A clean ellipsis beats corrupted output.
 
     // Balance to sum EXACTLY `avail` (so the table is exactly termWidth). Forcing narrow columns up
     // to MIN_COL_CONTENT can overshoot, so we may need to give back as well as hand out.
@@ -170,17 +207,21 @@ function renderTable(this: { parser: { parseInline(tokens: unknown): string } },
     for (let k = 0; diff > 0; k = (k + 1) % n, diff--) {
       widths[byRemainder[k][1]]++;
     }
-    // Overshot: shave from the widest columns that are still above the minimum.
-    while (diff < 0) {
-      let widest = -1;
-      for (let i = 0; i < n; i++) {
-        if (widths[i] > MIN_COL_CONTENT && (widest < 0 || widths[i] > widths[widest])) {
-          widest = i;
+    // Overshot: shave from the widest column, in two passes. The first respects each column's floor
+    // so a path column keeps its width; the second ignores floors, because the table must never be
+    // wider than the terminal — a wrapped border is worse than a truncated cell.
+    for (const floor of [scaled, header.map(() => MIN_COL_CONTENT)]) {
+      while (diff < 0) {
+        let widest = -1;
+        for (let i = 0; i < n; i++) {
+          if (widths[i] > floor[i] && (widest < 0 || widths[i] > widths[widest])) {
+            widest = i;
+          }
         }
+        if (widest < 0) break; // everything already at this pass's floor
+        widths[widest]--;
+        diff++;
       }
-      if (widest < 0) break; // everything already at the floor
-      widths[widest]--;
-      diff++;
     }
     opts.colWidths = widths.map((w) => w + 2);
   }
