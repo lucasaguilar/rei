@@ -1,170 +1,52 @@
-# AGENTS.md — REI Agent Specification
+# AGENTS.md — working rules for this repo
 
-> **Scope note:** this file documents REI for people (and agents) working **on the REI codebase**.
-> It is NOT sent to REI's runtime models — REI's system prompt is assembled from `prompts/**` plus
-> the target workspace's `.rei/rules.md`. Keep this file accurate to the current code; it is the
-> contributor-facing source of truth.
+REI is a local-first CLI coding agent (TypeScript, ESM). Its core bet: **trust nothing the model
+says — verify every edit against ground truth.** Hold yourself to the same rule.
 
-## What is REI?
+This file is read at runtime as project conventions, so it stays short and actionable. The
+architecture — modes, the validation pipeline, prompt assembly, the token budget — lives in
+`docs/rei-internals.md`.
 
-REI (Repository-Aware AI) is a personal, local-first CLI coding agent that operates directly on a
-repository. It reads and reasons about the codebase using only the provided context, proposes and
-**applies** changes, and validates every edit against the project's real compiler before keeping it.
+## Verify before you finish
 
-It targets **local models** (via LM Studio / Ollama) with optional cloud providers, and is built
-around one core bet: **trust nothing the model says — verify every edit against ground truth.**
-
----
-
-## General behavior rules
-
-- **No hallucination.** Never invent files, APIs, code, or behavior not present in the context.
-- **Respect context boundaries.** If a file preview is truncated, acknowledge it; never reconstruct.
-- **Act, don't narrate.** In agent mode, emit the tool call — a turn that *describes* an action
-  without performing it accomplishes nothing.
-- **Be direct and grounded.** Answer first, technical, repo-specific. State what's missing instead
-  of guessing.
-
----
-
-## Modes
-
-REI has three modes (`SessionMode` in `src/chat/types.ts`):
-
-- **ask** — answer questions about the repo. No unsolicited plans, no edits.
-- **planning** — produce a structured implementation plan. No edits. Plans can be persisted and
-  executed stage-by-stage via `/runplan stage N`.
-- **agent** — execution mode: read, propose, and apply concrete edits, validated in a sandbox.
-
----
-
-## Agent execution: TWO paths
-
-Agent mode has two distinct execution paths. Which one runs is decided in `prompt-builder.ts` /
-`agent.ts` (`useToolCalling`):
-
-### 1. Native tool-calling (PRIMARY)
-For models/providers that support the OpenAI function-calling API (e.g. qwen via LM Studio).
-- Driver: `generator-tools.ts` → `completeChatWithTools` → `openai-tool-caller.ts`.
-- Prompt: `prompts/modes/agent-tools.md` + `prompts/formats/agent-format-tools.md`.
-- The model emits structured `tool_calls`; REI executes them in a loop.
-- **This is the path to optimize for** — it's what capable local models (Qwen family) use.
-
-### 2. XML tags (FALLBACK)
-For models/providers WITHOUT reliable native function-calling — the model emits XML tags REI parses.
-- Driver: `generator.ts` (streaming, intercepts `<edit>`, `<create>`, `<request_files>`, `<call_tool>`).
-- Prompts: `prompts/modes/agent.md` (search-replace, default) or `prompts/modes/agent-wholefile.md`
-  (whole-file, when `AGENT_EDIT_FORMAT=wholefile`).
-- Lower priority — maintained as a compatibility fallback.
-
-> A model trained for tool-use (Qwen) follows path 1 reliably. Chat-first models (e.g. Gemma) tend to
-> narrate instead of emitting tool calls — prefer a tool-trained model for agent work.
-
----
-
-## Agent tools (native path)
-
-Defined in `src/contracts/tool-definitions.ts`:
-
-- **read_files** — read file contents before editing (never guess exact code).
-- **edit_file** — search-and-replace edit; `search` must match the file verbatim.
-- **rewrite_file** — overwrite a file's full content (no `search` needed). Fallback when `edit_file`
-  repeatedly fails to match. REI fills the `search` with the on-disk content, so the model can't miss.
-- **create_file** — create a new file.
-- **run_command** — shell, **exploration/verification only** (find, grep, `ng build`, tests). Writing
-  files via shell (`sed -i`, `>` redirects, `python`) is discouraged by prompt; destructive
-  recursive deletes (`rm -rf`) are blocked by the command-executor's security guard.
-- **search_tools** — meta-tool (tool-RAG). When an MCP server exposes > 25 tools, REI hides them
-  behind this and the model loads relevant ones on demand (keyword search, no embeddings).
-- **use_skill** — meta-tool: load a reusable recipe on demand (see *Skills* below).
-- **MCP tools** — appear as `mcp:server/tool` when MCP servers are connected (see `rei.config.json`,
-  workspace or global `~/.rei`). Used the same as built-in tools.
-
----
-
-## Skills & the spec-driven flow
-
-Skills are reusable Markdown recipes loaded **on demand** — only the catalog (name + description)
-rides in the prompt; the full body is injected when the model invokes `use_skill`. They live in
-`prompts/skills/` (built-in) and `{workspace}/.rei/skills/` (workspace overrides built-in).
-
-- **Mode-scoped** via `modes:` frontmatter (default `[agent]`). `skillsForMode()` filters: the native
-  agent path exposes agent-mode skills in the tool schema; ask/planning inject the mode's catalog into
-  the prompt (`buildSkillCatalogText`) and the model invokes via `<call_tool name="use_skill">`.
-- A model often calls a skill by its own name (`<call_tool name="write-spec">`) instead of via
-  `use_skill` — `action-executor.ts` tolerates this (loads any tool name matching a mode-scoped skill,
-  after built-ins/MCP), and `agent.ts` adds the mode's skill names to `feedbackTools` so the recipe is
-  fed back. **Dispatch and re-feed are two separate gates — a skill call needs both.**
-
-**Spec-driven loop** (planning skills): `write-spec` (Goal / In scope / **Out of scope** / Acceptance
-criteria — the scope-creep guard) → `micro-task-decomposition` (smallest atomic stages, each with
-`Satisfies: AC-N` and a `Verify:` command; resolves spec Open Questions under `## Assumptions` rather
-than silently) → `/runplan stage N` executes each → sandbox + verify. **SOURCE** of `/runplan` is the
-latest planning-mode plan in the session (fallback `.rei/current-plan-content.md`); plans/specs can be
-archived via `/saveplan`/`/savespec`. There is intentionally **no progress checklist** — the agent
-executes holistically, so "done" is the code + the verify command.
-
----
-
-## Validation — the core strength
-
-Every edit is validated **before** it touches the real filesystem:
-
-1. **Sandbox:** edits are applied to a temp copy of the workspace (`node_modules` symlinked).
-2. **Verify command:** the project-type-aware compiler runs against the sandbox
-   (`src/workspace/project-type.ts`). E.g. **Angular → `npx ngc -p tsconfig.app.json --noEmit`**
-   (ngc, not bare tsc — tsc is blind to Angular template errors); plain TS → `tsc --noEmit`.
-   Override with `REI_SANDBOX_VERIFY_COMMAND`.
-3. **In-loop (tools path):** each batch of edits is validated; failures are fed back to the model.
-4. **Search-mismatch escalation:** after 2 consecutive `search` mismatches REI injects the file's
-   exact content; after 4 it instructs the model to use `rewrite_file`.
-5. **Final verify:** when the model finishes, the full combined edit set is verified once more; on
-   failure the model gets up to `MAX_VERIFY_RETRIES` self-correction attempts.
-6. **Honest `verified` flag:** `ExecutionResult.verified` reflects the real final-verify result, not
-   an optimistic heuristic. `verified: true` means *"what was applied compiles"* — NOT *"the task is
-   complete"* (a model can apply a partial, compiling change and stop).
-
----
-
-## Context & token budget
-
-Unified in `src/config/model-runtime.ts` (single source of truth):
-
-- **`REI_CONTEXT_WINDOW`** — REI's trimming budget (input + output). `0` = no trimming. Should match
-  the model's loaded context in LM Studio (≥ 30000 recommended for agent work that reads files —
-  smaller windows truncate mid-turn).
-- **`REI_MAX_OUTPUT_TOKENS`** — output cap, sent on both the non-tools and tools paths. ~8192.
-- **`REI_MAX_TURNS`** — max agent-loop iterations per turn.
-
-Trimming + the MCP-tools-overflow warning only activate when `REI_CONTEXT_WINDOW > 0`.
-
----
-
-## Prompt assembly
-
-`src/prompts/prompt-builder.ts` composes the system prompt (NOT this file):
-
-```
-shared/base  +  shared/response-rules  +  modes/<mode>  +  formats/<mode>-format
+```bash
+npx tsc -p tsconfig.build.json --noEmit    # must be clean
+npx vitest run                             # must be green
 ```
 
-For agent mode the mode/format pair depends on the execution path (tools vs XML, see above).
-Per-workspace conventions are injected from `{workspace}/.rei/rules.md` (`loadLocalRules`).
+`src/chat/compactor.test.ts` has one pre-existing type error. It is the only accepted failure; do
+not "fix" it as a side quest, and do not let it hide a new one.
 
-### Adding a new mode
-1. Add the value to `SessionMode` in `src/chat/types.ts`.
-2. Create `prompts/modes/<mode>.md` and `prompts/formats/<mode>-format.md`.
-3. Wire any special injection in `src/prompts/prompt-builder.ts`.
+## Rules
 
-See `docs/prompt-architecture.md` for the full pipeline.
+- **Never invent files, APIs, or behaviour.** If a file preview is truncated, read the file with
+  `read_files` before editing it — do not reconstruct the missing part.
+- **Act, don't narrate.** In agent mode, emit the tool call. A turn that describes an edit without
+  applying it accomplished nothing.
+- **One change per edit, and keep call sites in step.** If you change a name or a signature, update
+  every caller in the same turn — a half-applied rename compiles nowhere.
+- **Source files stay under 400 lines.** `src/meta/file-size.test.ts` enforces it. Split the module
+  rather than adding to the allowlist.
+- **ESM, always.** `package.json` is `"type": "module"`: use `import`/`export`, and give relative
+  imports the `.js` extension (`./foo.js`), even from a `.ts` file.
+- **English in code and in anything the user sees** — comments, status lines, error messages.
+- **Write the regression test first, and prove it fails.** A test that passes against the unfixed
+  code proves nothing. Run it before the fix, watch it fail, then fix.
+- **Comments explain WHY, not what.** Prefer the reason a line exists — the bug it prevents, the
+  constraint it satisfies — over restating the code.
+- **No new `.md` files unless asked.** Documentation is a deliverable the user requests, not a
+  side effect.
 
----
+## Where things are
 
-## Recommended setup for local models
+| Path | What |
+|---|---|
+| `src/agent-mode/` | the native tool-calling loop and its handlers |
+| `src/chat/commands/` | one handler per slash command, registered in `registry.ts` |
+| `src/config/model-runtime.ts` | single source of truth for context window, tokens, thinking |
+| `src/workspace/project-type.ts` | project detection and each type's real verify command |
+| `prompts/` | the system prompt, as markdown — modes, formats, skills, roles |
+| `docs/rei-internals.md` | how it all fits together |
 
-- **Agent model:** a tool-trained model (e.g. `qwen/qwen3.6-35b-a3b` MoE — fast/cool, or `qwen3.6-27b`).
-- **LM Studio:** load the agent model with **≥ 30000 context** and **full GPU offload**; enable
-  *Only Keep Last JIT Loaded Model* so per-mode model swaps don't blow memory.
-- **`.env`:** `REI_CONTEXT_WINDOW` matching the loaded window, `REI_MAX_OUTPUT_TOKENS=8192`.
-- Avoid heavily-quantized / chat-first models for the agent path — they narrate instead of calling
-  tools and hallucinate completed actions.
+Per-project conventions come from the workspace's `.rei/rules.md`, which overrides anything generic
+here.

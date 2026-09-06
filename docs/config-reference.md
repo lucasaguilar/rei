@@ -32,6 +32,24 @@ path reads `REI_AGENT_TEMPERATURE` (default 0.3). Set `REI_AGENT_*` to tune the 
 
 Precedence: `REI_CONTEXT_WINDOW` > `<PREFIX>_CONTEXT_WINDOW` > runtime default (local 0).
 
+## Where configuration comes from
+
+Two files, and they are not peers:
+
+| File | Scope | What belongs in it |
+|---|---|---|
+| `<install>/.env` | the machine | API keys, `*_BASE_URL`, request timeouts, `MODEL_PROVIDER` |
+| `<workspace>/.rei/.env` | the project | model per mode, sampling, context, every `REI_*` behaviour flag |
+
+Only machine-scoped keys cross from the install: `*_API_KEY`, `*_TOKEN`, `*_SECRET`,
+`*_CLIENT_ID`, `*_BASE_URL`, `*_REQUEST_TIMEOUT_MS`, `MODEL_PROVIDER`, `AGENT_MODEL_PROVIDER`,
+`ALLOWED_WORKSPACES`. Everything else must come from the workspace or not at all — otherwise opening
+REI in a fresh folder inherits another project's model, sampling and context window, with nothing on
+screen to account for them. A real shell variable beats both files.
+
+A legacy `<workspace>/.env` is still read (between the two), so existing projects keep working.
+`REI_INHERIT_ALL_ENV=true` restores the old wholesale inheritance.
+
 ## Routing & model
 
 `MODEL_PROVIDER` · `AGENT_MODEL_PROVIDER` · `<PREFIX>_BASE_URL` · `<PREFIX>_API_KEY` ·
