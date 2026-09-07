@@ -1,4 +1,5 @@
 import type { AgentLogger } from "../../core/logger.js";
+import { fromWireToolName } from "../../contracts/mcp-tool-names.js";
 import type { ModelProvider } from "../../providers/model-provider.js";
 import type { ToolCall } from "../../providers/model-provider.js";
 import type { McpRegistry } from "../../tools/mcp/mcp-registry.js";
@@ -336,7 +337,9 @@ export async function dispatchToolCalls(
           if (call.function.name.startsWith("mcp:") && mcpRegistry) {
             // Strip the "mcp:" namespace prefix added by mcpToolsToDefinitions before
             // dispatching — the registry key is "serverName/toolName" not "mcp:...".
-            const qualifiedName = call.function.name.slice(4);
+            // Providers that reject `/` in a function name get `__` instead; the model calls
+            // back with whatever it was given, so both forms resolve here.
+            const qualifiedName = fromWireToolName(call.function.name.slice(4));
             logger.logInfo(`[tools] mcp: ${qualifiedName}`);
             emitStatus(`🔧  [REI] Tool: ${qualifiedName}`);
             // Retain the full result + spill large ones to disk, returning a short receipt to the

@@ -1,4 +1,5 @@
 import type { ChatMessage } from "../chat/types.js";
+import { toWireToolName } from "../contracts/mcp-tool-names.js";
 import { explainBackendError } from "./backend-error.js";
 import { sanitizeOpenAIUsage, type RawOpenAIUsage } from "./token-usage.js";
 import type {
@@ -124,6 +125,30 @@ export interface OpenAIToolsParams {
  * a hardcoded greedy `temperature: 0` used to cause on local models. Penalties are sent only when
  * > 0 (REI's "only when provided" convention).
  */
+/**
+ * Reduces a tool definition to the fields the OpenAI tools API defines.
+ *
+ * `ToolDefinition` carries REI's own bookkeeping alongside the wire shape — `modelFeedback` marks
+ * whether a result must go back to the model. Sending the whole object worked against permissive
+ * backends and failed hard against strict ones: Gemini validates the payload and rejected the
+ * request outright, once per MCP tool —
+ *
+ *     Unknown name "modelFeedback" at 'tools[9]': Cannot find field.
+ *
+ * — which reads as "MCP is broken with Gemini" rather than "REI leaked an internal field". The wire
+ * shape is built explicitly here so a future internal field cannot leak the same way.
+ */
+function toWireTool(tool: ToolDefinition): Record<string, unknown> {
+  return {
+    type: tool.type,
+    function: {
+      name: toWireToolName(tool.function.name),
+      description: tool.function.description,
+      parameters: tool.function.parameters,
+    },
+  };
+}
+
 function buildToolsRequestBody(
   params: OpenAIToolsParams,
   stream: boolean,
@@ -134,7 +159,7 @@ function buildToolsRequestBody(
   const body: Record<string, unknown> = {
     model: options?.model ?? model,
     messages: mergeLeadingSystemMessages(messages).map(toApiMessage),
-    tools,
+    tools: tools.map(toWireTool),
     tool_choice: "auto",
     temperature: sampling.temperature,
     ...(sampling.frequencyPenalty > 0
