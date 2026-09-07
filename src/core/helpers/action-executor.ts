@@ -45,7 +45,7 @@ async function dispatchXmlToolCall(
   try {
     // ── use_skill (meta-tool) ────────────────────────────────────────────
     // Loads a reusable recipe on demand. The catalog lives in the prompt
-    // (buildSkillCatalogText); here we return the full body so the model can
+    // (the use_skill tool's description); here we return the full body so the model can
     // follow it. Scoped to the current mode so planning-only skills aren't
     // loadable from agent and vice-versa.
     if (call.name === "use_skill") {

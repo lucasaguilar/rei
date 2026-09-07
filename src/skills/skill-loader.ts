@@ -107,29 +107,6 @@ export function skillsForMode(skills: Skill[], mode: SkillMode): Skill[] {
 }
 
 /**
- * Builds the skill catalog block injected into the ask/planning system prompt
- * (the XML path has no structured tool schema, so the catalog rides in the
- * prompt and the model invokes a skill with `<call_tool name="use_skill">`).
- * Returns "" when there are no skills for the mode, so nothing is injected.
- */
-export function buildSkillCatalogText(skills: Skill[]): string {
-  if (skills.length === 0) return "";
-  const catalog = skills
-    .map((s) => `- ${s.name}: ${s.description}`)
-    .join("\n");
-  return (
-    "## Skills (on-demand recipes)\n" +
-    "Before starting work that matches one of the skills below, load its full recipe by emitting " +
-    "ONLY this tag (no preamble):\n\n" +
-    "  <call_tool name=\"use_skill\">skill-name</call_tool>\n\n" +
-    "The tool name is literally `use_skill`; the skill name goes INSIDE the tag as the argument. " +
-    "Do NOT put the skill name in the `name=\"...\"` attribute. The system returns the recipe; then " +
-    "follow it. Available skills:\n" +
-    catalog
-  );
-}
-
-/**
  * Builds the `use_skill` meta-tool. Its description embeds the catalog (one line
  * per skill) so the model knows what's available without loading any bodies.
  * Returns null when there are no skills (so the tool isn't exposed needlessly).
