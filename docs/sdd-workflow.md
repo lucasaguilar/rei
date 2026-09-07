@@ -154,6 +154,25 @@ out-of-scope violation. Both are wrong, and neither tells you the design changed
 It reports and never edits: which document is wrong is a judgment call. Run it after `/decompose`,
 and again whenever the plan changes mid-flight.
 
+`/trace` also checks the plan's **declared scope** — the `## Scope` block `micro-task-decomposition`
+asks for before any stage:
+
+```
+  ✖ Declared but NOT on disk — the inventory was imagined, not read:
+      src/inventado.ts
+  ⚠ Touched by a stage but never declared — the inventory is incomplete:
+      src/no-declarado.ts
+```
+
+The block exists because a model conditions each token on the ones it already wrote: enumerating the
+files first keeps them in view while it writes the stages, which is what stops one from being
+dropped in a plan of ten. The same mechanism is the risk — an inventory written from imagination
+anchors the whole plan to files that are not there — so it is declared BEFORE the stages and
+verified AFTER, against disk and against the stages themselves.
+
+These are independent checks: a plan can trace perfectly to every acceptance criterion and still
+name files that do not exist.
+
 **Then amend the spec deliberately.** The tempting fix — editing the spec to match what you built —
 makes Step 5 tautological: you are grading against a document rewritten to fit the answer. Record
 *what* changed and *why* alongside the revised criteria, so an amended criterion stays visible as one

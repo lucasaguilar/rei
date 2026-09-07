@@ -15,6 +15,8 @@
  * It reports; it never edits. Which of the two documents is wrong is a judgment call, and the point
  * is to make the disagreement visible instead of letting it surface as a bogus verification verdict.
  */
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { STAGE_REGEX } from "./plan-tracker.js";
 
 export interface Criterion {
@@ -186,6 +188,101 @@ export function formatTraceReport(
     out.push(
       `  Coverage checked for ${stages.length - freeform.length - untraced.length} of ${stages.length} stages.`,
     );
+  }
+  return out.join("\n");
+}
+
+
+// ── Scope inventory ────────────────────────────────────────────────────────────────────────────
+//
+// A plan opens with the files it intends to touch, declared BEFORE the stages. That ordering is the
+// point: a model conditions each token on the ones it already wrote, so an inventory it emits first
+// stays in its immediate context while it builds the plan — which is what stops a stage from being
+// quietly dropped in a medium-sized plan.
+//
+// The risk is the same mechanism running backwards. An inventory written from imagination anchors
+// the whole plan to files that do not exist, turning one wrong step into a coherent wrong plan. So
+// the declaration is CHECKED rather than trusted: against disk, and against the stages themselves.
+
+/** The `Files to modify:` block that opens a plan, before any stage. */
+const SCOPE_FILES = /^\s*(?:[-*]\s*)?(?:\*\*)?files\s+to\s+modify(?:\*\*)?\s*:\s*(.*)$/im;
+
+export interface ScopeReport {
+  /** Paths the plan declared up front. */
+  declared: string[];
+  /** Declared paths with no file on disk — the inventory is imagined, not grounded. */
+  missing: string[];
+  /** Declared but never touched by any stage — scope claimed and then dropped. */
+  unplanned: string[];
+  /** Touched by a stage but never declared — the inventory is incomplete. */
+  undeclared: string[];
+}
+
+/** Reads the up-front inventory. Only the block BEFORE the first stage counts. */
+export function parseDeclaredScope(planContent: string): string[] {
+  const firstStage = planContent.split("\n").findIndex((l) => STAGE_REGEX.test(l));
+  const head = firstStage === -1 ? planContent : planContent.split("\n").slice(0, firstStage).join("\n");
+  const raw = head.match(SCOPE_FILES)?.[1] ?? "";
+  return raw
+    .split(/[,\s]+/)
+    .map((f) => f.trim().replace(/[`,]/g, ""))
+    .filter((f) => f.length > 0 && f !== "none" && f.includes("."));
+}
+
+/** Crosses the declared inventory against disk and against what the stages actually touch. */
+export function checkScope(planContent: string, workspacePath: string): ScopeReport {
+  const declared = parseDeclaredScope(planContent);
+  const touched = new Set(splitPlanIntoStageFiles(planContent));
+  const declaredSet = new Set(declared);
+  return {
+    declared,
+    missing: declared.filter((f) => !fs.existsSync(path.join(workspacePath, f))),
+    unplanned: declared.filter((f) => !touched.has(f)),
+    undeclared: [...touched].filter((f) => !declaredSet.has(f)),
+  };
+}
+
+/** Every path named by a stage's own `Files to modify:` line. */
+function splitPlanIntoStageFiles(planContent: string): string[] {
+  const lines = planContent.split("\n");
+  const firstStage = lines.findIndex((l) => STAGE_REGEX.test(l));
+  if (firstStage === -1) return [];
+  const out: string[] = [];
+  for (const line of lines.slice(firstStage)) {
+    const m = line.match(SCOPE_FILES);
+    if (!m) continue;
+    for (const f of m[1].split(/[,\s]+/)) {
+      const clean = f.trim().replace(/[`,]/g, "");
+      if (clean && clean !== "none" && clean.includes(".")) out.push(clean);
+    }
+  }
+  return out;
+}
+
+/** Renders the scope check, saying what it could NOT check as well as what it found. */
+export function formatScopeReport(r: ScopeReport): string {
+  if (r.declared.length === 0) {
+    return (
+      "  · No up-front `Files to modify:` block — the plan goes straight to its stages.\n" +
+      "    Declaring the scope first is what keeps a stage from being dropped; see the\n" +
+      "    micro-task-decomposition skill."
+    );
+  }
+  const out: string[] = [`  ${r.declared.length} file(s) declared up front`];
+  if (r.missing.length > 0) {
+    out.push("", "  ✖ Declared but NOT on disk — the inventory was imagined, not read:");
+    for (const f of r.missing) out.push(`      ${f}`);
+  }
+  if (r.unplanned.length > 0) {
+    out.push("", "  ✖ Declared but no stage touches them — scope claimed, then dropped:");
+    for (const f of r.unplanned) out.push(`      ${f}`);
+  }
+  if (r.undeclared.length > 0) {
+    out.push("", "  ⚠ Touched by a stage but never declared — the inventory is incomplete:");
+    for (const f of r.undeclared) out.push(`      ${f}`);
+  }
+  if (r.missing.length + r.unplanned.length + r.undeclared.length === 0) {
+    out.push("  ✔ Every declared file exists and is covered by a stage.");
   }
   return out.join("\n");
 }

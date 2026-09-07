@@ -2,7 +2,12 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { CommandHandler, CommandResult } from "./command-handler.js";
 import { getActive } from "../active-artifacts.js";
-import { formatTraceReport, traceSpecToPlan } from "../sdd-trace.js";
+import {
+  checkScope,
+  formatScopeReport,
+  formatTraceReport,
+  traceSpecToPlan,
+} from "../sdd-trace.js";
 
 /**
  * `/trace` — does the plan still match the spec it was built from?
@@ -54,11 +59,18 @@ export const traceCommands: CommandHandler = {
     }
 
     const report = traceSpecToPlan(specText as string, planText as string);
+    // Two independent checks over the same plan: criteria coverage, and whether the up-front file
+    // inventory is grounded. A plan can trace perfectly to the spec and still name files that do
+    // not exist.
+    const scope = checkScope(planText as string, workspacePath);
     return {
       // A disagreement is a finding, not a command failure — the report is the deliverable.
       success: true,
       recordInSession: false,
-      response: formatTraceReport(report, specName, planName),
+      response:
+        formatTraceReport(report, specName, planName) +
+        "\n\n  ── Declared scope ──\n" +
+        formatScopeReport(scope),
     };
   },
 };

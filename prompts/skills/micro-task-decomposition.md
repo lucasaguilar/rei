@@ -98,6 +98,31 @@ If you had to assume an answer to any of the spec's Open Questions, list them fi
 - (Open Q1) <the question> → <the choice you made>
 ```
 
+Then, BEFORE any stage, declare the scope:
+
+```
+## Scope
+Files to modify: src/a.ts, src/b.ts
+Affected consumers: src/c.ts (imports the changed signature)   ← or "none — checked with grep_code"
+Breaking changes: none                                          ← or what breaks, and for whom
+```
+
+**Write this after exploring, never before.** Every path here must be one you actually read
+(`read_files`) or found (`grep_code`) — not one you expect to exist. That is the whole difference
+between this section helping and hurting: you condition the rest of the plan on it, so a file you
+imagined here becomes a plan built on a file that is not there.
+
+Order matters for the same reason. Enumerating the scope first keeps it in view while you write the
+stages, which is what stops one from being quietly dropped in a plan of ten. Written afterwards it
+is a summary, and summaries do not prevent anything.
+
+`Affected consumers` is the half that is easy to skip and expensive to miss: `Files to modify`
+says what you will touch, not who depends on it. If a signature or an exported name changes, grep
+for its callers and list them — "none" is a fine answer, but only after checking.
+
+`/trace` checks this block against the repository and against your own stages: a declared file that
+is not on disk, one no stage touches, or one a stage touches without declaring.
+
 Then each stage:
 
 ```

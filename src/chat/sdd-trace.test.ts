@@ -1,9 +1,15 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
 import {
   parseCriteria,
   parseStages,
   traceSpecToPlan,
   formatTraceReport,
+  checkScope,
+  parseDeclaredScope,
+  formatScopeReport,
 } from "./sdd-trace.js";
 
 const SPEC = `# Spec: login
@@ -148,5 +154,96 @@ describe("formatTraceReport", () => {
     const plan = PLAN + "\n## Stage 4: Wire it\nSatisfies: the in-scope form bullet\n";
     const out = formatTraceReport(traceSpecToPlan(SPEC, plan), "login", "login");
     expect(out).toContain("Coverage checked for 3 of 4 stages");
+  });
+});
+
+// ── Scope inventory ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A plan declares the files it will touch BEFORE its stages, so the list stays in the model's own
+ * context while it writes them. The same mechanism runs backwards when the list is imagined: the
+ * plan is then coherently built on files that do not exist. So the declaration is checked, never
+ * trusted — against disk, and against the stages themselves.
+ */
+const PLAN_WITH_SCOPE = `# Plan: login
+
+## Scope
+Files to modify: src/auth.ts, src/session.ts
+Affected consumers: none — checked with grep_code
+Breaking changes: none
+
+## Stage 1: Reject bad passwords
+Files to modify: src/auth.ts
+Verify: tsc --noEmit
+
+## Stage 2: Persist the session
+Files to modify: src/session.ts
+Verify: tsc --noEmit
+`;
+
+let sws: string;
+const touch = (rel: string) => {
+  const f = join(sws, rel);
+  mkdirSync(dirname(f), { recursive: true });
+  writeFileSync(f, "export const x = 1;\n");
+};
+
+describe("parseDeclaredScope", () => {
+  it("reads only the block BEFORE the first stage", () => {
+    // A stage's own `Files to modify:` is not the up-front declaration.
+    expect(parseDeclaredScope(PLAN_WITH_SCOPE)).toEqual(["src/auth.ts", "src/session.ts"]);
+  });
+
+  it("returns nothing when the plan declares no scope", () => {
+    expect(parseDeclaredScope("# Plan\n\n## Stage 1: x\nFiles to modify: a.ts\n")).toEqual([]);
+  });
+});
+
+describe("checkScope", () => {
+  beforeEach(() => {
+    sws = mkdtempSync(join(tmpdir(), "rei-scope-"));
+  });
+  afterEach(() => rmSync(sws, { recursive: true, force: true }));
+
+  it("passes when every declared file exists and a stage touches it", () => {
+    touch("src/auth.ts");
+    touch("src/session.ts");
+    const r = checkScope(PLAN_WITH_SCOPE, sws);
+    expect(r.missing).toEqual([]);
+    expect(r.unplanned).toEqual([]);
+    expect(r.undeclared).toEqual([]);
+  });
+
+  it("catches a file the model imagined — the failure mode this exists for", () => {
+    touch("src/auth.ts"); // src/session.ts is never created
+    expect(checkScope(PLAN_WITH_SCOPE, sws).missing).toEqual(["src/session.ts"]);
+  });
+
+  it("catches scope declared and then dropped", () => {
+    touch("src/auth.ts");
+    touch("src/session.ts");
+    const plan = PLAN_WITH_SCOPE.replace(/## Stage 2[\s\S]*$/, "");
+    expect(checkScope(plan, sws).unplanned).toEqual(["src/session.ts"]);
+  });
+
+  it("catches a stage touching a file the scope never declared", () => {
+    touch("src/auth.ts");
+    touch("src/session.ts");
+    const plan = PLAN_WITH_SCOPE + "\n## Stage 3: Tidy\nFiles to modify: src/extra.ts\n";
+    expect(checkScope(plan, sws).undeclared).toEqual(["src/extra.ts"]);
+  });
+});
+
+describe("formatScopeReport", () => {
+  it("says plainly when a plan declared no scope at all", () => {
+    const out = formatScopeReport({ declared: [], missing: [], unplanned: [], undeclared: [] });
+    expect(out).toContain("No up-front");
+  });
+
+  it("names an imagined file as not read, rather than merely missing", () => {
+    const out = formatScopeReport({
+      declared: ["a.ts"], missing: ["a.ts"], unplanned: [], undeclared: [],
+    });
+    expect(out).toContain("imagined, not read");
   });
 });
