@@ -7,8 +7,6 @@ reads your repository, proposes changes, applies them, and checks them against `
 `go build`, `cargo check` or whatever your project actually uses. What it tells you compiles,
 compiled.
 
-<!-- TODO: demo gif -->
-
 ---
 
 ## Start in under a minute
