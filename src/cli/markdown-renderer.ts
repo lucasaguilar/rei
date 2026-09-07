@@ -1,5 +1,5 @@
 import { diffLines } from 'diff';
-import { linkPathsInTable, shortenPath } from "./table-links.js";
+import { linkPathsInTable, linkPathsInText, shortenPath } from "./file-links.js";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
 import Table from "cli-table3";
@@ -319,5 +319,7 @@ export function renderMarkdown(text: string): string {
   if (typeof rendered !== "string") {
     return text;
   }
-  return rendered.trimEnd();
+  // Link file paths LAST, over the laid-out text: OSC 8 escapes occupy no columns, so wrapping is
+  // already settled and nothing shifts. Tables have linked their own paths and are skipped.
+  return linkPathsInText(rendered.trimEnd());
 }

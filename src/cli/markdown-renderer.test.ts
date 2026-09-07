@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { renderMarkdown } from "./markdown-renderer.js";
-import { shortenPath } from "./table-links.js";
+import { shortenPath } from "./file-links.js";
 
 /** Visible width of a line, ignoring ANSI color codes (code points, not UTF-16 units). */
 const visibleWidth = (s: string) => [...s.replace(/\x1b\[[0-9;]*m/g, "")].length;
