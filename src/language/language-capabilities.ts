@@ -196,9 +196,19 @@ export function getAllSupportedExtensions(): string[] {
  * Builds a universal regular expression matching any supported file path with its extension.
  */
 export function buildFileMatcherRegex(): RegExp {
-  const extensions = getAllSupportedExtensions();
-  const escapedExtensions = extensions.map(ext => ext.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-  return new RegExp(`([\\w\\-/]+\\.(?:${escapedExtensions}))`, "gi");
+  // LONGEST extension first, and nothing word-like allowed after it.
+  //
+  // Regex alternation takes the first branch that matches, so with "js" listed before "json",
+  // `package.json` matched as `package.js` — a file that does not exist. That fed a plan's
+  // "Files to modify" extraction and every path-matching feature downstream. Same trap for
+  // tsx/ts, jsx/js, yaml/yml, cpp/c and hpp/h.
+  const extensions = [...getAllSupportedExtensions()].sort(
+    (a, b) => b.length - a.length || a.localeCompare(b),
+  );
+  const escapedExtensions = extensions
+    .map((ext) => ext.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+  return new RegExp(`([\\w\\-/]+\\.(?:${escapedExtensions}))(?![\\w])`, "gi");
 }
 
 /**
