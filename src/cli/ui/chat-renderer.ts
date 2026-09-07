@@ -205,20 +205,27 @@ export class ChatRenderer {
     const wrappedLines = allWrapped.slice(winStart, winStart + MAX_INPUT_ROWS);
     const cursorRowInWindow = cursorRow - winStart;
 
-    // Active-document indicator: a dim 📄 line right above the prompt. It's part of uiLines (so the
-    // tracked line count + clearUI stay correct) and sits ABOVE the input rows, leaving the cursor
-    // math below untouched.
+    // Every fixed line is clipped to the terminal width before it goes in.
+    //
+    // `lastDrawnLinesCount` counts LOGICAL lines, and clearUI erases that many terminal ROWS. A line
+    // wider than the terminal wraps to two rows, so one row survives every redraw — which is how a
+    // long model label ("llmstudio / qwen3.8-27b-reasoning-community") turned the status bar into a
+    // wall of repeated shortcut hints marching up the screen.
+    const fixedLine = (line: string): string => fitLine(line, cols);
+
     // Sticky context bar: the one reading you want when deciding whether to /clear, kept where it
-    // cannot scroll away. Part of uiLines so the tracked line count and clearUI stay correct.
+    // cannot scroll away.
     const contextBar =
       state.contextTokens !== undefined && state.contextWindow !== undefined
         ? formatContextBar(state.contextTokens, state.contextWindow, state.modelLabel)
         : null;
-    if (contextBar) uiLines.push(contextBar);
+    if (contextBar) uiLines.push(fixedLine(contextBar));
 
+    // Active-document indicator: a dim 📄 line right above the prompt, ABOVE the input rows, so the
+    // cursor math below is untouched.
     if (state.activeDocument) {
       const docName = state.activeDocument.split("/").pop() ?? state.activeDocument;
-      uiLines.push(`\x1b[2m📄 ${docName}\x1b[0m`);
+      uiLines.push(fixedLine(`\x1b[2m📄 ${docName}\x1b[0m`));
     }
 
     // First input row carries the prompt; continuation rows are padded so text stays aligned.
