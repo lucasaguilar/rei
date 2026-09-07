@@ -72,7 +72,7 @@ alternative. These are **not** missing entries in a list:
 | Construct | Instead |
 |---|---|
 | `for`, `while`, `until`, `if`, `case`, `select`, `function` | One command per call, chained with `&&` or `\|`; or `find … -exec`; or put the loop in a script via a heredoc |
-| `$(…)`, backticks | Run the inner command, then use its output |
+| `$(…)`, backticks | Run the inner command, then use its output — or, for a multi-line commit message, `git commit -F - <<'EOF'` instead of `-m "$(cat <<'EOF' … )"` |
 | Globs the command does not expand itself | `find`, or the tool's own pattern flag |
 
 They failed in two different ways before, and the quieter one was worse: control flow hit

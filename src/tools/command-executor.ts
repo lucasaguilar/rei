@@ -447,7 +447,12 @@ function unsupportedShellFeature(segment: string): string | null {
       `ERROR: command substitution ($(…) or backticks) is not available — commands run without a ` +
       `shell, so it would be sent as literal text rather than executed.\n` +
       `Instead: run the inner command first and use its output, or do both steps in one script via ` +
-      `a heredoc, e.g.  python3 - <<'PY' … PY`
+      `a heredoc, e.g.  python3 - <<'PY' … PY\n` +
+      // The overwhelmingly common case is a multi-line commit message written as
+      // `git commit -m "$(cat <<'EOF' … EOF)"` — a heredoc wrapped in a substitution. The heredoc
+      // alone already does the job, and naming it here saves the model from retrying the same shape.
+      `For a multi-line commit message, feed the heredoc straight to git instead of wrapping it:\n` +
+      `  git commit -F - <<'EOF'\n  subject line\n\n  body…\n  EOF`
     );
   }
   return null;

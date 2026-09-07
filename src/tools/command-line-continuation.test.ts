@@ -65,3 +65,21 @@ describe("unquoted whitespace separates arguments", () => {
     expect(r.stdout).toContain("uno\ndos");
   });
 });
+
+describe("command substitution", () => {
+  it("names the multi-line commit pattern that does work", async () => {
+    // The shape models reach for is `git commit -m "$(cat <<'EOF' … EOF)"` — a heredoc wrapped in a
+    // substitution. The heredoc alone already does the job, so the refusal says so; without that
+    // the model retries the same shape.
+    const r = await executeCommand('git commit -m "$(cat msg.txt)"', ws);
+    expect(r.exitCode).toBe(-1);
+    expect(r.stderr).toContain("git commit -F -");
+  });
+
+  it("runs a heredoc fed straight to a command's stdin", async () => {
+    const r = await executeCommand("cat - <<'EOF'\nline one\n\nline two\nEOF", ws);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain("line one");
+    expect(r.stdout).toContain("line two"); // blank lines inside the body survive
+  });
+});
