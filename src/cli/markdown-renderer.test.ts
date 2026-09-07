@@ -1,5 +1,6 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { renderMarkdown } from "./markdown-renderer.js";
+import { shortenPath } from "./table-links.js";
 
 /** Visible width of a line, ignoring ANSI color codes (code points, not UTF-16 units). */
 const visibleWidth = (s: string) => [...s.replace(/\x1b\[[0-9;]*m/g, "")].length;
@@ -111,5 +112,109 @@ describe("renderMarkdown — tables fit the terminal width", () => {
     expect(out).not.toContain("COLON");
     expect(out).toContain("arrayBuffer:");
     expect(out).toContain("{buffer: x}");
+  });
+});
+
+describe("shortenPath", () => {
+  it("drops interior directories, keeping the file name whole", () => {
+    // cli-table3 cuts from the end, removing exactly the part that says WHICH file it is — and a
+    // terminal cannot resolve the truncated text as a link either.
+    expect(shortenPath("smart-forms/components/record-filters/x.component.ts", 40)).toContain(
+      "x.component.ts",
+    );
+    expect(shortenPath("smart-forms/components/record-filters/x.component.ts", 40)).toContain("…");
+  });
+
+  it("gives back a path that already fits, untouched", () => {
+    expect(shortenPath("src/a.ts", 40)).toBe("src/a.ts");
+  });
+
+  it("keeps as many leading directories as the width allows", () => {
+    const wide = shortenPath("a/b/c/d/e/file.ts", 40);
+    const narrow = shortenPath("a/b/c/d/e/file.ts", 14);
+    expect(wide.length).toBeLessThanOrEqual(40);
+    expect(narrow.length).toBeLessThanOrEqual(14);
+    // More room ⇒ more of the original prefix survives.
+    expect(wide.length).toBeGreaterThanOrEqual(narrow.length);
+    expect(narrow).toContain("file.ts");
+  });
+
+  it("keeps the extension when even the file name does not fit", () => {
+    const out = shortenPath("a/b/a-very-long-component-name.component.ts", 20);
+    expect(out.length).toBeLessThanOrEqual(20);
+    expect(out.endsWith(".ts")).toBe(true);
+  });
+
+  it("leaves something without a directory alone", () => {
+    // Not a path: there is no interior to drop, so cli-table3's own cut is the right behaviour.
+    expect(shortenPath("aVeryLongIdentifierWithNoSlashes", 10)).toBe(
+      "aVeryLongIdentifierWithNoSlashes",
+    );
+  });
+
+  it("never returns more than the width it was given", () => {
+    for (const w of [8, 12, 20, 30, 50]) {
+      expect(shortenPath("a/b/c/d/e/f/g/some-file.component.spec.ts", w).length)
+        .toBeLessThanOrEqual(w);
+    }
+  });
+});
+
+describe("file hyperlinks in tables", () => {
+  const md = (rows: string) => `| Archivo | Nota |\n|---|---|\n${rows}`;
+  const links = (out: string): string[] =>
+    // eslint-disable-next-line no-control-regex
+    [...out.matchAll(/\x1b\]8;;file:\/\/([^\x1b]*)/g)].map((m) => m[1]);
+
+  let savedFlag: string | undefined;
+  let savedWs: string | undefined;
+  beforeEach(() => {
+    savedFlag = process.env.REI_HYPERLINKS;
+    savedWs = process.env.REI_WORKSPACE_PATH;
+    process.env.REI_HYPERLINKS = "on";
+    process.env.REI_WORKSPACE_PATH = process.cwd();
+  });
+  afterEach(() => {
+    if (savedFlag === undefined) delete process.env.REI_HYPERLINKS;
+    else process.env.REI_HYPERLINKS = savedFlag;
+    if (savedWs === undefined) delete process.env.REI_WORKSPACE_PATH;
+    else process.env.REI_WORKSPACE_PATH = savedWs;
+  });
+
+  it("points a path at the real file, absolute", () => {
+    const out = withColumns(90, () => renderMarkdown(md("| package.json | ok |\n")));
+    expect(links(out)).toHaveLength(1);
+    expect(links(out)[0].endsWith("/package.json")).toBe(true);
+  });
+
+  it("links a path even when it was NOT shortened", () => {
+    // Clicking should always open the file; fitting the column is not what makes a path worth
+    // linking.
+    const out = withColumns(200, () => renderMarkdown(md("| package.json | ok |\n")));
+    expect(links(out)).toHaveLength(1);
+  });
+
+  it("leaves a path that does not exist unlinked", () => {
+    // A link to a missing file looks clickable and does nothing — worse than plain text.
+    const out = withColumns(90, () => renderMarkdown(md("| smart-forms/nope.ts | x |\n")));
+    expect(links(out)).toHaveLength(0);
+  });
+
+  it("does not break the table's alignment", () => {
+    // cli-table3 measures the escapes as content, so they are applied AFTER layout. A linked cell
+    // measured 19 columns narrower than it rendered and pulled every border out of line.
+    const out = withColumns(90, () => renderMarkdown(md("| package.json | ok |\n| README.md | ok |\n")));
+    // Compared with the escapes stripped: they occupy no columns on screen, so a row carrying a
+    // link must measure the same as one without.
+    // eslint-disable-next-line no-control-regex
+    const bare = (l: string) => l.replace(/\x1b\]8;;[^\x1b]*\x1b\\/g, "").replace(/\x1b\[[0-9;]*m/g, "");
+    const rows = tableLines(out).filter((l) => l.includes("│")).map(bare);
+    expect(new Set(rows.map((l) => l.length)).size).toBe(1);
+  });
+
+  it("emits nothing when hyperlinks are turned off", () => {
+    process.env.REI_HYPERLINKS = "off";
+    const out = withColumns(90, () => renderMarkdown(md("| package.json | ok |\n")));
+    expect(links(out)).toHaveLength(0);
   });
 });

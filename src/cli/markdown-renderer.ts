@@ -1,4 +1,5 @@
 import { diffLines } from 'diff';
+import { linkPathsInTable, shortenPath } from "./table-links.js";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
 import Table from "cli-table3";
@@ -248,11 +249,22 @@ function renderTable(this: { parser: { parseInline(tokens: unknown): string } },
       }
     }
     opts.colWidths = widths.map((w) => w + 2);
+
+    // With each column's width known, shorten any path that still does not fit — from the middle,
+    // so the file name survives. cli-table3 would cut the end, dropping what identifies the file.
+    for (const row of rows) {
+      for (let i = 0; i < row.length; i++) {
+        const cell = row[i] ?? "";
+        if (visibleWidth(cell) > widths[i] && atomicWidth(cell) > widths[i]) {
+          row[i] = shortenPath(cell, widths[i]);
+        }
+      }
+    }
   }
 
   const table = new Table(opts);
   for (const r of rows) table.push(r);
-  return "\n" + table.toString() + "\n";
+  return "\n" + linkPathsInTable(table.toString(), rows) + "\n";
 }
 
 let initialized = false;
