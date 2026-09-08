@@ -11,15 +11,104 @@ Every REI env var, how it's resolved, and its scope. Source for the `/doctor` `C
    `PREFIX ∈ {LLM_STUDIO, MTPLX, OLLAMA, GEMINI, GROQ, HF, OPENROUTER}`.
 3. **Routing** — `MODEL_PROVIDER` (primary), `AGENT_MODEL_PROVIDER` (agent override).
 
-## ⚠️ Sampling has two sources depending on the path
+## ⚠️ Precedence — read this before setting anything
+
+Three layers, and the **first one that defines a key wins**:
+
+```
+1. rei.config.json      per-model tuning        ← beats everything below
+2. <workspace>/.rei/.env   the project
+3. <install>/.env       the machine (credentials and endpoints only)
+```
+
+This order is the single most common source of "I set it and nothing happened". A value in
+`rei.config.json` silently overrides the same setting in every `.env`, so `REI_CONTEXT_WINDOW=65536`
+does nothing while the model's entry says `contextWindow: 100352`. When a setting appears not to
+apply, **check `rei.config.json` first.**
+
+## Per-model tuning — `rei.config.json`
+
+Sampling, context and thinking belong to the MODEL, not to the installation: Ornith wants a low
+temperature, a 27B reasoner wants ~1.0, and a context window that suits one is wrong for the other.
+They live in `rei.config.json` at the workspace root, keyed by model id:
+
+```json
+{
+  "providers": {
+    "llmstudio": {
+      "models": [
+        {
+          "id": "ornith-1.5-35b-a3b-mlx",
+          "contextWindow": 65536,
+          "maxTokens": 16384,
+          "temperature": 0.6,
+          "topP": 0.95,
+          "topK": 20,
+          "minP": 0.02,
+          "presencePenalty": 0.0,
+          "frequencyPenalty": 0.0,
+          "reasoningEffort": "medium"
+        }
+      ]
+    }
+  }
+}
+```
+
+| Field | What | Note |
+|---|---|---|
+| `contextWindow` | REI's trimming budget | **must match the context the model is LOADED with** in LM Studio / Ollama |
+| `maxTokens` | output cap **and** the reserve subtracted from the input budget | one value, two jobs — see below |
+| `temperature`, `topP`, `topK`, `minP` | sampling | `min_p` and `top_k` are non-standard extensions; local runtimes accept them, strict cloud endpoints may not |
+| `presencePenalty`, `frequencyPenalty`, `repetitionPenalty` | anti-repetition | pinned at `0` they silently cancel the `REI_AGENT_*_PENALTY` values from `.env` |
+| `reasoningEffort` | thinking budget | `none` / `low` / `medium` / `high` / `xhigh`, if the model honours it |
+| `thinkingLevelMap` | maps REI's levels to what the model accepts | for models that reject a level outright |
+
+The model id is matched with the org prefix stripped, so one entry covers `qwen/x`, `orcarouter/x`
+and a bare `x`.
+
+**`maxTokens` is subtracted from the input budget**, not added to the window:
+`usable input = contextWindow − maxTokens`. Raising it to leave room for a long answer takes that
+room away from the prompt.
+
+**`contextWindow` must match the loaded context.** Larger than what the backend loaded and REI sends
+more than fits; smaller and the extra KV cache is reserved and never used — which, on a machine with
+limited memory, is what produces `[metal::malloc] Resource limit exceeded`.
+
+## How files reach the model — on demand, by default
+
+REI does **not** push a map of your repository into every turn. The model discovers what it needs
+with `list_files`, `grep_code` and `read_files`, and REI injects only what it asked for.
+
+This is the default for **all three modes**, with nothing to configure. It matters most on a large
+repository, where a proactive skeleton map runs to hundreds of thousands of tokens — most of them
+never read, all of them paid for on every turn, and on a local model they crowd out the thing you
+actually asked about.
+
+| Var | What | Default |
+|---|---|---|
+| `REI_ON_DEMAND_FILE_CONTEXT_<MODE>` | per mode: `ASK`, `PLANNING`, `AGENT` | on-demand (`1`) |
+| `REI_ON_DEMAND_FILE_CONTEXT` | all modes at once, when no per-mode value is set | on-demand (`1`) |
+
+Set a mode to `0` to opt it back into the proactive map. Worth trying only with a large context
+window and a small repository; on anything else the tools win.
+
+This is also why **RAG is off by default** (`REI_ENABLE_RAG`): the two solve the same problem, and
+`grep_code` needs no index, no embeddings and no re-indexing when the code changes.
+
+## Sampling has two sources when there is no per-model entry
 
 | Path | Temperature / penalties | Source | Default |
 |---|---|---|---|
-| **Tools (agent)** | `REI_AGENT_TEMPERATURE / _FREQUENCY_PENALTY / _PRESENCE_PENALTY` | agnostic (`openai-tool-caller.ts:119`) | 0.3 |
-| **Chat / ask** | `<PREFIX>_TEMPERATURE / _FREQUENCY_PENALTY / _PRESENCE_PENALTY / _REPEAT_PENALTY` | per-provider (`openai-compatible-provider.ts:256`) | varies |
+| **Tools (agent)** | `REI_AGENT_TEMPERATURE / _FREQUENCY_PENALTY / _PRESENCE_PENALTY` | agnostic (`openai-tool-caller.ts`) | 0.3 |
+| **Chat / ask** | `<PREFIX>_TEMPERATURE / _FREQUENCY_PENALTY / _PRESENCE_PENALTY / _REPEAT_PENALTY` | per-provider (`openai-compatible-provider.ts`) | varies |
 
-Gotcha: setting only `<PREFIX>_TEMPERATURE` does **not** change agent tool-calling — that
-path reads `REI_AGENT_TEMPERATURE` (default 0.3). Set `REI_AGENT_*` to tune the agent.
+Two gotchas, in order of how often they bite:
+
+- A `rei.config.json` entry for the active model **overrides both columns**. Setting `REI_AGENT_*`
+  changes nothing while that entry exists.
+- With no per-model entry, setting only `<PREFIX>_TEMPERATURE` does not change agent tool-calling —
+  that path reads `REI_AGENT_TEMPERATURE`.
 
 ## Budget (agnostic, overrides provider)
 

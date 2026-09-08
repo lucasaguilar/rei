@@ -1,7 +1,13 @@
 # Mini-spec: per-model config (unified with RECOMMENDED_MODELS)
 
-Status: **SPEC (defined, not implemented).** Supersedes the mechanism proposals in
-`docs/local-model-configuration.md` (keep that as the raw notes / the value tables).
+Status: **IMPLEMENTED.** Per-model tuning is live — `resolveModelTuning` / `matchModel` in
+`src/config/model-tuning.ts`, consumed by `src/config/model-runtime.ts` and the providers. This file
+is kept as the design record: what the mechanism is FOR and why it beats the env.
+
+**For using it, read [config-reference.md](./config-reference.md)** — the field table, the
+precedence chain and the two settings that bite (`contextWindow` must match what the backend
+loaded; `maxTokens` is subtracted from the input budget) live there. Supersedes the mechanism
+proposals in `docs/local-model-configuration.md` (keep that as the raw notes / the value tables).
 
 ## Goal & problem
 

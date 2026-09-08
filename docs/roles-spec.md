@@ -27,7 +27,7 @@ name: auditor
 description: Adversarial Lead-Architect review of a plan/spec — finds blind spots before implementation
 baseMode: planning          # which permission profile it borrows (ask|planning|agent). Default: planning
 writeGlob: "*.review.md"    # the ONLY files it may write (read-only otherwise). Optional.
-preferredModel: gemma-4-26b-a4b   # optional hint (Phase 2) — a DIFFERENT model than the builder
+preferredModel: qwen/qwen3.6-35b-a3b   # optional hint (Phase 2) — a DIFFERENT model than the builder
 ---
 
 <the posture / system-prompt body: adversarial stance, mandatory criteria, required output structure,
@@ -86,9 +86,10 @@ multi-session + per-model on-demand + data-driven roles + one repo → real red 
    the session; `buildSystemMessage` prepends the role body + applies `baseMode` (default planning →
    read-only). Ship `prompts/roles/auditor.md` with the non-negotiables above. `/mode <name>` sugar +
    `/roles` list. — *this alone lets you TRY the auditor: `/role auditor`, ask it to review a plan.md.*
-2. **Phase 2 — preferredModel + write scope.** Honor `preferredModel` (integrates with per-model config
-   / on-demand), and enforce `writeGlob` so the auditor can persist `plan.review.md` but touch nothing
-   else. — *the "different model per role" payoff + safe review persistence.*
+2. **Phase 2 — preferredModel + write scope. DONE.** `preferredModel` becomes the turn's
+   `modelOverride` (`core/agent.ts`), and `writeGlob` narrows the write scope
+   (`tools-loop/write-scope.ts`) — it can only tighten what the base mode allows, never widen it,
+   so a role cannot grant itself agent's reach. Covered by `agent-mode/role-write-scope.test.ts`.
 3. **Phase 3 — grounding assist + more roles.** Optional: feed the target doc with line/section markers
    so citations are exact (like the ask-document chunker). Add `security.md`, `finance.md`, `legal.md`.
 
