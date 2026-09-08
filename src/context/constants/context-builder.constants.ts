@@ -38,12 +38,19 @@ export const MAX_RELEVANT_FILES_AGENT = 3;
 // Cantidad máxima de archivos sospechosos de ser relevantes a seleccionar por heurística en modos no-agente ("ask" o "planning").
 export const MAX_RELEVANT_FILES_NON_AGENT = 2;
 
-// Puntaje mínimo de similitud de coseno en la búsqueda RAG requerido para calificar una vista previa de archivo a ser inyectada.
+// Minimum cosine-similarity score a RAG hit needs before its file preview is injected.
 export const MIN_RAG_SCORE_FOR_FILE_PREVIEW = 0.4;
 
-// Determina si los archivos solo se inyectan al contexto bajo demanda explícita del usuario, configurable por modo.
-// Soporta variables específicas: REI_ON_DEMAND_FILE_CONTEXT_ASK, REI_ON_DEMAND_FILE_CONTEXT_AGENT, etc.
-// Si no están definidas, cae de vuelta a la general o a valores inteligentes predeterminados.
+/**
+ * Whether files reach the model ON DEMAND (it asks, via tools) rather than being injected up front.
+ *
+ * DEFAULT: on-demand, for every mode. The model discovers the repository with `list_files`,
+ * `grep_code` and `read_files` instead of REI pushing a proactive skeleton map into every turn —
+ * on a large repo that map runs to hundreds of thousands of tokens, and most of it is never read.
+ *
+ * Per-mode first (`REI_ON_DEMAND_FILE_CONTEXT_<MODE>`), then the general
+ * `REI_ON_DEMAND_FILE_CONTEXT`. Set a mode to 0 to opt it back into the proactive map.
+ */
 export function isOnDemandFileContextEnabled(mode: string): boolean {
   const envKey = `REI_ON_DEMAND_FILE_CONTEXT_${mode.toUpperCase()}`;
   const specificValue = process.env[envKey];
