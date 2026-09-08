@@ -364,6 +364,11 @@ export class Agent {
         resolver?.();
       };
 
+      // The active role decides what this turn may write. It was declared in the role file and
+      // previously ignored — see tools-loop/write-scope.ts.
+      const turnRole = session.activeRole
+        ? loadRole(session.activeRole, this.workspacePath)
+        : null;
       const turnPromise = executeAgentTurnWithTools({
         provider: askProvider,
         messagesForModel,
@@ -375,6 +380,8 @@ export class Agent {
         onChunk,
         userQuery: userInput,
         mode: session.mode as SkillMode,
+        // Narrows what this turn may write — see write-scope.
+        roleWriteGlob: turnRole?.writeGlob,
         elicit: options?.elicit,
       }).finally(() => {
         done = true;
