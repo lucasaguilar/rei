@@ -63,6 +63,8 @@ export async function executeAgentTurnWithTools(params: {
   userQuery?: string;
   /** Mode whose tool-permission profile + directive govern this turn. Defaults to "agent". */
   mode?: SkillMode;
+  /** An active role's `writeGlob` — narrows what this turn may write. See write-scope. */
+  roleWriteGlob?: string;
   /** ask_user elicitation; frontend-provided, else the dispatch uses the non-interactive default. */
   elicit?: ElicitFn;
   /** Sub-agent nesting depth. 0 = orchestrator (can delegate); >0 = worker (no `delegate` tool). */
@@ -81,6 +83,7 @@ export async function executeAgentTurnWithTools(params: {
     mode = "agent",
     elicit,
     depth = 0,
+    roleWriteGlob,
   } = params;
 
   if (!provider.completeChatWithTools) {
@@ -295,6 +298,7 @@ export async function executeAgentTurnWithTools(params: {
         {
           workspacePath,
           mode,
+          roleWriteGlob,
           logger,
           emitStatus,
           elicit,

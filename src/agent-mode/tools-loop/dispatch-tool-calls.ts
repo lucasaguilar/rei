@@ -36,6 +36,8 @@ export interface DispatchContext {
   workspacePath: string;
   /** Active session mode — decides which paths this turn may write to (see write-scope). */
   mode?: string;
+  /** An active role's `writeGlob`, which narrows that scope further. */
+  roleWriteGlob?: string;
   logger: AgentLogger;
   emitStatus: (msg: string) => void;
   /** Asks the user a question mid-turn (ask_user tool). Frontend-provided; defaults to the
@@ -86,6 +88,7 @@ export async function dispatchToolCalls(
   const {
     workspacePath,
     mode,
+    roleWriteGlob,
     logger,
     emitStatus,
     elicit,
@@ -253,7 +256,7 @@ export async function dispatchToolCalls(
         case "edit_file":
         case "rewrite_file":
         case "create_file": {
-          const scope = writeScopeForMode(mode);
+          const scope = writeScopeForMode(mode, roleWriteGlob);
           const target = String(args.file ?? args.path ?? "");
           if (!isWriteAllowed(target, workspacePath, scope)) {
             logger.logInfo(`[tools] write denied (${mode}): ${target}`);
