@@ -1,4 +1,17 @@
+```
+██████╗ ███████╗██╗
+██╔══██╗██╔════╝██║
+██████╔╝█████╗  ██║
+██╔══██╗██╔══╝  ██║
+██║  ██║███████╗██║
+╚═╝  ╚═╝╚══════╝╚═╝
+```
+
 # REI
+
+[![CI](https://github.com/lucasaguilar/rei/actions/workflows/ci.yml/badge.svg)](https://github.com/lucasaguilar/rei/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](package.json)
 
 **A local-first coding agent that verifies every edit against your project's real compiler.**
 
@@ -12,9 +25,18 @@ compiled.
 ## Start in under a minute
 
 ```bash
-git clone https://github.com/<you>/rei && cd rei
+curl -fsSL https://raw.githubusercontent.com/lucasaguilar/rei/main/install.sh | bash
+```
+
+<details>
+<summary>Or clone it yourself</summary>
+
+```bash
+git clone https://github.com/lucasaguilar/rei && cd rei
+npm install && npm run build
 ./install-rei-cli-local.sh
 ```
+</details>
 
 Then, from any project:
 

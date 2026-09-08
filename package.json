@@ -1,6 +1,9 @@
 {
   "name": "rei",
   "version": "0.1.0",
+  "engines": {
+    "node": ">=20"
+  },
   "description": "A personal AI agent CLI",
   "author": "Lucas Aguilar",
   "license": "MIT",

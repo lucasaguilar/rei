@@ -168,9 +168,12 @@ describe("compactSession resilience", () => {
     vi.useFakeTimers();
     process.env.COMPACTOR_TIMEOUT_MS = "50";
 
-    const provider = makeProvider(async () => {
+    const provider = makeProvider(async (): Promise<string> => {
       // Both calls hang forever — use setTimeout so fake timers can fire the timeout
       await new Promise((resolve) => setTimeout(resolve, 999_999));
+      return ""; // unreachable: the timeout always fires first. Present so the mock matches the
+      // provider's signature — without it the file was the one standing typecheck error, which is
+      // exactly the kind of "known failure" that makes a red CI easy to ignore.
     });
     const original = makeMessages();
 
