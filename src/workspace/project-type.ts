@@ -103,7 +103,16 @@ export function detectProjectType(workspacePath: string): ProjectDetection {
     command = `npx tsc -p ${tsconfigPath} --noEmit --pretty false`;
   } else if (has("package.json") || has("index.js") || has("index.mjs")) {
     type = "javascript";
-    command = "node --check index.js 2>/dev/null || echo ok";
+    // Plain JavaScript has no type checker, so this is a SYNTAX check over the files that exist —
+    // which is the strongest honest claim available for the language.
+    //
+    // It replaces `node --check index.js 2>/dev/null || echo ok`, which checked one hard-coded file
+    // that usually was not there, swallowed the error, and printed "ok". A project with a syntax
+    // error verified green. A verify command that cannot fail is worse than none: the agent takes
+    // the pass as proof and stops looking.
+    command =
+      "find . -name '*.js' -not -path './node_modules/*' -not -path './.rei/*' " +
+      "-not -path './dist/*' | head -50 | xargs -I{} node --check {}";
   } else if (
     has("Directory.Build.props") ||
     hasExt(".csproj") ||

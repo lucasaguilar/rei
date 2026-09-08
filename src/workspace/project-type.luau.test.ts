@@ -80,3 +80,32 @@ describe("Luau files are recognised as source files", () => {
     expect(exts).toContain(".lua");
   });
 });
+
+describe("a verify command must be able to fail", () => {
+  it("checks the JavaScript files that exist, not a hard-coded index.js", () => {
+    // It used to be `node --check index.js 2>/dev/null || echo ok`: one file that usually was not
+    // there, its error swallowed, and "ok" printed. A project with a syntax error verified green —
+    // and a check that cannot fail is worse than none, because the agent reads the pass as proof.
+    write("package.json", '{"name":"x"}');
+    const { type, verifyCommand } = detectProjectType(ws);
+    expect(type).toBe("javascript");
+    expect(verifyCommand).not.toContain("|| echo ok");
+    expect(verifyCommand).toContain("node --check");
+  });
+
+  it("skips node_modules, which would swamp the check", () => {
+    write("package.json", '{"name":"x"}');
+    expect(detectProjectType(ws).verifyCommand).toContain("node_modules");
+  });
+
+  it("gives an unrecognised project no verify command rather than a fake pass", () => {
+    write("notes.txt", "hello");
+    const { verifyCommand } = detectProjectType(ws);
+    expect(verifyCommand).toBe("echo ok"); // the explicit SKIP marker, reported as "not verified"
+  });
+
+  it("runs the real compiler where the language has one", () => {
+    write("go.mod", "module x");
+    expect(detectProjectType(ws).verifyCommand).toBe("go build ./...");
+  });
+});
