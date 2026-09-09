@@ -7,6 +7,7 @@ import {
   clamp,
   inputWrapWidth,
 } from "../helpers/terminal.helpers.js";
+import { moveCursorRow } from "./input-wrap.js";
 
 export class KeyboardHandler {
   public static handleKeypress(
@@ -165,13 +166,19 @@ export class KeyboardHandler {
       // Multi-line input: move the cursor UP one visual row (keeping its column) before falling
       // back to history/palette. Only when editing a fresh buffer (not mid-history, no palette) and
       // the cursor isn't already on the first row.
-      const upWidth = inputWrapWidth(state.sessionMode, state.cols);
-      if (
-        palette.length === 0 &&
-        state.historyCursor === undefined &&
-        state.inputCursor >= upWidth
-      ) {
-        state.inputCursor -= upWidth;
+      // Rows break on words, so "one row up" is not "one width back" — ask the row model, which
+      // is the same one the renderer draws from. null means there is no row above: fall through.
+      const upTarget =
+        palette.length === 0 && state.historyCursor === undefined
+          ? moveCursorRow(
+              state.inputBuffer,
+              inputWrapWidth(state.sessionMode, state.cols),
+              state.inputCursor,
+              -1,
+            )
+          : null;
+      if (upTarget !== null) {
+        state.inputCursor = upTarget;
         actions.draw();
         return;
       }
@@ -215,18 +222,17 @@ export class KeyboardHandler {
 
     if (key.name === "down") {
       // Multi-line input: move the cursor DOWN one visual row before falling back to history/palette.
-      const downWidth = inputWrapWidth(state.sessionMode, state.cols);
-      const cursorRow = Math.floor(state.inputCursor / downWidth);
-      const lastRow = Math.floor(state.inputBuffer.length / downWidth);
-      if (
-        palette.length === 0 &&
-        state.historyCursor === undefined &&
-        cursorRow < lastRow
-      ) {
-        state.inputCursor = Math.min(
-          state.inputBuffer.length,
-          state.inputCursor + downWidth,
-        );
+      const downTarget =
+        palette.length === 0 && state.historyCursor === undefined
+          ? moveCursorRow(
+              state.inputBuffer,
+              inputWrapWidth(state.sessionMode, state.cols),
+              state.inputCursor,
+              1,
+            )
+          : null;
+      if (downTarget !== null) {
+        state.inputCursor = downTarget;
         actions.draw();
         return;
       }

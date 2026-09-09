@@ -7,6 +7,7 @@ import {
 } from "../models/chat.types.js";
 import {
   MODE_PROMPTS,
+  continuationPrompt,
   SPINNER_FRAMES,
   formatStatusLine,
   THINKING_TEXT,
@@ -17,25 +18,10 @@ import {
   padRight,
   fitLine,
   visibleLength,
-  takeVisible,
 } from "../helpers/terminal.helpers.js";
+import { wrapInput, cursorRowCol, InputRow } from "./input-wrap.js";
 import { TurnStatus } from "../../core/models/agent.types.js";
 import { SessionMode } from "../../chat/types.js";
-
-/** Split text into fixed-width visual chunks, respecting ANSI escapes. */
-function splitByVisibleWidth(text: string, width: number): string[] {
-  if (!text || visibleLength(text) <= width) return [text];
-  const lines: string[] = [];
-  let remaining = text;
-  while (remaining.length > 0 && visibleLength(remaining) > 0) {
-    // takeVisible returns the longest prefix whose visual length ≤ width.
-    const chunk = takeVisible(remaining, width);
-    if (!chunk || visibleLength(chunk) === 0) break;
-    lines.push(chunk);
-    remaining = remaining.slice(chunk.length);
-  }
-  return lines;
-}
 
 export class ChatRenderer {
   private static lastDrawnLinesCount = 0;
@@ -182,28 +168,27 @@ export class ChatRenderer {
     this.clearUI(currentCols);
     this.lastDrawnCols = currentCols;
 
-    // Render newlines (from a multi-line paste) as a dim ↵ glyph inline. Each is one visible
-    // column, so the whole input is a flat sequence of columns for wrapping + cursor math.
-    const visibleInput = state.inputBuffer.replace(/\n/g, "\x1b[90m↵\x1b[0m");
-
     // Wrap the input into visual rows of inputInnerWidth. THIS is the feature: a line that reaches
     // the right edge continues on the row below as you type, instead of scrolling horizontally.
-    const allWrapped = splitByVisibleWidth(visibleInput, inputInnerWidth);
-
-    // Cursor 2D position — every raw buffer char (incl. \n→↵) occupies exactly one visible column,
-    // so the cursor's visible position equals its raw index and wrapping is a pure width divide.
-    const cursorRow = Math.floor(state.inputCursor / inputInnerWidth);
-    const cursorCol = state.inputCursor % inputInnerWidth;
+    // Rows break on words, so they are no longer all the same width and the cursor cannot be placed
+    // by dividing — input-wrap.ts owns both, which is what keeps them agreeing.
+    const allRows = wrapInput(state.inputBuffer, inputInnerWidth);
+    const { row: cursorRow, col: cursorCol } = cursorRowCol(allRows, state.inputCursor);
 
     // Vertical cap: keep the input box bounded. Show at most MAX_INPUT_ROWS rows as a window that
     // always keeps the cursor's row visible, so a very long / pasted prompt stays usable.
     const MAX_INPUT_ROWS = 8;
     const winStart =
-      allWrapped.length > MAX_INPUT_ROWS
-        ? clamp(cursorRow - (MAX_INPUT_ROWS - 1), 0, allWrapped.length - MAX_INPUT_ROWS)
+      allRows.length > MAX_INPUT_ROWS
+        ? clamp(cursorRow - (MAX_INPUT_ROWS - 1), 0, allRows.length - MAX_INPUT_ROWS)
         : 0;
-    const wrappedLines = allWrapped.slice(winStart, winStart + MAX_INPUT_ROWS);
+    const visibleRows = allRows.slice(winStart, winStart + MAX_INPUT_ROWS);
     const cursorRowInWindow = cursorRow - winStart;
+
+    // Newlines (from a multi-line paste) are drawn as a dim ↵ glyph: one column, so a row's drawn
+    // width still equals the length of the slice it came from.
+    const rowText = (r: InputRow): string =>
+      state.inputBuffer.slice(r.start, r.end).replace(/\n/g, "\x1b[90m↵\x1b[0m");
 
     // Every fixed line is clipped to the terminal width before it goes in.
     //
@@ -228,10 +213,14 @@ export class ChatRenderer {
       uiLines.push(fixedLine(`\x1b[2m📄 ${docName}\x1b[0m`));
     }
 
-    // First input row carries the prompt; continuation rows are padded so text stays aligned.
-    uiLines.push(`${promptText}${wrappedLines[0] ?? ""}`);
-    for (let i = 1; i < wrappedLines.length; i++) {
-      uiLines.push(`${" ".repeat(promptLen)}${wrappedLines[i]}`);
+    // First input row carries the prompt; continuation rows carry a dim ⋮ of the SAME width, so the
+    // input reads as one block that is still visibly the input. MODE_PROMPTS share one width for
+    // this reason: an indent that changed with the mode made the block jump sideways on every
+    // /mode.
+    const contPrompt = continuationPrompt(promptLen);
+    uiLines.push(`${promptText}${visibleRows[0] ? rowText(visibleRows[0]) : ""}`);
+    for (let i = 1; i < visibleRows.length; i++) {
+      uiLines.push(`${contPrompt}${rowText(visibleRows[i])}`);
     }
 
     process.stdout.write("\x1b[?25l"); // hide cursor while drawing
@@ -242,7 +231,7 @@ export class ChatRenderer {
     // The terminal cursor now sits at the end of the last drawn row. Move it UP to the cursor's
     // input row, then to its absolute column (prompt on row 0 and padding on the rest both offset
     // the input text by promptLen columns).
-    const rowsUp = wrappedLines.length - 1 - cursorRowInWindow;
+    const rowsUp = visibleRows.length - 1 - cursorRowInWindow;
     if (rowsUp > 0) process.stdout.write(`\x1b[${rowsUp}A`);
     const cursorColumn = promptLen + cursorCol + 1; // 1-based terminal column
     process.stdout.write(`\x1b[${cursorColumn}G\x1b[?25h`);
