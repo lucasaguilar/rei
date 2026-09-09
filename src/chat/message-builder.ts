@@ -111,10 +111,33 @@ function demoteOldAssistantProse(
  * @param mode - The active session mode; controls how many history turns to keep.
  * @returns A new array: the system message (if any) followed by the last N non-system messages.
  */
+/**
+ * Trims one message to fit a token budget, keeping the head AND the tail.
+ *
+ * The interesting part of a long file or a build log is at both ends — the imports and the error —
+ * so a middle-out cut preserves more meaning than a head cut, and the marker says how much went.
+ */
+function clampToBudget(msg: ChatMessage, budgetTokens: number): ChatMessage {
+  const maxChars = Math.max(2000, budgetTokens * 4);
+  if (!msg.content || msg.content.length <= maxChars) return msg;
+  const half = Math.floor(maxChars / 2);
+  const dropped = msg.content.length - maxChars;
+  return {
+    ...msg,
+    content:
+      msg.content.slice(0, half) +
+      `\n\n… [${dropped.toLocaleString("en-US")} characters trimmed to fit the context window] …\n\n` +
+      msg.content.slice(-half),
+  };
+}
+
 export function buildMessagesForModel(
   messages: ChatMessage[],
   mode: SessionMode = "ask",
   editFormat?: AgentEditFormat,
+  /** Tokens the request costs BEFORE any message — the `tools` array. The system prompt is counted
+   *  from `messages[0]`; the tools schema is not visible here, so the caller measures it. */
+  toolsOverheadTokens = 0,
 ): ChatMessage[] {
   const systemMessage =
     messages.length > 0 && messages[0].role === "system"
@@ -175,17 +198,32 @@ export function buildMessagesForModel(
   // big-local models → "I don't remember what we were doing"). Reserve room for output;
   // when the window is unknown (0 = no-trim, e.g. cloud) keep a large amount.
   const ctxWindow = getContextWindow();
+  // The budget must pay for everything the request carries, not just the history. The system prompt
+  // and the tools schema are ~5.6k tokens in agent mode and were counted by nobody, so a session
+  // that fit "on budget" still went over the window — measured at 37,472 sent against a 32,768
+  // window, with the trimmer reporting itself within budget.
+  const systemTokens = systemMessage ? estimateTokens(systemMessage.content) : 0;
+  const fixedOverhead = systemTokens + toolsOverheadTokens;
   const MAX_TOKEN_BUDGET =
     ctxWindow > 0
-      ? Math.max(8000, Math.floor((ctxWindow - getMaxOutputTokens()) * 0.85))
+      ? Math.max(
+          2000,
+          Math.floor((ctxWindow - getMaxOutputTokens() - fixedOverhead) * 0.85),
+        )
       : 100000;
   let accumulatedTokens = 0;
   const budgetedMessages: ChatMessage[] = [];
 
-  // We always want to keep the latest message (which is the current user prompt)
+  // The latest message is always kept — it is the current turn. But it is no longer kept WHOLE at
+  // any size: in agent mode each tool result becomes a message, so one `read_files` of a large file
+  // could exceed the whole budget by itself and sail through unchecked. It is clamped instead, with
+  // the cut announced so the model knows something is missing rather than reasoning over a
+  // silently-truncated file.
   if (tieredNonSystemMessages.length > 0) {
-    const latestMsg =
-      tieredNonSystemMessages[tieredNonSystemMessages.length - 1];
+    const latestMsg = clampToBudget(
+      tieredNonSystemMessages[tieredNonSystemMessages.length - 1],
+      MAX_TOKEN_BUDGET,
+    );
     budgetedMessages.unshift(latestMsg);
     accumulatedTokens += estimateTokens(latestMsg.content);
 

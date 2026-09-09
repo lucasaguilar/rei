@@ -143,7 +143,12 @@ export async function compactSession(params: {
 /**
  * Checks if a session needs compacting.
  */
-export function needsCompaction(messages: ChatMessage[]): boolean {
+export function needsCompaction(
+  messages: ChatMessage[],
+  /** Tokens the request costs before any message — system prompt and tools schema. Counting only
+   *  the messages meant compaction waited for a threshold the request had already blown past. */
+  fixedOverheadTokens = 0,
+): boolean {
   const nonSystem = messages.filter((m) => m.role !== "system");
   if (nonSystem.length <= COMPACT_MIN_MSGS) return false;
 
@@ -153,7 +158,8 @@ export function needsCompaction(messages: ChatMessage[]): boolean {
     // by tokens — only the hard message cap guards against unbounded growth.
     return nonSystem.length > COMPACT_MSG_HARD_CAP;
   }
-  const tokens = estimateTokens(messages.map((m) => m.content).join("\n"));
+  const tokens =
+    estimateTokens(messages.map((m) => m.content).join("\n")) + fixedOverheadTokens;
   const usable = Math.max(1, window - getMaxOutputTokens());
   return tokens > usable * COMPACT_TOKEN_FRACTION;
 }

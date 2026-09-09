@@ -171,12 +171,20 @@ export class Agent {
       userInput,
       options?.onStatus,
     );
-    await this.compactSessionIfNeeded(session, options?.onStatus);
+    await this.compactSessionIfNeeded(
+      session,
+      options?.onStatus,
+      this.estimateActiveToolsTokens(session.mode),
+    );
 
+    // The tools schema costs ~2.3k tokens in agent mode and is invisible to the message builder,
+    // which was budgeting against a window it only partly accounted for.
+    const toolsOverhead = this.estimateActiveToolsTokens(session.mode);
     const baseMessagesForModel = buildMessagesForModel(
       session.messages,
       session.mode,
       session.mode === "agent" ? getAgentEditFormat() : undefined,
+      toolsOverhead,
     );
     const messagesForModel = this.injectCurrentTurnContext(
       baseMessagesForModel,
@@ -716,8 +724,10 @@ export class Agent {
   private async compactSessionIfNeeded(
     session: ChatSession,
     onStatus?: StreamTurnOptions["onStatus"],
+    /** System prompt + tools — the part of the window compaction was not counting. */
+    fixedOverheadTokens = 0,
   ): Promise<void> {
-    if (!needsCompaction(session.messages)) {
+    if (!needsCompaction(session.messages, fixedOverheadTokens)) {
       return;
     }
 
