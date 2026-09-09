@@ -27,11 +27,33 @@ export function getHelpText(): string {
   );
 }
 
+/**
+ * The prompts are padded to ONE common width (11 columns: emoji, space, mode padded to 5, " » ").
+ *
+ * The renderer indents wrapped input rows by the prompt's width so the text reads as one block. With
+ * prompts of 9, 10 and 11 columns that indent changed with the mode, and the whole input block
+ * shifted sideways on every /mode — which reads as a rendering glitch, not as a mode change.
+ */
 export const MODE_PROMPTS: Record<SessionMode, string> = {
-  ask: "🚀 ask » ",
-  planning: "🎯 plan » ",
+  ask: "🚀 ask   » ",
+  planning: "🎯 plan  » ",
   agent: "🧠 agent » ",
 };
+
+/**
+ * What a wrapped input row shows where the prompt would be: a dim ⋮ sitting under the prompt's »,
+ * so a long prompt reads as one input continuing rather than as a stray indented paragraph.
+ *
+ * It is exactly as wide as the prompt it continues, and that is load-bearing, not tidiness. The
+ * renderer indents continuation rows by the prompt width and places the terminal cursor at
+ * `promptLen + col`; a gutter of any other width would put the text in one column and the cursor
+ * in another.
+ */
+export function continuationPrompt(promptWidth: number): string {
+  // Below two columns there is no room for the marker and its trailing space — pad and move on.
+  if (promptWidth < 2) return " ".repeat(Math.max(0, promptWidth));
+  return `${" ".repeat(promptWidth - 2)}\x1b[90m⋮\x1b[0m `;
+}
 
 /** What each phase is called on the status line. Lowercase and short: it sits under a wall of tool
  *  lines and should read as a state, not as an announcement. */
