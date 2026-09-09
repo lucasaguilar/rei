@@ -32,6 +32,26 @@ export function isExplicitContentRequest(userInput: string): boolean {
   return EXPLICIT_CONTENT_REQUEST_PATTERN.test(lower);
 }
 
+/**
+ * Directories that exist in a repository without describing it.
+ *
+ * The cost is trivial — four tokens for "node_modules" — but the signal is not: listing build
+ * output and dependencies as part of the project's shape invites the model to go looking there.
+ * `bin`, `docs`, `prompts`, `src` say what this repo IS; these say what a build left behind.
+ */
+const NON_STRUCTURAL_DIRS = new Set([
+  "node_modules",
+  "dist",
+  "build",
+  "out",
+  "target", // rust / java
+  "vendor", // php / go
+  "coverage",
+  "__pycache__",
+  ".venv",
+  "venv",
+]);
+
 export async function buildRepoSummary(params: {
   workspacePath: string;
   fileCount: number;
@@ -52,7 +72,11 @@ export async function buildRepoSummary(params: {
       withFileTypes: true,
     });
     for (const entry of entries) {
-      if (entry.isDirectory() && !entry.name.startsWith(".")) {
+      if (
+        entry.isDirectory() &&
+        !entry.name.startsWith(".") &&
+        !NON_STRUCTURAL_DIRS.has(entry.name)
+      ) {
         topLevelDirs.push(entry.name);
       }
     }
