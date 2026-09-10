@@ -50,6 +50,7 @@ export interface ChatRendererState {
   /** Path of the active /ask-document target, shown as a 📄 indicator above the prompt. */
   activeDocument?: string;
   activeRole?: string;
+  manualModel?: string;
 }
 
 export interface ChatUIState {
@@ -88,6 +89,7 @@ export interface ChatUIState {
   sessionMode: string; // SessionMode — kept in sync each draw so key handling knows the prompt width
   activeDocument?: string; // synced from session each draw (see run-chat draw())
   activeRole?: string; // idem — a role changes mode, write scope AND model, so it must be visible
+  manualModel?: string; // set by /model: the role is active but not running on ITS model
 }
 
 export interface KeyboardActions {

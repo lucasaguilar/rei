@@ -210,7 +210,11 @@ export class ChatRenderer {
     // the prompt shows you are in `plan` while nothing says WHY — and a forgotten role is a session
     // quietly running under someone else's rules. Same slot as the document line below.
     if (state.activeRole) {
-      uiLines.push(fixedLine(`\x1b[2m🎭 ${state.activeRole}\x1b[0m`));
+      // A manual /model outranks the role's preferredModel, so the role is active while NOT running
+      // on its own model. The context bar names the model; this says why it is not the role's —
+      // between the two there is nothing left to ask.
+      const overridden = state.manualModel ? " \x1b[33m· model overridden\x1b[0m\x1b[2m" : "";
+      uiLines.push(fixedLine(`\x1b[2m🎭 ${state.activeRole}${overridden}\x1b[0m`));
     }
 
     // Active-document indicator: a dim 📄 line right above the prompt, ABOVE the input rows, so the

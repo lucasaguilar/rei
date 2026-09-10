@@ -71,3 +71,32 @@ describe("the active role is visible in the sticky block", () => {
     for (const line of out.split("\r\n")) expect(line.length).toBeLessThanOrEqual(40);
   });
 });
+
+/**
+ * A manual `/model` outranks the role's `preferredModel`, so the role can be active while NOT
+ * running on its own model. The context bar names the model that runs; without this marker there
+ * is nothing on screen explaining why it is not the one `/roles` advertises for that role.
+ */
+describe("the indicator shows when the role's model was overridden", () => {
+  it("marks the role when a manual model is set", () => {
+    expect(draw({ activeRole: "auditor", manualModel: "other-model" })).toContain("overridden");
+  });
+
+  it("stays quiet when the role runs on its own model", () => {
+    expect(draw({ activeRole: "auditor" })).not.toContain("overridden");
+  });
+
+  it("still names the role", () => {
+    expect(draw({ activeRole: "auditor", manualModel: "other" })).toContain("🎭 auditor");
+  });
+
+  it("says nothing at all with no role, even with a manual model", () => {
+    // /model without a role is ordinary configuration, not an override of anything.
+    expect(draw({ manualModel: "other" })).not.toContain("🎭");
+  });
+
+  it("still fits the terminal width", () => {
+    const out = draw({ activeRole: "x".repeat(80), manualModel: "y", cols: 40 });
+    for (const line of out.split("\r\n")) expect(line.length).toBeLessThanOrEqual(40);
+  });
+});

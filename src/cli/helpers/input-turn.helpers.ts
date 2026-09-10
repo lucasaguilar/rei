@@ -35,7 +35,7 @@ function stripAnsiKeepingFences(text: string): string {
  * (e.g. 🦙 for Ollama, 🧠 for OpenRouter, ⚡ for Groq, ♊ for Gemini, 💻 for LM Studio).
  * Supports dedicated agent provider resolution in multi-provider environments.
  */
-export function resolveActiveModelLabel(mode?: string): string {
+export function resolveActiveModelLabel(mode?: string, actualModel?: string): string {
   const isAgentMode = mode === "agent";
   const agentProvider = process.env.AGENT_MODEL_PROVIDER?.trim().toLowerCase();
 
@@ -44,10 +44,11 @@ export function resolveActiveModelLabel(mode?: string): string {
       ? agentProvider
       : (process.env.MODEL_PROVIDER ?? "").trim().toLowerCase();
 
-  // Use the same resolver the agent uses so the label always matches the model that
-  // actually runs (ask/planning → <PROVIDER>_MODEL, agent → <PROVIDER>_MODEL_AGENT).
+  // `actualModel` is what the turn REPORTED running on, and it wins: an active role's
+  // preferredModel changes the model without changing the mode, so re-deriving from the mode
+  // named the wrong one. The resolver is the fallback for before any turn has run (startup gauge).
   const modelName =
-    resolveModelForMode((mode as SessionMode) ?? "ask") ?? "default";
+    actualModel || resolveModelForMode((mode as SessionMode) ?? "ask") || "default";
 
   const emoji: Record<string, string> = {
     ollama: "🦙",
@@ -356,7 +357,7 @@ export async function handleInputTurn(
       value > 0 && value < 0.1 ? "<0.1" : value.toFixed(1);
     const speedText = `${formatSpeed(speedValue)} tok/s`;
 
-    const activeModel = resolveActiveModelLabel(session.mode);
+    const activeModel = resolveActiveModelLabel(session.mode, agent.getLastTurnModel());
 
     // Visual context-usage gauge: how much of the assumed window the prompt consumed this turn.
     // Helps spot when history/files are about to overflow (and explains slow prefill).

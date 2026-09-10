@@ -64,4 +64,15 @@ export interface ChatSession {
    * survive a session reload, so neither should the mode it displaced.
    */
   rolePreviousMode?: SessionMode;
+  /**
+   * A model chosen by hand with `/model`, which outranks an active role's `preferredModel`.
+   *
+   * The rule is **the most recent explicit choice wins**: activating a role and typing `/model` are
+   * both deliberate, so ordering them by recency is the only rule that never surprises. Cleared
+   * when a role is activated — that is a new decision about the model — so `/role X` always returns
+   * you to X's model. In-memory, like `activeRole`.
+   *
+   * Without it, `/model` reported success and changed nothing while a role was active.
+   */
+  manualModel?: string;
 }

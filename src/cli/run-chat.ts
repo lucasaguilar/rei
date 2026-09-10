@@ -14,6 +14,7 @@ import {
 import { clamp } from "./helpers/terminal.helpers.js";
 import {
   buildPaletteSources,
+  sessionIndicators,
   displayUserLabel,
 } from "./helpers/chat.helpers.js";
 import {
@@ -98,8 +99,7 @@ export async function runChat(
     cols: process.stdout.columns || 80,
     rows: process.stdout.rows || 24,
     sessionMode: session.mode,
-    activeDocument: session.activeDocument,
-    activeRole: session.activeRole,
+    ...sessionIndicators(session),
   };
 
   let exitResolve!: () => void;
@@ -161,8 +161,7 @@ export async function runChat(
 
     // Keep keyboard mode, document and role current (Up/Down prompt width, sticky indicators).
     state.sessionMode = session.mode;
-    state.activeDocument = session.activeDocument;
-    state.activeRole = session.activeRole;
+    Object.assign(state, sessionIndicators(session));
 
     const renderState: ChatRendererState = {
       cols: process.stdout.columns || 80,
@@ -184,8 +183,7 @@ export async function runChat(
       sessionMode: session.mode,
       inputBuffer: state.inputBuffer,
       inputCursor: state.inputCursor,
-      activeDocument: session.activeDocument,
-      activeRole: session.activeRole,
+      ...sessionIndicators(session),
     };
 
     const paletteItems = renderState.activePalette.items; // selectedCommandIndex adjusted by draw

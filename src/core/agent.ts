@@ -104,10 +104,23 @@ export class Agent {
    *  calls). The CLI reads it after the stream ends to show REAL token counts instead of the
    *  chars/4 estimate. Reset at each turn start; undefined when the provider doesn't report usage. */
   private lastTurnUsage?: TokenUsage;
+  /**
+   * The model the last turn actually ran on — reported, not re-derived.
+   *
+   * The status bar used to work it out again from the session mode, which was correct until a role
+   * with a `preferredModel` could change it: the turn ran on the role's model while the bar named
+   * the session's. Two derivations of one fact drift; one fact reported does not.
+   */
+  private lastTurnModel?: string;
 
   /** Backend-reported token counts for the last turn, when available (else undefined → estimate). */
   getLastTurnUsage(): TokenUsage | undefined {
     return this.lastTurnUsage;
+  }
+
+  /** The model the last turn ran on (a role's `preferredModel` when one was active). */
+  getLastTurnModel(): string | undefined {
+    return this.lastTurnModel;
   }
   /** Registry of connected MCP servers — populated lazily via connectMcp(). */
   public readonly mcpRegistry: McpRegistry;
@@ -161,11 +174,22 @@ export class Agent {
     this.currentTurnId = this.logger.getTurnId();
     // A new turn starts with no backend-reported usage — the provider may not report any.
     this.lastTurnUsage = undefined;
+    // An active role may prefer a DIFFERENT model than the session's — a reviewer you want a second
+    // opinion from. Resolved here, before the tuning, because the two must agree: picking the
+    // model without picking its rei.config.json entry runs it on the other model's sampling,
+    // context window and thinking level.
+    const turnRole = session.activeRole
+      ? loadRole(session.activeRole, this.workspacePath)
+      : null;
+    // Most recent explicit choice first: `/model` (this session) beats the role's preference,
+    // which beats the mode's configured model. See ChatSession.manualModel.
+    const turnModel =
+      session.manualModel || turnRole?.preferredModel || resolveModelForMode(session.mode);
+    this.lastTurnModel = turnModel; // what the status bar reports, so it cannot disagree
+
     // Resolve this turn's per-model tuning (rei.config.json) ONCE; the config resolvers
     // (getContextWindow / resolveAgentSampling / reasoning_effort) read it. See model-config-spec.md.
-    setActiveModelTuning(
-      resolveModelTuning(resolveModelForMode(session.mode), this.workspacePath),
-    );
+    setActiveModelTuning(resolveModelTuning(turnModel, this.workspacePath));
     const enrichedUserMessage = await this.prepareSessionForTurn(
       session,
       userInput,
@@ -229,11 +253,16 @@ export class Agent {
         messagesForModel,
         workspacePath: this.workspacePath,
         logger: this.logger,
-        modelOverride: resolveModelForMode("agent"),
+        // Same two role fields as the ask/planning branch below. They were missing here, so a
+        // role with `baseMode: agent` — the ones that actually edit code — ran on the session's
+        // model and with NO write restriction at all, while `/roles` and the status bar both
+        // reported the role's. The two branches must stay in step; a meta-test now checks that.
+        modelOverride: turnModel,
         reasoningEffort: resolveReasoningEffort("agent"),
         mcpRegistry: this.mcpRegistry,
         onChunk,
         userQuery: userInput,
+        roleWriteGlob: turnRole?.writeGlob,
         elicit: options?.elicit,
       }).finally(() => {
         done = true;
@@ -372,17 +401,13 @@ export class Agent {
         resolver?.();
       };
 
-      // The active role decides what this turn may write. It was declared in the role file and
-      // previously ignored — see tools-loop/write-scope.ts.
-      const turnRole = session.activeRole
-        ? loadRole(session.activeRole, this.workspacePath)
-        : null;
       const turnPromise = executeAgentTurnWithTools({
         provider: askProvider,
         messagesForModel,
         workspacePath: this.workspacePath,
         logger: this.logger,
-        modelOverride: resolveModelForMode(session.mode),
+        // The role's preferredModel when one is active — resolved above, together with its tuning.
+        modelOverride: turnModel,
         reasoningEffort: resolveReasoningEffort(session.mode),
         mcpRegistry: this.mcpRegistry,
         onChunk,
