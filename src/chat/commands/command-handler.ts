@@ -36,8 +36,16 @@ export interface LiveStatusEvent {
 
 /** A self-contained command, or a group of related commands. */
 export interface CommandHandler {
-  /** True when this handler owns the input. MUST be exact to stay behavior-preserving — an input
-   *  it doesn't fully own should return false so it falls through to the legacy dispatcher. */
-  match(command: string): boolean;
+  /**
+   * True when this handler owns the input. MUST be exact — an input it doesn't fully own should
+   * return false so the next handler gets it.
+   *
+   * `ctx` is OPTIONAL, and passed for handlers whose command set is DATA rather than code:
+   * `/auditor` is a command only because a role by that name exists on disk, which cannot be known
+   * from the string alone. It is optional so that matching on the string stays the norm and every
+   * caller that has no context — the handlers' own tests — keeps working; a handler that needs it
+   * must therefore say what it does without it.
+   */
+  match(command: string, ctx?: CommandContext): boolean;
   run(ctx: CommandContext): Promise<CommandResult> | CommandResult;
 }

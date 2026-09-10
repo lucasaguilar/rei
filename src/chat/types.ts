@@ -55,4 +55,13 @@ export interface ChatSession {
   /** Active data-driven role (e.g. "auditor") — a posture layered on `mode`, loaded from
    *  prompts/roles/<name>.md. Its body is injected into the system prompt. See docs/roles-spec.md. */
   activeRole?: string;
+  /**
+   * The mode you were in before a role took over, so `/role off` puts you back.
+   *
+   * A role adopts its own `baseMode`, so activating one silently moved you (agent → planning) and
+   * leaving it left you there — with `/role off` reporting "back to the plain mode", which reads
+   * as if it had returned you where you started. In-memory like `activeRole`: a role does not
+   * survive a session reload, so neither should the mode it displaced.
+   */
+  rolePreviousMode?: SessionMode;
 }

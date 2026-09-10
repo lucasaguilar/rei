@@ -14,6 +14,7 @@ import { sddCommands } from "./sdd-commands.js";
 import { activeCommands } from "./active-commands.js";
 import { traceCommands } from "./trace-commands.js";
 import { verboseCommands } from "./verbose-commands.js";
+import { roleAgentCommands } from "./role-agent-commands.js";
 
 /**
  * The command registry. Commands are migrated out of menu-command-processor's big if/else into
@@ -37,6 +38,10 @@ const COMMAND_HANDLERS = [
   activeCommands,
   traceCommands,
   verboseCommands,
+  // LAST on purpose: it matches `/<role-name>`, which is whatever is on disk. Every static command
+  // above therefore wins a name collision, and a role that shadows one simply never fires — which
+  // `/roles` reports rather than leaving you to wonder.
+  roleAgentCommands,
 ];
 
 /**
@@ -50,7 +55,7 @@ export async function dispatchCommand(
   ctx: CommandContext,
 ): Promise<CommandResult | null> {
   for (const handler of COMMAND_HANDLERS) {
-    if (handler.match(ctx.command)) {
+    if (handler.match(ctx.command, ctx)) {
       try {
         return await handler.run(ctx);
       } catch (err) {
