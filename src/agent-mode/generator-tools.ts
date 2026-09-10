@@ -6,6 +6,8 @@ import { mergeTurnUsage } from "../providers/token-usage.js";
 import type { AgentLogger } from "../core/logger.js";
 import type { McpRegistry } from "../tools/mcp/mcp-registry.js";
 import { mcpToolsToDefinitions } from "../contracts/tool-definitions.js";
+import { retainAndMaybeSpill } from "./tools-loop/tool-output-store.js";
+import { pruneSupersededReads } from "./tools-loop/prune-superseded-reads.js";
 import { startStepSpan } from "../telemetry/spans.js";
 import { getMaxTurns } from "../config/model-runtime.js";
 import {
@@ -44,6 +46,25 @@ export { withNativeToolsDirective };
  * Executes an agent turn using native function/tool calling instead of XML parsing.
  * Returns the same ExecutionResult shape as the XML generator so callers are interchangeable.
  */
+/**
+ * Tools whose result is NOT spilled, each for a reason — the exemption is the exception, so a tool
+ * added tomorrow is protected by default rather than forgotten.
+ *
+ * `read_files` already pages: the model passed an explicit offset/limit and is told when there is
+ * more, so a second truncation on top would cut what it deliberately asked for. `use_skill` returns
+ * a recipe that only works whole. The rest are already short by construction — an answer, a
+ * summary, a receipt — and spilling a receipt produces a receipt for a receipt.
+ */
+const SPILL_EXEMPT = new Set([
+  "read_files",
+  "use_skill",
+  "ask_user",
+  "delegate",
+  "save_tool_output",
+]);
+
+const spillExempt = (toolName: string): boolean => SPILL_EXEMPT.has(toolName);
+
 export async function executeAgentTurnWithTools(params: {
   provider: ModelProvider;
   messagesForModel: ChatMessage[];
@@ -350,17 +371,35 @@ export async function executeAgentTurnWithTools(params: {
       consecutiveSearchMismatchFailures = batch.mismatchStreak;
       const mismatchEscalation = batch.mismatchEscalation;
 
-      // Feed back all tool results to model history in correct chronological order
+      // Feed back all tool results to model history in correct chronological order.
+      //
+      // This is the ONE point where a tool's bytes enter the model's context, so it is where the
+      // context budget is enforced: anything over the inline limit is written to disk and replaced
+      // by a receipt naming the path, the id and exactly how much was omitted. It used to be done
+      // per-tool, in the MCP branch only — so `run_command` put a 24k build log into the window
+      // while a 3k MCP fetch was spilled, and every tool added later inherited the wrong default.
+      //
+      // Spilling here also bounds the RE-SEND cost: results stay in `currentMessages` and go back
+      // to the model on every subsequent call of the turn, so an unspilled 6k result is not paid
+      // once, it is paid once per remaining step.
       for (const call of result.toolCalls) {
         const res =
           toolResultsMap.get(call.id) ?? "ERROR: Tool execution failed";
         currentMessages.push({
           role: "tool",
-          content: res,
+          content: spillExempt(call.function.name)
+            ? res
+            : retainAndMaybeSpill(call.function.name, res),
           tool_call_id: call.id,
           name: call.function.name,
         });
       }
+
+      // Read the same file twice in a turn and the first copy is dead weight that still ships on
+      // every remaining model call. Dropping it here — after the new results land, so the newest
+      // copy is the one that survives — is the difference between paying for a file once and
+      // paying for it once per step. Only exact duplicates go; see prune-superseded-reads.
+      currentMessages = pruneSupersededReads(currentMessages);
 
       // Escalation against the SR mismatch death-loop.
       if (mismatchEscalation) {

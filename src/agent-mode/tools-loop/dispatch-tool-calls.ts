@@ -14,7 +14,6 @@ import {
   handleGitChanges,
   handleSaveToolOutput,
 } from "./builtin-handlers.js";
-import { retainAndMaybeSpill } from "./tool-output-store.js";
 import { isWriteAllowed, writeDeniedMessage, writeScopeForMode } from "./write-scope.js";
 import { grepCode, listFiles } from "../../tools/code-search.js";
 import { nonInteractiveElicit, type ElicitFn } from "../../chat/elicitation.js";
@@ -345,14 +344,7 @@ export async function dispatchToolCalls(
             const qualifiedName = fromWireToolName(call.function.name.slice(4));
             logger.logInfo(`[tools] mcp: ${qualifiedName}`);
             emitStatus(`🔧  [REI] Tool: ${qualifiedName}`);
-            // Retain the full result + spill large ones to disk, returning a short receipt to the
-            // model (control plane) instead of the raw bytes (data plane). Prevents a backend like
-            // MTPLX from truncating a big fetched document out of the model's view.
-            toolResult = retainAndMaybeSpill(
-              qualifiedName,
-              await mcpRegistry.dispatch(qualifiedName, args),
-              workspacePath,
-            );
+            toolResult = await mcpRegistry.dispatch(qualifiedName, args);
           } else {
             toolResult = `ERROR: Unknown tool "${call.function.name}"`;
             hasToolFailure = true;
