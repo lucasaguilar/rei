@@ -432,8 +432,47 @@ interface PreparedCommand {
  * Both now return an explanation naming a real alternative — heredocs work (see extractHeredoc), so
  * a loop can run inside a script.
  */
+function looksLikeTool(line: string): boolean {
+  const firstWord = line.split(/\s+/)[0];
+  return /^(?:mcp:)?[\w.-]+:[\w.-]+/.test(firstWord) || /^[\w.-]+\(.*\)$/.test(line);
+}
+
 function unsupportedShellFeature(segment: string): string | null {
-  const firstWord = segment.trim().split(/\s+/)[0];
+  const trimmed = segment.trim();
+  const firstWord = trimmed.split(/\s+/)[0];
+  const lines = trimmed.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  const codeLines = lines.filter((l) => !l.startsWith("#"));
+
+  // A TOOL name used as a shell command: "atlassian-mcp-server:getJiraIssue --help", or the same
+  // with call syntax. The allow-list refusal named the tool as an unknown command, which sent the
+  // model looking for it on PATH — it tried `ls /usr/local/bin` — instead of telling it the truth:
+  // tools are called as tools, and one that is absent from its tool list is not connected.
+  //
+  // Checked BEFORE the comment case below: the model that narrated two comment lines and then called
+  // the tool made one mistake worth explaining, and it is this one. Answering "that is a comment"
+  // there costs a turn and it calls the tool as a command again.
+  const toolCall = codeLines.find(looksLikeTool);
+  if (toolCall) {
+    const name = toolCall.split(/\s+/)[0];
+    return (
+      `ERROR: '${name}' looks like a TOOL, not a shell command — tools are invoked through the ` +
+      `tool interface, never through run_command.\n` +
+      `If it is in your tool list, call it directly. If it is NOT in your tool list, that server is ` +
+      `not connected in this session: say so instead of looking for it on disk.`
+    );
+  }
+
+  // A comment, sent as a command. Models narrate their reasoning into the argument — "# I need to
+  // check if the tool is available" — and the allow-list answered "Command '#' is not in the
+  // allow-list", which reads as a missing permission for a command nobody meant to run.
+  if (lines.length > codeLines.length) {
+    return (
+      `ERROR: that is a comment, not a command. run_command runs ONE command; there is no shell to ` +
+      `strip '#' lines.\nPut your reasoning in your reply and send only the command itself` +
+      (codeLines.length > 0 ? `, like this:\n  ${codeLines[0]}` : ".")
+    );
+  }
+
   if (["for", "while", "until", "if", "case", "select", "function"].includes(firstWord)) {
     return (
       `ERROR: shell control flow ('${firstWord}') is not available — commands run without a shell.\n` +

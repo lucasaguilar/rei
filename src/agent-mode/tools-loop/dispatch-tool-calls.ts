@@ -296,7 +296,7 @@ export async function dispatchToolCalls(
               command: cmd,
               priorRuns,
             });
-            emitStatus(`↩️  [REI] Comando repetido bloqueado: ${cmd}`);
+            emitStatus(`↩️  [REI] Blocked a repeated command: ${cmd}`);
             toolResult =
               `You already ran this exact command earlier this turn:\n  ${cmd}\n` +
               `Its output is in the conversation above — re-running it returns the SAME result and ` +

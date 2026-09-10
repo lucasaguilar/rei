@@ -29,6 +29,17 @@ const BILINGUAL_INPUT: Record<string, string> = {
 const ACCENT = /[ñÑ¿¡áéíóúÁÉÍÓÚ]/;
 const SPANISH_WORDS =
   /\b(que|para|con|del|los|las|una|por|como|donde|cuando|hasta|este|esta|todo|sobre|sin|hay|son|fue|ser|tiene|puede|archivo|archivos|cambios|documento|busqueda|respuesta|pregunta|activa|indica|arrastra|usa|probando|lineas)\b/gi;
+/**
+ * Spanish morphology: past participles, gerunds and -ción nouns. Function words alone were not
+ * enough — "Comando repetido bloqueado" shipped past this test with no accent and no article in
+ * it, and it is exactly the shape a status line takes.
+ */
+const SPANISH_SHAPE = /\b\w{4,}(?:ado|ada|ido|ida|ando|iendo|cion|ciones|mente)\b/gi;
+/** English words that happen to end like Spanish ones. */
+const FALSE_FRIENDS = new Set([
+  "tornado", "avocado", "bravado", "desperado", "armada", "florida", "valid", "solid",
+  "comment", "commented", "documented", "implemented",
+]);
 const STRING_LITERAL = /"([^"\n]{4,})"|'([^'\n]{4,})'|`([^`\n]{4,})`/g;
 const deaccent = (s: string) =>
   s.replace(/[áéíóú]/g, (c) => "aeiou"["áéíóú".indexOf(c)]).replace(/[ÁÉÍÓÚ]/g, (c) => "AEIOU"["ÁÉÍÓÚ".indexOf(c)]);
@@ -46,8 +57,14 @@ function spanishStringsIn(body: string): string[] {
     if (/^\s*(\*|\/\/|\/\*)/.test(line)) continue; // comments are a separate cleanup
     for (const m of line.matchAll(STRING_LITERAL)) {
       const s = m[1] ?? m[2] ?? m[3] ?? "";
-      const words = new Set((deaccent(s).match(SPANISH_WORDS) ?? []).map((w) => w.toLowerCase()));
-      if (ACCENT.test(s) || words.size >= 2) {
+      const plain = deaccent(s);
+      const words = new Set((plain.match(SPANISH_WORDS) ?? []).map((w) => w.toLowerCase()));
+      const shaped = new Set(
+        (plain.match(SPANISH_SHAPE) ?? [])
+          .map((w) => w.toLowerCase())
+          .filter((w) => !FALSE_FRIENDS.has(w)),
+      );
+      if (ACCENT.test(s) || words.size >= 2 || shaped.size >= 2) {
         found.push(`line ${i + 1}: ${s.slice(0, 70)}`);
         break;
       }
@@ -85,5 +102,9 @@ describe("user-facing output is in English", () => {
     expect(spanishStringsIn('const a = "No hay documento activo, usá /doc";')).toHaveLength(1);
     expect(spanishStringsIn("const b = `pág. ${n}`;")).toHaveLength(1);
     expect(spanishStringsIn('const c = "No changes detected in the repository.";')).toHaveLength(0);
+    // The one that got through: no accent, no article — just Spanish morphology.
+    expect(spanishStringsIn('emitStatus(`Comando repetido bloqueado: ${c}`);')).toHaveLength(1);
+    // …and English that merely ends the same way must not trip it.
+    expect(spanishStringsIn('const d = "Documented and implemented the command";')).toHaveLength(0);
   });
 });

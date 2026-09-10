@@ -423,7 +423,7 @@ export async function executeAgentTurnWithTools(params: {
       consecutiveBlockedTurns = guard.consecutiveBlockedTurns;
       if (guard.action === "abandon") {
         logger.logInfo("[tools] loop-guard: abandoning — repeated blocked commands, no progress");
-        emitStatus("⛔  [REI] Loop de comando repetido sin progreso — terminando el turno.");
+        emitStatus("⛔  [REI] Repeated-command loop with no progress — ending the turn.");
         return finalizeAtLimit();
       }
       if (guard.action === "nudge") {
