@@ -13,7 +13,7 @@ import {
 } from "./models/chat.types.js";
 import { clamp } from "./helpers/terminal.helpers.js";
 import {
-  buildMentionEntries,
+  buildPaletteSources,
   displayUserLabel,
 } from "./helpers/chat.helpers.js";
 import {
@@ -59,7 +59,7 @@ export async function runChat(
     : { messages: [], mode: resolveDefaultSessionMode() };
   // Rebuilt after every turn (submitCurrentUserInput): a turn can CREATE files (OCR sidecar writes
   // ocr/*.ocr.md) that must be @-referenceable this session. `let` so getPalette reads the freshest scan.
-  let mentionEntries = buildMentionEntries(workspacePath);
+  let palette = buildPaletteSources(workspacePath);
 
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     console.error(
@@ -99,6 +99,7 @@ export async function runChat(
     rows: process.stdout.rows || 24,
     sessionMode: session.mode,
     activeDocument: session.activeDocument,
+    activeRole: session.activeRole,
   };
 
   let exitResolve!: () => void;
@@ -140,7 +141,7 @@ export async function runChat(
     process.stdout.write(value);
   };
 
-  const getPalette = () => getActivePalette(state, mentionEntries);
+  const getPalette = () => getActivePalette(state, palette.mentionEntries, palette.roleEntries);
 
   const findMatchingHistoryEntry = (
     query: string,
@@ -158,9 +159,10 @@ export async function runChat(
     // Skip rendering if actively resizing to avoid overlapping visual frames
     if (resizeTimer !== undefined) return;
 
-    // Keep keyboard mode + active document current (Up/Down prompt width, doc indicator).
+    // Keep keyboard mode, document and role current (Up/Down prompt width, sticky indicators).
     state.sessionMode = session.mode;
     state.activeDocument = session.activeDocument;
+    state.activeRole = session.activeRole;
 
     const renderState: ChatRendererState = {
       cols: process.stdout.columns || 80,
@@ -183,6 +185,7 @@ export async function runChat(
       inputBuffer: state.inputBuffer,
       inputCursor: state.inputCursor,
       activeDocument: session.activeDocument,
+      activeRole: session.activeRole,
     };
 
     const paletteItems = renderState.activePalette.items; // selectedCommandIndex adjusted by draw
@@ -277,7 +280,7 @@ export async function runChat(
     }
     await InputHandler.submitInput(inputContext);
     // Pick up any files the turn just created (OCR output, generated files) so `@` finds them now.
-    mentionEntries = buildMentionEntries(workspacePath);
+    palette = buildPaletteSources(workspacePath);
   };
 
   const kbActions: KeyboardActions = {

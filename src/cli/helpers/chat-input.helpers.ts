@@ -6,16 +6,24 @@ import {
   type MentionEntry,
 } from "../models/chat.types.js";
 
-export function getCommandPalette(state: ChatUIState): CommandEntry[] {
+/**
+ * `roleEntries` are the data-driven `/…` commands (see buildRoleCommandEntries). They come LAST,
+ * mirroring dispatch: a static command owns its name, so it is what the palette offers for it.
+ */
+export function getCommandPalette(
+  state: ChatUIState,
+  roleEntries: CommandEntry[] = [],
+): CommandEntry[] {
   const trimmed = state.inputBuffer.trim().toLowerCase();
   if (!trimmed.startsWith("/") || state.busy || state.paletteClosed) {
     return [];
   }
+  const all = roleEntries.length > 0 ? [...COMMANDS, ...roleEntries] : COMMANDS;
   if (trimmed === "/") {
-    return COMMANDS;
+    return all;
   }
 
-  return COMMANDS.filter((entry) => entry.command.startsWith(trimmed));
+  return all.filter((entry) => entry.command.toLowerCase().startsWith(trimmed));
 }
 
 export function getMentionContext(
@@ -102,6 +110,7 @@ export function getMentionPalette(
 export function getActivePalette(
   state: ChatUIState,
   mentionEntries: MentionEntry[],
+  roleEntries: CommandEntry[] = [],
 ): ActivePalette {
   const mentionItems = getMentionPalette(state, mentionEntries);
 
@@ -112,7 +121,7 @@ export function getActivePalette(
     };
   }
 
-  const commandItems = getCommandPalette(state);
+  const commandItems = getCommandPalette(state, roleEntries);
 
   if (commandItems.length > 0) {
     return {
