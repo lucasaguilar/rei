@@ -138,10 +138,11 @@ export async function runSubAgent(params: SubAgentParams): Promise<string> {
       onChunk: (event) => {
         if (event.type === "status") {
           emitStatus?.(event.content);
-          // A status means a tool ran, so whatever text preceded it was narration about work still
-          // to come ("I'll start by reading cart.ts…"), not the summary. Only the block written
-          // after the LAST tool call is.
-          tail = "";
+          // A TOOL status means whatever text preceded it was narration about work still to come
+          // ("I'll start by reading cart.ts…"), not the summary — only the block written after the
+          // last tool call is. A NOTICE is not a boundary: the output-limit continuation fires
+          // mid-answer, and resetting there returned the tail of a report as the whole report.
+          if (event.kind !== "notice") tail = "";
           return;
         }
         if (event.type === "text") tail += event.content;

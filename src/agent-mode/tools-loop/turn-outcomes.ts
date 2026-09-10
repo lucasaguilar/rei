@@ -32,7 +32,7 @@ export async function handleTruncation(params: {
   currentMessages: ChatMessage[];
   truncationContinuations: number;
   logger: AgentLogger;
-  emitStatus: (msg: string) => void;
+  emitStatus: (msg: string, kind?: "tool" | "notice") => void;
   virtualEdits: () => Promise<AgentSREdit[]>;
   firstTurnExplanation: string;
   appendCreatedSummary: (resp: string) => string;
@@ -53,7 +53,9 @@ export async function handleTruncation(params: {
     logger.logInfo(
       `[truncation] response cut off (${truncationContinuations + 1}/${MAX_TRUNCATION_CONTINUATIONS}) — continuing into the loop`,
     );
-    emitStatus("⏳  [REI] Response hit the output limit — continuing");
+    // A NOTICE, not a tool: the model is still writing the same answer. Marked so that consumers
+    // which use a status as a "narration ends here" boundary do not discard what came before it.
+    emitStatus("⏳  [REI] Response hit the output limit — continuing", "notice");
     currentMessages.push(
       {
         role: "assistant",

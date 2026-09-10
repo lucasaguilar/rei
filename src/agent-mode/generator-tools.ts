@@ -58,6 +58,13 @@ export async function executeAgentTurnWithTools(params: {
   onChunk?: (event: {
     type: "thinking" | "text" | "status";
     content: string;
+    /**
+     * What a "status" is about. `tool` (the default) means a tool ran, so the text before it was
+     * narration; `notice` means the SAME answer is still being written — the output-limit
+     * continuation. Consumers that treat a status as a boundary in the model's prose must not
+     * treat a notice as one. Optional so the other declarations of this shape stay compatible.
+     */
+    kind?: "tool" | "notice";
   }) => void;
   /** Raw user request, used by tool-RAG to select only relevant MCP tools. */
   userQuery?: string;
@@ -93,8 +100,8 @@ export async function executeAgentTurnWithTools(params: {
   }
 
   // Emits a one-line live status for a tool action (shown immediately by the CLI).
-  const emitStatus = (msg: string) =>
-    onChunk?.({ type: "status", content: `\n\x1b[33m${msg}\x1b[0m\n` });
+  const emitStatus = (msg: string, kind: "tool" | "notice" = "tool") =>
+    onChunk?.({ type: "status", content: `\n\x1b[33m${msg}\x1b[0m\n`, kind });
 
   // Tool selection lives in setupToolSelection. `activeMcp` returned MUTABLE (search_tools grows it).
   const { buildTools, activeMcp, allMcpTools, useToolSearch, skills } = setupToolSelection({
