@@ -4,13 +4,23 @@
  * through the model (which a backend like MTPLX may truncate). The model stays on the control plane
  * (decides WHAT to fetch and WHERE to save); the runtime moves the bytes.
  *
- * Large outputs are ALSO auto-spilled to `.rei/tool-output/` as a safety net, so a fetched document
+ * Large outputs are ALSO auto-spilled to a temp directory as a safety net, so a fetched document
  * (e.g. a 10k-char Jira issue) is preserved on disk even if the model only ever sees a truncated view.
+ *
+ * The spill lives in the OS temp dir, not in `.rei/`: nothing references these files once the
+ * process ends (the id→path ring is in memory), so keeping them in the project meant a directory
+ * that grew forever with no code anywhere to clean it. The OS already solves that. Verified that
+ * `read_files` can still read the path back — it normalises to a `../..` key and resolves — so the
+ * model can recover the full text, while writes outside the workspace stay refused.
+ *
+ * ONE directory per process, not one per call: `save_tool_output(id)` resolves a path recorded
+ * earlier in the session, so the location has to outlive the call that created it.
  *
  * @module rei/agent-mode/tools-loop/tool-output-store
  */
 
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 
 interface ToolOutputEntry {
@@ -60,15 +70,23 @@ function previewLimit(): number {
   return Number.isFinite(n) && n > 0 ? n : 2000;
 }
 
-function writeSpillFile(
-  workspacePath: string,
-  tool: string,
-  content: string,
-): string {
-  const dir = path.join(workspacePath, ".rei", "tool-output");
-  fs.mkdirSync(dir, { recursive: true });
+let spillDir: string | undefined;
+
+/** The session's spill directory, created on first use. `REI_TOOL_OUTPUT_DIR` overrides it — set it
+ *  to a path inside the project when you want the outputs to survive for a post-mortem. */
+function ensureSpillDir(): string {
+  const configured = process.env.REI_TOOL_OUTPUT_DIR?.trim();
+  if (configured) {
+    fs.mkdirSync(configured, { recursive: true });
+    return configured;
+  }
+  if (!spillDir) spillDir = fs.mkdtempSync(path.join(os.tmpdir(), "rei-tool-output-"));
+  return spillDir;
+}
+
+function writeSpillFile(tool: string, content: string): string {
   const safe = tool.replace(/[^\w.-]/g, "_");
-  const file = path.join(dir, `${safe}-${Date.now()}.md`);
+  const file = path.join(ensureSpillDir(), `${safe}-${Date.now()}.md`);
   fs.writeFileSync(file, content, "utf8");
   return file;
 }
@@ -79,27 +97,27 @@ function writeSpillFile(
  * instead of the full text. The receipt puts path/id FIRST so it survives an aggressive backend
  * truncation. Small outputs are retained and returned inline unchanged.
  */
-export function retainAndMaybeSpill(
-  tool: string,
-  content: string,
-  workspacePath: string,
-): string {
+export function retainAndMaybeSpill(tool: string, content: string): string {
   if (content.length <= inlineLimit()) {
     recordToolOutput(tool, content);
     return content;
   }
-  const savedPath = writeSpillFile(workspacePath, tool, content);
+  const savedPath = writeSpillFile(tool, content);
   const id = recordToolOutput(tool, content, savedPath);
   const shown = content.slice(0, previewLimit()).replace(/\s+$/, "");
-  const omitted = content.length - shown.length;
+  // Exact counts, in LINES as well as chars. A model deciding whether to fetch the rest needs to
+  // know how much it is missing; "some output was omitted" is not a basis for that decision.
+  const totalLines = content.split("\n").length;
+  const shownLines = shown.split("\n").length;
   return (
-    `[REI] Large tool output (${content.length} chars) — full content written to disk:\n` +
+    `[REI] Large tool output truncated: showing ${shownLines} of ${totalLines} lines ` +
+    `(${shown.length} of ${content.length} chars). Full output saved to:\n` +
     `  path: ${savedPath}\n` +
     `  id:   ${id}\n` +
-    `To copy it elsewhere, call save_tool_output(id="${id}", path="<dest>") — the runtime moves the ` +
-    `bytes, not through you, so nothing is truncated.\n` +
-    `--- preview (${shown.length} of ${content.length} chars) ---\n${shown}` +
-    (omitted > 0 ? `\n… ${omitted} more chars are in the file above.` : "")
+    `Read it with read_files("${savedPath}"), or copy it elsewhere with ` +
+    `save_tool_output(id="${id}", path="<dest>") — the runtime moves the bytes, not through you, ` +
+    `so nothing is truncated.\n` +
+    `--- preview ---\n${shown}`
   );
 }
 

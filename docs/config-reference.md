@@ -229,6 +229,20 @@ carrying them will start taking effect.)
 | `REI_READ_MAX_LINES` | page size for `read_files`, in lines | 1200 |
 | `REI_TOOL_OUTPUT_MAX_INLINE` | tool output kept inline before it spills to disk, in chars | 2000 |
 | `REI_TOOL_OUTPUT_PREVIEW` | chars of a spilled output the model still sees as a preview | 2000 |
+| `REI_TOOL_OUTPUT_DIR` | where spilled tool outputs are written | a temp dir, cleaned by the OS |
+
+**Spilled tool output.** Any tool result over `REI_TOOL_OUTPUT_MAX_INLINE` is written to disk and
+replaced, in the model's context, by a receipt naming the file, an id, and exactly how many
+lines/chars were omitted. The model gets the rest with `read_files(path)` or copies it elsewhere
+with `save_tool_output(id, dest)` — the runtime moves those bytes, so nothing is truncated on the
+way. This is the main defence against a single build log eating a local model's window, and it
+matters more than it looks: results stay in the turn's history and are re-sent on every remaining
+model call, so an unspilled result costs its size once *per step*.
+
+The spill goes to a temp directory because nothing references those files after the process exits —
+in the project they became a directory that grew forever with no code to clean it. Point
+`REI_TOOL_OUTPUT_DIR` at something inside the workspace if you want them kept for a post-mortem,
+and prune it yourself.
 | MCP | `MCP_TOOL_TIMEOUT_MS`, `MCP_TOOL_MAX_TIMEOUT_MS` | — |
 
 ## OCR / vision (agnostic)
