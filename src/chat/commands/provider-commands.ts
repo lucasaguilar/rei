@@ -1,4 +1,5 @@
 import type { CommandHandler, CommandResult } from "./command-handler.js";
+import { loadRole } from "../../skills/role-loader.js";
 
 const PROVIDER_RE = /^\/provider(?:\s+(agent))?(?:\s+(\S+))?$/i;
 const MODEL_RE = /^\/model(?:\s+(agent))?(?:\s+(\S+))?$/i;
@@ -58,7 +59,7 @@ function getModelEnvVar(providerName: string, mode?: string): string | undefined
 export const providerCommands: CommandHandler = {
   match: (c) => PROVIDER_RE.test(c) || MODEL_RE.test(c),
 
-  run: async ({ command: trimmed }): Promise<CommandResult> => {
+  run: async ({ command: trimmed, session, workspacePath }): Promise<CommandResult> => {
     const providerMatch = trimmed.match(PROVIDER_RE);
     if (providerMatch) {
       const isAgentTarget = !!providerMatch[1];
@@ -229,10 +230,31 @@ export const providerCommands: CommandHandler = {
       }
 
       const modeLabel = isAgentTarget ? "Agent" : "Ask/Planning";
+
+      // Setting the model by hand outranks an active role's `preferredModel` — the most recent
+      // explicit choice wins. Recorded on the SESSION rather than left to the env var, because the
+      // role is consulted first and would otherwise keep shadowing what you just typed: `/model`
+      // used to report success and change nothing at all while a role was active.
+      //
+      // Only when it targets the mode you are IN. `/model agent x` from ask mode configures agent
+      // for later; it is not a statement about the turn you are about to run.
+      const targetsThisMode = isAgentTarget === (session?.mode === "agent");
+      const activeRole = session?.activeRole
+        ? loadRole(session.activeRole, workspacePath)
+        : null;
+      const overriding =
+        targetsThisMode && activeRole?.preferredModel && activeRole.preferredModel !== requested
+          ? ` Overriding role '${activeRole.name}' (${activeRole.preferredModel}) for this session` +
+            ` — /role ${activeRole.name} to go back.`
+          : "";
+
       return {
         success: true,
-        response: `[REI] ${modeLabel} model changed to: '${requested}' (provider: '${targetProvider}'). Agent recreated successfully.`,
+        response: `[REI] ${modeLabel} model changed to: '${requested}' (provider: '${targetProvider}').${overriding}`,
         recreateAgent: true,
+        ...(targetsThisMode && session
+          ? { newSession: { ...session, manualModel: requested } }
+          : {}),
       };
     }
 

@@ -92,3 +92,44 @@ describe("the palette completes a role name", () => {
     expect(getCommandPalette(state("/AUD"), buildRoleCommandEntries(ws))).toHaveLength(1);
   });
 });
+
+/**
+ * A role has two invocations and both get typed, so both complete. Only the isolated form was
+ * offered, which left `/role git-` with nothing: the palette matches whole commands by prefix, and
+ * `/role <name>` is not in the static command list — it exists only because a file does.
+ */
+describe("both ways to invoke a role complete", () => {
+  it("offers /role <name> for a prefix of the name", () => {
+    role("git-expert");
+    const items = getCommandPalette(state("/role git-"), buildRoleCommandEntries(ws));
+    expect(items.map((i) => i.command)).toContain("/role git-expert");
+  });
+
+  it("inserts it ready to send, with no placeholder to delete", () => {
+    // Unlike `/git-expert <task>`, this one is complete as typed.
+    expect(commandInsertText("/role git-expert")).toBe("/role git-expert");
+  });
+
+  it("still offers the isolated form on the bare name", () => {
+    role("git-expert");
+    const items = getCommandPalette(state("/git-"), buildRoleCommandEntries(ws));
+    expect(items.map((i) => i.command)).toContain("/git-expert <task>");
+  });
+
+  it("gives every role exactly two entries", () => {
+    role("reviewer");
+    const mine = buildRoleCommandEntries(ws).filter((e) => e.command.includes("reviewer"));
+    expect(mine.map((e) => e.command).sort()).toEqual(["/reviewer <task>", "/role reviewer"]);
+  });
+
+  it("leaves the built-in /role and /roles reachable", () => {
+    role("reviewer");
+    const items = getCommandPalette(state("/role"), buildRoleCommandEntries(ws));
+    expect(items.map((i) => i.command)).toContain("/roles");
+  });
+
+  it("does not offer /role <name> for a role shadowed by a built-in", () => {
+    role("trace");
+    expect(buildRoleCommandEntries(ws).map((e) => e.command)).not.toContain("/role trace");
+  });
+});

@@ -33,6 +33,11 @@ function scanReiArtifacts(workspacePath: string): string[] {
 /**
  * The roles on disk, as command-palette entries — so `/aud` + Tab completes to `/auditor `.
  *
+ * TWO entries per role, because a role has two invocations and both are typed. `/auditor <task>`
+ * runs it isolated; `/role auditor` wears it here. Completing only the first left `/role git-` with
+ * nothing to offer — the palette matches whole commands by prefix, and `/role <name>` is not a
+ * static command.
+ *
  * `/auditor` is a command only because a file in .rei/roles/ says so, which means it appears in no
  * static list: without this it is invocable but undiscoverable, and a feature nobody can find is
  * one that does not exist.
@@ -46,6 +51,23 @@ function scanReiArtifacts(workspacePath: string): string[] {
  * turn writes an OCR output, you (or the agent) write a role — so they are rescanned together
  * after every turn, and pairing them here keeps the two from drifting apart.
  */
+/**
+ * The session facts the sticky block shows: the active document, the active role, and whether a
+ * manual `/model` is outranking that role's own. They are read together on every draw and must be
+ * synced together — three separate assignments is three chances for one to be forgotten.
+ */
+export function sessionIndicators(session: {
+  activeDocument?: string;
+  activeRole?: string;
+  manualModel?: string;
+}): { activeDocument?: string; activeRole?: string; manualModel?: string } {
+  return {
+    activeDocument: session.activeDocument,
+    activeRole: session.activeRole,
+    manualModel: session.manualModel,
+  };
+}
+
 export function buildPaletteSources(workspacePath: string): {
   mentionEntries: MentionEntry[];
   roleEntries: CommandEntry[];
@@ -60,13 +82,20 @@ export function buildRoleCommandEntries(workspacePath: string): CommandEntry[] {
   try {
     return listRoles(workspacePath)
       .filter((r) => !RESERVED_COMMAND_NAMES.has(r.name.toLowerCase()))
-      .map((r) => ({
-        // The `<task>` suffix follows the COMMANDS convention: it documents the usage in the
-        // palette, and commandInsertText strips it and leaves the cursor after a space.
-        command: `/${r.name} <task>`,
-        description: `role · ${r.description}`,
-        requiresArgs: true,
-      }));
+      .flatMap((r) => [
+        {
+          // The `<task>` suffix follows the COMMANDS convention: it documents the usage in the
+          // palette, and commandInsertText strips it and leaves the cursor after a space.
+          command: `/${r.name} <task>`,
+          description: `role · ${r.description}`,
+          requiresArgs: true,
+        },
+        {
+          // No placeholder: `/role auditor` is complete as typed, so Tab inserts it ready to send.
+          command: `/role ${r.name}`,
+          description: `role · wear ${r.name} in this session`,
+        },
+      ]);
   } catch {
     return []; // an unreadable roles dir must never take the palette down
   }

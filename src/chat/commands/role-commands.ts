@@ -79,14 +79,21 @@ export const roleCommands: CommandHandler = {
       // Each role is listed with BOTH ways to invoke it. Without this nobody discovers the
       // isolated form: `/auditor` is a command only because a file says so, so it appears in no
       // static command list and in no tab-completion.
+      // The name is the thing you type, so it is the thing that has to be findable in the list:
+      // bold cyan for the name, dim for the prose around it. The active one is bold green — you
+      // read "which am I in" far more often than you read the descriptions.
+      const NAME = "\x1b[1;36m", ON = "\x1b[1;32m", DIM = "\x1b[2m", OFF = "\x1b[0m";
       const lines = roles.map((r) => {
-        const active = r.name === session.activeRole ? "▶" : " ";
-        const shadowed = RESERVED_COMMAND_NAMES.has(r.name.toLowerCase())
-          ? `      ⚠ '${r.name}' is also a built-in command, so /${r.name} runs that instead — rename the role to invoke it isolated.`
-          : `      /role ${r.name} (here) · /${r.name} <task> (isolated${r.preferredModel ? `, ${r.preferredModel}` : ""})`;
-        return `  ${active} ${r.name} — ${r.description}\n${shadowed}`;
+        const isActive = r.name === session.activeRole;
+        const name = `${isActive ? ON : NAME}${r.name}${OFF}`;
+        const invoke = RESERVED_COMMAND_NAMES.has(r.name.toLowerCase())
+          ? `      \x1b[33m⚠ '${r.name}' is also a built-in command, so /${r.name} runs that instead — rename the role to invoke it isolated.${OFF}`
+          : `      ${DIM}/role${OFF} ${name} ${DIM}(here) · ${OFF}${NAME}/${r.name}${OFF} ${DIM}<task> (isolated${r.preferredModel ? `, ${r.preferredModel}` : ""})${OFF}`;
+        return `  ${isActive ? `${ON}▶${OFF}` : " "} ${name} ${DIM}— ${r.description}${OFF}\n${invoke}`;
       });
-      const header = session.activeRole ? `Active role: ${session.activeRole}` : "No active role.";
+      const header = session.activeRole
+        ? `Active role: ${ON}${session.activeRole}${OFF}`
+        : "No active role.";
       return {
         success: true,
         recordInSession: false,
@@ -115,6 +122,7 @@ export const roleCommands: CommandHandler = {
           mode: restored,
           activeRole: undefined,
           rolePreviousMode: undefined,
+          manualModel: undefined,
         },
       };
     }
@@ -132,14 +140,21 @@ export const roleCommands: CommandHandler = {
     // Where you were is recorded on the FIRST activation only: swapping auditor → security must
     // not overwrite it with the mode the previous role had already imposed.
     const previousMode = session.activeRole ? session.rolePreviousMode : session.mode;
+    // Choosing a role is a new decision about the model, so it clears one made by hand — otherwise
+    // `/role X` could not take you back to X's model once you had ever typed `/model`.
+    const droppedManual = session.manualModel;
     saveSession(workspacePath, session.messages, role.baseMode, session.summary, session.createdAt);
     const modelHint = role.preferredModel
       ? ` Runs on ${role.preferredModel}.`
       : "";
+    const droppedHint =
+      droppedManual && droppedManual !== role.preferredModel
+        ? ` (dropping your manual choice of ${droppedManual})`
+        : "";
     return {
       success: true,
       response:
-        `[REI] Role '${role.name}' active (${role.baseMode} profile). ${role.description}.${modelHint}\n` +
+        `[REI] Role '${role.name}' active (${role.baseMode} profile). ${role.description}.${modelHint}${droppedHint}\n` +
         `Point it at a document with @ (e.g. "audit @.rei/plans/my-plan.md"), or run it in an ` +
         `isolated context instead with /${role.name} <task>.`,
       newSession: {
@@ -147,6 +162,7 @@ export const roleCommands: CommandHandler = {
         mode: role.baseMode,
         activeRole: role.name,
         rolePreviousMode: previousMode,
+        manualModel: undefined,
       },
     };
   },
