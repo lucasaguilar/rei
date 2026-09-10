@@ -9,10 +9,11 @@ which is read at runtime by sub-agents and must stay short — see that file for
 
 REI (Repository-Aware AI) is a personal, local-first CLI coding agent that operates directly on a
 repository. It reads and reasons about the codebase using only the provided context, proposes and
-**applies** changes, and validates every edit against the project's real compiler before keeping it.
+**applies** changes, and runs the project's real compiler over them before the turn is allowed to
+finish. (Once per turn by default; per edit under `REI_EDIT_MODE=sandbox` — see agent-loop.md.)
 
 It targets **local models** (via LM Studio / Ollama) with optional cloud providers, and is built
-around one core bet: **trust nothing the model says — verify every edit against ground truth.**
+around one core bet: **trust nothing the model says — check it against ground truth.**
 
 ---
 

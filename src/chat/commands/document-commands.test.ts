@@ -59,7 +59,7 @@ describe("documentCommands handler", () => {
   it("/ask-document with no file and no active document guides the user", async () => {
     const r = await documentCommands.run(ctx("/ask-document que dice del doc?"));
     expect(r.success).toBe(false);
-    expect(r.response).toContain("No hay documento activo");
+    expect(r.response).toContain("No active document");
   });
 });
 

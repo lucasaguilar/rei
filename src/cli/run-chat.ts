@@ -345,7 +345,7 @@ export async function runChat(
     const recent = mostRecentSessionId(workspacePath);
     if (recent) {
       pushTranscript(
-        `\x1b[90m[REI] Nueva sesión. Usá 'rei -c' para continuar la última (${recent}), o 'rei --session <nombre>' para una con nombre.\x1b[0m`,
+        `\x1b[90m[REI] New session. Use 'rei -c' to resume the last one (${recent}), or 'rei --session <name>' for a named one.\x1b[0m`,
       );
     }
   }

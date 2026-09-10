@@ -62,8 +62,8 @@ export function parseGroundedResponse(response: string): ParsedGrounded {
   const fallback: ParsedGrounded = {
     answer:
       rescued ||
-      "(El modelo no devolvió una respuesta: el razonamiento consumió toda la salida. " +
-        "Reintentá, o desactivá el thinking del modelo.)",
+      "(The model produced no answer: its reasoning consumed the entire output budget. " +
+        "Retry, or turn the model's thinking off.)",
     claims: fallbackClaims,
     notFound: rescued.length === 0,
   };

@@ -43,7 +43,8 @@ it verified.
 - **Your code cannot leave the building.** Regulated work, an NDA, a client who says no. Local-first
   is the requirement, not the preference.
 - **An agent told you it made a change, and it hadn't.** Or it had, and nothing compiled. REI runs
-  your project's real compiler over every edit and reports what it actually found.
+  your project's real compiler before the turn ends, hands the model its own errors to fix, and
+  reports what it actually found.
 - **You are paying per token** for work a machine you already own can do.
 - **You want to shape the agent, not accept one.** Roles, skills and prompts are markdown files you
   edit — a reviewer with its own posture and model, a recipe for how your team writes tests. Nothing
@@ -144,6 +145,14 @@ less with a small local model than with a frontier one.
 
 So REI does not take the model's word. It detects what the project is and runs that project's own
 verify command against the edits; a failure goes back to the model with the compiler's own message.
+
+**When the check runs.** By default, REI applies edits to disk and verifies once, when the model
+says it is finished — one verify per turn, not one per edit. A failure does not end the turn: the
+diagnostics go back to the model, which gets two attempts to fix them. If it still cannot reach
+green, the changes are applied anyway — and the turn ends on a warning that they do **not** pass
+the project's check, instead of a report that implies they do. (Setting
+`REI_EDIT_MODE=sandbox` checks every edit against a virtual tree instead and persists only green
+state — stricter, heavier, and on local models the default usually wins.)
 
 The one rule REI holds to here is that **the check never lies about its own strength.** An
 unrecognised project gets no verify command rather than a fake pass — a check that cannot fail is

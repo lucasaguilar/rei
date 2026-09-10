@@ -14,7 +14,7 @@ export function formatGitChanges(
   workspacePath?: string,
 ): string {
   if (changes.length === 0) {
-    return "No se detectaron cambios en el repositorio.";
+    return "No changes detected in the repository.";
   }
 
   const statusIcon = (status: GitChange["status"]): string => {
@@ -28,7 +28,7 @@ export function formatGitChanges(
 
   const statusLabel = (status: GitChange["status"]): string => {
     switch (status) {
-      case "added": return "Añadido";
+      case "added": return "Added";
       case "modified": return "Modificado";
       case "deleted": return "Eliminado";
       case "renamed": return "Renombrado";
@@ -36,7 +36,7 @@ export function formatGitChanges(
   };
 
   const header = [
-    `| ${statusIcon("modified")} Estado | Archivo |`,
+    `| ${statusIcon("modified")} Status | File |`,
     `| --- | --- |`,
   ];
 
@@ -62,7 +62,7 @@ export function summarizeGitChanges(changes: GitChange[]): string {
   const renamed = changes.filter((c) => c.status === "renamed").length;
 
   const parts: string[] = [];
-  if (added > 0) parts.push(`🟢 ${added} añadido(s)`);
+  if (added > 0) parts.push(`🟢 ${added} added`);
   if (modified > 0) parts.push(`✏️ ${modified} modificado(s)`);
   if (deleted > 0) parts.push(`🗑️ ${deleted} eliminado(s)`);
   if (renamed > 0) parts.push(`↔️ ${renamed} renombrado(s)`);

@@ -45,7 +45,7 @@ describe("activeDocumentCommands", () => {
   });
 
   it("/doc shows none, then the active document", async () => {
-    expect((await run("/doc")).response).toContain("No hay documento activo");
+    expect((await run("/doc")).response).toContain("No active document");
     session.activeDocument = "ocr/guia escaneada.ocr.md";
     expect((await run("/doc")).response).toContain("ocr/guia escaneada.ocr.md");
   });

@@ -144,6 +144,29 @@ A legacy `<workspace>/.env` is still read (between the two), so existing project
 `MODEL_PROVIDER` · `AGENT_MODEL_PROVIDER` · `<PREFIX>_BASE_URL` · `<PREFIX>_API_KEY` ·
 `<PREFIX>_REQUEST_TIMEOUT_MS`.
 
+> **Credential names are not uniform.** Every provider takes `<PREFIX>_API_KEY` **except Hugging
+> Face, which reads `HF_TOKEN`** — its own convention, and the name its hub issues. `HF_API_KEY` is
+> not read at all, so setting it looks correct and authenticates nothing.
+
+### Request timeouts
+
+One per provider, all in milliseconds. Local and remote defaults differ on purpose: a 27B on your
+own machine can spend minutes on a single reply, while a cloud call that has not answered in two
+minutes has failed.
+
+| Var | Default | Why that number |
+|---|---|---|
+| `LLM_STUDIO_REQUEST_TIMEOUT_MS` | 600000 (10 min) | local inference — a long think is not a hang |
+| `MTPLX_REQUEST_TIMEOUT_MS` | 600000 (10 min) | idem |
+| `OLLAMA_REQUEST_TIMEOUT_MS` | 300000 (5 min) | local, but usually smaller models |
+| `GEMINI_REQUEST_TIMEOUT_MS` | 120000 (2 min) | remote |
+| `GROQ_REQUEST_TIMEOUT_MS` | 120000 (2 min) | remote |
+| `HF_REQUEST_TIMEOUT_MS` | 120000 (2 min) | remote |
+| `OPENROUTER_REQUEST_TIMEOUT_MS` | 120000 (2 min) | remote |
+
+Raise the local ones before blaming the model if a big local reply dies mid-stream. These are
+machine-scoped, so they belong in `<install>/.env`.
+
 **One model per mode.** Each mode has an optional override; all fall back to `<PREFIX>_MODEL`,
 so setting none keeps a single model for everything:
 
@@ -165,6 +188,11 @@ with per-mode overrides. Every provider has them now, so they are live again —
 carrying them will start taking effect.)
 
 ## Agent behavior (agnostic)
+
+| Var | What | Default |
+|---|---|---|
+| `REI_DEFAULT_MODE` | mode a FRESH session starts in (`ask` \| `planning` \| `agent`) | `agent` |
+
 
 | Var | What | Default |
 |---|---|---|
@@ -197,6 +225,10 @@ carrying them will start taking effect.)
 | `REI_ALLOWED_COMMANDS` | extra allowed commands | — |
 | `REI_SANDBOX_VERIFY_COMMAND` | override verify command | auto by project |
 | `REI_CONFIRM_DESTRUCTIVE` | confirm before destructive commands (rm / git reset --hard / clean / checkout --) — interactive CLI only | `true` |
+| `REI_CONFIRM_GIT_MUTANT` | confirm before state-mutating git commands (commit / push / merge / rebase) — interactive CLI only | `true` |
+| `REI_READ_MAX_LINES` | page size for `read_files`, in lines | 1200 |
+| `REI_TOOL_OUTPUT_MAX_INLINE` | tool output kept inline before it spills to disk, in chars | 2000 |
+| `REI_TOOL_OUTPUT_PREVIEW` | chars of a spilled output the model still sees as a preview | 2000 |
 | MCP | `MCP_TOOL_TIMEOUT_MS`, `MCP_TOOL_MAX_TIMEOUT_MS` | — |
 
 ## OCR / vision (agnostic)
@@ -215,7 +247,18 @@ modes; set `=1` only for proactive agent that wants semantic file selection. Leg
 regardless; a manual `/index` still builds it on demand. ·
 `REI_EMBEDDER_PROVIDER/_MODEL/_BASE_URL/_API_KEY` · `REI_TOOL_RAG` · `REI_DOC_VERIFY` ·
 `REI_WORKSPACE_PATH` · `ALLOWED_WORKSPACES` · `REI_SERVER_PORT` · `REI_TELEMETRY_DISABLED` ·
-`COMPACTOR_MODEL` · Laminar telemetry `LMNR_*`.
+`COMPACTOR_MODEL` · `COMPACTOR_TIMEOUT_MS` (history compaction timeout, default 60000 — raise it
+if compaction gives up on a slow local model) · Laminar telemetry `LMNR_*`.
+
+## MTPLX — `chat_template_kwargs`
+
+MTPLX forwards `chat_template_kwargs` to the chat template, which is the **only** way to set the
+reasoning level on a Qwen3.8 there: thinking is a template variable, not an engine parameter
+(verified — `enable_thinking:false` produced `reasoning_tokens=0`). REI sends them by default.
+
+| Var | What | Default |
+|---|---|---|
+| `MTPLX_TEMPLATE_KWARGS` | set to `false` to stop forwarding them, if the server's behaviour changes | forwarded |
 
 ## Provider-specific sampling/budget cheat-sheet
 

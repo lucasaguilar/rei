@@ -21,13 +21,14 @@ import { processMenuCommand } from "../chat/menu-command-processor.js";
 function wrapDiffForMarkdown(text: string): string {
   const lead = text.match(/^\s*/)?.[0] ?? "";
   const body = text.slice(lead.length);
-  if (!body.startsWith("Archivo:")) return text;
+  // Must match the label core/agent.ts emits above each diff.
+  if (!body.startsWith("File:")) return text;
 
   const nl = body.indexOf("\n");
   if (nl === -1) return text;
-  const file = body.slice("Archivo:".length, nl).trim();
+  const file = body.slice("File:".length, nl).trim();
   const diff = body.slice(nl + 1).replace(/\s+$/, "");
-  return `${lead}**Archivo:** ${file}\n\`\`\`diff\n${diff}\n\`\`\`\n`;
+  return `${lead}**File:** ${file}\n\`\`\`diff\n${diff}\n\`\`\`\n`;
 }
 
 /**

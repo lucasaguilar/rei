@@ -29,7 +29,7 @@ function renderQuestion(req: Elicitation): string {
     return `${q}\n${opts}\n\x1b[90m(pick a number, or just write your own answer — empty = skip)\x1b[0m`;
   }
   if (req.kind === "confirm") {
-    return `${q}\n\x1b[90m(y / n · sí / no — empty = ${req.default})\x1b[0m`;
+    return `${q}\n\x1b[90m(y / n — empty = ${req.default})\x1b[0m`;
   }
   return `${q}\n\x1b[90m(type your answer, or empty = skip, then Enter)\x1b[0m`;
 }

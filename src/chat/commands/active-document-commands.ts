@@ -54,19 +54,19 @@ export const activeDocumentCommands: CommandHandler = {
         return {
           success: true,
           recordInSession: false,
-          response: `[REI] No hay documentos de texto (.md/.txt) en el workspace. Arrastrá un PDF para OCRearlo.`,
+          response: `[REI] No text documents (.md/.txt) in this workspace. Drop a PDF in to OCR it.`,
         };
       }
       const lines = docs.map((d) => `  ${d === session.activeDocument ? "▶" : " "} ${d}`);
       const header = session.activeDocument
-        ? `Activo: ${session.activeDocument}`
-        : "Ninguno activo";
+        ? `Active: ${session.activeDocument}`
+        : "None active";
       return {
         success: true,
         recordInSession: false,
         response:
           `${REI} ${header}\n\n${lines.join("\n")}\n\n` +
-          `(/doc use <archivo> para activar · /doc clear para desactivar)`,
+          `(/doc use <file> to activate · /doc clear to deactivate)`,
       };
     }
 
@@ -78,8 +78,8 @@ export const activeDocumentCommands: CommandHandler = {
         success: true,
         recordInSession: false,
         response: session.activeDocument
-          ? `${REI} 📄 Documento activo: ${session.activeDocument}`
-          : `[REI] No hay documento activo. Usá /doc use <archivo>, o arrastrá un PDF para OCRearlo.`,
+          ? `${REI} 📄 Active document: ${session.activeDocument}`
+          : `[REI] No active document. Use /doc use <file>, or drop a PDF in to OCR it.`,
       };
     }
 
@@ -91,8 +91,8 @@ export const activeDocumentCommands: CommandHandler = {
         success: true,
         recordInSession: false,
         response: prev
-          ? `${REI} Documento desactivado (${prev}). Volvés a chat normal.`
-          : `[REI] No había documento activo.`,
+          ? `${REI} Document deactivated (${prev}). Back to normal chat.`
+          : `[REI] There was no active document.`,
       };
     }
 
@@ -101,7 +101,7 @@ export const activeDocumentCommands: CommandHandler = {
     const { file } = splitFileAndRest(rawFile, workspacePath);
     const stored = activate(session, file, workspacePath);
     return stored
-      ? { success: true, recordInSession: false, response: `${REI} 📄 Documento activo: ${stored}` }
-      : { success: false, recordInSession: false, response: `[REI] No encontré el archivo: ${file}` };
+      ? { success: true, recordInSession: false, response: `${REI} 📄 Active document: ${stored}` }
+      : { success: false, recordInSession: false, response: `[REI] File not found: ${file}` };
   },
 };

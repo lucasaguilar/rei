@@ -140,7 +140,7 @@ export async function handleInputTurn(
         session.activeDocument = active;
         state.activeDocument = active;
         actions.pushTranscript(
-          `\x1b[2m📄 Documento activo: ${active} — preguntale con /ask-document <pregunta> (o /doc clear)\x1b[0m`,
+          `\x1b[2m📄 Active document: ${active} — ask it with /ask-document <question> (or /doc clear)\x1b[0m`,
         );
       }
       actions.pushTranscript("");

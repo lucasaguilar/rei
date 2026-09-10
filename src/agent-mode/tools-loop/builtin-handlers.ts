@@ -284,7 +284,7 @@ export async function handleGitChanges(
 
   const changes = await detectGitChanges(ctx.workspacePath);
   if (changes.length === 0) {
-    return `\n### 📁 Git Status: No uncommitted changes\nNo hay cambios sin confirmar en el workspace.\n`;
+    return `\n### 📁 Git Status: No uncommitted changes\nNothing to commit in this workspace.\n`;
   }
 
   let output = formatGitChanges(changes);

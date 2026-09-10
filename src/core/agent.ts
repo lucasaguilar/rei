@@ -290,7 +290,7 @@ export class Agent {
             (r) => r.file === edit.file && r.applied,
           );
           if (applied) {
-            yield `\n\x1b[1mArchivo:\x1b[0m ${edit.file}\n\`\`\`diff\n${formatCodeDiff(edit.search, edit.replace)}\n\`\`\``;
+            yield `\n\x1b[1mFile:\x1b[0m ${edit.file}\n\`\`\`diff\n${formatCodeDiff(edit.search, edit.replace)}\n\`\`\``;
           }
         }
 

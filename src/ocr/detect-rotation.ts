@@ -42,7 +42,7 @@ export async function detectRotation(
   axisDetector: (dataUrl: string) => Promise<TextAxis> = detectTextAxis,
 ): Promise<RotationDetection> {
   const axis = await axisDetector(page1DataUrl);
-  onStatus?.(`   líneas de texto ${axis === "horizontal" ? "horizontales" : "verticales"} → probando ${AXIS_CANDIDATES[axis].join("°/")}°`);
+  onStatus?.(`   ${axis === "horizontal" ? "horizontal" : "vertical"} text lines → trying ${AXIS_CANDIDATES[axis].join("°/")}°`);
 
   const scores: Partial<Record<Rotation, number>> = {};
   const probeCandidate = async (deg: Rotation): Promise<void> => {

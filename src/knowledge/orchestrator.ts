@@ -65,7 +65,7 @@ export class KnowledgeOrchestrator {
       });
 
       const answer = await rl.question(
-        `\n[REI] No encontré un proveedor técnico específico para: "${query}".\n¿Deseas realizar una búsqueda general en la web? (s/n): `
+        `\n[REI] No specific technical provider matched: "${query}".\nSearch the web generally? (y/n): `
       );
       rl.close();
       */
@@ -113,7 +113,7 @@ export class KnowledgeOrchestrator {
         this.cache.set(q, [generalChunk]);
         return [generalChunk];
       } catch (err) {
-        console.error(`[REI] Error en búsqueda general: ${err}`);
+        console.error(`[REI] General search failed: ${err}`);
         return [];
       }
     }

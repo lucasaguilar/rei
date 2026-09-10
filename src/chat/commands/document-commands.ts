@@ -30,11 +30,11 @@ function formatAskResult(r: AskResult): string {
     }
     lines.push(
       "",
-      `Fidelidad: ${r.faithfulness.verified}/${r.faithfulness.total} afirmaciones verificadas` +
-        `${r.sources.length ? ` · páginas consultadas: ${r.sources.join(", ")}` : ""}.`,
+      `Grounding: ${r.faithfulness.verified}/${r.faithfulness.total} claims verified` +
+        `${r.sources.length ? ` · pages consulted: ${r.sources.join(", ")}` : ""}.`,
     );
   } else if (r.notFound) {
-    lines.push("", "(No se encontró respuesta en el texto recuperado.)");
+    lines.push("", "(No answer found in the retrieved text.)");
   }
   // Same magenta "REI" badge as a normal answer so it reads as REI's response, not plain output.
   return `\x1b[1;97;45m REI \x1b[0m ${lines.join("\n")}`;
@@ -118,8 +118,8 @@ export const documentCommands: CommandHandler = {
           };
         }
         const where = slice.pages.some((p) => p > 0)
-          ? `pág. ${slice.pages.join(", ")}`
-          : "documento";
+          ? `p. ${slice.pages.join(", ")}`
+          : "document";
         return {
           success: true,
           response: `\x1b[1;97;45m REI \x1b[0m ${path.basename(filePath)} — ${where}:\n\n${slice.text}`,
@@ -160,8 +160,8 @@ export const documentCommands: CommandHandler = {
         return {
           success: false,
           response:
-            `[REI] No hay documento activo. Indicá uno: /ask-document <file> <pregunta>, ` +
-            `o activá con /doc use <file> (o arrastrá un PDF para OCRearlo).`,
+            `[REI] No active document. Name one: /ask-document <file> <question>, ` +
+            `or activate it with /doc use <file> (or drop a PDF in to OCR it).`,
         };
       }
 
