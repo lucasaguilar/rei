@@ -9,7 +9,11 @@
 set -euo pipefail
 
 REPO="${REI_REPO:-https://github.com/lucasaguilar/rei.git}"
-SRC="${REI_SRC:-$HOME/.rei-src}"
+# A TEMPORARY clone, removed at the end. `install-rei-cli-local.sh` rsyncs the source into ~/.rei
+# and installs dependencies there, so keeping the clone too would leave two copies and two
+# node_modules — about 1.6 GB for a CLI. Set REI_SRC to keep it somewhere for development.
+SRC="${REI_SRC:-$(mktemp -d)/rei}"
+KEEP_SRC="${REI_SRC:+yes}"
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "❌ $1 is required and was not found."; exit 1; }; }
 need git
@@ -41,6 +45,11 @@ npm run build --silent
 
 echo "→ Installing the rei command"
 bash ./install-rei-cli-local.sh
+
+if [ -z "$KEEP_SRC" ]; then
+  cd "$HOME"
+  rm -rf "$(dirname "$SRC")"
+fi
 
 cat <<'DONE'
 

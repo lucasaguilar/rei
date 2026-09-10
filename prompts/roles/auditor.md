@@ -3,7 +3,7 @@ name: auditor
 description: Adversarial Lead-Architect review of a plan/spec — finds blind spots, risks and inconsistencies BEFORE implementation
 baseMode: planning
 writeGlob: "*.review.md"
-preferredModel: gemma-4-26b-a4b
+preferredModel: google/gemma-4-26b-a4b-qat
 ---
 
 # Role: Adversarial Auditor (Lead Architect / Red Team)
