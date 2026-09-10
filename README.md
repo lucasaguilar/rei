@@ -13,25 +13,31 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](package.json)
 
-**A local-first coding agent that checks its own work against your project's real toolchain.**
+**A local-first agent you assemble yourself.**
 
-Run it against a model on your own machine, or against a cloud one — same tool, same commands. It
-reads your repository, proposes changes, applies them, and then runs whatever your project uses to
-tell right from wrong: `tsc`, `ngc`, `go build`, `cargo check`, `dotnet build`, `mvn compile`.
+Roles, sub-agents and skills are markdown files you write — and the limits they declare are
+**enforced in code, not suggested in a prompt**. A reviewer that says it may only write
+`*.review.md` is stopped by REI when it tries to touch anything else.
 
-**How strong that check is depends on your language**, and REI says which one it ran rather than
-implying they are equal:
+Runs against a model on your own machine, or a cloud one. Same tool, same commands.
 
-| Your project | What runs | What it proves |
-|---|---|---|
-| TypeScript · Angular · Go · Rust · C# · Java | the real compiler | it type-checks and builds |
-| Roblox / Luau | `luau-analyze`, `selene`, or `rojo build` | it parses, and analyses if you have the tools |
-| JavaScript · Python · PHP | a syntax check over the files | it parses — there is no type checker to run |
-| anything unrecognised | nothing | REI says so instead of reporting a pass |
+```markdown
+---
+name: auditor
+baseMode: planning          # read-only profile
+writeGlob: "*.review.md"    # the only files it may write. Enforced.
+preferredModel: some-other-model
+---
+You are an extremely critical Lead Architect. Find what is wrong,
+missing or risky. You are NOT here to implement or encourage.
+```
 
-A green result means **"what was applied passes that check"** — never "the task is done". A model
-can apply a partial change that compiles perfectly, and REI is built to tell you which of the two
-it verified.
+Drop that in `.rei/roles/`. It is a command next session — no build, no plugin API, no fork.
+
+It also checks its own work: REI runs your project's own verify command before a turn is allowed to
+finish, hands the model its own errors, and says plainly when it could not get to green. How strong
+that check is depends on what your project ships — a compiler proves more than a syntax check, and
+REI names which one it ran instead of implying they are equal.
 
 ---
 
@@ -49,10 +55,6 @@ it verified.
 - **You want to shape the agent, not accept one.** Roles, skills and prompts are markdown files you
   edit — a reviewer with its own posture and model, a recipe for how your team writes tests. Nothing
   is compiled in.
-
-**Probably not for you if** you have a frontier API budget and no privacy constraint — Claude Code
-or Cursor will serve you better, and they should. REI is for the case where those are not on the
-table, or where you want the machine to prove its work rather than assert it.
 
 ## Start in under a minute
 
@@ -79,8 +81,10 @@ rei
 
 The first run has no configuration, so **REI starts the setup wizard by itself**. It asks for a
 provider, takes an API key if you picked a cloud one, or **lists the models your local server
-already has** if you picked LM Studio, Ollama or MTPLX. It writes `.rei/.env` in the project and
-drops you into the session.
+already has** if you picked LM Studio, Ollama or MTPLX. Running something else that speaks the
+OpenAI API — vLLM, llama.cpp's server, LocalAI, your own gateway — pick LM Studio and point
+`LLM_STUDIO_BASE_URL` at it; that provider is a plain OpenAI `/v1` client. It writes `.rei/.env` in
+the project and drops you into the session.
 
 That is the whole setup. To change it later: `rei --config`.
 
@@ -88,12 +92,16 @@ That is the whole setup. To change it later: `rei --config`.
 
 ## Cloud or local, same tool
 
-| Cloud | Local |
-|---|---|
-| OpenRouter · Gemini · Groq · Hugging Face | LM Studio · Ollama · MTPLX |
+| Cloud | Local | Anything else |
+|---|---|---|
+| OpenRouter · Gemini · Groq · Hugging Face | LM Studio · Ollama · MTPLX | any OpenAI-compatible `/v1` endpoint |
 
 Cloud costs money and needs a key. Local is free, private, and works offline. Pick either in the
 wizard; nothing else about REI changes.
+
+There is no separate "OpenAI-compatible" provider to choose, because the LM Studio one already is
+that: set `LLM_STUDIO_BASE_URL` to your server's `/v1` URL and `LLM_STUDIO_MODEL` to its model id.
+vLLM, llama.cpp, LocalAI and most self-hosted gateways work this way.
 
 REI is an agent, so **the model has to support tool calling.** Most do; some hosted endpoints do
 not, and will reject the request outright. The wizard lists what your provider offers, and
@@ -216,12 +224,43 @@ You are an extremely critical Lead Architect. Your ONLY job is to find what is
 wrong, missing or risky. You are NOT here to implement or encourage.
 ```
 
-`/role auditor` switches to it, `/role off` leaves. Both of those fields are enforced, not advice:
+Those fields are enforced, not advice:
 
 - **`writeGlob` is a write scope.** The auditor can persist `plan.review.md` and nothing else — not
   the plan it is reviewing, not your source. It can only ever narrow what the base mode allows.
 - **`preferredModel` actually runs.** Which is the point: an auditor on the same weights that wrote
   the code tends to agree with itself. Give the reviewer different weights.
+
+**Sub-agents — the same file, invoked differently.** One definition, two ways to run it, and they
+differ on one thing: whose context it runs in.
+
+```
+/role auditor              wear it HERE. Your history, your session. It sees the
+audit @plan.md             conversation, you go back and forth, it stays until /role off.
+
+/auditor audit @plan.md    run it ISOLATED. A fresh session that does NOT inherit your
+                           history; returns a report; your session is untouched.
+```
+
+The role's name IS the command — `/auditor`, like `/compact`. It tab-completes, and `/roles` lists
+both forms for everything installed.
+
+Isolation cuts both ways, and that is the point on a local model. The worker starts with a small,
+clean window instead of your accumulated turns, and your context grows by its **report only** — not
+by the twenty files it read to write it. It also runs on the role's `preferredModel`, so a second
+opinion from different weights costs one keystroke instead of switching models by hand.
+
+Because it cannot see your conversation, the task goes on the same line: `/auditor` alone is
+refused, with an explanation.
+
+REI can also delegate on its own: `/runplan` gives each stage of a plan to its own worker, and in
+agent mode the model has a `delegate` tool for self-contained subtasks. `/<role>` is the
+deterministic version — you decide, not the model.
+
+**Together** — roles, sub-agents, skills and MCP servers are how you turn REI into something other
+than a coding agent. It ships with `auditor` (adversarial plan review) and `daily` (a concierge:
+weather, headlines, music — `baseMode: ask`, so it never touches your repository). `/roles new
+<name>` scaffolds another.
 
 **Project rules** — `{workspace}/.rei/rules.md` is prepended to every turn as mandatory
 conventions, and overrides anything generic REI infers about your stack.
@@ -229,23 +268,33 @@ conventions, and overrides anything generic REI infers about your stack.
 **MCP servers** — declared in `rei.config.json`; their tools join the session. Past 25 tools they go
 behind a search tool, so a large server does not eat the window.
 
-**Sub-agents** — `/runplan` hands each stage to a worker with a clean context and keeps only its
-summary. What the worker read never enters your session.
-
 ---
 
 ## Beyond code
 
-REI reads documents, not just repositories:
+REI reads documents and images, not just repositories:
 
 ```
-/read-document contract.pdf          images, digital PDFs and scanned ones (OCR)
+/paste-image                          an image from your clipboard — a screenshot,
+                                      a whiteboard, a UI mock, an error dialog
+drag a file into the terminal         same thing for a file on disk
+/read-document contract.pdf           a literal page range from a large document
 /ask-document what are the payment terms?
-/paste-image                         analyse an image from the clipboard
+/docs · /doc use <file>               list documents, pick the active one
 ```
 
-Scanned PDFs go through page rendering and a vision model, with rotation detection — a sideways
-photo of a page still works.
+**Images go through a vision sidecar.** The image is sent to a vision-capable model in a *separate*
+call, and only the text it returns enters the agent loop. Two consequences worth knowing: your
+coding model does not have to be multimodal — a small local vision model handles the picture while
+your reasoner stays text-only — and what gets stored in the session is the description, never the
+base64 blob.
+
+Scanned PDFs use the same path per page, with rotation detection, so a sideways photo of a page
+still works. Digital PDFs skip it and have their text extracted directly.
+
+`/ask-document` answers **with citations**, and reports how many of its own claims it could ground
+in the retrieved text — because a document Q&A that quietly invents a payment term is worse than
+one that refuses.
 
 ---
 
