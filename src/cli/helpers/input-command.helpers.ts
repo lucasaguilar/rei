@@ -4,6 +4,7 @@ import { createModelProvider } from "../../providers/provider-factory.js";
 import { Agent } from "../../core/agent.js";
 import { handleInputTurn } from "./input-turn.helpers.js";
 import { displayUserLabel } from "./chat.helpers.js";
+import { addContextReading } from "./turn-display.helpers.js";
 import { grabClipboardImage } from "../../tools/clipboard-image.js";
 import {
   extractImagePaths,
@@ -130,6 +131,9 @@ export async function handleInputCommand(
     if (result.recordInSession && !result.newSession) {
       session.messages.push({ role: "user", content: trimmed });
       session.messages.push({ role: "assistant", content: result.response });
+      // The history just grew, so the sticky gauge must too — it is only republished at the end of
+      // a real turn, and would otherwise keep the pre-command figure until the next message.
+      addContextReading(state, trimmed, result.response);
       saveSession(ctx.workspacePath, session.messages, session.mode);
     }
 

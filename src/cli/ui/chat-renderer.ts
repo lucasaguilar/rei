@@ -206,6 +206,13 @@ export class ChatRenderer {
         : null;
     if (contextBar) uiLines.push(fixedLine(contextBar));
 
+    // Active-role indicator. A role silently adopts its own baseMode, write scope and model, so
+    // the prompt shows you are in `plan` while nothing says WHY — and a forgotten role is a session
+    // quietly running under someone else's rules. Same slot as the document line below.
+    if (state.activeRole) {
+      uiLines.push(fixedLine(`\x1b[2m🎭 ${state.activeRole}\x1b[0m`));
+    }
+
     // Active-document indicator: a dim 📄 line right above the prompt, ABOVE the input rows, so the
     // cursor math below is untouched.
     if (state.activeDocument) {

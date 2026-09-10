@@ -1,5 +1,6 @@
 import { formatCodeDiff } from "../markdown-renderer.js";
 import { isVerboseOutput } from "../../config/output-verbosity.js";
+import { estimateTokens } from "../../chat/helpers/token-estimator.js";
 
 /**
  * How a finished turn's machinery is rendered — the parts whose SIZE is the question, kept apart
@@ -59,6 +60,23 @@ export interface PhaseState {
  * Deliberately the LAST turn's number: the bar is redrawn on every keystroke, and re-estimating the
  * whole history there would put a full token count in the input loop.
  */
+/**
+ * Adds to the sticky bar what a COMMAND just recorded into the session.
+ *
+ * `publishContextReading` runs only at the end of a real turn, so a command that stores its result
+ * — a sub-agent's report, /ask-document's answer — grew the history while the bar kept showing the
+ * previous turn's figure. It under-reported at exactly the wrong moment: right after a long report
+ * lands is when you read that number to decide whether to /clear.
+ *
+ * An INCREMENT, not a recount. The whole-history estimate stays out of this path (see the note
+ * above), and the next real turn replaces this with the measured value.
+ */
+export function addContextReading(state: PhaseState, ...added: string[]): void {
+  // Nothing measured yet means nothing to add to — a bare estimate here would read as a real one.
+  if (state.contextTokens === undefined) return;
+  state.contextTokens += added.reduce((sum, text) => sum + estimateTokens(text), 0);
+}
+
 export function publishContextReading(
   state: PhaseState,
   tokens: number,
