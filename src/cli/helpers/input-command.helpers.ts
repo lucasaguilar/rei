@@ -5,6 +5,7 @@ import { Agent } from "../../core/agent.js";
 import { handleInputTurn } from "./input-turn.helpers.js";
 import { displayUserLabel } from "./chat.helpers.js";
 import { addContextReading } from "./turn-display.helpers.js";
+import { refreshStickyReading } from "./startup-gauge.helper.js";
 import { grabClipboardImage } from "../../tools/clipboard-image.js";
 import {
   extractImagePaths,
@@ -155,6 +156,12 @@ export async function handleInputCommand(
     if (result.newSession) {
       Object.assign(session, result.newSession);
     }
+
+    // Refresh the sticky context bar after any session-mutating command:
+    // /mode, /model, /role, /provider, /clear, /runplan — all of these
+    // change the active model or history, so the bar would otherwise stay
+    // stale until the next real turn.
+    refreshStickyReading(state, agent, session, ctx.workspacePath);
 
     // Handle automatic execution (e.g., /runplan) via the full streaming pipeline
     // so patch diffs and live output are shown correctly.
