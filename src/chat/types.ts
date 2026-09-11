@@ -75,4 +75,15 @@ export interface ChatSession {
    * Without it, `/model` reported success and changed nothing while a role was active.
    */
   manualModel?: string;
+  /**
+   * WHICH model slot `manualModel` was chosen for: `"agent"` for `/model agent x`, `"base"` for
+   * `/model x` — mirroring the env split (`<PREFIX>_MODEL_AGENT` vs `<PREFIX>_MODEL`), because that
+   * is the split `/model` itself writes to.
+   *
+   * Without it the field was session-wide, so a choice made for one slot silently governed the
+   * other: `/model agent X` then `/mode ask` ran ask on X and the status bar named it, while the
+   * ask model sat unused. `/model` already refused to record a choice that did not target the mode
+   * you were in (`targetsThisMode`) — this is that same rule, remembered instead of checked once.
+   */
+  manualModelScope?: "agent" | "base";
 }
