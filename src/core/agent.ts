@@ -42,6 +42,7 @@ import {
 import type { StreamTurnOptions } from "./models/agent.types.js";
 import { formatBatchPatchResult } from "./helpers/action-executor.js";
 import { type SkillMode } from "../skills/skill-loader.js";
+import { activeManualModel } from "../chat/manual-model.js";
 import { loadRole } from "../skills/role-loader.js";
 import {
   ensureRepoMapIndexed,
@@ -184,7 +185,9 @@ export class Agent {
     // Most recent explicit choice first: `/model` (this session) beats the role's preference,
     // which beats the mode's configured model. See ChatSession.manualModel.
     const turnModel =
-      session.manualModel || turnRole?.preferredModel || resolveModelForMode(session.mode);
+      activeManualModel(session, session.mode) ||
+      turnRole?.preferredModel ||
+      resolveModelForMode(session.mode);
     this.lastTurnModel = turnModel; // what the status bar reports, so it cannot disagree
 
     // Resolve this turn's per-model tuning (rei.config.json) ONCE; the config resolvers

@@ -1,3 +1,4 @@
+import type { ChatSession } from "../types.js";
 import type { CommandHandler, CommandResult } from "./command-handler.js";
 import { loadRole } from "../../skills/role-loader.js";
 
@@ -56,6 +57,22 @@ function getModelEnvVar(providerName: string, mode?: string): string | undefined
  * model (per mode), setting the env vars and recreating the agent.
  * Extracted verbatim from menu-command-processor (Phase 1 — no behavior change).
  */
+/**
+ * A manual `/model` choice names a model of the provider that was active when you typed it, so
+ * switching THAT slot's provider makes it unreachable — Ollama has no "mlx-community/…". Dropping
+ * it hands the slot back to the new provider's configured model; keeping it asked the new backend
+ * for the old backend's model and froze the status bar on a name that no longer existed.
+ *
+ * Only the slot that changed: `/provider agent x` leaves an ask/planning choice alone.
+ */
+function clearManualModelFor(
+  slot: "agent" | "base",
+  session: ChatSession | undefined,
+): { newSession: ChatSession } | Record<string, never> {
+  if (!session || session.manualModelScope !== slot) return {};
+  return { newSession: { ...session, manualModel: undefined, manualModelScope: undefined } };
+}
+
 export const providerCommands: CommandHandler = {
   match: (c) => PROVIDER_RE.test(c) || MODEL_RE.test(c),
 
@@ -92,6 +109,7 @@ export const providerCommands: CommandHandler = {
           success: true,
           response: `[REI] Dedicated Agent provider disabled. Agent mode will now use primary provider: '${currentPrimary}'.`,
           recreateAgent: true,
+          ...clearManualModelFor("agent", session),
         };
       }
 
@@ -108,6 +126,7 @@ export const providerCommands: CommandHandler = {
           success: true,
           response: `[REI] Dedicated Agent provider changed to: '${lower}'. Agent recreated successfully.`,
           recreateAgent: true,
+          ...clearManualModelFor("agent", session),
         };
       }
       process.env.MODEL_PROVIDER = lower;
@@ -115,6 +134,7 @@ export const providerCommands: CommandHandler = {
         success: true,
         response: `[REI] Active provider changed to: '${lower}'. Agent recreated successfully.`,
         recreateAgent: true,
+        ...clearManualModelFor("base", session),
       };
     }
 
@@ -253,7 +273,15 @@ export const providerCommands: CommandHandler = {
         response: `[REI] ${modeLabel} model changed to: '${requested}' (provider: '${targetProvider}').${overriding}`,
         recreateAgent: true,
         ...(targetsThisMode && session
-          ? { newSession: { ...session, manualModel: requested } }
+          ? {
+              newSession: {
+                ...session,
+                manualModel: requested,
+                // Which slot it was chosen for, so leaving this mode drops it instead of
+                // carrying it over (ChatSession.manualModelScope).
+                manualModelScope: (isAgentTarget ? "agent" : "base") as "agent" | "base",
+              },
+            }
           : {}),
       };
     }

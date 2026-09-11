@@ -45,11 +45,13 @@ describe("every turn honours the active role", () => {
 
   it("resolves ONE model for the turn, in the documented order of precedence", () => {
     // Most recent explicit choice first: /model beats the role, which beats the mode's config.
+    // The manual choice is read through activeManualModel, which drops one made for the OTHER
+    // model slot (`/model agent X` then `/mode ask`) — see chat/manual-model.ts.
     const chain = turnBody.match(/const turnModel\s*=([\s\S]{0,160}?);/)?.[1] ?? "";
-    expect(chain).toContain("session.manualModel");
+    expect(chain).toContain("activeManualModel(session");
     expect(chain).toContain("turnRole?.preferredModel");
     expect(chain).toContain("resolveModelForMode");
-    expect(chain.indexOf("session.manualModel")).toBeLessThan(chain.indexOf("turnRole?.preferredModel"));
+    expect(chain.indexOf("activeManualModel(session")).toBeLessThan(chain.indexOf("turnRole?.preferredModel"));
     expect(chain.indexOf("turnRole?.preferredModel")).toBeLessThan(chain.indexOf("resolveModelForMode"));
   });
 

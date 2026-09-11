@@ -4,6 +4,8 @@ import { scanWorkspace } from "../../workspace/workspace-scanner.js";
 import { MentionEntry, CommandEntry } from "../models/chat.types.js";
 import { listRoles } from "../../skills/role-loader.js";
 import { RESERVED_COMMAND_NAMES } from "../../chat/commands/role-agent-commands.js";
+import { activeManualModel } from "../../chat/manual-model.js";
+import type { SessionMode } from "../../chat/types.js";
 
 export function toPosixPath(input: string): string {
   // NOTE: Replace all Windows-style backslashes with POSIX forward slashes
@@ -60,11 +62,15 @@ export function sessionIndicators(session: {
   activeDocument?: string;
   activeRole?: string;
   manualModel?: string;
+  manualModelScope?: "agent" | "base";
+  mode?: SessionMode;
 }): { activeDocument?: string; activeRole?: string; manualModel?: string } {
   return {
     activeDocument: session.activeDocument,
     activeRole: session.activeRole,
-    manualModel: session.manualModel,
+    // Scoped, like the turn: a choice made for the agent slot must not light up "model overridden"
+    // while you are in ask — the badge would name a model the turn is not going to use.
+    manualModel: activeManualModel(session, session.mode ?? "ask"),
   };
 }
 
