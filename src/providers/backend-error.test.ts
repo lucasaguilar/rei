@@ -86,3 +86,42 @@ describe("everything else", () => {
     expect(explainBackendError(raw)).toBe(raw);
   });
 });
+
+/**
+ * Verbatim body from a `hola` that never reached the model: LM Studio answers 400 and the turn is
+ * lost to a toggle in the backend's right-hand panel. The traceback names the draft model, so the
+ * obvious move — try a different draft model — is the one that cannot work.
+ */
+const DRAFT = JSON.stringify({
+  error:
+    "Failed to load draft model. SpeculativeDecodingNotSupportedError: Speculative decoding is " +
+    "not supported for batched MLX models.",
+});
+
+describe("a draft model that cannot be loaded", () => {
+  it("points at the toggle, not at the draft model", () => {
+    const out = explainBackendError(DRAFT);
+    expect(out).toContain("Speculative Decoding OFF");
+    expect(out).not.toContain("SpeculativeDecodingNotSupportedError");
+  });
+
+  it("says a batched model can never speculate, so no other draft model is worth trying", () => {
+    expect(explainBackendError(DRAFT)).toContain("no draft model will work with it");
+  });
+
+  it("clears REI of the blame — the request never reached the model", () => {
+    expect(explainBackendError(DRAFT)).toContain("Nothing REI sent caused this");
+  });
+
+  it("falls back to the tokenizer explanation when the backend does not say 'batched'", () => {
+    const out = explainBackendError("Failed to load draft model: vocab size mismatch");
+    expect(out).toContain("tokenizer");
+    expect(out).not.toContain("BATCHED");
+  });
+});
+
+describe("unknown failures are still passed through", () => {
+  it("does not invent a cause for an error it does not recognise", () => {
+    expect(explainBackendError("ECONNREFUSED 127.0.0.1:1234")).toBe("ECONNREFUSED 127.0.0.1:1234");
+  });
+});
