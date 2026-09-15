@@ -277,7 +277,22 @@ export function stripActionTags(text: string): string {
  * preserving all action/XML tags so the agent/planning modes maintain their full context.
  */
 export function stripThinkingBlock(text: string): string {
-  return text.replace(/<think>[\s\S]*?(<\/think>|$)/gi, "").trim();
+  return (
+    text
+      // A CLOSED block is reasoning wherever it sits — remove it and keep what surrounds it.
+      .replace(/<think>[\s\S]*?<\/think>/gi, "")
+      // An UNCLOSED block counts only when it OPENS the text. That is the streaming case: the
+      // closing tag has not arrived yet, and everything after the opener is still reasoning.
+      //
+      // Anywhere else, `<think>` is just five characters inside an answer — a model quoting the
+      // tag, or explaining REI's own code — and the previous `(<\/think>|$)` fallback deleted from
+      // there to the end of the string. The answer arrived whole and REI truncated it, which reads
+      // exactly like the model running out of output tokens. It is not: the server reported
+      // finish_reason=stop. Losing the rest of an answer is worse than showing a stray tag, so a
+      // mid-text opener is left alone.
+      .replace(/^\s*<think>[\s\S]*$/i, "")
+      .trim()
+  );
 }
 
 /**
