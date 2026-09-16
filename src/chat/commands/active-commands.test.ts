@@ -84,7 +84,20 @@ describe("/active", () => {
   });
 
   it("does not swallow neighbours", async () => {
+    // A different command that merely starts with the same letters is not ours.
     expect(await run("/actives")).toBeNull();
-    expect(await run("/active clear everything")).toBeNull();
+    expect(await run("/activedoc")).toBeNull();
+  });
+
+  it("answers a malformed argument with the usage, not 'Unknown command'", async () => {
+    // `/active [clear]` is what the help line shows, so it is what people type. Telling them the
+    // command does not exist is false: the command is right, the brackets were quoted from its own
+    // usage. Same for any other wrong argument.
+    for (const wrong of ["/active [clear]", "/active clear everything", "/active spec"]) {
+      const r = await run(wrong);
+      expect(r?.success, wrong).toBe(false);
+      expect(r?.response, wrong).toContain("Usage: /active");
+      expect(r?.response, wrong).not.toContain("Unknown command");
+    }
   });
 });

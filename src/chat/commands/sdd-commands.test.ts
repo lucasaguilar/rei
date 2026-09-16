@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { dispatchCommand } from "./registry.js";
+import { proposeName, sanitizeName } from "./sdd-commands.js";
 import type { CommandContext } from "./command-handler.js";
 import type { ChatMessage } from "../types.js";
 
@@ -28,11 +29,16 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(ws, { recursive: true, force: true }));
 
-const run = (command: string, messages: ChatMessage[] = []) =>
+const run = (
+  command: string,
+  messages: ChatMessage[] = [],
+  extra: Partial<CommandContext> = {},
+) =>
   dispatchCommand({
     command,
     workspacePath: ws,
     session: { messages, mode: "ask" },
+    ...extra,
   } as unknown as CommandContext);
 
 const promptOf = (r: unknown) =>
@@ -119,5 +125,79 @@ describe("command matching", () => {
     expect(await run("/specs")).toBeNull();
     expect(await run("/spec")).toBeNull(); // no task → not ours
     expect(await run("/decomposed")).toBeNull();
+  });
+});
+
+/**
+ * The name is the part a human uses later. REI decides the PATH (the active pointer depends on it),
+ * but the name is proposed and the user gets the last word.
+ *
+ * The proposal used to be the first five words of the task with every non-letter deleted, so
+ * articles ate the budget ("arreglar-el-bug-del-context") and a pasted path fused into one 48-char
+ * token: `usersdevwwwprclient-webclient-appcursorplansci` — a real name from a real session.
+ */
+describe("naming a spec", () => {
+  const MONDAY = new Date(2026, 8, 16); // 2026-09-16
+
+  it("puts the date first, so the directory sorts chronologically", () => {
+    expect(proposeName("arreglar el parser", MONDAY)).toMatch(/^2026-09-16-/);
+  });
+
+  it("drops the words that carry nothing", () => {
+    // "arreglar el bug del context window" — the old slug stopped at "context".
+    expect(proposeName("arreglar el bug del context window cuando falla", MONDAY)).toBe(
+      "2026-09-16-arreglar-bug-context-window",
+    );
+  });
+
+  it("breaks a pasted path into words instead of fusing it", () => {
+    const name = proposeName(
+      "/Users/dev/www/PR/client-web/client-app/.cursor/plans/stable-slot.md",
+      MONDAY,
+    );
+    expect(name).not.toContain("userslucas");
+    expect(name.length).toBeLessThanOrEqual(43); // date + 32
+  });
+
+  it("never comes back empty", () => {
+    expect(proposeName("de la y el", MONDAY)).toBe("2026-09-16-spec");
+    expect(proposeName("", MONDAY)).toBe("2026-09-16-spec");
+  });
+});
+
+describe("sanitising what the user types", () => {
+  it("keeps a sensible name as it is", () => {
+    expect(sanitizeName("2026-09-16-mi-spec")).toBe("2026-09-16-mi-spec");
+  });
+
+  it("cannot escape the specs directory", () => {
+    expect(sanitizeName("../../etc/passwd")).toBe("etc-passwd");
+    expect(sanitizeName("/absolute/path")).toBe("absolute-path");
+  });
+
+  it("forgives a typed .md and stray spaces", () => {
+    expect(sanitizeName("  mi spec.md  ")).toBe("mi-spec");
+  });
+});
+
+describe("asking the user for the name", () => {
+  it("uses what the user typed", async () => {
+    const elicit = vi.fn().mockResolvedValue({ id: "1", value: "2026-09-16-elegido-por-mi" });
+    const r = await run("/spec arreglar el parser", [], { elicit });
+    expect(elicit).toHaveBeenCalledTimes(1);
+    expect(r?.response).toContain("2026-09-16-elegido-por-mi");
+    expect(r?.autoExecute?.prompt).toContain(".rei/specs/2026-09-16-elegido-por-mi.md");
+  });
+
+  it("keeps the proposal when the user just hits Enter", async () => {
+    const elicit = vi.fn().mockResolvedValue({ id: "1", value: "" });
+    const r = await run("/spec arreglar el parser roto", [], { elicit });
+    expect(r?.response).toMatch(/\.rei\/specs\/\d{4}-\d{2}-\d{2}-arreglar-parser-roto\.md/);
+  });
+
+  it("does not ask when there is no interactive frontend", async () => {
+    // One-shot and server runs have no elicit: the proposal stands, nothing blocks.
+    const r = await run("/spec arreglar el parser");
+    expect(r?.response).toMatch(/\.rei\/specs\/\d{4}-\d{2}-\d{2}-/);
   });
 });

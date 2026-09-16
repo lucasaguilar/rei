@@ -5,7 +5,7 @@ import type { TurnStatus } from "../core/models/agent.types.js";
 import { resolveDefaultSessionMode, type ChatSession } from "../chat/types.js";
 
 import { getWelcomeMessage } from "./constants/chat.constants.js";
-import { renderStartupGauge } from "./helpers/startup-gauge.helper.js";
+import { refreshActiveArtifacts, renderStartupGauge, stickyIndicators } from "./helpers/startup-gauge.helper.js";
 import {
   ChatRendererState,
   ChatUIState,
@@ -176,9 +176,7 @@ export async function runChat(
       activeStatus: state.activeStatus,
       activeStatusText: state.activeStatusText,
       statusStartedAt: state.statusStartedAt,
-      contextTokens: state.contextTokens,
-      contextWindow: state.contextWindow,
-      modelLabel: state.modelLabel,
+      ...stickyIndicators(state),
       spinnerIndex: state.spinnerIndex,
       sessionMode: session.mode,
       inputBuffer: state.inputBuffer,
@@ -356,6 +354,9 @@ export async function runChat(
   state.contextTokens = startupGauge.tokens;
   state.contextWindow = startupGauge.window;
   state.modelLabel = startupGauge.model;
+  // The 📋 indicator is seeded here too: an active plan survives a restart, and the first thing you
+  // should see on opening REI is that yesterday's pointer is still set.
+  refreshActiveArtifacts(state, workspacePath);
 
   if (autoIndex && isRagEnabled() && !hasRagIndex(workspacePath)) {
     pushTranscript(

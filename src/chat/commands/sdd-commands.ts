@@ -6,6 +6,7 @@ import { isSpecMessage } from "../spec-tracker.js";
 import { findSkill, loadSkills } from "../../skills/skill-loader.js";
 import { getActive, setActivePlan, setActiveSpec } from "../active-artifacts.js";
 import type { SessionMode } from "../types.js";
+import { newElicitationId } from "../elicitation.js";
 
 /**
  * `/spec <task>` and `/decompose` — the two phases of the spec-driven flow, made deterministic.
@@ -25,16 +26,75 @@ import type { SessionMode } from "../types.js";
 const SPEC_RE = /^\/spec\s+(.+)$/is;
 const DECOMPOSE_RE = /^\/decompose\s*$/i;
 
-/** A short, filesystem-safe name derived from the task — the spec and its plan share it. */
-function slug(task: string): string {
-  const base = task
+/**
+ * Words that carry no meaning in a file name. Two languages because the tasks are written in two.
+ */
+const STOPWORDS = new Set([
+  "el","la","los","las","un","una","unos","unas","de","del","al","a","en","y","o","que","para",
+  "por","con","sin","su","sus","mi","lo","se","es","son","este","esta","esto","ese","esa","como",
+  "the","a","an","of","to","in","on","for","and","or","that","this","with","from","is","are","it",
+]);
+
+/**
+ * A short, filesystem-safe name proposed for a spec (and the plan that follows it).
+ *
+ * The old version lowercased, deleted every non-letter and took the first FIVE words — which meant
+ * articles and prepositions ate the budget ("arreglar-el-bug-del-context") and, because `/` and `.`
+ * were deleted rather than treated as separators, a path pasted into the task collapsed into one
+ * 48-char token: `usersdevwwwprclient-webclient-appcursorplansci`. The date goes in front so the
+ * directory sorts chronologically, which is how you actually look for one of these later.
+ */
+export function proposeName(task: string, today = new Date()): string {
+  const date = [
+    today.getFullYear(),
+    String(today.getMonth() + 1).padStart(2, "0"),
+    String(today.getDate()).padStart(2, "0"),
+  ].join("-");
+
+  const words = task
     .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, "")
-    .trim()
+    // Separators, not characters to delete: a path must break into its parts, not fuse into one.
+    .replace(/[/\\._:@]+/g, " ")
+    .replace(/[^a-z0-9\s-]/g, " ")
     .split(/\s+/)
-    .slice(0, 5)
-    .join("-");
-  return base.length > 0 ? base.slice(0, 48) : "spec";
+    .filter((w) => w.length > 2 && !STOPWORDS.has(w))
+    // A pasted path leaves its directories behind; they describe where, never what.
+    .filter((w) => !["users","home","www","src","tmp","var","dev"].includes(w));
+
+  const slug = words.slice(0, 4).join("-").slice(0, 32).replace(/-+$/, "");
+  return `${date}-${slug || "spec"}`;
+}
+
+/** Strips anything that could escape `.rei/specs/`, and normalises what the user typed. */
+export function sanitizeName(name: string): string {
+  return name
+    .trim()
+    .replace(/\.md$/i, "")
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^[.-]+|[.-]+$/g, "")
+    .slice(0, 64);
+}
+
+/**
+ * Lets the user name the artifact, proposing one derived from the task.
+ *
+ * REI picks the path the model must write to, so the name is REI's decision — but it is the user
+ * who has to find the file next week. Without an interactive frontend the proposal stands, so
+ * one-shot and server runs are unaffected.
+ */
+async function askForName(
+  ctx: CommandContext,
+  proposed: string,
+  what: "spec" | "plan",
+): Promise<string> {
+  if (!ctx.elicit) return proposed;
+  const answer = await ctx.elicit({
+    id: newElicitationId(),
+    kind: "text",
+    message: `Name for the ${what} (Enter keeps "${proposed}") → .rei/${what}s/<name>.md`,
+    default: proposed,
+  });
+  return sanitizeName(answer.value) || proposed;
 }
 
 /** Loads a skill's full body, or null when it isn't installed. */
@@ -80,7 +140,7 @@ function findSpec(ctx: CommandContext): { content: string; origin: string } | nu
 export const sddCommands: CommandHandler = {
   match: (c) => SPEC_RE.test(c.trim()) || DECOMPOSE_RE.test(c.trim()),
 
-  run: (ctx): CommandResult => {
+  run: async (ctx): Promise<CommandResult> => {
     const { command, session, workspacePath } = ctx;
     const trimmed = command.trim();
     const planning = "planning" as SessionMode;
@@ -92,10 +152,10 @@ export const sddCommands: CommandHandler = {
       const body = skillBody(workspacePath, "write-spec");
       if (!body) return missingSkill("write-spec");
 
-      // The COMMAND picks the name and marks it active, then tells the model exactly where to write.
-      // Letting the model choose would leave REI guessing which file it meant — the ambiguity the
-      // active pointer exists to remove.
-      const specName = slug(task);
+      // The COMMAND owns the path — letting the model choose leaves REI guessing which file it
+      // meant, the ambiguity the active pointer exists to remove. But the NAME is offered to the
+      // user first: they are the one who has to find this file next week.
+      const specName = await askForName(ctx, proposeName(task), "spec");
       setActiveSpec(workspacePath, specName);
 
       const prompt =
@@ -133,9 +193,13 @@ export const sddCommands: CommandHandler = {
     const body = skillBody(workspacePath, "micro-task-decomposition");
     if (!body) return missingSkill("micro-task-decomposition");
 
-    // The plan inherits the spec's name, so the pair is obvious on disk and `/runplan` has an active
-    // plan without anyone remembering to `/saveplan`.
-    const planName = getActive(workspacePath).spec ?? "current";
+    // The plan is OFFERED the spec's name, so the pair stays obvious on disk and `/runplan` has an
+    // active plan without anyone remembering to `/saveplan` — but it is still the user's to change.
+    const planName = await askForName(
+      ctx,
+      getActive(workspacePath).spec ?? proposeName(spec.origin),
+      "plan",
+    );
     setActivePlan(workspacePath, planName);
 
     const prompt =

@@ -6,8 +6,11 @@ import { resolveModelForMode } from "../../providers/provider-factory.js";
 import { resolveModelTuning, setActiveModelTuning } from "../../config/model-tuning.js";
 import { resolveActiveModelLabel } from "./input-turn.helpers.js";
 import type { PhaseState } from "./turn-display.helpers.js";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { loadRole } from "../../skills/role-loader.js";
-import { activeManualModel } from "../../chat/manual-model.js";
+import { getActive } from "../../chat/active-artifacts.js";
+import { resolveSessionModel } from "../../chat/manual-model.js";
 
 /**
  * Pre-resolves the active model's tuning and renders the startup context gauge. The per-turn path
@@ -53,6 +56,47 @@ export interface ContextBar extends PhaseState {
   contextTokens?: number;
   contextWindow?: number;
   modelLabel?: string;
+  activeSpec?: string;
+  activePlan?: string;
+  activeArtifactsMissing?: boolean;
+}
+
+/**
+ * Everything the sticky block above the prompt reads, as one value.
+ *
+ * Copying six fields by hand into the render state is six chances to forget the seventh — which is
+ * how the bar came to show a model the turn was not using. They move together because they ARE one
+ * thing: the state of this session, drawn where it cannot scroll away.
+ */
+export function stickyIndicators(state: ContextBar): Pick<
+  ContextBar,
+  "contextTokens" | "contextWindow" | "modelLabel" | "activeSpec" | "activePlan" | "activeArtifactsMissing"
+> {
+  return {
+    contextTokens: state.contextTokens,
+    contextWindow: state.contextWindow,
+    modelLabel: state.modelLabel,
+    activeSpec: state.activeSpec,
+    activePlan: state.activePlan,
+    activeArtifactsMissing: state.activeArtifactsMissing,
+  };
+}
+
+/**
+ * Publishes the active spec/plan for the 📋 indicator.
+ *
+ * The pointer lives on disk (.rei/active.json) so it survives a restart, which means the renderer —
+ * redrawn on every keystroke — must never read it. It is read HERE instead: once, when a command
+ * could have changed it. A pointer whose file is gone is flagged, because the alternative is
+ * finding out at /runplan, and `/trace` reporting "File not found" on a name nobody recognises.
+ */
+export function refreshActiveArtifacts(state: ContextBar, workspacePath: string): void {
+  const { spec, plan } = getActive(workspacePath);
+  const gone = (name: string | undefined, dir: string) =>
+    !!name && !fs.existsSync(path.join(workspacePath, ".rei", dir, `${name}.md`));
+  state.activeSpec = spec;
+  state.activePlan = plan;
+  state.activeArtifactsMissing = gone(spec, "specs") || gone(plan, "plans");
 }
 
 /**
@@ -77,13 +121,9 @@ export function refreshStickyReading(
   session: ChatSession,
   workspacePath = process.cwd(),
 ): void {
-  const turnRole = session.activeRole
-    ? loadRole(session.activeRole, workspacePath)
-    : null;
-  const turnModel =
-    activeManualModel(session, session.mode) ??
-    turnRole?.preferredModel ??
-    resolveModelForMode(session.mode);
+  // The SAME resolver the turn uses (chat/manual-model.ts). Two derivations of one fact drift —
+  // that is exactly how the bar came to name a model the turn was not running on.
+  const turnModel = resolveSessionModel(session, workspacePath);
 
   setActiveModelTuning(resolveModelTuning(turnModel, workspacePath));
 
@@ -97,4 +137,5 @@ export function refreshStickyReading(
   // mode → context window (from the NEW model's tuning), history → estimated tokens.
   state.contextWindow = getContextWindow();
   state.contextTokens = historyTokens + agent.estimateActiveToolsTokens(session.mode);
+  refreshActiveArtifacts(state, workspacePath);
 }

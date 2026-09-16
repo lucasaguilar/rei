@@ -12,6 +12,13 @@ import { clearActive, getActive } from "../active-artifacts.js";
  * makes stickiness safe.
  */
 const ACTIVE_RE = /^\/active(?:\s+(clear|off)(?:\s+(spec|plan))?)?$/i;
+/**
+ * Anything else starting with `/active`. The help line reads `/active [clear]`, and a bracketed
+ * placeholder is what a reader copies — so `/active [clear]` was answered with "Unknown command",
+ * which says the command does not exist when the truth is that the argument was quoted from its own
+ * usage. Tab-completion strips the brackets; a human reading /help does not.
+ */
+const ACTIVE_ANY_RE = /^\/active\b/i;
 
 function describe(workspacePath: string): string {
   const { spec, plan } = getActive(workspacePath);
@@ -32,10 +39,21 @@ function describe(workspacePath: string): string {
 }
 
 export const activeCommands: CommandHandler = {
-  match: (c) => ACTIVE_RE.test(c.trim()),
+  match: (c) => ACTIVE_ANY_RE.test(c.trim()),
 
   run: ({ command, workspacePath }): CommandResult => {
-    const m = command.trim().match(ACTIVE_RE);
+    const trimmed = command.trim();
+    if (!ACTIVE_RE.test(trimmed)) {
+      return {
+        success: false,
+        recordInSession: false,
+        response:
+          `[REI] Usage: /active · /active clear · /active clear spec · /active clear plan\n` +
+          `  (the square brackets in the help line mean "optional" — they are not typed)\n` +
+          `${describe(workspacePath)}`,
+      };
+    }
+    const m = trimmed.match(ACTIVE_RE);
     const clearing = m?.[1];
     if (!clearing) {
       return { success: true, recordInSession: false, response: describe(workspacePath) };

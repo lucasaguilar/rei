@@ -217,6 +217,16 @@ export class ChatRenderer {
       uiLines.push(fixedLine(`\x1b[2m🎭 ${state.activeRole}${overridden}\x1b[0m`));
     }
 
+    // Active SDD artifacts. `/active` answers this on demand, but the pointer is STICKY by design —
+    // finishing a plan does not clear it — so the failure mode is a forgotten pointer executing
+    // yesterday's plan against today's work. Seeing it costs one dim line; not seeing it cost a
+    // `/trace` against a file nobody recognised.
+    if (state.activeSpec || state.activePlan) {
+      const warn = state.activeArtifactsMissing ? " \x1b[33m⚠ file missing\x1b[0m\x1b[2m" : "";
+      const pair = [state.activeSpec ?? "—", state.activePlan ?? "—"].join(" → ");
+      uiLines.push(fixedLine(`\x1b[2m📋 ${pair}${warn}\x1b[0m`));
+    }
+
     // Active-document indicator: a dim 📄 line right above the prompt, ABOVE the input rows, so the
     // cursor math below is untouched.
     if (state.activeDocument) {

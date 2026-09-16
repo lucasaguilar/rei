@@ -43,6 +43,12 @@ export interface ChatRendererState {
   contextTokens?: number;
   contextWindow?: number;
   modelLabel?: string;
+  /** Active SDD artifacts, shown as a 📋 indicator above the prompt. Read when a command changes
+   *  them — never per keystroke, since they live on disk (.rei/active.json). `missing` marks a
+   *  pointer whose file is gone, which is otherwise only discovered when /runplan fails. */
+  activeSpec?: string;
+  activePlan?: string;
+  activeArtifactsMissing?: boolean;
   spinnerIndex: number;
   sessionMode: string; // SessionMode
   inputBuffer: string;
@@ -65,6 +71,12 @@ export interface ChatUIState {
   contextTokens?: number;
   contextWindow?: number;
   modelLabel?: string;
+  /** Active SDD artifacts, shown as a 📋 indicator above the prompt. Read when a command changes
+   *  them — never per keystroke, since they live on disk (.rei/active.json). `missing` marks a
+   *  pointer whose file is gone, which is otherwise only discovered when /runplan fails. */
+  activeSpec?: string;
+  activePlan?: string;
+  activeArtifactsMissing?: boolean;
   spinnerIndex: number;
 
   historySearchMode: boolean;
