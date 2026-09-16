@@ -52,10 +52,24 @@ export function getToolOutput(id?: string): ToolOutputEntry | undefined {
   return entries[entries.length - 1];
 }
 
-/** Inline char budget before a tool output is spilled to disk (override via env). */
+/**
+ * Inline char budget before a tool output is spilled to disk (override via env).
+ *
+ * It is a BUDGET, so `0` means exactly that: no output travels inline, everything goes to disk and
+ * the model gets the receipt (plus whatever REI_TOOL_OUTPUT_PREVIEW allows — set that to 0 too for
+ * the receipt alone). That is the aggressive end of the knob, for answering "how much does the
+ * model actually need to see?".
+ *
+ * The guard used to be `n > 0`, so 0 fell through to the 2000 default and the setting looked broken
+ * rather than ignored. A negative or unparseable value is still a mistake, and still falls back.
+ */
 function inlineLimit(): number {
-  const n = parseInt(process.env.REI_TOOL_OUTPUT_MAX_INLINE ?? "", 10);
-  return Number.isFinite(n) && n > 0 ? n : 2000;
+  const raw = process.env.REI_TOOL_OUTPUT_MAX_INLINE?.trim();
+  if (raw) {
+    const n = Number.parseInt(raw, 10);
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return 2000;
 }
 
 /**
@@ -63,11 +77,15 @@ function inlineLimit(): number {
  * it showed only the opening metadata (`{"expand":"renderedFields,names,…`) and for prose it cut off
  * mid-sentence, so the model could not tell what it had fetched and re-read the whole file to find
  * out. 2000 matches the ~2KB preview other agents converged on. Override with
- * REI_TOOL_OUTPUT_PREVIEW.
+ * REI_TOOL_OUTPUT_PREVIEW. `0` shows the receipt alone, with no excerpt.
  */
 function previewLimit(): number {
-  const n = parseInt(process.env.REI_TOOL_OUTPUT_PREVIEW ?? "", 10);
-  return Number.isFinite(n) && n > 0 ? n : 2000;
+  const raw = process.env.REI_TOOL_OUTPUT_PREVIEW?.trim();
+  if (raw) {
+    const n = Number.parseInt(raw, 10);
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return 2000;
 }
 
 let spillDir: string | undefined;

@@ -54,18 +54,22 @@ describe("the context budget is enforced at one place", () => {
 });
 
 /**
- * The pruner has to run AFTER the new tool results are appended, or the copy it keeps is the old
- * one and the fresh read is the one thrown away — the exact inversion of what it is for.
+ * The loop appends; it never edits what it already sent.
+ *
+ * A pruner used to empty the earlier copy of a file read twice in one turn. It saved tokens and
+ * rewrote a message the backend had already processed — and a local runtime reuses its KV cache
+ * only while the next prompt extends the last, so everything after the gutted message was re-read.
+ * On a real turn that cost 28s, against ~11s paid ONCE for keeping the duplicate.
  */
-describe("superseded reads are pruned inside the turn", () => {
-  it("runs the pruner in the loop", () => {
-    expect(GENERATOR).toContain("currentMessages = pruneSupersededReads(currentMessages)");
+describe("the loop only appends to its message list", () => {
+  it("does not prune superseded reads", () => {
+    expect(GENERATOR).not.toContain("pruneSupersededReads");
   });
 
-  it("runs it after the results are appended, not before", () => {
-    const append = GENERATOR.indexOf('role: "tool"');
-    const prune = GENERATOR.indexOf("pruneSupersededReads(currentMessages)");
-    expect(append).toBeGreaterThan(-1);
-    expect(prune).toBeGreaterThan(append);
+  it("assigns currentMessages only where the loop legitimately re-seats it", () => {
+    // Truncation/format-correction hand back the SAME array extended; anything else reassigning it
+    // is a rewrite in disguise, which is what this file exists to keep out.
+    const assignments = [...GENERATOR.matchAll(/currentMessages = (\w+)/g)].map((m) => m[1]);
+    expect(new Set(assignments)).toEqual(new Set(["outcome"]));
   });
 });

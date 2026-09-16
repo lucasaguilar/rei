@@ -71,3 +71,52 @@ describe("spilled-output preview", () => {
     expect(retainAndMaybeSpill("t", small)).toBe(small);
   });
 });
+
+/**
+ * `REI_TOOL_OUTPUT_MAX_INLINE` is an inline BUDGET, and 0 is a budget of nothing: no output travels
+ * inline at all. The guard used to be `n > 0`, so 0 fell through to the 2000 default — the setting
+ * looked broken rather than ignored, and the "how little can the model be given?" end of the knob
+ * was unreachable.
+ */
+describe("the spill threshold honours its extremes", () => {
+  afterEach(() => {
+    delete process.env.REI_TOOL_OUTPUT_MAX_INLINE;
+  });
+
+  it("0 sends NOTHING inline — even a short output spills", () => {
+    process.env.REI_TOOL_OUTPUT_MAX_INLINE = "0";
+    const r = retainAndMaybeSpill("fetch", "apenas unas palabras");
+    expect(r).not.toBe("apenas unas palabras");
+    expect(r).toContain("Large tool output truncated");
+  });
+
+  it("0 paired with a 0 preview leaves the receipt alone, with no excerpt", () => {
+    process.env.REI_TOOL_OUTPUT_MAX_INLINE = "0";
+    process.env.REI_TOOL_OUTPUT_PREVIEW = "0";
+    const r = retainAndMaybeSpill("fetch", "D".repeat(5_000));
+    expect(r).toContain("Large tool output truncated");
+    expect(r).not.toContain("DDDD");
+    delete process.env.REI_TOOL_OUTPUT_PREVIEW;
+  });
+
+  it("without the override, a big output is still spilled", () => {
+    const content = "B".repeat(50_000);
+    const r = retainAndMaybeSpill("fetch", content);
+    expect(r).not.toBe(content);
+    expect(r).toContain("Large tool output truncated");
+  });
+
+  it("honours an explicit threshold", () => {
+    process.env.REI_TOOL_OUTPUT_MAX_INLINE = "10";
+    expect(retainAndMaybeSpill("fetch", "0123456789")).toBe("0123456789"); // exactly at the limit
+    expect(retainAndMaybeSpill("fetch", "0123456789X")).toContain("Large tool output truncated");
+  });
+
+  it("falls back to the default for a value that is a mistake, not a choice", () => {
+    for (const bad of ["-1", "abc", "  "]) {
+      process.env.REI_TOOL_OUTPUT_MAX_INLINE = bad;
+      const r = retainAndMaybeSpill("fetch", "C".repeat(50_000));
+      expect(r, bad).toContain("Large tool output truncated");
+    }
+  });
+});
