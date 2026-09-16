@@ -13,8 +13,9 @@ import {
   getAgentEditFormat,
 } from "../prompts/prompt-builder.js";
 import { buildTurnContext } from "../context/context-builder.js";
-import { buildMessagesForModel } from "../chat/message-builder.js";
-import { compactSession, needsCompaction } from "../chat/compactor.js";
+import { AGENT_REMINDER_BY_FORMAT, buildMessagesForModel } from "../chat/message-builder.js";
+import { isContextOverflowError } from "../providers/backend-error.js";
+import { compactorModelFor, compactSession, needsCompaction } from "../chat/compactor.js";
 import { type ChatSession } from "../chat/types.js";
 import { getTotalStagesInPlan } from "../chat/plan-tracker.js";
 import { VectorStore } from "../context/rag/vector-store.js";
@@ -42,7 +43,7 @@ import {
 import type { StreamTurnOptions } from "./models/agent.types.js";
 import { formatBatchPatchResult } from "./helpers/action-executor.js";
 import { type SkillMode } from "../skills/skill-loader.js";
-import { activeManualModel } from "../chat/manual-model.js";
+import { resolveSessionModel } from "../chat/manual-model.js";
 import { loadRole } from "../skills/role-loader.js";
 import {
   ensureRepoMapIndexed,
@@ -184,20 +185,15 @@ export class Agent {
       : null;
     // Most recent explicit choice first: `/model` (this session) beats the role's preference,
     // which beats the mode's configured model. See ChatSession.manualModel.
-    const turnModel =
-      activeManualModel(session, session.mode) ||
-      turnRole?.preferredModel ||
-      resolveModelForMode(session.mode);
+    const turnModel = resolveSessionModel(session, this.workspacePath);
     this.lastTurnModel = turnModel; // what the status bar reports, so it cannot disagree
 
     // Resolve this turn's per-model tuning (rei.config.json) ONCE; the config resolvers
     // (getContextWindow / resolveAgentSampling / reasoning_effort) read it. See model-config-spec.md.
     setActiveModelTuning(resolveModelTuning(turnModel, this.workspacePath));
-    const enrichedUserMessage = await this.prepareSessionForTurn(
-      session,
-      userInput,
-      options?.onStatus,
-    );
+    // Enriches the turn and PUSHES it onto the session — the pushed message is what gets sent,
+    // so there is no enriched copy to hand around separately any more.
+    await this.prepareSessionForTurn(session, userInput, options?.onStatus);
     await this.compactSessionIfNeeded(
       session,
       options?.onStatus,
@@ -213,10 +209,9 @@ export class Agent {
       session.mode === "agent" ? getAgentEditFormat() : undefined,
       toolsOverhead,
     );
-    const messagesForModel = this.injectCurrentTurnContext(
-      baseMessagesForModel,
-      enrichedUserMessage,
-    );
+    // No patching here any more: prepareSessionForTurn stored the enriched message itself, so what
+    // the builder renders IS what gets sent. Rewriting it at send time is what broke the prefix.
+    const messagesForModel = baseMessagesForModel;
     options?.onStatus?.("calling_model");
 
     // Emit any pending hardware warnings before the model response starts
@@ -251,41 +246,96 @@ export class Agent {
         resolver?.();
       };
 
-      const turnPromise = executeAgentTurnWithTools({
-        provider: agentProvider,
-        messagesForModel,
-        workspacePath: this.workspacePath,
-        logger: this.logger,
-        // Same two role fields as the ask/planning branch below. They were missing here, so a
-        // role with `baseMode: agent` — the ones that actually edit code — ran on the session's
-        // model and with NO write restriction at all, while `/roles` and the status bar both
-        // reported the role's. The two branches must stay in step; a meta-test now checks that.
-        modelOverride: turnModel,
-        reasoningEffort: resolveReasoningEffort("agent"),
-        mcpRegistry: this.mcpRegistry,
-        onChunk,
-        userQuery: userInput,
-        roleWriteGlob: turnRole?.writeGlob,
-        elicit: options?.elicit,
-      }).finally(() => {
-        done = true;
-        resolver?.();
-      });
+      const startAttempt = (msgs: ChatSession["messages"]) => {
+        done = false;
+        return executeAgentTurnWithTools({
+          provider: agentProvider,
+          messagesForModel: msgs,
+          workspacePath: this.workspacePath,
+          logger: this.logger,
+          // Same two role fields as the ask/planning branch below. They were missing here, so a
+          // role with `baseMode: agent` — the ones that actually edit code — ran on the session's
+          // model and with NO write restriction at all, while `/roles` and the status bar both
+          // reported the role's. The two branches must stay in step; a meta-test now checks that.
+          modelOverride: turnModel,
+          reasoningEffort: resolveReasoningEffort("agent"),
+          mcpRegistry: this.mcpRegistry,
+          onChunk,
+          userQuery: userInput,
+          roleWriteGlob: turnRole?.writeGlob,
+          elicit: options?.elicit,
+        }).finally(() => {
+          done = true;
+          resolver?.();
+        });
+      };
 
-      // Stream thoughts and action statuses to the user in real-time
-      while (!done || chunksQueue.length > 0) {
-        if (chunksQueue.length > 0) {
-          yield chunksQueue.shift()!;
-        } else {
-          await new Promise<void>((resolve) => {
-            resolver = resolve;
+      let turnPromise = startAttempt(messagesForModel);
+      let outcome: Awaited<ReturnType<typeof executeAgentTurnWithTools>> | undefined;
+
+      // At most two attempts: the retry exists for ONE failure, the backend refusing the request
+      // because it is too big (see isContextOverflowError). That is not a bug to surface — the
+      // conversation simply outgrew what the backend will take, and compacting is the answer REI
+      // already has. Without this the turn dies and every tool call it had already run is lost.
+      for (let attempt = 0; outcome === undefined; attempt += 1) {
+        // Nothing consumes the rejection until the drain loop ends; mark it handled so Node does
+        // not report an unhandled rejection in between.
+        turnPromise.catch(() => {});
+
+        // Stream thoughts and action statuses to the user in real-time
+        while (!done || chunksQueue.length > 0) {
+          if (chunksQueue.length > 0) {
+            yield chunksQueue.shift()!;
+          } else {
+            await new Promise<void>((resolve) => {
+              resolver = resolve;
+            });
+          }
+        }
+
+        try {
+          outcome = await turnPromise;
+        } catch (err) {
+          const overflow = isContextOverflowError(err);
+          // One retry, and only when nothing has been shown yet: an overflow is refused during
+          // prefill, before a single token exists, so a retry cannot duplicate visible output.
+          if (attempt > 0 || !overflow || hasStreamedText) throw err;
+
+          this.logger.logInfo("[overflow] backend refused the request — compacting and retrying", {
+            error: err instanceof Error ? err.message : String(err),
           });
+          yield `\n\x1b[33m⚠️  [REI] The backend refused the request as too large — compacting and retrying.\x1b[0m\n`;
+
+          session.messages = (await compactSession({
+            messages: session.messages,
+            provider: this.provider,
+            modelOverride: compactorModelFor(this.lastTurnModel),
+            force: true,
+          })).messages;
+          turnPromise = startAttempt(
+            buildMessagesForModel(
+              session.messages,
+              session.mode,
+              session.mode === "agent" ? getAgentEditFormat() : undefined,
+              toolsOverhead,
+            ),
+          );
         }
       }
-
-      const outcome = await turnPromise;
       // Stash backend-reported usage for this turn — the CLI reads it after the stream ends.
       this.lastTurnUsage = outcome.usage;
+
+      // Keep the turn's tool traffic in the history, in the order the model saw it. What the model
+      // received this turn then stays a byte-exact PREFIX of what it receives next turn, which is
+      // the only condition under which a local backend reuses its KV cache. Dropping it used to
+      // make every turn re-read the whole prompt: 40.36s against 0.59s, measured on oMLX.
+      //
+      // Pushed BEFORE the final answer below, so the sequence stays request → results → answer.
+      if (outcome.turnMessages?.length) {
+        session.messages.push(
+          ...outcome.turnMessages.map((m) => ({ ...m, turnId: this.currentTurnId })),
+        );
+      }
 
       // Si hay parches válidos, aplicarlos directamente
       if (
@@ -550,6 +600,24 @@ export class Agent {
       repositorySkeletonMap = undefined;
     }
 
+    return repositorySkeletonMap;
+  }
+
+
+
+  /**
+   * Builds the system prompt and seats it at index 0 of the session.
+   *
+   * This used to live inside updateSystemContextWithRepoMap, which on-demand file context skips —
+   * and on-demand is the DEFAULT for every mode. So the prompt that carries REI's identity, the
+   * response rules, the mode's instructions, the project's own rules and the verify command was not
+   * being sent AT ALL: the model received the tool-calling directive and nothing else. Measured on a
+   * real turn: 1,688 chars of prompt where there should have been 10,633.
+   *
+   * The two jobs had nothing to do with each other. The repo map is a context-budget decision; the
+   * system prompt is not optional. See systemPromptAlwaysTravels in agent-system-prompt.test.ts.
+   */
+  private ensureSystemPrompt(session: ChatSession): void {
     // Rebuild system message on every turn or when mode changes, to keep the active plan progress checklist in sync.
     // An active role (auditor, …) injects its posture into the prompt. See docs/roles-spec.md.
     const activeRole = session.activeRole
@@ -588,7 +656,6 @@ export class Agent {
       session.messages.unshift({ role: "system", content: systemContent });
     }
 
-    return repositorySkeletonMap;
   }
 
   private async prepareSessionForTurn(
@@ -617,6 +684,10 @@ export class Agent {
     // otherwise every turn re-scans the whole repo and rewrites a large
     // .rei/logs/repo-skeleton-map.txt (can be MBs) for nothing. The model discovers structure with
     // tools instead. Only the explicit opt-out (REI_ON_DEMAND_FILE_CONTEXT_<MODE>=0) builds the map.
+    // ALWAYS, whatever the file-context mode decides: the repo map is a budget decision, the system
+    // prompt is not optional (see ensureSystemPrompt).
+    this.ensureSystemPrompt(session);
+
     const onDemand = isOnDemandFileContextEnabled(session.mode);
     const repositorySkeletonMap = onDemand
       ? undefined
@@ -708,6 +779,11 @@ export class Agent {
     // the model discovers structure with tools (ls / find / git ls-files / read_files). Only a mode
     // explicitly opted out (REI_ON_DEMAND_FILE_CONTEXT_<MODE>=0) injects the proactive map + tree.
     // `onDemand` was computed above (it also gated the map generation).
+    // The agent-mode format reminder rides INSIDE the stored message: small models weigh what is
+    // near the generation point, and putting it here keeps that recency without rewriting the
+    // previous turn's message on every render (which is what broke the cached prefix).
+    const reminder =
+      session.mode === "agent" ? AGENT_REMINDER_BY_FORMAT[getAgentEditFormat()] : "";
     const enrichedMessage = buildTurnUserMessage({
       userInput,
       context,
@@ -717,36 +793,36 @@ export class Agent {
         : buildProjectFileTree(scannedFiles),
     });
 
+    const enrichedWithReminder = enrichedMessage + reminder;
+
     this.logger.logInfo("Enriched user message size", {
       chars: enrichedMessage.length,
       estimatedTokens: Math.round(enrichedMessage.length / 4),
     });
 
-    // Persist only the raw user input so historical turns stay compact.
+    // Persist EXACTLY what the model is about to receive.
+    //
+    // This used to store the raw input while sending the enriched one, and the difference was not
+    // cosmetic: the next turn re-sent that same message WITHOUT its enrichment, so the prompt no
+    // longer began with what the backend had already processed. Local runtimes cache the KV of the
+    // last prompt and reuse it only while the new prompt EXTENDS it — one changed byte early in the
+    // history and the whole thing is re-read.
+    //
+    // Measured against oMLX (Qwen3.8-27B-MLX-4bit, ~27.5k tokens, max_tokens=1): re-sending the
+    // message unchanged prefilled in 0.73s; re-sending it stripped back to raw took 61.11s, with a
+    // SMALLER prompt. Same conversation, 83x, decided by whether the prefix still matched.
+    //
+    // The invariant this buys: what was sent on turn N is a byte-exact prefix of turn N+1 (see
+    // prompt-prefix-stability.test.ts). The turn's tool traffic is persisted right after this
+    // point (in streamTurnInternal), in the order the model saw it, so the next turn EXTENDS the
+    // cached prefix instead of diverging from it.
     session.messages.push({
       role: "user",
-      content: userInput,
+      content: enrichedWithReminder,
       turnId: this.currentTurnId,
     });
 
-    return enrichedMessage;
-  }
-
-  private injectCurrentTurnContext(
-    messagesForModel: ChatSession["messages"],
-    enrichedUserMessage: string,
-  ): ChatSession["messages"] {
-    const patched = [...messagesForModel];
-    for (let index = patched.length - 1; index >= 0; index -= 1) {
-      if (patched[index].role === "user") {
-        patched[index] = {
-          ...patched[index],
-          content: enrichedUserMessage,
-        };
-        return patched;
-      }
-    }
-    return patched;
+    return enrichedWithReminder;
   }
 
   private async compactSessionIfNeeded(
@@ -760,11 +836,17 @@ export class Agent {
     }
 
     onStatus?.("compacting_memory");
-    session.messages = await compactSession({
+    const compaction = await compactSession({
       messages: session.messages,
       provider: this.provider,
-      modelOverride: process.env.COMPACTOR_MODEL,
+      modelOverride: compactorModelFor(this.lastTurnModel),
     });
+    session.messages = compaction.messages;
+    // Auto-compaction stays non-fatal — the turn goes on with the full history — but a silent skip
+    // here is how a session sails past its window and dies on the next request instead.
+    if (compaction.skipped) {
+      this.logger.logInfo("[compactor] skipped, history kept in full", { reason: compaction.skipped });
+    }
   }
 
   private initWatcher(): void {

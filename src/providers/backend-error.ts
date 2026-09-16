@@ -12,6 +12,28 @@ import { getContextWindow } from "../config/model-runtime.js";
  * guessing at an unfamiliar error would replace a true message with a plausible wrong one.
  */
 
+/**
+ * The backend refused the request because it was too BIG — not a bug, and not something a retry of
+ * the same prompt can fix. Two shapes, both seen in the wild:
+ *
+ *   - the model's own limit: `context_length_exceeded`, "maximum context length is 50176 tokens,
+ *     but the prompt alone has 51614"
+ *   - a memory guard aborting mid-prefill: "Request aborted: process memory limit exceeded",
+ *     "prefill rejected" — the prompt fit the window on paper but not in RAM while being read
+ *
+ * Both mean the same thing to REI: the conversation outgrew what this backend will take. The answer
+ * is to compact and try again, which is what `agent.ts` does with this (Pi calls the same path
+ * "overflow" compaction). Deliberately NOT included: an out-of-memory DURING generation
+ * (metal::malloc), which is about how the model is loaded, not how much we sent.
+ */
+const CONTEXT_OVERFLOW =
+  /context_length_exceeded|maximum context length|prompt is too long|too many tokens|process memory limit exceeded|memory guard|prefill rejected/i;
+
+export function isContextOverflowError(err: unknown): boolean {
+  const text = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+  return text.length > 0 && CONTEXT_OVERFLOW.test(text);
+}
+
 /** MLX's Metal allocator refusing an allocation: the model does not fit as currently loaded. */
 const METAL_OOM = /metal::malloc|Resource limit \(\d+\) exceeded|Insufficient Memory/i;
 
@@ -60,6 +82,17 @@ export function explainBackendError(raw: string): string {
       `  • Turn Speculative Decoding OFF for this model in the backend — it is a per-model load-time ` +
       `setting, and nothing in REI's config overrides it.\n` +
       `  • Nothing REI sent caused this: the same prompt works once the draft model is detached.`
+    );
+  }
+
+  if (/process memory limit exceeded|prefill rejected/i.test(raw)) {
+    return (
+      `The backend's memory guard aborted this request while READING the prompt.\n` +
+      `  The prompt fit the context window, but prefilling it needed more RAM than the guard allows ` +
+      `— so this is about the SIZE OF THIS REQUEST, not about the model being too big to load.\n` +
+      `  • REI compacts and retries once on its own; if you are seeing this, that retry also failed.\n` +
+      `  • Enable chunked prefill in the backend so the prompt is read in slices instead of at once.\n` +
+      `  • Or raise the guard's ceiling, if the machine actually has the headroom.`
     );
   }
 
