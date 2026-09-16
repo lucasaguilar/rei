@@ -1,4 +1,6 @@
 import type { ChatSession, SessionMode } from "./types.js";
+import { resolveModelForMode } from "../providers/provider-factory.js";
+import { loadRole } from "../skills/role-loader.js";
 
 /**
  * Whether a hand-picked `/model` choice still applies.
@@ -32,4 +34,24 @@ export function activeManualModel(
   if (!session.manualModel) return undefined;
   if (session.manualModelScope && session.manualModelScope !== scopeForMode(mode)) return undefined;
   return session.manualModel;
+}
+
+/**
+ * The model this session runs on: the one the turn uses, the status bar names, and — since it is
+ * the one already loaded in a local backend — the one anything else should reuse.
+ *
+ * Most recent explicit choice first: `/model` beats an active role's `preferredModel`, which beats
+ * the mode's configured model. The chain lived inline in three places and had already drifted once
+ * (the status bar naming a model the turn was not using), so it lives here now.
+ */
+export function resolveSessionModel(
+  session: Pick<ChatSession, "manualModel" | "manualModelScope" | "mode" | "activeRole">,
+  workspacePath: string,
+): string | undefined {
+  const role = session.activeRole ? loadRole(session.activeRole, workspacePath) : null;
+  return (
+    activeManualModel(session, session.mode) ||
+    role?.preferredModel ||
+    resolveModelForMode(session.mode)
+  );
 }

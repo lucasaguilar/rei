@@ -44,15 +44,25 @@ describe("every turn honours the active role", () => {
   });
 
   it("resolves ONE model for the turn, in the documented order of precedence", () => {
-    // Most recent explicit choice first: /model beats the role, which beats the mode's config.
-    // The manual choice is read through activeManualModel, which drops one made for the OTHER
-    // model slot (`/model agent X` then `/mode ask`) — see chat/manual-model.ts.
+    // The turn delegates to the one resolver, instead of spelling the chain out again. It used to
+    // be inline here AND in the status bar, and the two drifted: the bar named a model the turn was
+    // not running on.
     const chain = turnBody.match(/const turnModel\s*=([\s\S]{0,160}?);/)?.[1] ?? "";
-    expect(chain).toContain("activeManualModel(session");
-    expect(chain).toContain("turnRole?.preferredModel");
-    expect(chain).toContain("resolveModelForMode");
-    expect(chain.indexOf("activeManualModel(session")).toBeLessThan(chain.indexOf("turnRole?.preferredModel"));
-    expect(chain.indexOf("turnRole?.preferredModel")).toBeLessThan(chain.indexOf("resolveModelForMode"));
+    expect(chain).toContain("resolveSessionModel(session");
+
+    // And the resolver keeps the documented order: /model beats the role, which beats the mode's
+    // configured model. activeManualModel is what drops a choice made for the OTHER model slot
+    // (`/model agent X` then `/mode ask`) — see chat/manual-model.ts.
+    const resolver = fs.readFileSync(
+      path.resolve(__dirname, "../chat/manual-model.ts"),
+      "utf-8",
+    );
+    const body = resolver.slice(resolver.indexOf("export function resolveSessionModel"));
+    expect(body).toContain("activeManualModel(session");
+    expect(body).toContain("role?.preferredModel");
+    expect(body).toContain("resolveModelForMode");
+    expect(body.indexOf("activeManualModel(session")).toBeLessThan(body.indexOf("role?.preferredModel"));
+    expect(body.indexOf("role?.preferredModel")).toBeLessThan(body.indexOf("resolveModelForMode"));
   });
 
   it.each([0, 1])("branch %i sends that model, not one it resolves itself", (i) => {

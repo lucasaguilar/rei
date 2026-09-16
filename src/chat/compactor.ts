@@ -52,11 +52,65 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
     });
 }
 
-/** Default compaction timeout — overridden by COMPACTOR_TIMEOUT_MS env var. */
-const compactorTimeoutMs = (): number => {
-  const val = process.env.COMPACTOR_TIMEOUT_MS;
-  return val ? Number(val) : 60_000;
-};
+/**
+ * How long to wait for a summary, scaled to how much there is to read.
+ *
+ * A flat 60s was a cloud-era number. Summarizing a real local session means prefilling the whole
+ * history first, and prefill on this class of hardware runs at a few hundred tokens/second —
+ * measured 176s for 55k tokens. So the one compaction that matters, the one on a session big enough
+ * to need it, was the one guaranteed to be cut off: the call died at 60s, the error was swallowed,
+ * and the history came back untouched.
+ *
+ * 150 tok/s is a deliberately pessimistic floor (measured ~300-390), so a slower machine or a
+ * loaded GPU still finishes. The 30s base covers the request itself; the cap keeps a wedged backend
+ * from blocking a turn forever. `COMPACTOR_TIMEOUT_MS` overrides the whole calculation.
+ */
+const TIMEOUT_BASE_MS = 30_000;
+const TIMEOUT_TOKENS_PER_SECOND = 150;
+const TIMEOUT_CAP_MS = 900_000; // 15 min — past this, something is wrong, not slow
+
+export function compactorTimeoutMs(promptChars = 0): number {
+  const override = Number(process.env.COMPACTOR_TIMEOUT_MS);
+  if (Number.isFinite(override) && override > 0) return override;
+  const tokens = promptChars / 4; // the same chars/4 estimate used everywhere else
+  const scaled = TIMEOUT_BASE_MS + (tokens / TIMEOUT_TOKENS_PER_SECOND) * 1000;
+  return Math.min(Math.round(scaled), TIMEOUT_CAP_MS);
+}
+
+/**
+ * Which model summarizes: `COMPACTOR_MODEL` when set, else the model the session is ALREADY running
+ * on.
+ *
+ * It used to fall back to the provider's own default, which is `<PREFIX>_MODEL` — the ask/planning
+ * model, not the agent's and not one picked with `/model`. On a local backend that means loading a
+ * SECOND model to summarize: minutes of swap, memory pressure, and a 404 when the id belongs to a
+ * different backend (a real case: COMPACTOR_MODEL=qwen/qwen3-4b, an LM Studio name, against oMLX).
+ * Reusing the loaded model costs nothing to start and keeps its cached prefix warm.
+ */
+export function compactorModelFor(activeModel?: string): string | undefined {
+  return process.env.COMPACTOR_MODEL?.trim() || activeModel || undefined;
+}
+
+/**
+ * The outcome of a compaction attempt.
+ *
+ * `skipped` carries WHY the history came back unchanged. Compaction fails softly on purpose — a
+ * failed summary must never kill the turn — but "softly" used to mean "silently": `/compact`
+ * reported success, named the model that had just 404'd, and printed `117 → 117 messages` without
+ * noticing that the count had not moved. The caller cannot tell the difference from the messages
+ * alone, so the reason travels with them.
+ */
+export interface CompactionResult {
+  messages: ChatMessage[];
+  /** Set when nothing was compacted; the reason, phrased for the user. */
+  skipped?: string;
+  /**
+   * The model that actually WROTE the summary — which is not always the one asked for. When a
+   * configured COMPACTOR_MODEL fails, the call is retried with the provider's own model, and
+   * reporting the requested name then credits the summary to a model that 404'd.
+   */
+  model?: string;
+}
 
 /**
  * Summarizes the conversation using a cheaper model if configured.
@@ -69,7 +123,7 @@ export async function compactSession(params: {
   provider: ModelProvider;
   modelOverride?: string;
   force?: boolean;
-}): Promise<ChatMessage[]> {
+}): Promise<CompactionResult> {
   const { messages, provider, modelOverride, force } = params;
 
   const systemMessage =
@@ -80,12 +134,12 @@ export async function compactSession(params: {
 
   // Gate on the same window-aware check as auto-compaction (manual /compact passes force).
   if (!force && !needsCompaction(messages)) {
-    return messages;
+    return { messages, skipped: "the history is still under the compaction threshold" };
   }
 
   // Nothing to summarize when the session is empty or has only 1 message
   if (nonSystem.length < 2) {
-    return messages;
+    return { messages, skipped: "there is not enough conversation to summarize yet" };
   }
 
   // Split into old (to be summarized) and new (to keep verbatim)
@@ -101,8 +155,12 @@ export async function compactSession(params: {
 
   try {
     let summary: string;
+    // The timeout is sized from what the summarizer actually has to read.
+    const timeout = compactorTimeoutMs(
+      sumMessages.reduce((n, m) => n + m.content.length, 0),
+    );
+    let summarizedBy = modelOverride;
     if (modelOverride) {
-      const timeout = compactorTimeoutMs();
       try {
         summary = await withTimeout(
           provider.completeChat(sumMessages, { model: modelOverride }),
@@ -117,10 +175,13 @@ export async function compactSession(params: {
           provider.completeChat(sumMessages, {}),
           timeout,
         );
+        summarizedBy = provider.getModel?.();
       }
     } else {
-      // No override: single call, no timeout (active model is already loaded).
-      summary = await provider.completeChat(sumMessages, {});
+      // No model to name (nothing configured and no active model known): let the provider pick,
+      // still bounded — the same scaled timeout, since the work is the same.
+      summary = await withTimeout(provider.completeChat(sumMessages, {}), timeout);
+      summarizedBy = provider.getModel?.();
     }
 
     const summaryMessage: ChatMessage = {
@@ -128,15 +189,18 @@ export async function compactSession(params: {
       content: `[CONVERSATION SUMMARY — DO NOT SUMMARIZE AGAIN]\n\n${summary}`,
     };
 
-    return systemMessage
-      ? [systemMessage, summaryMessage, ...verbatim]
-      : [summaryMessage, ...verbatim];
+    return {
+      messages: systemMessage
+        ? [systemMessage, summaryMessage, ...verbatim]
+        : [summaryMessage, ...verbatim],
+      model: summarizedBy,
+    };
   } catch (error) {
     // Non-fatal: keep the full history (uncompacted) so the turn proceeds. Log a single
     // clean line — never dump the raw error/stack, which would corrupt the live TUI.
     const reason = error instanceof Error ? error.message : String(error);
     console.warn(`[COMPACTOR] Skipped — keeping full history: ${reason}`);
-    return messages;
+    return { messages, skipped: reason };
   }
 }
 
