@@ -8,9 +8,38 @@ import {
   getMaxOutputTokens,
 } from "../config/model-runtime.js";
 
+/**
+ * Tool plumbing: a `tool` result is addressed by its `tool_call_id`, and an assistant message that
+ * carries `tool_calls` is answered by the results that follow it. Neither may be merged into a
+ * neighbour the way two consecutive prose messages can — concatenating them loses the id pairing
+ * and produces a sequence the provider rejects.
+ *
+ * Only reachable since the turn's tool traffic started living in the session history (before that
+ * the loop kept it to itself and the history never held a `tool` message).
+ */
+function isToolPlumbing(message: ChatMessage): boolean {
+  return (
+    message.role === "tool" ||
+    (message.role === "assistant" && (message.tool_calls?.length ?? 0) > 0)
+  );
+}
+
 function isEnrichedTurnMessage(content: string): boolean {
   return content.includes("Task:") && content.includes("Repository summary:");
 }
+
+/**
+ * The bulky per-turn sections. Only a message carrying one of these is worth rewriting.
+ *
+ * Rewriting ANY historical message costs a full re-prefill: the backend caches the KV of the last
+ * prompt and reuses it only while the next prompt extends it byte for byte. Measured on oMLX with
+ * ~27.5k tokens — prefix preserved 0.73s, prefix broken 61.11s. So stripping a stale repo map from
+ * an old turn pays (tens of thousands of tokens saved); stripping a two-line header does not.
+ *
+ * On-demand file context — the default for every mode — never injects either section, so in the
+ * normal configuration nothing is rewritten and the prefix survives the whole session.
+ */
+const HEAVY_TURN_SECTIONS = /### (?:RELEVANT REPOSITORY SKELETON MAP|PROJECT FILE TREE)/;
 
 function compactHistoricalUserTurn(message: ChatMessage): ChatMessage {
   const taskMatch = message.content.match(/^Task:\s*(.+)$/m);
@@ -25,76 +54,11 @@ function compactHistoricalUserTurn(message: ChatMessage): ChatMessage {
   };
 }
 
-// NOTE: Position 0 in session.messages is always the system message and is
-// never included in this count — it is always prepended to the output.
-// Each user message already re-injects workspace context (files, RAG, AST),
-// so trimming old turns only loses conversational back-and-forth, not code grounding.
-const MAX_NON_SYSTEM_MESSAGES: Record<SessionMode, number> = {
-  ask: 20, // ~40 full exchanges
-  planning: 12, // ~24 full exchanges
-  agent: 16, // ~32 full exchanges
-};
-
-const AGENT_ACTION_TAG_PATTERN = /<(wholefile|edit|request_files|create)\b/;
-
 // How many of the most-recent assistant turns to keep VERBATIM. Older prose answers are
 // demoted to a one-line gist (see demoteOldAssistantProse). Configurable so power users can
 // trade continuity for context budget; default 3 keeps the last few exchanges intact.
-function verbatimAssistantTurns(): number {
-  const raw = Number(process.env.REI_VERBATIM_HISTORY_TURNS);
-  return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 3;
-}
 
-/**
- * Collapse a verbose historical assistant answer down to a compact gist. In a coding agent the
- * durable state is the workspace (files on disk, re-read on demand) plus the DECISIONS — not the
- * assistant's expository prose. Re-sending a 1700-token analysis from an unrelated earlier task
- * every turn is near-pure waste. We keep the headline (or first non-empty line) as an anchor so a
- * later "as I said before" reference still resolves. The FULL text stays in session.messages
- * (persistence / user scrollback) — only what we send to the model shrinks.
- */
-function demoteAssistantProse(message: ChatMessage): ChatMessage {
-  const lines = message.content
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-  // Already short — demoting saves nothing and would only lose fidelity.
-  if (lines.length <= 2) return message;
 
-  const headline =
-    lines.find((line) => /^#{1,6}\s+/.test(line))?.replace(/^#{1,6}\s+/, "") ??
-    lines[0];
-  const gist = headline.length > 200 ? `${headline.slice(0, 197)}…` : headline;
-  return { ...message, content: `[Earlier answer — gist] ${gist}` };
-}
-
-/**
- * Recency-tiered history: keep the last `verbatimTurns` assistant answers intact, and demote
- * OLDER prose answers to a gist. Two carve-outs are preserved verbatim regardless of age because
- * they carry durable, non-expository value:
- *   - agent action messages (edits/creates/requests) — the record of what was done, and
- *   - planning-sourced plans — structured plans the agent is meant to read and execute.
- * User and system messages are untouched (user turns already re-inject workspace grounding).
- */
-function demoteOldAssistantProse(
-  messages: ChatMessage[],
-  verbatimTurns: number,
-): ChatMessage[] {
-  let assistantSeen = 0;
-  const result = messages.slice();
-  for (let i = result.length - 1; i >= 0; i -= 1) {
-    const message = result[i];
-    if (message.role !== "assistant") continue;
-    assistantSeen += 1;
-    const isRecent = assistantSeen <= verbatimTurns;
-    const isAction = AGENT_ACTION_TAG_PATTERN.test(message.content);
-    const isPlan = message.sourceMode === "planning";
-    if (!isRecent && !isAction && !isPlan) {
-      result[i] = demoteAssistantProse(message);
-    }
-  }
-  return result;
-}
 
 /**
  * Builds the message array to send to the model provider.
@@ -151,10 +115,18 @@ export function buildMessagesForModel(
   // Drop empty assistant placeholders (waste context), and turns pruned as off-topic detours via
   // `/tree prune` (kept on disk, excluded here). Whole turns are pruned together so removing them
   // leaves user/assistant/tool pairing intact. See docs/context-drift-spec.md.
+  // An assistant message carrying tool_calls is NOT an empty placeholder even when its content is
+  // empty — that is the normal shape when the model only asks for tools. Dropping it orphans the
+  // results that answer it, which the provider rejects. Only reachable since the turn's tool
+  // traffic began living in the history.
   const cleanedNonSystemMessages = nonSystemMessages.filter(
     (message) =>
       !message.pruned &&
-      !(message.role === "assistant" && !message.content.trim()),
+      !(
+        message.role === "assistant" &&
+        !message.content.trim() &&
+        (message.tool_calls?.length ?? 0) === 0
+      ),
   );
 
   // Legacy sessions may persist full enriched context in user turns.
@@ -176,7 +148,8 @@ export function buildMessagesForModel(
       if (
         message.role === "user" &&
         index !== latestUserIndex &&
-        isEnrichedTurnMessage(message.content)
+        isEnrichedTurnMessage(message.content) &&
+        HEAVY_TURN_SECTIONS.test(message.content)
       ) {
         return compactHistoricalUserTurn(message);
       }
@@ -185,13 +158,15 @@ export function buildMessagesForModel(
     },
   );
 
-  // Recency-tiered demotion: the last few assistant answers stay verbatim; older prose answers
-  // collapse to a gist so re-sending stale ask/planning essays doesn't burn context every turn.
-  // Runs BEFORE the budget accounting so the freed room lets more RECENT history survive the trim.
-  const tieredNonSystemMessages = demoteOldAssistantProse(
-    normalizedNonSystemMessages,
-    verbatimAssistantTurns(),
-  );
+  // History is passed through as it stands. Demoting old assistant answers to a headline used to
+  // happen here, and it was the last thing rewriting the prompt mid-conversation.
+  //
+  // Measured on a real session: it demoted 3 answers and saved 7,455 chars (~1,864 tokens, 5% of
+  // the prompt) — while the tool traffic it does not touch accounted for 80%. The rewrite cost 132
+  // seconds of re-prefill, because a local backend reuses its KV cache only while each prompt
+  // extends the last. Shrinking history is the compactor's job (needsCompaction, by threshold),
+  // where a cold prefill is paid once instead of on the turn that happens to cross a boundary.
+  const tieredNonSystemMessages = normalizedNonSystemMessages;
 
   // Keep the tail of the conversation under a token budget that SCALES WITH the context
   // window (was a hardcoded 18000 that silently dropped older history on large-window cloud /
@@ -239,20 +214,28 @@ export function buildMessagesForModel(
     }
   }
 
-  const finalNonSystem =
-    budgetedMessages.length > 0
-      ? budgetedMessages
-      : tieredNonSystemMessages;
+  // The trim walks backwards and stops on a token budget, so it can cut BETWEEN an assistant that
+  // requested tools and the results answering it. A `tool` message left at the head of the window
+  // has no parent in the window: providers reject it ("tool message without preceding tool_calls").
+  // Dropping the orphans is the only safe repair — the results are meaningless without the request.
+  const dropOrphanToolHead = (msgs: ChatMessage[]): ChatMessage[] => {
+    let start = 0;
+    while (start < msgs.length && msgs[start].role === "tool") start += 1;
+    return start === 0 ? msgs : msgs.slice(start);
+  };
+
+  const finalNonSystem = dropOrphanToolHead(
+    budgetedMessages.length > 0 ? budgetedMessages : tieredNonSystemMessages,
+  );
 
   const modeNormalized = finalNonSystem;
 
   // Aider-style system_reminder: append a format reminder to the LAST user message
   // in agent mode. Small models have recency bias — instructions near the generation
   // point outweigh the system prompt at position 0 as context grows.
-  const withReminder =
-    mode === "agent" && editFormat
-      ? appendAgentReminder(modeNormalized, editFormat)
-      : modeNormalized;
+  // No reminder injection here any more — it lives inside the stored user message (see
+  // AGENT_REMINDER_BY_FORMAT). Appending it at render time rewrote history on every turn.
+  const withReminder = modeNormalized;
 
   // Enforce strict role alternation and ensure conversation starts with 'user'
   const alternating: ChatMessage[] = [];
@@ -264,7 +247,7 @@ export function buildMessagesForModel(
       alternating.push({ ...msg });
     } else {
       const last = alternating[alternating.length - 1];
-      if (last.role === msg.role) {
+      if (last.role === msg.role && !isToolPlumbing(last) && !isToolPlumbing(msg)) {
         last.content += "\n\n" + msg.content;
       } else {
         alternating.push({ ...msg });
@@ -275,26 +258,17 @@ export function buildMessagesForModel(
   return systemMessage ? [systemMessage, ...alternating] : alternating;
 }
 
-const AGENT_REMINDER_BY_FORMAT: Record<AgentEditFormat, string> = {
+/**
+ * The format reminder, kept where a small model still sees it: at the end of the user message.
+ *
+ * It used to be appended at RENDER time to whichever user message was last, which moved it one
+ * message forward every turn — rewriting the previous turn's message and breaking the prefix the
+ * backend had cached. It is now part of the message when it is built (agent.ts), so it is stored
+ * once, never moves, and every turn still ends with it right before generation.
+ */
+export const AGENT_REMINDER_BY_FORMAT: Record<AgentEditFormat, string> = {
   wholefile:
     '\n\n---\nREMINDER: You are in agent mode. ALL file changes MUST use `<wholefile path="...">complete file</wholefile>` blocks. Do NOT use plain text descriptions, "Direct Answer", or any other format.',
   sr: '\n\n---\nREMINDER: You are in agent mode. ALL file changes MUST use `<edit>` or `<create>` XML blocks. Do NOT use plain text descriptions, "Direct Answer", or any other format.',
 };
 
-function appendAgentReminder(
-  messages: ChatMessage[],
-  editFormat: AgentEditFormat,
-): ChatMessage[] {
-  const reminder = AGENT_REMINDER_BY_FORMAT[editFormat];
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === "user") {
-      const updated = [...messages];
-      updated[i] = {
-        ...messages[i],
-        content: messages[i].content + reminder,
-      };
-      return updated;
-    }
-  }
-  return messages;
-}

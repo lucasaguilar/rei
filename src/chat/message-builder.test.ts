@@ -66,129 +66,70 @@ describe("message-builder - buildMessagesForModel", () => {
     }
   });
 
-  describe("recency-tiered assistant history (demoteOldAssistantProse)", () => {
-    // Multi-line prose (>2 non-empty lines) so demotion actually triggers.
+  describe("history is passed through, not rewritten", () => {
     const prose = (headline: string) =>
       `# ${headline}\nfirst detail line\nsecond detail line\nthird detail line`;
 
-    const findContent = (result: ChatMessage[], needle: string) =>
-      result.find((m) => m.content.includes(needle));
-
-    it("demotes OLD assistant prose to a gist but keeps the last 3 verbatim", () => {
+    it("keeps an old assistant answer whole", () => {
+      // It used to be demoted to "[Earlier answer — gist] <headline>". That rewrite broke the
+      // backend's cached prefix — 132s of re-prefill on a real session — to save 5% of the prompt.
       const messages: ChatMessage[] = [
         { role: "system", content: "sys" },
-        { role: "user", content: "u1" },
-        { role: "assistant", content: prose("Old One") }, // 5th from end → demote
-        { role: "user", content: "u2" },
-        { role: "assistant", content: prose("Old Two") }, // 4th from end → demote
-        { role: "user", content: "u3" },
-        { role: "assistant", content: prose("Keep One") }, // 3rd → verbatim
-        { role: "user", content: "u4" },
-        { role: "assistant", content: prose("Keep Two") }, // 2nd → verbatim
-        { role: "user", content: "u5" },
-        { role: "assistant", content: prose("Keep Three") }, // newest → verbatim
-        { role: "user", content: "u6" },
+        ...["One", "Two", "Three", "Four", "Five", "Six"].flatMap((h, i) => [
+          { role: "user" as const, content: `u${i + 1}` },
+          { role: "assistant" as const, content: prose(h) },
+        ]),
+        { role: "user", content: "latest" },
       ];
       const result = buildMessagesForModel(messages, "ask");
-
-      // Old ones collapsed to the headline gist (full prose gone from what's sent).
-      expect(findContent(result, "[Earlier answer — gist] Old One")).toBeDefined();
-      expect(findContent(result, "[Earlier answer — gist] Old Two")).toBeDefined();
-      expect(findContent(result, "first detail line")).toBeDefined(); // recent prose survives
-      // The recent three keep their full body.
-      expect(findContent(result, "Keep One")?.content).toContain("third detail line");
-      expect(findContent(result, "Keep Three")?.content).toContain("third detail line");
-      // No old full prose leaked through.
-      const oldFull = result.filter(
-        (m) => m.content.startsWith("# Old"),
-      );
-      expect(oldFull).toHaveLength(0);
+      expect(result.find((m) => m.content.includes("[Earlier answer — gist]"))).toBeUndefined();
+      expect(result.find((m) => m.content.includes("# One"))?.content).toContain("third detail line");
     });
+  });
+});
 
-    it("keeps agent action messages verbatim regardless of age", () => {
-      const messages: ChatMessage[] = [
-        { role: "system", content: "sys" },
-        { role: "user", content: "u1" },
-        {
-          role: "assistant",
-          content: `<edit>\nchanged code\nmore\nlines</edit>`, // old, but an ACTION
-        },
-        { role: "user", content: "u2" },
-        { role: "assistant", content: prose("Recent A") },
-        { role: "user", content: "u3" },
-        { role: "assistant", content: prose("Recent B") },
-        { role: "user", content: "u4" },
-        { role: "assistant", content: prose("Recent C") },
-        { role: "user", content: "u5" },
-      ];
-      const result = buildMessagesForModel(messages, "agent");
-      expect(findContent(result, "changed code")).toBeDefined();
-      expect(findContent(result, "[Earlier answer — gist]")).toBeUndefined();
-    });
+describe("tool plumbing survives the builder intact", () => {
+  const withTools: ChatMessage[] = [
+    { role: "system", content: "sys" },
+    { role: "user", content: "mira el repo" },
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [
+        { id: "c1", type: "function", function: { name: "run_command", arguments: "{}" } },
+        { id: "c2", type: "function", function: { name: "grep_code", arguments: "{}" } },
+      ],
+    },
+    { role: "tool", content: "salida 1", tool_call_id: "c1", name: "run_command" },
+    { role: "tool", content: "salida 2", tool_call_id: "c2", name: "grep_code" },
+    { role: "assistant", content: "Listo." },
+    { role: "user", content: "seguimos" },
+  ];
 
-    it("keeps planning-sourced plans verbatim regardless of age", () => {
-      const messages: ChatMessage[] = [
-        { role: "system", content: "sys" },
-        { role: "user", content: "u1" },
-        {
-          role: "assistant",
-          content: prose("Implementation Plan"),
-          sourceMode: "planning",
-        },
-        { role: "user", content: "u2" },
-        { role: "assistant", content: prose("Recent A") },
-        { role: "user", content: "u3" },
-        { role: "assistant", content: prose("Recent B") },
-        { role: "user", content: "u4" },
-        { role: "assistant", content: prose("Recent C") },
-        { role: "user", content: "u5" },
-      ];
-      const result = buildMessagesForModel(messages, "planning");
-      expect(findContent(result, "Implementation Plan")?.content).toContain(
-        "third detail line",
-      );
-      expect(findContent(result, "[Earlier answer — gist]")).toBeUndefined();
-    });
+  it("does not merge two consecutive tool results into one", () => {
+    // Merging drops a tool_call_id, and the provider rejects a result answering nothing.
+    const result = buildMessagesForModel(withTools, "agent");
+    const tools = result.filter((m) => m.role === "tool");
+    expect(tools).toHaveLength(2);
+    expect(tools.map((t) => t.tool_call_id)).toEqual(["c1", "c2"]);
+  });
 
-    it("honors REI_VERBATIM_HISTORY_TURNS override (1 = only the newest kept)", () => {
-      const saved = process.env.REI_VERBATIM_HISTORY_TURNS;
-      process.env.REI_VERBATIM_HISTORY_TURNS = "1";
-      try {
-        const messages: ChatMessage[] = [
-          { role: "system", content: "sys" },
-          { role: "user", content: "u1" },
-          { role: "assistant", content: prose("Older") }, // 2nd from end → demote
-          { role: "user", content: "u2" },
-          { role: "assistant", content: prose("Newest") }, // newest → verbatim
-          { role: "user", content: "u3" },
-        ];
-        const result = buildMessagesForModel(messages, "ask");
-        expect(findContent(result, "[Earlier answer — gist] Older")).toBeDefined();
-        expect(findContent(result, "Newest")?.content).toContain(
-          "third detail line",
-        );
-      } finally {
-        if (saved === undefined) delete process.env.REI_VERBATIM_HISTORY_TURNS;
-        else process.env.REI_VERBATIM_HISTORY_TURNS = saved;
-      }
-    });
+  it("keeps each result's pairing with the request that asked for it", () => {
+    const result = buildMessagesForModel(withTools, "agent");
+    const requester = result.find((m) => m.role === "assistant" && m.tool_calls);
+    expect(requester?.tool_calls?.map((c) => c.id)).toEqual(["c1", "c2"]);
+  });
 
-    it("leaves short prose answers untouched (nothing to gain)", () => {
-      const messages: ChatMessage[] = [
-        { role: "system", content: "sys" },
-        { role: "user", content: "u1" },
-        { role: "assistant", content: "Yes." }, // 1-line, old → not demoted
-        { role: "user", content: "u2" },
-        { role: "assistant", content: prose("Recent A") },
-        { role: "user", content: "u3" },
-        { role: "assistant", content: prose("Recent B") },
-        { role: "user", content: "u4" },
-        { role: "assistant", content: prose("Recent C") },
-        { role: "user", content: "u5" },
-      ];
-      const result = buildMessagesForModel(messages, "ask");
-      expect(findContent(result, "Yes.")).toBeDefined();
-      expect(findContent(result, "[Earlier answer — gist]")).toBeUndefined();
-    });
+  it("never opens the window with an orphan tool result", () => {
+    // A trim that cuts between the request and its results would leave one at the head, with no
+    // assistant in the window to answer — providers reject that outright.
+    const orphaned: ChatMessage[] = [
+      { role: "system", content: "sys" },
+      { role: "tool", content: "huerfano", tool_call_id: "gone", name: "run_command" },
+      { role: "user", content: "hola" },
+    ];
+    const result = buildMessagesForModel(orphaned, "agent");
+    const firstNonSystem = result.find((m) => m.role !== "system");
+    expect(firstNonSystem?.role).not.toBe("tool");
   });
 });
