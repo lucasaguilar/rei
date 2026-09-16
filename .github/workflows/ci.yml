@@ -1,0 +1,35 @@
+name: CI
+
+# Every push and every pull request. The point of a badge is that it reflects main RIGHT NOW, so
+# there is no filtering by path: a docs-only change that somehow breaks the build should still show.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  check:
+    name: typecheck + tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # `npm ci` over `npm install`: it installs exactly what the lockfile says and fails if the
+      # lockfile and package.json disagree — which is the failure you want CI to catch.
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Tests
+        run: npx vitest run
+
+      # The build is a separate step so a compile error reads as a build failure rather than
+      # hiding inside the test run.
+      - name: Build
+        run: npm run build

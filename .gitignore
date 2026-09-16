@@ -10,6 +10,9 @@ dist/
 # Debug / temp HTML artifacts
 .rei-debug.html
 
+# Scratch diffs
+.rei-tmp/
+
 coverage/
 scripts/launch-rei.config.js
 .aider*
