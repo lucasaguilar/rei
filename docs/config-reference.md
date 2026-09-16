@@ -203,7 +203,6 @@ carrying them will start taking effect.)
 | `REI_ON_DEMAND_FILE_CONTEXT[_ASK/_PLANNING/_AGENT]` | on-demand file context per mode | ask/plan=1, agent=0 |
 | `REI_REASONING_EFFORT_[ASK/PLANNING/AGENT]` | thinking cap (none/low/medium/high) | model default |
 | `REI_INVESTIGATE_BEFORE_PRODUCE` | produce-or-bail nudge threshold | 8 |
-| `REI_VERBATIM_HISTORY_TURNS` | turns kept verbatim before demotion | 3 |
 | `AGENT_EDIT_FORMAT` | edit format | — |
 | CLI `--session <name>` / `-s` | open/create a named session (parallel agents on one repo) | new auto-id |
 | CLI `--continue` / `-c` | resume the most recent session | — |
@@ -227,9 +226,10 @@ carrying them will start taking effect.)
 | `REI_CONFIRM_DESTRUCTIVE` | confirm before destructive commands (rm / git reset --hard / clean / checkout --) — interactive CLI only | `true` |
 | `REI_CONFIRM_GIT_MUTANT` | confirm before state-mutating git commands (commit / push / merge / rebase) — interactive CLI only | `true` |
 | `REI_READ_MAX_LINES` | page size for `read_files`, in lines | 1200 |
-| `REI_TOOL_OUTPUT_MAX_INLINE` | tool output kept inline before it spills to disk, in chars | 2000 |
-| `REI_TOOL_OUTPUT_PREVIEW` | chars of a spilled output the model still sees as a preview | 2000 |
+| `REI_TOOL_OUTPUT_MAX_INLINE` | tool output kept inline before it spills to disk, in chars — **`0` = nada viaja inline** (todo se vuelca a disco, el modelo ve solo el recibo) | 2000 |
+| `REI_TOOL_OUTPUT_PREVIEW` | chars of a spilled output the model still sees as a preview (`0` = receipt only) | 2000 |
 | `REI_TOOL_OUTPUT_DIR` | where spilled tool outputs are written | a temp dir, cleaned by the OS |
+| `REI_PROMPT_TRACE` | log how much of each prompt is a byte-exact prefix of the previous one (`1` = on) — diagnoses lost KV-cache reuse | off |
 
 **Spilled tool output.** Any tool result over `REI_TOOL_OUTPUT_MAX_INLINE` is written to disk and
 replaced, in the model's context, by a receipt naming the file, an id, and exactly how many
@@ -261,8 +261,12 @@ modes; set `=1` only for proactive agent that wants semantic file selection. Leg
 regardless; a manual `/index` still builds it on demand. ·
 `REI_EMBEDDER_PROVIDER/_MODEL/_BASE_URL/_API_KEY` · `REI_TOOL_RAG` · `REI_DOC_VERIFY` ·
 `REI_WORKSPACE_PATH` · `ALLOWED_WORKSPACES` · `REI_SERVER_PORT` · `REI_TELEMETRY_DISABLED` ·
-`COMPACTOR_MODEL` · `COMPACTOR_TIMEOUT_MS` (history compaction timeout, default 60000 — raise it
-if compaction gives up on a slow local model) · Laminar telemetry `LMNR_*`.
+`COMPACTOR_MODEL` (which model writes the summary — **leave it empty** to reuse the model already
+loaded, which costs no swap and keeps its cached prefix; a name from another backend gives a 404 and
+the compaction is skipped) · `COMPACTOR_TIMEOUT_MS` (overrides the timeout; by default it SCALES
+with the history — ~30s plus one second per 150 tokens, capped at 15 min — because prefilling a big
+history is the slow part and a flat value killed exactly the compactions that were needed) ·
+Laminar telemetry `LMNR_*`.
 
 ## MTPLX — `chat_template_kwargs`
 
