@@ -124,7 +124,7 @@ export const COMMANDS: Array<{
   { command: "/loadplan <name>", description: "load a plan from disk and update active checklist" },
   { command: "/spec <task>", description: "SDD step 1 — write the spec for a task (forces the write-spec recipe)" },
   { command: "/decompose", description: "SDD step 2 — turn the current spec into a traceable plan" },
-  { command: "/active [clear]", description: "show the active spec/plan, or unset them (/active clear [spec|plan])" },
+  { command: "/active", description: "show the active spec/plan (also: /active clear [spec|plan] to unset)" },
   { command: "/trace", description: "SDD check — cross the active spec's criteria against the plan's Satisfies: lines, both ways" },
   { command: "/verbose [on|off]", description: "show or hide full command output, diffs and the model's reasoning" },
   { command: "/savespec <name>", description: "save the write-spec spec to disk as .rei/specs/<name>.md" },
