@@ -15,6 +15,9 @@ import { preserveThinkingEnabled } from "../../config/model-runtime.js";
  *
  * `provider.completeChatWithTools` is asserted to exist by the caller before the loop starts.
  */
+/** Last serialized prompt, for the opt-in REI_PROMPT_TRACE diff. Module-level: one live turn. */
+const promptTrace: { last?: string } = {};
+
 export async function callModel(params: {
   provider: ModelProvider;
   messages: ChatMessage[];
@@ -47,6 +50,41 @@ export async function callModel(params: {
   // rest of the loop is unchanged. (Spike — see docs/stream-tools-spike.md.) Text deltas are NOT
   // forwarded: the loop builds the final response (recap/created-files) which the caller displays —
   // forwarding text here would suppress that.
+  // Opt-in prompt trace (REI_PROMPT_TRACE=1): logs how much of THIS prompt is a byte-exact prefix
+  // of the previous one. A local backend reuses its KV cache only while each prompt extends the
+  // last, so "common: 100%" means the call prefills just the new tokens and anything less means it
+  // re-reads from the first differing byte. Cheap string work, off by default.
+  if (process.env.REI_PROMPT_TRACE === "1") {
+    const serialized = messages.map((m) => `${m.role}|${m.content ?? ""}`).join("\u0002");
+    const prev = promptTrace.last;
+    let common = 0;
+    if (prev) {
+      const max = Math.min(prev.length, serialized.length);
+      while (common < max && prev[common] === serialized[common]) common += 1;
+    }
+    // The question is NOT "how much overlaps" — a pure extension always overlaps less than 100% of
+    // the NEW prompt simply because it is longer. What matters is whether the whole PREVIOUS prompt
+    // survived: only then does the backend prefill just the new tokens.
+    const extendsPrevious = prev ? common === prev.length : true;
+    logger.logInfo("[trace] prompt prefix", {
+      chars: serialized.length,
+      previousChars: prev?.length ?? 0,
+      commonWithPrevious: common,
+      extendsPrevious,
+      // Only meaningful when the prefix broke: which message REI rewrote or dropped.
+      rewroteMessage: extendsPrevious
+        ? -1
+        : messages.findIndex((_m, i) => {
+            const upto = messages
+              .slice(0, i + 1)
+              .map((x) => `${x.role}|${x.content ?? ""}`)
+              .join("\u0002").length;
+            return upto > common;
+          }),
+    });
+    promptTrace.last = serialized;
+  }
+
   const opts = { model: modelOverride, reasoningEffort };
   let result: ChatCompletionWithTools;
   let streamed = false;

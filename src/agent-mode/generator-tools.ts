@@ -7,7 +7,6 @@ import type { AgentLogger } from "../core/logger.js";
 import type { McpRegistry } from "../tools/mcp/mcp-registry.js";
 import { mcpToolsToDefinitions } from "../contracts/tool-definitions.js";
 import { retainAndMaybeSpill } from "./tools-loop/tool-output-store.js";
-import { pruneSupersededReads } from "./tools-loop/prune-superseded-reads.js";
 import { startStepSpan } from "../telemetry/spans.js";
 import { getMaxTurns } from "../config/model-runtime.js";
 import {
@@ -211,9 +210,16 @@ export async function executeAgentTurnWithTools(params: {
   // REI_EDIT_MODE=sandbox validates the cumulative tree per edit, persisting only green state (heavier).
   const directMode = process.env.REI_EDIT_MODE !== "sandbox";
 
-  // Attaches the turn's aggregated token usage to a final result (no-op when none reported).
-  const attachUsage = (r: ExecutionResult): ExecutionResult =>
-    turnUsage ? { ...r, usage: turnUsage } : r;
+  // Everything after this index is what THIS turn appended — the tool traffic the caller persists.
+  const loopStart = currentMessages.length;
+
+  // Attaches the turn's aggregated token usage AND the messages it appended (see
+  // ExecutionResult.turnMessages: dropping them is what made the next turn re-prefill from scratch).
+  const attachUsage = (r: ExecutionResult): ExecutionResult => ({
+    ...r,
+    ...(turnUsage ? { usage: turnUsage } : {}),
+    turnMessages: currentMessages.slice(loopStart),
+  });
 
   // Finalize with whatever was gathered (queued edits + one final verify); reused by turn-limit + loop-guard abandon.
   const finalizeAtLimit = () =>
@@ -395,11 +401,14 @@ export async function executeAgentTurnWithTools(params: {
         });
       }
 
-      // Read the same file twice in a turn and the first copy is dead weight that still ships on
-      // every remaining model call. Dropping it here — after the new results land, so the newest
-      // copy is the one that survives — is the difference between paying for a file once and
-      // paying for it once per step. Only exact duplicates go; see prune-superseded-reads.
-      currentMessages = pruneSupersededReads(currentMessages);
+      // A duplicate read is NOT pruned from the history any more. Emptying the earlier copy saved
+      // tokens but rewrote a message the backend had already processed, and a local runtime reuses
+      // its KV cache only while the next prompt extends the last — so everything after the gutted
+      // message was re-read. Measured on a real turn: the prune cost 28s of re-prefill, against the
+      // ~11s the duplicate costs ONCE (and never again, since from then on it is cached).
+      //
+      // Duplicates are bounded anyway: a large result is already spilled to disk and only its
+      // preview travels (REI_TOOL_OUTPUT_MAX_INLINE). Shrinking history is the compactor's job.
 
       // Escalation against the SR mismatch death-loop.
       if (mismatchEscalation) {

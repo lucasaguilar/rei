@@ -1,3 +1,4 @@
+import type { ChatMessage } from "../../chat/types.js";
 import * as fs from "fs/promises";
 import type { AgentSREdit } from "../../contracts/agent-interaction.types.js";
 import type { AgentLogger } from "../../core/logger.js";
@@ -31,6 +32,17 @@ export interface ExecutionResult {
   verified?: boolean;
   /** Aggregated token usage across all model calls in this turn (max prompt / sum completion). */
   usage?: TokenUsage;
+  /**
+   * The messages the loop APPENDED this turn: the assistant requests carrying `tool_calls` and the
+   * results answering them. Returned so the caller can persist them instead of dropping them.
+   *
+   * Dropping them is what made every turn start cold. A local backend keeps the KV of the last
+   * prompt and reuses it only while the next prompt EXTENDS it; removing the turn's tool traffic
+   * from the middle leaves the next prompt diverging from what was cached, so the whole thing is
+   * re-read. Measured on oMLX at ~23k tokens: 0.59s when the traffic stayed, 40.36s when it was
+   * dropped — with a SMALLER prompt.
+   */
+  turnMessages?: ChatMessage[];
 }
 
 /** Marker prefixing the "N file(s) created" summary appended to a turn response. */
