@@ -20,7 +20,7 @@ const CUSTOM = '[ enter custom model... ]';
 // Cloud providers authenticate with an API key; local providers expose an
 // OpenAI-compatible endpoint we can probe for models (the probe IS the validation).
 const CLOUD_PROVIDERS = ['openrouter', 'gemini', 'groq', 'huggingface'];
-const LOCAL_PROVIDERS = ['ollama', 'llmstudio', 'mtplx'];
+const LOCAL_PROVIDERS = ['ollama', 'llmstudio', 'mtplx', 'omlx', 'openai-compat'];
 
 // Env var that holds each cloud provider's API key (HF uses HF_TOKEN, not HF_API_KEY).
 const API_KEY_VAR = {
@@ -41,12 +41,16 @@ const LOCAL_DEFAULT_URL = {
     ollama: 'http://127.0.0.1:11434',
     llmstudio: 'http://127.0.0.1:1234/v1',
     mtplx: 'http://127.0.0.1:8000/v1',
+    omlx: 'http://127.0.0.1:8000/v1',
+    'openai-compat': 'http://127.0.0.1:8000/v1',
 };
 // Concrete "how to get it running" hint shown when a local server can't be reached.
 const LOCAL_HINT = {
     ollama: 'Ollama: install from https://ollama.com, then `ollama serve` and `ollama pull <model>`.',
     llmstudio: 'LM Studio: open the app → Developer tab → Start Server (default http://localhost:1234).',
     mtplx: 'MTPLX: start the server (e.g. :8000) — set the URL + API key when prompted above.',
+    omlx: 'oMLX: open the app (or `omlx serve`) — it answers 401 without a key, so set OMLX_API_KEY too.',
+    'openai-compat': 'Any OpenAI-compatible server (vLLM, SGLang, llama.cpp, LiteLLM): give the URL and, if it needs one, the key.',
 };
 
 // Curated last-resort model lists — used ONLY when the live server/list is unreachable.
@@ -55,6 +59,8 @@ const KNOWN_MODELS = {
     ollama: ['qwen3.8:27b-mlx', 'qwen3.6:35b-a3b-coding-nvfp4', 'llama3.2'],
     llmstudio: ['ornith-1.5-35b-a3b-mlx', 'qwen/qwen3.6-27b', 'qwen/qwen3-vl-4b'],
     mtplx: ['mtplx-qwen38-27b-optimized-speed'],
+    omlx: ['Qwen3.8-27B-MLX-4bit', 'Ornith-1.5-35B-A3B-MLX-4bit', 'gemma-4-26B-A4B-it-QAT-MLX-4bit'],
+    'openai-compat': [],
     openrouter: ['qwen/qwen3.6-plus', 'deepseek/deepseek-r1', 'openai/gpt-4o-mini', 'auto'],
     gemini: ['gemini-2.5-flash', 'gemini-2.5-pro'],
     groq: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'],
@@ -219,7 +225,9 @@ export const PROVIDER_MODELS = {
             openrouter: ['qwen/qwen3.6-plus'],
             gemini: ['gemini-2.5-flash'],
             llmstudio: [],
-            mtplx: []
+            mtplx: [],
+            omlx: [],
+            'openai-compat': []
         };
     }
 
@@ -290,7 +298,10 @@ function getEnvPrefix(provider) {
     if (provider === 'llmstudio') return 'LLM_STUDIO';
     if (provider === 'huggingface') return 'HF';
     if (provider === 'mtplx') return 'MTPLX';
-    return provider.toUpperCase();
+    // A provider name is a menu label; an env prefix is an identifier. `openai-compat` toUpperCase'd
+    // to OPENAI-COMPAT, and the wizard would have written OPENAI-COMPAT_BASE_URL — a variable no
+    // shell exports and REI never reads. Keep the two spellings from drifting.
+    return provider.toUpperCase().replace(/-/g, '_');
 }
 
 /** Decorates a provider option so the user sees, at a glance, what each choice needs. */

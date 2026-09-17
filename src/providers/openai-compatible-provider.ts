@@ -88,6 +88,12 @@ export abstract class OpenAiCompatibleProvider implements ModelProvider {
     reasoningEffort?: string,
   ): Record<string, unknown> | undefined {
     if (!this.forwardsTemplateKwargs || !reasoningEffort) return undefined;
+    // `none` is not a reasoning LEVEL, it is the absence of reasoning — and on a Qwen-style template
+    // the two are different doors. Measured against oMLX with Qwen3.8 (medians of 3 runs, chars of
+    // reasoning_content): reasoning_effort:none → 279, chat_template_kwargs{reasoning_effort:none}
+    // → 280, chat_template_kwargs{enable_thinking:false} → 0. Only the last one turns it off, and it
+    // overrides a top-level level sent alongside it.
+    if (reasoningEffort === "none") return { enable_thinking: false };
     return { reasoning_effort: reasoningEffort };
   }
 

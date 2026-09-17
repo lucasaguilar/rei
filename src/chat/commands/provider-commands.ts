@@ -14,6 +14,8 @@ const VALID_PROVIDERS = [
   "huggingface",
   "llmstudio",
   "mtplx",
+  "omlx",
+  "openai-compat",
 ];
 
 /** Active model env var for a provider/mode (ask vs agent). */

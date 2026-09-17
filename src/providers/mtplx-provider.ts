@@ -7,6 +7,12 @@ import type {
   ToolStreamDelta,
 } from "./model-provider.js";
 import { OpenAiCompatibleProvider } from "./openai-compatible-provider.js";
+import {
+  forwardsTemplateKwargsFromEnv,
+  normalizeBaseUrl,
+  parseFloatEnv,
+  parseRequestTimeoutMs,
+} from "./provider-env.js";
 
 /**
  * MTPLX provider — thin wrapper around the OpenAI-compatible base.
@@ -30,7 +36,7 @@ export class MtplxProvider extends OpenAiCompatibleProvider {
     // thinking por completo, reasoning_tokens=0). Es la única vía para mandarle a Qwen3.8 el nivel
     // de razonamiento, porque es una variable del template y no un parámetro del motor.
     // Se puede desactivar con MTPLX_TEMPLATE_KWARGS=false si el server cambia de comportamiento.
-    this.forwardsTemplateKwargs = process.env.MTPLX_TEMPLATE_KWARGS !== "false";
+    this.forwardsTemplateKwargs = forwardsTemplateKwargsFromEnv("MTPLX", true);
     this.model = params?.model ?? process.env.MTPLX_MODEL ?? "";
     this.requestTimeoutMs = parseRequestTimeoutMs(
       process.env.MTPLX_REQUEST_TIMEOUT_MS,
@@ -64,32 +70,3 @@ const DEFAULT_MTPLX_REQUEST_TIMEOUT_MS = 600_000; // 10 minutes fallback for loc
 const DEFAULT_MTPLX_TEMPERATURE = 0.6;
 const DEFAULT_MTPLX_FREQUENCY_PENALTY = 0.3;
 const DEFAULT_MTPLX_PRESENCE_PENALTY = 0.3;
-
-// ── Shared helpers (extracted so subclasses don't duplicate) ─────────────
-
-function normalizeBaseUrl(baseUrl: string): string {
-  return baseUrl.replace(/\/+$/, "");
-}
-
-function parseRequestTimeoutMs(
-  value: string | undefined,
-  fallback: number,
-): number {
-  if (!value) return fallback;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 1000) return fallback;
-  return Math.floor(parsed);
-}
-
-function parseFloatEnv(
-  value: string | undefined,
-  fallback: number,
-  bounds: { min: number; max: number },
-): number {
-  if (value === undefined || value === "") return fallback;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < bounds.min || parsed > bounds.max) {
-    return fallback;
-  }
-  return parsed;
-}

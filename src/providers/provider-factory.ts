@@ -7,6 +7,8 @@ import { OllamaProvider } from "./ollama-provider.js";
 import { GroqProvider } from "./groq-provider.js";
 import { OpenRouterProvider } from "./openrouter-provider.js";
 import { HuggingFaceProvider } from "./huggingface-provider.js";
+import { OmlxProvider } from "./omlx-provider.js";
+import { OpenAiCompatProvider } from "./openai-compat-provider.js";
 import { MtplxProvider } from "./mtplx-provider.js";
 import { withDegenerateGuard } from "./degenerate-guard.js";
 import { withTelemetry } from "./with-telemetry.js";
@@ -54,6 +56,12 @@ export function createModelProvider(providerNameArg?: string): ModelProvider {
     case "mtplx":
       provider = new MtplxProvider();
       break;
+    case "omlx":
+      provider = new OmlxProvider();
+      break;
+    case "openai-compat":
+      provider = new OpenAiCompatProvider();
+      break;
     default:
       throw new Error(
         `Unknown MODEL_PROVIDER: ${providerNameArg ?? process.env.MODEL_PROVIDER}. Expected one of: mock, ollama, groq, gemini, openrouter, huggingface, llmstudio, mtplx`,
@@ -91,6 +99,8 @@ const PROVIDER_ENV_PREFIX: Record<string, string> = {
   huggingface: "HF",
   llmstudio: "LLM_STUDIO",
   mtplx: "MTPLX",
+  omlx: "OMLX",
+  "openai-compat": "OPENAI_COMPAT",
 };
 
 /** Per-mode model override suffix, appended to the provider prefix. */

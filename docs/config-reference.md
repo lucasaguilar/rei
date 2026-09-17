@@ -277,6 +277,18 @@ reasoning level on a Qwen3.8 there: thinking is a template variable, not an engi
 | Var | What | Default |
 |---|---|---|
 | `MTPLX_TEMPLATE_KWARGS` | set to `false` to stop forwarding them, if the server's behaviour changes | forwarded |
+| `OMLX_TEMPLATE_KWARGS` | same switch for oMLX, which forwards them (measured: `enable_thinking:false` → zero reasoning) | forwarded |
+| `OPENAI_COMPAT_TEMPLATE_KWARGS` | set to `true` only when you KNOW the endpoint forwards them — LM Studio answered a fatal backend error and went down | not forwarded |
+
+### oMLX and the generic OpenAI-compatible provider
+
+`omlx` (`OMLX_BASE_URL`, `OMLX_API_KEY`, `OMLX_MODEL`, default `http://127.0.0.1:8000/v1`) exists as
+its own provider rather than `llmstudio` pointed elsewhere, because the two endpoints differ in what
+they accept: oMLX forwards `chat_template_kwargs`, LM Studio crashes on them. oMLX also answers 401
+without a key, even on localhost.
+
+`openai-compat` (`OPENAI_COMPAT_BASE_URL`, `_API_KEY`, `_MODEL`) covers every other OpenAI-compatible
+server — vLLM, SGLang, llama.cpp, LiteLLM. Capabilities are declared, never probed.
 
 ## Provider-specific sampling/budget cheat-sheet
 
@@ -284,6 +296,8 @@ reasoning level on a Qwen3.8 there: thinking is a template variable, not an engi
 |---|---|---|
 | LM Studio | `LLM_STUDIO_TEMPERATURE / _FREQUENCY_PENALTY / _PRESENCE_PENALTY / _REPEAT_PENALTY` | `LLM_STUDIO_MAX_TOKENS` |
 | MTPLX | `MTPLX_TEMPERATURE / _FREQUENCY_PENALTY / _PRESENCE_PENALTY / _REPEAT_PENALTY` | — |
+| oMLX | `OMLX_TEMPERATURE / _FREQUENCY_PENALTY / _PRESENCE_PENALTY`, `OMLX_REQUEST_TIMEOUT_MS` | — |
+| OpenAI-compatible (generic) | `OPENAI_COMPAT_TEMPERATURE / _FREQUENCY_PENALTY / _PRESENCE_PENALTY`, `OPENAI_COMPAT_REQUEST_TIMEOUT_MS` | — |
 | Ollama | `OLLAMA_TEMPERATURE / _FREQUENCY_PENALTY / _PRESENCE_PENALTY / _REPEAT_PENALTY` | `OLLAMA_NUM_CTX`, `OLLAMA_NUM_PREDICT`, `OLLAMA_NUM_THREAD`, `OLLAMA_KEEP_ALIVE` |
 | HF | — | `HF_MAX_TOKENS` |
 | OpenRouter | — | `OPENROUTER_CONTEXT_WINDOW` |
