@@ -261,6 +261,7 @@ export class Agent {
           reasoningEffort: resolveReasoningEffort("agent"),
           mcpRegistry: this.mcpRegistry,
           onChunk,
+          drainUserMessages: options?.drainUserMessages,
           userQuery: userInput,
           roleWriteGlob: turnRole?.writeGlob,
           elicit: options?.elicit,

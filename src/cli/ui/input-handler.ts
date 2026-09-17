@@ -7,12 +7,41 @@ import { handleInputTurn } from "../helpers/input-turn.helpers.js";
 import { extractSREdits } from "../../agent-mode/response-handler.js";
 import { formatCodeDiff } from "../markdown-renderer.js";
 
+/** A queue is a nudge, not a conversation: past a few messages you are talking over the model. */
+const MAX_QUEUED_USER_MESSAGES = 3;
+
 export class InputHandler {
   public static async submitInput(ctx: InputHandlerContext): Promise<void> {
     const { state, actions } = ctx;
 
-    // NOTE: Check if the input handler is currently busy processing another input
-    if (state.busy) return;
+    // A turn is running: what you type is QUEUED, not dropped. It used to return here, so a line
+    // typed while REI worked vanished — including the one that would have unblocked it ("the token
+    // is in ~/.config/..."), which you then had to retype after watching the turn go the wrong way.
+    // The queue is handed to the running turn between model responses, never mid-generation.
+    if (state.busy) {
+      const pending = state.inputBuffer.trim();
+      if (!pending) return;
+      if (pending.startsWith("/")) {
+        // Commands mutate the session (mode, model, history). Running one against a turn already in
+        // flight is a different feature, and a dangerous one — this is text only.
+        actions.pushTranscript(
+          `\x1b[33m[REI] Commands can't be queued mid-turn — wait for it to finish.\x1b[0m`,
+        );
+        return;
+      }
+      state.queuedUserMessages ??= [];
+      if (state.queuedUserMessages.length >= MAX_QUEUED_USER_MESSAGES) {
+        actions.pushTranscript(
+          `\x1b[33m[REI] ${MAX_QUEUED_USER_MESSAGES} messages already queued — waiting for the turn to read them.\x1b[0m`,
+        );
+        return;
+      }
+      state.queuedUserMessages.push(pending);
+      actions.pushTranscript(`\x1b[2m✉  queued for this turn: ${pending}\x1b[0m`);
+      actions.resetInput();
+      actions.draw();
+      return;
+    }
 
     const activePalette = actions.getActivePalette();
     const submittedInput = state.inputBuffer;

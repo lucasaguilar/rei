@@ -74,6 +74,9 @@ export async function executeAgentTurnWithTools(params: {
   reasoningEffort?: string;
   /** Connected MCP registry. When provided, MCP tools are merged into the tool list. */
   mcpRegistry?: McpRegistry;
+  /** Hands over messages the user typed while this turn was running (CLI queue). Returning them
+   *  CLEARS the queue: whatever is drained here is owned by this turn. */
+  drainUserMessages?: () => string[];
   /** Live progress callback — emits "status" chunks as each tool runs (else silent until end). */
   onChunk?: (event: {
     type: "thinking" | "text" | "status";
@@ -111,6 +114,7 @@ export async function executeAgentTurnWithTools(params: {
     elicit,
     depth = 0,
     roleWriteGlob,
+    drainUserMessages,
   } = params;
 
   if (!provider.completeChatWithTools) {
@@ -398,6 +402,20 @@ export async function executeAgentTurnWithTools(params: {
             : retainAndMaybeSpill(call.function.name, res),
           tool_call_id: call.id,
           name: call.function.name,
+        });
+      }
+
+      // Anything you typed while the turn was running, handed over here: after the model's response
+      // and its tool results, before the next call. Not mid-generation — a message cannot land
+      // inside a token being written, and interrupting is what Ctrl-C is for.
+      const queued = drainUserMessages?.() ?? [];
+      for (const message of queued) {
+        emitStatus(`✉️  [REI] Your message reached the turn: ${message}`, "notice");
+        currentMessages.push({
+          role: "user",
+          // Marked, because the model has to tell this apart from the task it was given: it is a
+          // correction or a fact arriving late, not a new request replacing the old one.
+          content: `[USER, mid-turn] ${message}`,
         });
       }
 

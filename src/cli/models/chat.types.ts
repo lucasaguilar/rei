@@ -60,6 +60,9 @@ export interface ChatRendererState {
 }
 
 export interface ChatUIState {
+  /** Messages typed WHILE a turn was running, waiting to be handed to it. Delivered between the
+   *  model's response and the next one — never mid-generation. See MAX_QUEUED_USER_MESSAGES. */
+  queuedUserMessages?: string[];
   running: boolean;
   busy: boolean;
   activeStatus?: string; // TurnStatus

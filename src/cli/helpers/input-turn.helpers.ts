@@ -5,8 +5,16 @@ import type { InputHandlerContext } from "../models/input-handler.types.js";
 import { saveSession } from "../../chat/session-store.js";
 import { extractSREdits } from "../../agent-mode/response-handler.js";
 import { formatContextGauge } from "../markdown-renderer.js";
+import { resolveActiveModelLabel } from "./model-label.helper.js";
+// Re-exported: it lived here, and the status bar + its tests import it from this path.
+export { resolveActiveModelLabel } from "./model-label.helper.js";
 import { isVerboseOutput } from "../../config/output-verbosity.js";
-import { beginPhase, formatEdits, formatThinkingSummary, publishContextReading } from "./turn-display.helpers.js";
+import {
+  beginPhase,
+  formatEdits,
+  formatThinkingSummary,
+  publishContextReading,
+} from "./turn-display.helpers.js";
 import { estimateMessagesTokens } from "../../chat/helpers/token-estimator.js";
 import { getContextWindow } from "../../config/model-runtime.js";
 import { stripNativeToolSyntax } from "../../core/helpers/turn-message.helpers.js";
@@ -28,42 +36,6 @@ function stripAnsiKeepingFences(text: string): string {
     .split(/(```[\s\S]*?```)/g)
     .map((seg, i) => (i % 2 === 1 ? seg : seg.replace(ansi, "")))
     .join("");
-}
-
-/**
- * Resolves the active model label and maps it to its corresponding brand icon or emoji
- * (e.g. 🦙 for Ollama, 🧠 for OpenRouter, ⚡ for Groq, ♊ for Gemini, 💻 for LM Studio).
- * Supports dedicated agent provider resolution in multi-provider environments.
- */
-export function resolveActiveModelLabel(mode?: string, actualModel?: string): string {
-  const isAgentMode = mode === "agent";
-  const agentProvider = process.env.AGENT_MODEL_PROVIDER?.trim().toLowerCase();
-
-  const provider =
-    isAgentMode && agentProvider
-      ? agentProvider
-      : (process.env.MODEL_PROVIDER ?? "").trim().toLowerCase();
-
-  // `actualModel` is what the turn REPORTED running on, and it wins: an active role's
-  // preferredModel changes the model without changing the mode, so re-deriving from the mode
-  // named the wrong one. The resolver is the fallback for before any turn has run (startup gauge).
-  const modelName =
-    actualModel || resolveModelForMode((mode as SessionMode) ?? "ask") || "default";
-
-  const emoji: Record<string, string> = {
-    ollama: "🦙",
-    openrouter: "🧠",
-    groq: "⚡",
-    gemini: "♊",
-    huggingface: "🤗",
-    llmstudio: "💻",
-    mock: "🧪",
-  };
-
-  if (!provider) return "unknown";
-  const icon = emoji[provider] ?? "";
-  // Show provider / model so it's clear which backend AND model is active per mode.
-  return `${icon ? icon + " " : ""}${provider} / ${modelName}`;
 }
 
 function isInsideXmlBlock(text: string): boolean {
@@ -185,6 +157,9 @@ export async function handleInputTurn(
     let totalOutputChars = 0;
     // track whether any thinking or status content was shown live
     let liveContentShown = false;
+    /** Whether the spinner is currently drawing. It is re-armed after every tool call, so "have we
+     *  shown anything yet" is not the same question as "is it running right now". */
+    let spinnerRunning = true;
     /** Reasoning characters seen while quiet — reported once instead of streamed. */
     let thinkingChars = 0;
     let firstTokenTime = -1;
@@ -193,6 +168,9 @@ export async function handleInputTurn(
 
     for await (const token of agent.streamTurn(session, promptForModel, {
       elicit,
+      // Hand over anything typed while this turn runs, and clear the queue: whatever is taken here
+      // belongs to this turn. Anything typed after the last drain survives for the next one.
+      drainUserMessages: () => state.queuedUserMessages?.splice(0) ?? [],
       onStatus: (status) => {
         if (lastStatus === status) return;
         if (status === "producing_response") return;
@@ -233,11 +211,17 @@ export async function handleInputTurn(
           continue; // the spinner keeps saying REI is working — see onStatus below
         }
 
-        if (!liveContentShown) {
+        // Stop the spinner EVERY time reasoning is about to stream, not just the first time in the
+        // turn. It is re-armed after each tool call (see the `shownLive` branch below), so a guard
+        // on `liveContentShown` — true from the first token onwards — left it running for every
+        // later block: its status line redrew between fragments and the screen came out as
+        // "thinking · 47s" interleaved into the middle of each sentence.
+        if (spinnerRunning) {
           actions.stopSpinner();
           state.activeStatus = undefined;
-          liveContentShown = true;
+          spinnerRunning = false;
         }
+        liveContentShown = true;
         // Collapse 3+ consecutive newlines to 2 to avoid excessive blank lines in thinking
         const normalized = cleanToken.replace(/\n{3,}/g, "\n\n");
         actions.streamText(`\x1b[3;2m${normalized}\x1b[0m`);
@@ -256,9 +240,10 @@ export async function handleInputTurn(
           !isText && !isNowInside && !wasInside && Boolean(cleanToken.trim());
         if (shownLive) {
           // status / agent raw response: show live — skip whitespace-only tokens
-          if (!liveContentShown) {
+          if (spinnerRunning || !liveContentShown) {
             actions.stopSpinner();
             state.activeStatus = undefined;
+            spinnerRunning = false;
             liveContentShown = true;
           }
           // Report the reasoning that ran before this tool call as ONE line. Quiet mode does not
@@ -276,6 +261,7 @@ export async function handleInputTurn(
           // again — not a fresh "calling model" announcement each of the twenty times.
           beginPhase(state, "calling_model");
           actions.startSpinner();
+          spinnerRunning = true;
           actions.draw();
         } else {
           renderBuffer += cleanToken;
@@ -336,11 +322,16 @@ export async function handleInputTurn(
       // Real numbers from the backend — no `~`, and the tools array is already counted in
       // promptTokens (the backend tokenized it), so no separate tools estimate is added.
       sentTokens = realUsage.promptTokens ?? 0;
-      recTokens = realUsage.completionTokens ?? Math.max(1, Math.round(totalOutputChars / 4));
+      recTokens =
+        realUsage.completionTokens ??
+        Math.max(1, Math.round(totalOutputChars / 4));
     } else {
       // Approximate token counts (1 token ~= 4 chars in mixed code/text prompts)
       const inputMsgs = session.messages.slice(0, -1);
-      const inputChars = inputMsgs.reduce((acc, m) => acc + m.content.length, 0);
+      const inputChars = inputMsgs.reduce(
+        (acc, m) => acc + m.content.length,
+        0,
+      );
       const historyTokens = Math.round(inputChars / 4);
       // The function-calling tools array (built-in + MCP schemas) is sent on every agent
       // request but is NOT in the message history — include it so the gauge reflects real
@@ -357,7 +348,10 @@ export async function handleInputTurn(
       value > 0 && value < 0.1 ? "<0.1" : value.toFixed(1);
     const speedText = `${formatSpeed(speedValue)} tok/s`;
 
-    const activeModel = resolveActiveModelLabel(session.mode, agent.getLastTurnModel());
+    const activeModel = resolveActiveModelLabel(
+      session.mode,
+      agent.getLastTurnModel(),
+    );
 
     // Visual context-usage gauge: how much of the assumed window the prompt consumed this turn.
     // Helps spot when history/files are about to overflow (and explains slow prefill).

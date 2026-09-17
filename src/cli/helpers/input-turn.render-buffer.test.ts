@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // The turn handler persists the session and may reach for a vision model; neither is what these
 // tests are about, so both are stubbed out.
@@ -95,5 +95,88 @@ describe("what the final markdown render receives", () => {
 
     expect(answer).not.toContain("razonando en voz alta");
     expect(answer).toContain("La respuesta");
+  });
+});
+
+/**
+ * With REI_VERBOSE the reasoning streams to the screen — and it came out shredded:
+ *
+ *     server is already configured:  thinking · 46s
+ *     in rei.config.json — just      thinking · 46s
+ *     use it")
+ *
+ * The spinner is re-armed after every tool call, and the guard that stopped it was
+ * `if (!liveContentShown)` — true only for the FIRST live token of the turn. Every later block of
+ * reasoning therefore streamed while the spinner was drawing, and its status line redrew between
+ * fragments, landing in the middle of the sentences.
+ */
+async function spinnerTimeline(chunks: string[]) {
+  const events: string[] = [];
+  const ctx = {
+    state: {},
+    session: { messages: [] },
+    transcript: [] as string[],
+    workspacePath: "/tmp",
+    agent: {
+      // eslint-disable-next-line require-yield
+      async *streamTurn() {
+        for (const c of chunks) yield c;
+      },
+    },
+    actions: {
+      pushTranscript: () => {},
+      // Reasoning is streamed dim+italic; that escape is how we spot it here.
+      streamText: (v: string) => events.push(v.includes("\x1b[3;2m") ? "THINKING" : "text"),
+      draw: () => {},
+      startSpinner: () => events.push("start"),
+      stopSpinner: () => events.push("stop"),
+      resetInput: () => {},
+      rememberHistory: () => {},
+      getActivePalette: () => ({}),
+      getMentionContext: () => undefined,
+    },
+  } as unknown as InputHandlerContext;
+  await handleInputTurn("pregunta", ctx);
+  return events;
+}
+
+describe("streaming the reasoning with REI_VERBOSE", () => {
+  const saved = process.env.REI_VERBOSE;
+  beforeEach(() => {
+    process.env.REI_VERBOSE = "true";
+  });
+  afterEach(() => {
+    if (saved === undefined) delete process.env.REI_VERBOSE;
+    else process.env.REI_VERBOSE = saved;
+  });
+
+  it("never prints reasoning while the spinner is drawing", async () => {
+    const events = await spinnerTimeline([
+      `${THINKING}primer bloque de razonamiento`,
+      "   ↳ exit 0\nsalida de una herramienta\n", // a tool result re-arms the spinner
+      `${THINKING}segundo bloque, despues de la herramienta`,
+      `${THINKING} y sigue`,
+      `${TEXT}listo`,
+    ]);
+
+    let running = true; // the spinner is started before the stream begins
+    for (const e of events) {
+      if (e === "start") running = true;
+      else if (e === "stop") running = false;
+      else if (e === "THINKING") {
+        expect(running, `reasoning printed while the spinner was drawing: ${events.join(" → ")}`).toBe(
+          false,
+        );
+      }
+    }
+  });
+
+  it("still shows the reasoning — the fix is not 'print nothing'", async () => {
+    const events = await spinnerTimeline([
+      `${THINKING}razonando`,
+      "   ↳ exit 0\n",
+      `${THINKING}razonando otra vez`,
+    ]);
+    expect(events.filter((e) => e === "THINKING").length).toBeGreaterThanOrEqual(2);
   });
 });

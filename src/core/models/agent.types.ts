@@ -14,6 +14,8 @@ export type StreamTurnOptions = {
   /** Frontend-provided elicitation (ask_user tool). CLI passes an interactive renderer; server/
    *  headless omits it → the dispatch uses the non-interactive safe default. */
   elicit?: import("../../chat/elicitation.js").ElicitFn;
+  /** Hands the running turn whatever the user typed while it worked (the CLI queue). */
+  drainUserMessages?: () => string[];
 };
 
 export interface PendingPatchAssessmentItem {
