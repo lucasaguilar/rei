@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { setupToolSelection } from "./tool-selection.js";
 
 const fakeLogger = new Proxy({}, { get: () => vi.fn() }) as never;
@@ -14,7 +14,7 @@ function toolNames(allowSubAgents: boolean): string[] {
   return sel.buildTools().map((t) => t.function.name);
 }
 
-afterEach(() => {
+beforeEach(() => {
   delete process.env.REI_SUBAGENT_ENABLED;
 });
 
