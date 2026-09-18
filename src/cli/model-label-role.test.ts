@@ -3,7 +3,7 @@ import { resolveActiveModelLabel } from "./helpers/input-turn.helpers.js";
 
 const saved = { ...process.env };
 beforeEach(() => {
-  process.env.MODEL_PROVIDER = "llmstudio";
+  process.env.MODEL_PROVIDER = "lmstudio";
   process.env.LLM_STUDIO_MODEL = "qwen/qwen3.8-27b";
   process.env.LLM_STUDIO_MODEL_AGENT = "qwen/qwen3.8-27b";
 });
@@ -39,7 +39,7 @@ describe("the status bar names the model that ran", () => {
 
   it("keeps the provider and its icon", () => {
     const label = resolveActiveModelLabel("agent", "google/gemma-4-26b-a4b-qat");
-    expect(label).toContain("llmstudio");
+    expect(label).toContain("lmstudio");
     expect(label).toContain("💻");
   });
 });

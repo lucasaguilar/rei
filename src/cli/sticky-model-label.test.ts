@@ -23,8 +23,8 @@ beforeEach(() => {
     "LLM_STUDIO_MODEL_PLANNING", "OLLAMA_MODEL_PLANNING",
   ]) delete process.env[k];
 
-  process.env.MODEL_PROVIDER = "llmstudio";
-  process.env.AGENT_MODEL_PROVIDER = "llmstudio";
+  process.env.MODEL_PROVIDER = "lmstudio";
+  process.env.AGENT_MODEL_PROVIDER = "lmstudio";
   process.env.LLM_STUDIO_MODEL = "ask-model";
   process.env.LLM_STUDIO_MODEL_AGENT = "agent-model";
   process.env.OLLAMA_MODEL = "ollama-ask";
@@ -91,7 +91,7 @@ describe("a manual /model does not survive its provider", () => {
 
   it("does the same when the dedicated agent provider is switched off", async () => {
     // The fallback only goes somewhere else if the primary provider IS somewhere else: with both
-    // set to llmstudio, `/model agent X` wrote LLM_STUDIO_MODEL_AGENT and X stays — correctly.
+    // set to lmstudio, `/model agent X` wrote LLM_STUDIO_MODEL_AGENT and X stays — correctly.
     process.env.MODEL_PROVIDER = "ollama";
     const s = session("agent");
     const bar: ContextBar = {};
@@ -142,6 +142,6 @@ describe("the bar keeps tracking what it already tracked", () => {
     const s = session("agent");
     const bar: ContextBar = {};
     await type("/mode agent", s, bar);
-    expect(bar.modelLabel).toContain("llmstudio");
+    expect(bar.modelLabel).toContain("lmstudio");
   });
 });

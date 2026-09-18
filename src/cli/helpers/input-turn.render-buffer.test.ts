@@ -7,6 +7,7 @@ vi.mock("../vision-sidecar.js", () => ({ describeAttachedImages: vi.fn(async () 
 
 import { handleInputTurn } from "./input-turn.helpers.js";
 import type { InputHandlerContext } from "../models/input-handler.types.js";
+import { code } from "../theme/palette.js";
 
 const THINKING = "\x10";
 const TEXT = "\x11";
@@ -125,8 +126,9 @@ async function spinnerTimeline(chunks: string[]) {
     },
     actions: {
       pushTranscript: () => {},
-      // Reasoning is streamed dim+italic; that escape is how we spot it here.
-      streamText: (v: string) => events.push(v.includes("\x1b[3;2m") ? "THINKING" : "text"),
+      // Reasoning carries the `thinking` role's escape — asked of the palette rather than
+      // hardcoded, so a theme change does not quietly turn this probe into "never matches".
+      streamText: (v: string) => events.push(v.includes(code("thinking")) ? "THINKING" : "text"),
       draw: () => {},
       startSpinner: () => events.push("start"),
       stopSpinner: () => events.push("stop"),

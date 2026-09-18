@@ -11,8 +11,8 @@ const plain = (s: string | null): string => (s ?? "").replace(/\x1b\[[0-9;]*m/g,
  */
 describe("formatContextBar", () => {
   it("reads as tokens, window and percentage", () => {
-    expect(plain(formatContextBar(15_501, 100_352, "llmstudio/ornith"))).toBe(
-      "16k/100k · 15% · llmstudio/ornith",
+    expect(plain(formatContextBar(15_501, 100_352, "lmstudio/ornith"))).toBe(
+      "16k/100k · 15% · lmstudio/ornith",
     );
   });
 
@@ -47,7 +47,7 @@ describe("formatContextBar", () => {
   });
 
   it("stays short enough to share the line with a narrow terminal", () => {
-    expect(plain(formatContextBar(15_501, 100_352, "llmstudio/ornith-1.5-35b")).length)
+    expect(plain(formatContextBar(15_501, 100_352, "lmstudio/ornith-1.5-35b")).length)
       .toBeLessThanOrEqual(48);
   });
 });

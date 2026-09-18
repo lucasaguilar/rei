@@ -13,7 +13,7 @@ const plain = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
  * that is exactly what happened: the context bar came to 65 columns in a 62-column window, and the
  * shortcut hint piled up the screen, one copy per keystroke.
  */
-const LONG_LABEL = "llmstudio / qwen/qwen3.8-27b-reasoning-community";
+const LONG_LABEL = "lmstudio / qwen/qwen3.8-27b-reasoning-community";
 
 describe("the sticky context bar fits its row", () => {
   it("overflows a narrow terminal before clipping — the case that broke", () => {
