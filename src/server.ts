@@ -1,6 +1,7 @@
 import "./load-env.js"; // MUST be first: loads workspace .env with override (see load-env.ts) —
 // same precedence as the CLI, so the server honors per-project .env even when started standalone.
 import * as http from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import { initTelemetry } from "./telemetry/init.js";
 import {
   createModelProvider,
@@ -8,20 +9,56 @@ import {
 } from "./providers/provider-factory.js";
 import { Agent } from "./core/agent.js";
 import { ChatHandler } from "./server/chat-handler.js";
+import { HEALTH_BODY, HEALTH_PATH, isHealthProbe, normalizeRoutePath } from "./server/health.js";
 import { REI_LOGO } from "./cli/rei-logo.js";
 import {
   isWorkspaceAllowed,
   getDefaultWorkspace,
 } from "./server/workspace-config.js";
-// Imports fundamentales para el REI Flow
-import { scanWorkspace } from "./workspace/workspace-scanner.js";
-import { generateRepoMap } from "./tools/repo-map-generator.js";
 import { startIndexingWorker, hasRagIndex } from "./context/rag/rag-indexer.js";
 import { isRagEnabled } from "./context/rag/rag-enabled.js";
 
 await initTelemetry();
 
-const PORT = process.env.REI_SERVER_PORT || 3000;
+/** `PORT` is what a PaaS injects (Render, Fly, Heroku); REI_SERVER_PORT wins when both are set. */
+const PORT = Number(process.env.REI_SERVER_PORT || process.env.PORT || 3000);
+
+/**
+ * Loopback by default. `server.listen(PORT)` binds every interface, so the server that executes
+ * commands and writes files in your repository was reachable from the whole network while the
+ * startup banner said `localhost`. Anyone who wants it exposed says so with REI_SERVER_HOST.
+ */
+const HOST = process.env.REI_SERVER_HOST || "127.0.0.1";
+
+/**
+ * Optional shared secret, sent as `Authorization: Bearer <token>`. Unset means no check, which is
+ * the sane default for a loopback-only server; setting REI_SERVER_HOST without this one is the
+ * combination worth refusing, and startup does.
+ */
+const AUTH_TOKEN = process.env.REI_SERVER_TOKEN?.trim() || "";
+
+/**
+ * With no token there is nothing to steal a browser into sending, so `*` is fine and IDE clients
+ * need it. With a token, a wildcard origin would let any page the user visits replay a request the
+ * browser attaches credentials to — so the allowed origin becomes explicit.
+ */
+const ALLOWED_ORIGIN = AUTH_TOKEN ? (process.env.REI_SERVER_ORIGIN || "") : "*";
+
+/** Constant-time compare that tolerates different lengths (they hash to unequal buffers anyway). */
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
+
+if (HOST !== "127.0.0.1" && HOST !== "localhost" && !AUTH_TOKEN) {
+  console.error(
+    `❌ REI_SERVER_HOST=${HOST} exposes an agent that edits files and runs commands.\n` +
+      `   Set REI_SERVER_TOKEN=<secret> as well, or bind to 127.0.0.1.`,
+  );
+  process.exit(1);
+}
 const WORKSPACE_PATH = process.env.REI_WORKSPACE_PATH || getDefaultWorkspace();
 
 // Validar que el workspace sea uno permitido
@@ -31,14 +68,15 @@ if (!isWorkspaceAllowed(WORKSPACE_PATH)) {
 }
 
 async function startServer() {
-  console.log("🔍 Initializing workspace context (matching CLI flow)...");
+  // Startup does the same work as the CLI's, and no more: every per-turn decision — which model
+  // per mode, its tuning from rei.config.json, the reasoning budget, and whether the repo map is
+  // injected at all (REI_ON_DEMAND_FILE_CONTEXT_<MODE>) — is resolved inside agent.streamTurn,
+  // which both entrypoints call. There is deliberately no repo map built here: on-demand is the
+  // default, so the map is built only for a mode that explicitly opted out, and only when a turn
+  // actually needs it.
+  console.log("🔍 Initializing workspace context (same flow as the CLI)...");
 
-  // 1. Preparar el contexto igual que en runChat
-  //const scannedFiles = scanWorkspace(WORKSPACE_PATH);
-  //const repoMap = generateRepoMap(WORKSPACE_PATH);
-  //console.log(`📁 Repo map generated with ${repoMap.length} entries.`);
-
-  // Iniciar RAG en background si es la primera vez (solo si RAG está habilitado — OFF por default)
+  // RAG in the background on first run — only when RAG is enabled, which it is not by default.
   if (isRagEnabled() && !hasRagIndex(WORKSPACE_PATH)) {
     console.log("[RAG] First run detected — starting background indexing...");
     startIndexingWorker(WORKSPACE_PATH, {
@@ -67,7 +105,7 @@ async function startServer() {
   }
 
   const server = http.createServer(async (req, res) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    if (ALLOWED_ORIGIN) res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
@@ -77,12 +115,27 @@ async function startServer() {
       return;
     }
 
+    // Liveness FIRST, before auth: a platform health check cannot send the bearer token, and a
+    // 401 there reads as "unhealthy" and gets the service restarted in a loop. See server/health.ts.
+    if (isHealthProbe(req.url, req.method)) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(HEALTH_BODY);
+      return;
+    }
+
+    if (AUTH_TOKEN) {
+      const sent = (req.headers.authorization ?? "").replace(/^Bearer\s+/i, "").trim();
+      if (!timingSafeEqualStr(sent, AUTH_TOKEN)) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "Unauthorized", type: "invalid_request_error" } }));
+        return;
+      }
+    }
+
     // Normalize the path so OpenAI-compatible clients work whether or not they add the `/v1`
     // prefix (Cline appends /v1 → /v1/chat/completions; Continue posts /chat/completions directly).
     // Also strip query strings and a trailing slash.
-    const routePath =
-      (req.url || "").split("?")[0].replace(/\/+$/, "").replace(/^\/v1/, "") ||
-      "/";
+    const routePath = normalizeRoutePath(req.url);
 
     // GET /models (and /v1/models) — IDE clients probe this on connect to populate the model list.
     if (routePath === "/models" && req.method === "GET") {
@@ -175,16 +228,18 @@ async function startServer() {
     } else {
       res.writeHead(404, { "Content-Type": "text/plain" });
       res.end(
-        "Not Found. Use POST /chat/completions (or /v1/chat/completions) and GET /models.",
+        "Not Found. Use POST /chat/completions (or /v1/chat/completions), GET /models, GET /healthz.",
       );
     }
   });
 
-  server.listen(PORT, () => {
+  server.listen(PORT, HOST, () => {
     console.log(REI_LOGO);
-    console.log(`🚀 REI Server running at http://localhost:${PORT}`);
+    console.log(`🚀 REI Server running at http://${HOST}:${PORT}`);
+    if (AUTH_TOKEN) console.log(`Auth: Authorization: Bearer <REI_SERVER_TOKEN>`);
     console.log(`Workspace: ${WORKSPACE_PATH}`);
-    console.log(`Endpoint: http://localhost:${PORT}/chat/completions`);
+    console.log(`Endpoint: http://${HOST}:${PORT}/chat/completions`);
+    console.log(`Health:   http://${HOST}:${PORT}${HEALTH_PATH} (no auth — for platform probes)`);
     console.log(`Flow: Session-aware + Streaming enabled.`);
   });
 }
