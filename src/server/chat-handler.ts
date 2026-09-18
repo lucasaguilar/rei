@@ -11,6 +11,7 @@ import { loadCurrentSession, saveSession } from "../chat/session-store.js";
 import { runChat } from "../cli/run-chat.js";
 import { buildMentionEntries } from "../cli/helpers/chat.helpers.js";
 import { processMenuCommand } from "../chat/menu-command-processor.js";
+import { looksLikeCommand } from "../chat/commands/command-syntax.js";
 
 /**
  * REI yields per-edit diffs in terminal format: `Archivo: <file>` followed by
@@ -127,7 +128,7 @@ export class ChatHandler {
     };
 
     // Interceptar comandos de menú (ej: /index, /compact, /clear, /runplan)
-    if (promptTrimmed.startsWith("/")) {
+    if (looksLikeCommand(promptTrimmed)) {
       const cmdResult = await processMenuCommand(
         promptTrimmed,
         session,
