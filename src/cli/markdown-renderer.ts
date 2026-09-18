@@ -1,4 +1,5 @@
 import { diffLines } from 'diff';
+import { code, paint, RESET } from "./theme/palette.js";
 import { linkPathsInTable, linkPathsInText, shortenPath } from "./file-links.js";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
@@ -78,9 +79,11 @@ export function formatContextGauge(
   const pct = Math.min(100, Math.round((promptTokens / ctxWindow) * 100));
   const filled = Math.max(0, Math.min(10, Math.round(pct / 10)));
   const bar = "█".repeat(filled) + "░".repeat(10 - filled);
-  const color = "\x1b[90m"; // dim gray — same as the prep line below it
   const suffix = modelLabel ? ` | ${modelLabel}` : "";
-  return `${color}⏳ Context: ${promptTokens.toLocaleString()} / ${ctxWindow.toLocaleString()} tokens  [${bar}] ${pct}% used${suffix}\x1b[0m`;
+  return paint(
+    "muted", // same weight as the prep line printed below it
+    `⏳ Context: ${promptTokens.toLocaleString()} / ${ctxWindow.toLocaleString()} tokens  [${bar}] ${pct}% used${suffix}`,
+  );
 }
 
 /**
@@ -88,7 +91,7 @@ export function formatContextGauge(
  *
  * The full gauge is printed once per turn and scrolls away with everything else, so the number you
  * want when deciding whether to `/clear` is never the one on screen. This version lives in the
- * redrawn block above the prompt, where it stays: `12.4k/100k · 12% · llmstudio/ornith`.
+ * redrawn block above the prompt, where it stays: `12.4k/100k · 12% · lmstudio/ornith`.
  *
  * Returns null when no window is configured — a bar with no denominator says nothing.
  */
@@ -100,11 +103,11 @@ export function formatContextBar(
   if (ctxWindow <= 0) return null;
   const pct = Math.min(100, Math.round((promptTokens / ctxWindow) * 100));
   // Colour carries the urgency so the line itself can stay short: dim until it matters.
-  const tone = pct > 85 ? "\x1b[31m" : pct > 60 ? "\x1b[33m" : "\x1b[2m";
+  const tone = pct > 85 ? code("danger") : pct > 60 ? code("warn") : code("dim");
   const compact = (n: number): string =>
     n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(n);
-  const model = modelLabel ? ` \x1b[2m·\x1b[0m \x1b[2m${modelLabel}\x1b[0m` : "";
-  return `${tone}${compact(promptTokens)}/${compact(ctxWindow)} · ${pct}%\x1b[0m${model}`;
+  const model = modelLabel ? ` ${paint("dim", "·")} ${paint("dim", modelLabel)}` : "";
+  return `${tone}${compact(promptTokens)}/${compact(ctxWindow)} · ${pct}%${RESET}${model}`;
 }
 
 /**

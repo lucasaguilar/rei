@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import { paint } from "../theme/palette.js";
 import * as path from "path";
 import { scanWorkspace } from "../../workspace/workspace-scanner.js";
 import { MentionEntry, CommandEntry } from "../models/chat.types.js";
@@ -137,7 +138,5 @@ export function buildMentionEntries(workspacePath: string): MentionEntry[] {
 }
 
 export function displayUserLabel(displayLabel: string): string {
-  // NOTE \x1b[1;36m is ANSI escape code for bold cyan text
-  // NOTE \x1b[0m is ANSI escape code for reset to default text
-  return `\x1b[1;36mYou: ${displayLabel}\x1b[0m`;
+  return paint("user", `You: ${displayLabel}`);
 }

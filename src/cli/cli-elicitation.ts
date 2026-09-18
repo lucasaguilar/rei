@@ -1,4 +1,5 @@
 import type { ElicitFn, Elicitation } from "../chat/elicitation.js";
+import { paint } from "./theme/palette.js";
 
 /**
  * Transcript-based elicitation for the interactive CLI. Instead of introducing a SECOND keyboard
@@ -19,19 +20,19 @@ export interface CliElicitDeps {
 }
 
 function renderQuestion(req: Elicitation): string {
-  const q = `\x1b[36m❓ ${req.message}\x1b[0m`;
+  const q = paint("accent", `❓ ${req.message}`);
   if (req.kind === "select" && req.options?.length) {
     const opts = req.options
-      .map((o, i) => `  \x1b[36m${i + 1})\x1b[0m ${o.label}`)
+      .map((o, i) => `  ${paint("accent", `${i + 1})`)} ${o.label}`)
       .join("\n");
     // Advertise the free-text escape hatch (like a frontier "Other" option): any answer that
     // isn't a number/option is passed to the model verbatim; empty Enter skips.
-    return `${q}\n${opts}\n\x1b[90m(pick a number, or just write your own answer — empty = skip)\x1b[0m`;
+    return `${q}\n${opts}\n${paint("muted", "(pick a number, or just write your own answer — empty = skip)")}`;
   }
   if (req.kind === "confirm") {
-    return `${q}\n\x1b[90m(y / n — empty = ${req.default})\x1b[0m`;
+    return `${q}\n${paint("muted", `(y / n — empty = ${req.default})`)}`;
   }
-  return `${q}\n\x1b[90m(type your answer, or empty = skip, then Enter)\x1b[0m`;
+  return `${q}\n${paint("muted", "(type your answer, or empty = skip, then Enter)")}`;
 }
 
 /** Maps a free-typed line to a value. For a select, accept a 1-based number, or a value/label
