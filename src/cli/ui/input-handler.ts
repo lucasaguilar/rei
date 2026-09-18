@@ -1,8 +1,10 @@
 import { commandInsertText } from "../constants/chat.constants.js";
+import { paint } from "../theme/palette.js";
 import { ActivePalette } from "../models/chat.types.js";
 import type { InputHandlerContext } from "../models/input-handler.types.js";
 import { clamp } from "../helpers/terminal.helpers.js";
 import { handleInputCommand } from "../helpers/input-command.helpers.js";
+import { looksLikeCommand } from "../../chat/commands/command-syntax.js";
 import { handleInputTurn } from "../helpers/input-turn.helpers.js";
 import { extractSREdits } from "../../agent-mode/response-handler.js";
 import { formatCodeDiff } from "../markdown-renderer.js";
@@ -21,23 +23,26 @@ export class InputHandler {
     if (state.busy) {
       const pending = state.inputBuffer.trim();
       if (!pending) return;
-      if (pending.startsWith("/")) {
+      if (looksLikeCommand(pending)) {
         // Commands mutate the session (mode, model, history). Running one against a turn already in
         // flight is a different feature, and a dangerous one — this is text only.
         actions.pushTranscript(
-          `\x1b[33m[REI] Commands can't be queued mid-turn — wait for it to finish.\x1b[0m`,
+          paint("warn", "[REI] Commands can't be queued mid-turn — wait for it to finish."),
         );
         return;
       }
       state.queuedUserMessages ??= [];
       if (state.queuedUserMessages.length >= MAX_QUEUED_USER_MESSAGES) {
         actions.pushTranscript(
-          `\x1b[33m[REI] ${MAX_QUEUED_USER_MESSAGES} messages already queued — waiting for the turn to read them.\x1b[0m`,
+          paint(
+            "warn",
+            `[REI] ${MAX_QUEUED_USER_MESSAGES} messages already queued — waiting for the turn to read them.`,
+          ),
         );
         return;
       }
       state.queuedUserMessages.push(pending);
-      actions.pushTranscript(`\x1b[2m✉  queued for this turn: ${pending}\x1b[0m`);
+      actions.pushTranscript(paint("dim", `✉  queued for this turn: ${pending}`));
       actions.resetInput();
       actions.draw();
       return;

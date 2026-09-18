@@ -141,9 +141,14 @@ export class KeyboardHandler {
       return;
     }
 
-    if (state.busy) {
-      return;
-    }
+    // NOTE: there is deliberately NO `if (state.busy) return` here. It used to sit right at this
+    // point — after the submit branch and before every editing key — which is why the queue looked
+    // broken: Enter was handled while a turn ran, but not a single CHARACTER ever reached the input
+    // buffer, so what you submitted was always empty and submitInput() bailed on `if (!pending)`.
+    // Typing mid-turn is the whole point of the queue, so the editing keys below run either way.
+    // What must NOT happen mid-turn is running a command: the palette is already empty while busy
+    // (see getActivePalette in chat-input.helpers), and submitInput refuses a line starting with
+    // `/`, so the only thing that can be typed into a running turn is text.
 
     const activePalette = actions.getActivePalette();
     const palette = activePalette.items;

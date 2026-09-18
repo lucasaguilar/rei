@@ -1,4 +1,5 @@
 import { processMenuCommand } from "../../chat/menu-command-processor.js";
+import { looksLikeCommand } from "../../chat/commands/command-syntax.js";
 import type { InputHandlerContext } from "../models/input-handler.types.js";
 import { createModelProvider } from "../../providers/provider-factory.js";
 import { Agent } from "../../core/agent.js";
@@ -7,10 +8,6 @@ import { displayUserLabel } from "./chat.helpers.js";
 import { addContextReading } from "./turn-display.helpers.js";
 import { refreshStickyReading } from "./startup-gauge.helper.js";
 import { grabClipboardImage } from "../../tools/clipboard-image.js";
-import {
-  extractImagePaths,
-  extractPdfPaths,
-} from "../../tools/vision-sidecar.js";
 import { saveSession } from "../../chat/session-store.js";
 import * as fs from "fs";
 import { LiveStatusEvent } from "../../chat/commands/command-handler.js";
@@ -67,14 +64,11 @@ export async function handleInputCommand(
     return true;
   }
 
-  // A dragged-in attachment path is absolute (starts with "/" on macOS/Linux) and would
-  // otherwise be misread as an unknown slash-command. If the input references an existing
-  // image OR pdf file, it's not a command — let it flow to the turn so the OCR/vision
-  // sidecar handles it.
-  if (
-    extractImagePaths(trimmed, ctx.workspacePath).length > 0 ||
-    extractPdfPaths(trimmed, ctx.workspacePath).length > 0
-  ) {
+  // Text that merely starts with a slash is not a command — an absolute path is the everyday case
+  // (a dragged-in file, a question about one). This used to be handled only for images and PDFs,
+  // by looking up whether the path existed; looksLikeCommand answers it for every path, by syntax,
+  // and for files that do not exist yet too.
+  if (!looksLikeCommand(trimmed)) {
     return false;
   }
 
@@ -174,9 +168,9 @@ export async function handleInputCommand(
     return true;
   }
 
-  // Any slash-prefixed input is treated as a command. If it fails,
-  // surface the command error and do not fall through to model execution.
-  if (trimmed.startsWith("/")) {
+  // A command that FAILED is still a command: surface its error rather than falling through to the
+  // model, which would answer a question nobody asked.
+  if (looksLikeCommand(trimmed)) {
     actions.pushTranscript(displayUserLabel(trimmed));
     actions.pushTranscript(result.response);
     return true;
