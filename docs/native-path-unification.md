@@ -160,7 +160,7 @@ reasoning_content strip above.
 ### Streaming rolled out to ALL OpenAI-compat providers (2026-07-02)
 Testing Ollama (qwen3.6:27b-mlx, planning mode) surfaced that Ollama's native-tool turns ran with
 `streamed:false` — native tools worked (via /v1) but there was NO live token streaming, because only
-`llm-studio-provider` implemented `streamChatWithTools`; every other provider fell back to the
+`lm-studio-provider` implemented `streamChatWithTools`; every other provider fell back to the
 non-streaming `completeChatWithTools`. Added `streamChatWithTools` (delegating to the shared
 `openaiStreamChatWithTools`) to ollama, openrouter, groq, gemini (reusing its geminiToolParams shaping
 → omitParams + reasoning_content strip), and huggingface. Now all real providers stream reasoning/text

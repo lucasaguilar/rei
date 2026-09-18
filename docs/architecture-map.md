@@ -29,7 +29,7 @@ A one-page map of the layers and where things live. **Dependency rule: imports p
 │  workspace/  scanner, file-security, project-type                            │
 │  language/   per-language capabilities                                       │
 ├─ PROVIDERS ───────────────────────────────────────────────────────────────┤
-│  providers/  LLM providers (ollama, llm-studio, openrouter, gemini, groq,   │
+│  providers/  LLM providers (ollama, lm-studio, openrouter, gemini, groq,   │
 │              hf, mock) + factory + openai-tool-caller + fetch-retry          │
 ├─ CROSS-CUTTING (leaf — used by everyone, depends on nothing above) ────────┤
 │  config/     model-runtime (window/output/reasoning/sampling resolution)    │

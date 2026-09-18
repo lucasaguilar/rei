@@ -145,7 +145,10 @@ shared/base  +  shared/response-rules  +  modes/<mode>  +  formats/<mode>-format
 ```
 
 Agent mode always uses the `-tools` pair; there is no second path to choose between.
-Per-workspace conventions are injected from `{workspace}/.rei/rules.md` (`loadLocalRules`).
+Per-workspace conventions are injected from `{workspace}/.rei/rules.md` (`loadLocalRules`) — the
+only stack rules REI sends. A hardcoded Angular ruleset used to be injected from REI's own source
+for any workspace detected as Angular; it was removed (see prompt-builder.ts) and now ships as an
+installable template (`/rules install angular`) that lands in the repo instead.
 
 ### Adding a new mode
 1. Add the value to `SessionMode` in `src/chat/types.ts`.

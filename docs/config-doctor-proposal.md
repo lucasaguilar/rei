@@ -35,7 +35,7 @@ Three consumers derive from that ONE spec (add a param once → shows up in all 
    secrets masked, with recommendations" that /env wanted to be.
 
 Local detection: provider not in `CLOUD_CONTEXT_DEFAULTS` (openrouter/gemini/groq/hf) → local
-(llmstudio/ollama/unknown). Add a small `isLocalProvider()` helper.
+(lmstudio/ollama/unknown). Add a small `isLocalProvider()` helper.
 
 ### Initial CONFIG_SPEC checks (prioritized by impact)
 | Sev | Param | Rule (local) | Why |

@@ -129,7 +129,7 @@ embedder, else the vector spaces don't align and retrieval is garbage.
 model-provider factory) with Xenova / OpenAI-compatible (`/v1/embeddings`, covers LM Studio +
 cloud) / Ollama backends; index metadata + reindex-on-mismatch; and wiring both the code RAG and
 the ask-document indexer through it. Config below. Recommended default for this user: keep Xenova
-as the zero-config fallback, point `REI_EMBEDDER_PROVIDER=llmstudio` at a multilingual model
+as the zero-config fallback, point `REI_EMBEDDER_PROVIDER=lmstudio` at a multilingual model
 (e.g. `bge-m3`) for the quality jump on Spanish docs.
 
 > Note: this is about EMBEDDING quality, not chunking. Chunking is heuristic text-splitting (by
@@ -139,7 +139,7 @@ as the zero-config fallback, point `REI_EMBEDDER_PROVIDER=llmstudio` at a multil
 ## Config / env
 
 ```bash
-REI_EMBEDDER_PROVIDER=xenova   # xenova | llmstudio | ollama | openai  (default xenova, zero-config)
+REI_EMBEDDER_PROVIDER=xenova   # xenova | lmstudio | ollama | openai  (default xenova, zero-config)
 REI_EMBEDDER_MODEL=bge-m3      # model id for the chosen backend
 REI_EMBEDDER_BASE_URL=         # for server/cloud backends (e.g. LM Studio /v1)
 REI_EMBEDDER_DIM=              # optional override; else detected from the model

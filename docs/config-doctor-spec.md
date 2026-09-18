@@ -43,7 +43,7 @@ One data module, three tables, feeding every surface (wizard, startup, `/doctor`
 
 Add a knob once → it shows up in init, in diagnosis, and in the explain view. No drift.
 
-`isLocalProvider(p)` = provider ∉ `{openrouter, gemini, groq, hf}` (i.e. llmstudio/ollama/mtplx/unknown).
+`isLocalProvider(p)` = provider ∉ `{openrouter, gemini, groq, hf}` (i.e. lmstudio/ollama/mtplx/unknown).
 
 ## 4. Command surface
 
@@ -86,7 +86,7 @@ These are the buildable form of what's already commented at the top of `.env.exa
 
 ### Lane A — LOCAL (LM Studio / Ollama, offline, free)
 ```
-MODEL_PROVIDER=llmstudio
+MODEL_PROVIDER=lmstudio
 LLM_STUDIO_MODEL=<recommended agent model>      # ask + planning + agent
 LLM_STUDIO_MODEL_AGENT=<recommended agent model>
 REI_CONTEXT_WINDOW=61440                         # MUST match window loaded in LM Studio (🔴 the #1 gotcha)
@@ -113,7 +113,7 @@ OPENROUTER_MODEL_AGENT=<recommended cloud model>
 
 ### Lane C — HYBRID (local ask/planning, cloud agent)
 ```
-MODEL_PROVIDER=llmstudio
+MODEL_PROVIDER=lmstudio
 AGENT_MODEL_PROVIDER=openrouter                   # heavy agent turns → cloud
 LLM_STUDIO_MODEL=<recommended local model>        # fast local ask/planning
 OPENROUTER_MODEL_AGENT=<recommended cloud model>  # reliable agent tool-calling

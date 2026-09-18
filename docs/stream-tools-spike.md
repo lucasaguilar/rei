@@ -74,7 +74,7 @@ sidesteps the partial-JSON problem entirely.
    same request body as `openaiCompleteChatWithTools` but `stream:true`, plus an SSE reader +
    the per-index accumulator above. Reuses `toApiMessage`, `resolveAgentSampling`, `maxTokens`,
    headers — identical request shape, only `stream` flips and the response is read as a stream.
-2. **`providers/llm-studio-provider.ts`** — add `streamChatWithTools` delegating to the shared core
+2. **`providers/lm-studio-provider.ts`** — add `streamChatWithTools` delegating to the shared core
    (one method, like the existing `completeChatWithTools`). **LM Studio only for the spike.**
 3. **`agent-mode/tools-loop/call-model.ts`** — prefer `streamChatWithTools` when present, mapping
    `onDelta` → the existing `onChunk` (`reasoning`→`"thinking"`, `text`→`"text"`). Fall back to
@@ -139,7 +139,7 @@ result). ~half a day to a green spike against a live LM Studio.
 - `providers/openai-tool-caller.ts` — extracted `buildToolsRequestBody` (shared, `stream` flag);
   `ToolCallAccumulator` (exported, pure, the per-index args accumulation); `openaiStreamChatWithTools`
   (SSE reader with cross-chunk buffering → live `onDelta` → assembled `ChatCompletionWithTools`).
-- `providers/llm-studio-provider.ts` — `streamChatWithTools` delegating to the shared core.
+- `providers/lm-studio-provider.ts` — `streamChatWithTools` delegating to the shared core.
 - `agent-mode/tools-loop/call-model.ts` — prefers streaming when present; forwards **reasoning**
   deltas live (not text — see above); **runtime try/catch fallback** to the non-streaming call so a
   streaming failure can't break a turn.

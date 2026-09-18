@@ -43,7 +43,7 @@ REI names which one it ran instead of implying they are equal.
 
 ## Who it's for
 
-- **You run a model on your own machine** — LM Studio, Ollama, MTPLX — and you want an agent built
+- **You run a model on your own machine** — LM Studio, oMLX, Ollama, MTPLX — and you want an agent built
   for that, not one that treats local as a fallback. Per-mode models, per-model tuning and on-demand
   context all exist because a 30B on your laptop is not a frontier model behind an API.
 - **Your code cannot leave the building.** Regulated work, an NDA, a client who says no. Local-first
@@ -81,41 +81,65 @@ rei
 
 The first run has no configuration, so **REI starts the setup wizard by itself**. It asks for a
 provider, takes an API key if you picked a cloud one, or **lists the models your local server
-already has** if you picked LM Studio, Ollama or MTPLX. Running something else that speaks the
-OpenAI API — vLLM, llama.cpp's server, LocalAI, your own gateway — pick LM Studio and point
-`LLM_STUDIO_BASE_URL` at it; that provider is a plain OpenAI `/v1` client. It writes `.rei/.env` in
-the project and drops you into the session.
+already has** if you picked LM Studio, Ollama, oMLX or MTPLX. Running something else that speaks the
+OpenAI API — vLLM, SGLang, llama.cpp's server, LiteLLM, your own gateway — pick **`openai-compat`**
+and give it the URL. It writes `.rei/.env` in the project and drops you into the session.
 
-That is the whole setup. To change it later: `rei --config`.
+That is the whole setup. To change it later: **`rei --config`**. To make a local model actually
+fast — context, sampling, thinking level, per model — that is `rei.config.json`, two sections down.
 
 ---
 
 ## Cloud or local, same tool
 
-| Cloud | Local | Anything else |
-|---|---|---|
-| OpenRouter · Gemini · Groq · Hugging Face | LM Studio · Ollama · MTPLX | any OpenAI-compatible `/v1` endpoint |
-
 Cloud costs money and needs a key. Local is free, private, and works offline. Pick either in the
 wizard; nothing else about REI changes.
 
-There is no separate "OpenAI-compatible" provider to choose, because the LM Studio one already is
-that: set `LLM_STUDIO_BASE_URL` to your server's `/v1` URL and `LLM_STUDIO_MODEL` to its model id.
-vLLM, llama.cpp, LocalAI and most self-hosted gateways work this way.
+### The backends that work
+
+The **key** is what you put in `MODEL_PROVIDER` (or pick in the wizard); each one reads its own
+`<PREFIX>_MODEL` / `_BASE_URL` / `_API_KEY`, listed in `.env.example`.
+
+**Local — run the model on your own machine**
+
+| Backend | Key | Where it stands |
+|---|---|---|
+| [LM Studio](https://lmstudio.ai) | `lmstudio` | REI's primary development backend. Everything here was tuned against it. |
+| oMLX (Apple Silicon, MLX) | `omlx` | Measured live: KV-cache prefix reuse, `enable_thinking: false`, per-level thinking. Reuses the models LM Studio already downloaded. |
+| [Ollama](https://ollama.com) | `ollama` | Supported on its native `/api/chat`, including tool calling. |
+| MTPLX | `mtplx` | Local MLX server, OpenAI-compatible. |
+
+**Cloud — someone else's GPU, your API key**
+
+| Backend | Key | Where it stands |
+|---|---|---|
+| [OpenRouter](https://openrouter.ai) | `openrouter` | Any model it fronts; the usual choice for putting one mode on a frontier model. |
+| [Google Gemini](https://ai.google.dev) | `gemini` | Works; a few sampling params are stripped, which REI handles for you. |
+| [Groq](https://groq.com) | `groq` | Works. |
+| [Hugging Face](https://huggingface.co) | `huggingface` | Works. Authenticates with `HF_TOKEN`, not `HF_API_KEY`. |
+
+**Anything else that speaks OpenAI `/v1`**
+
+| Backend | Key | Where it stands |
+|---|---|---|
+| [vLLM](https://github.com/vllm-project/vllm) · [llama.cpp](https://github.com/ggml-org/llama.cpp) · [LocalAI](https://localai.io) · self-hosted gateways | `openai-compat` | Point `OPENAI_COMPAT_BASE_URL` at the `/v1` URL and set `OPENAI_COMPAT_MODEL`. |
+
+These are names and links, not endorsements: none of these projects is affiliated with REI.
+
+**REI is built local-first.** Everything it does to keep a session cheap — sending the prompt so a
+backend can reuse its KV cache, reading a file once instead of on every turn, spilling a large tool
+result to disk and handing the model a receipt — exists because a model on your own machine charges
+you in seconds rather than in dollars. None of it hurts a cloud model; it just matters less there.
+The next section is how you get the rest of that speed.
+
+If your server is not on the list, `openai-compat` is the one to pick: it is the plain
+OpenAI-compatible client with nothing provider-specific added. The named backends exist as separate
+keys only because each needs something of its own — LM Studio rejects `chat_template_kwargs`, oMLX
+wants it, Ollama's tool-call arguments are an object where the `/v1` spec says a string.
 
 REI is an agent, so **the model has to support tool calling.** Most do; some hosted endpoints do
 not, and will reject the request outright. The wizard lists what your provider offers, and
 `.env.example` names a working default for each.
-
-**And you can give each mode its own model** — which is the point of running locally. A small fast
-model to ask questions, the strongest reasoner you have to plan, the most reliable tool-caller to
-execute:
-
-```bash
-LLM_STUDIO_MODEL_ASK=ornith-1.5-35b        # interactive: favours speed
-LLM_STUDIO_MODEL_PLANNING=qwen3.8-27b      # favours reasoning
-LLM_STUDIO_MODEL_AGENT=qwen3.8-27b         # favours tool calling
-```
 
 ### Mix them, and pay for less
 
@@ -123,7 +147,7 @@ LLM_STUDIO_MODEL_AGENT=qwen3.8-27b         # favours tool calling
 cloud:
 
 ```bash
-MODEL_PROVIDER=llmstudio          # ask + planning — the many, chatty turns, free
+MODEL_PROVIDER=lmstudio          # ask + planning — the many, chatty turns, free
 AGENT_MODEL_PROVIDER=openrouter   # agent — the edits you want to get right
 ```
 
@@ -143,6 +167,122 @@ per mode is the point — you stop paying frontier prices for a `grep`.
 | `agent` | Executes: reads, edits, runs commands, verifies | yes |
 
 Switch with `/mode ask`, `/mode planning`, `/mode agent`.
+
+---
+
+## Configuration
+
+One command and two files. That is the whole surface:
+
+```bash
+rei --config       # the wizard: provider, model, endpoint, key. Re-run it whenever you want.
+```
+
+The wizard writes `.rei/.env` — **which** model runs. `rei.config.json`, next to it, is **how** it
+runs: context window, sampling, output cap, thinking level, per model. The wizard never touches that
+file, and tuning it is where a local model stops being a demo. That is the next section.
+
+These are the `.env` keys worth knowing by hand:
+
+| Variable | What |
+|---|---|
+| `MODEL_PROVIDER` | which backend to use |
+| `<PROVIDER>_MODEL` | the model, with `_ASK` / `_PLANNING` / `_AGENT` variants per mode |
+| `REI_CONTEXT_WINDOW` | trimming budget; match it to the context your model is loaded with |
+| `REI_VERBOSE` | show full command output and full diffs |
+| `REI_SHOW_REASONING` | the model's thinking as a live paragraph — on by default |
+
+Two files, and they are not peers: `<install>/.env` holds the machine's credentials and endpoints,
+`<project>/.rei/.env` holds everything about the project. Only credentials and endpoints cross, so
+opening REI in a new folder never inherits another project's model.
+
+**Each mode can run its own model** — which is the point of running locally. A small fast model to
+ask questions, the strongest reasoner you have to plan, the most reliable tool-caller to execute:
+
+```bash
+LLM_STUDIO_MODEL_ASK=ornith-1.5-35b        # interactive: favours speed
+LLM_STUDIO_MODEL_PLANNING=qwen3.8-27b      # favours reasoning
+LLM_STUDIO_MODEL_AGENT=qwen3.8-27b         # favours tool calling
+```
+
+Set none of them and `<PROVIDER>_MODEL` runs everything.
+
+**Three models per mode does not mean three models in RAM.** What it costs depends on the backend,
+and the good ones already solve this: LM Studio loads a model on demand and unloads it after an idle
+timeout, Ollama keeps one resident for a few minutes (`OLLAMA_KEEP_ALIVE`). You name the models; the
+server decides what stays in memory.
+
+What that buys and what it costs, plainly:
+
+- **A swap is a cold turn.** The model that just loaded has no cached prefix, so the first turn after
+  a switch pays a full prefill on top of the load. Switching per mode is cheap when you stay in a
+  mode for a while, and expensive if you bounce between `ask` and `agent` every message.
+- **The split can cross backends, not just models.** `AGENT_MODEL_PROVIDER` (above) puts one mode on
+  another server entirely. Two local ones means two resident models and the RAM adds up; a local one
+  plus a cloud one costs nothing extra on the machine.
+- **On limited RAM, one good model beats three that swap.** Give it a tuned `thinkingLevelMap` and
+  per-mode reasoning levels instead — same win on the chatty turns, no load time.
+
+### Tuning a local model: `rei.config.json`
+
+Per-model tuning lives in `rei.config.json` at the root of your project, and **overrides every
+`.env`**. Copy [`rei.config-example.json`](rei.config-example.json) and edit it — one entry per
+model you actually run. This is where a local setup stops being "it works" and becomes fast.
+
+```json
+{ "providers": { "omlx": { "models": [ {
+  "id": "Qwen3.8-27B-MLX-4bit",
+  "contextWindow": 65536,
+  "maxTokens": 8192,
+  "temperature": 0.7,
+  "thinkingLevelMap": { "none": "none", "high": "xhigh" }
+} ] } } }
+```
+
+| Field | What it decides | How to choose it |
+|---|---|---|
+| `id` | which entry applies | The id **the backend reports** (`/v1/models`), not the file on disk. Exact match wins; otherwise the org prefix is stripped. |
+| `contextWindow` | how much REI packs before compacting | **Never above what the backend serves.** Over it you get `context_length_exceeded`; under it you simply use less. Also decide it by what your machine can *prefill*: a prompt twice as long is twice the wait on every cold turn. |
+| `maxTokens` | the output cap **and** the reserve subtracted from the window | Generous is not free: it comes off the prompt budget. 8k is plenty for an answer. |
+| `temperature`, `topP`, `topK`, `*Penalty` | sampling | Start from the model card. Local models differ far more than cloud ones here. |
+| `thinking` | `"off"` for a model that should never reason | Blunt but effective on a model that spirals. |
+| `thinkingLevelMap` | translates REI's levels to the ones **this** model accepts | See below — this one bites. |
+
+**Why `thinkingLevelMap` matters.** REI accepts `none · minimal · low · medium · high · xhigh`, but a
+given model usually understands fewer. Qwen3.8 knows only `low · medium · xhigh`, and **its template
+defaults to `xhigh` when the value it gets is not one of them** — so asking for a level it does not
+have gets you the *most* thinking, not the least. The map is how you declare the real range, and map
+the rest onto it. Get this wrong and the model reasons for minutes before running `ls`.
+
+The map's `none` is special: on a backend that forwards `chat_template_kwargs` (oMLX, MTPLX), REI
+turns it into `enable_thinking: false`, which actually switches reasoning off. Keep `"none": "none"`
+so it reaches that bridge.
+
+### The rest of the speed
+
+Once the model entry is right, these are what a local session actually spends its time on:
+
+- **`REI_REASONING_EFFORT_<MODE>`** — `ask=low`, `agent=medium` is a sane start. `/think <level>`
+  changes it mid-session, and `/think none` turns thinking off where the backend supports it.
+- **`REI_TOOL_OUTPUT_MAX_INLINE`** (default 2000) — how much of a tool result travels in context.
+  `0` sends none of it, only a receipt. Raise it if the model keeps re-reading; lower it if the
+  context grows too fast.
+- **`REI_ON_DEMAND_FILE_CONTEXT_<MODE>`** — on by default: REI injects no repo map and the model
+  discovers structure with tools. Turn it off (`=0`) only in a small repo where the map is cheap.
+- **`REI_SHOW_REASONING`** — on by default: the model's thinking is drawn as a short paragraph
+  above the status line, scrolling under a fixed frame, so you can follow the argument without
+  losing the prompt you are typing into. It is the sign of life on a local model, which thinks long
+  before the first tool call. `REI_THINKING_LINES` sets its height (4 by default, capped against
+  the terminal); `=false` (or `/reasoning off`) counts it instead — one line per block; `--verbose`
+  dumps the whole stream when you need to read the thinking itself.
+- **`REI_VERBOSE`** — full command output and full diffs. Off by default: twenty lines per command
+  was the noise, and `git diff` shows the hunks whenever they are actually wanted.
+
+- **`REI_THEME`** — `default` or `matrix`. `/theme` switches mid-session. It repaints REI's chrome
+  (status line, thinking block, context bar, prompt) and nothing else: diff hunks and syntax
+  highlighting keep their colours in every theme, because that colour is information.
+
+→ [Every variable](docs/config-reference.md) · [How commands are run](docs/command-execution.md)
 
 ---
 
@@ -262,8 +402,11 @@ than a coding agent. It ships with `auditor` (adversarial plan review) and `dail
 weather, headlines, music — `baseMode: ask`, so it never touches your repository). `/roles new
 <name>` scaffolds another.
 
-**Project rules** — `{workspace}/.rei/rules.md` is prepended to every turn as mandatory
-conventions, and overrides anything generic REI infers about your stack.
+**Project rules** — `{workspace}/.rei/rules.md` is prepended to every coding turn as mandatory
+conventions. REI ships **no** rules about your stack: they belong to the repo, versioned with the
+code and editable by the people who wrote it. `/rules` shows what the file costs you per turn —
+those tokens are spent on every turn, forever — and `/rules install <stack>` writes a starting
+ruleset into it for you to edit.
 
 **MCP servers** — declared in `rei.config.json`; their tools join the session. Past 25 tools they go
 behind a search tool, so a large server does not eat the window.
@@ -338,47 +481,34 @@ rei plan  "add rate limiting to the API"
 rei agent "fix the failing test in auth.test.ts"
 
 rei ask "…" --metrics    # timings and token counts on stderr
-rei ask "…" --verbose    # plus the reasoning and full tool output
+rei ask "…" --verbose    # plus full tool output and diffs (reasoning is already on)
 ```
 
-**Server** — an OpenAI-compatible API (`/chat/completions`, `/models`), so any IDE extension that
-speaks that protocol connects to it, Continue.dev included:
+**Server** — an OpenAI-compatible API (`/chat/completions`, `/models`, `/healthz`):
 
 ```bash
 ./install-rei-server-local.sh && rei-server
 ```
 
----
+It binds `127.0.0.1` and runs the same agent as the CLI — it edits files and runs commands in the
+workspace. To reach it from another machine, set `REI_SERVER_HOST` **and** `REI_SERVER_TOKEN`
+(sent as `Authorization: Bearer`); without the token it refuses to start on a public interface.
 
-## Configuration
+Point **Continue.dev** at it as an OpenAI provider and it works. **Cline does not**: it ships its
+own tool protocol and expects the model to drive it, while REI is already an agent running its own
+tools — the two fight over the same job.
 
-The wizard writes everything. These are the ones worth knowing by hand:
-
-| Variable | What |
-|---|---|
-| `MODEL_PROVIDER` | which backend to use |
-| `<PROVIDER>_MODEL` | the model, with `_ASK` / `_PLANNING` / `_AGENT` variants per mode |
-| `REI_CONTEXT_WINDOW` | trimming budget; match it to the context your model is loaded with |
-| `REI_VERBOSE` | show the reasoning, full command output and full diffs |
-
-Two files, and they are not peers: `<install>/.env` holds the machine's credentials and endpoints,
-`<project>/.rei/.env` holds everything about the project. Only credentials and endpoints cross, so
-opening REI in a new folder never inherits another project's model.
-
-Per-model tuning — sampling, context window, thinking level — lives in `rei.config.json`, and
-**overrides every `.env`**. A model's `contextWindow` there must match the context the backend
-actually loaded.
-
-→ [Every variable](docs/config-reference.md) · [How commands are run](docs/command-execution.md)
+`Dockerfile` and `render.yaml` deploy that server as a container (Render Blueprint, or any host
+that runs a Dockerfile). Read them before you use them: the image opens the server to `0.0.0.0`,
+so `REI_SERVER_TOKEN` becomes mandatory and the service will not start until you set it in the
+host's environment — what you are publishing is an agent that writes files and runs commands.
+`/healthz` is the one unauthenticated route (it answers `{"status":"ok"}` and nothing else), because
+a platform health check cannot send the token. The blueprint points at a cloud provider, not at
+your local models: it is the deployment path, not the point of REI.
 
 ---
 
 ## Advanced, and off by default
-
-First, one default worth knowing: **files reach the model on demand.** REI does not inject a map of
-your repository into every turn — the model asks for what it needs with `list_files`, `grep_code`
-and `read_files`. On a large repo a proactive map costs hundreds of thousands of tokens per turn,
-almost all of them unread. Opt a mode out with `REI_ON_DEMAND_FILE_CONTEXT_<MODE>=0`.
 
 Two subsystems exist and are **not** enabled, because the simpler path measured better:
 

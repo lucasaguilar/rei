@@ -35,7 +35,7 @@ Resolution order (global, same for all models):
 
 **Limitation:** One set of values for all models. What's optimal for Ornith 35B is not optimal for Qwen 35B-A3B.
 
-Each provider (`llm-studio-provider.ts`, `mtplx-provider.ts`) also has its own defaults at the provider level (`0.6` temp, `0.3` penalties), which apply to non-agent chat paths.
+Each provider (`lm-studio-provider.ts`, `mtplx-provider.ts`) also has its own defaults at the provider level (`0.6` temp, `0.3` penalties), which apply to non-agent chat paths.
 
 ---
 
