@@ -47,7 +47,7 @@ export const PROVIDER_MODELS = {
             ollama: ['llama3.2', 'qwen2.5-coder:14b'],
             openrouter: ['qwen/qwen3.6-plus'],
             gemini: ['gemini-2.5-flash'],
-            llmstudio: [],
+            lmstudio: [],
             mtplx: []
         };
     }
@@ -117,9 +117,9 @@ function getOllamaModels() {
 
 /**
  * Returns available models from a running OpenAI-compatible local server (LM Studio, MTPLX, …).
- * Falls back to PROVIDER_MODELS.llmstudio if the request fails.
+ * Falls back to PROVIDER_MODELS.lmstudio if the request fails.
  */
-async function getLlmStudioModels() {
+async function getLmStudioModels() {
     try {
         // The provider convention (and the /model command) is that LLM_STUDIO_BASE_URL already ENDS
         // in /v1 — e.g. http://127.0.0.1:8000/v1 for MTPLX. Strip a trailing /v1 (and slashes) before
@@ -131,9 +131,9 @@ async function getLlmStudioModels() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         const models = (data.data || []).map(m => m.id).filter(Boolean);
-        return models.length > 0 ? models : (PROVIDER_MODELS.llmstudio ?? []);
+        return models.length > 0 ? models : (PROVIDER_MODELS.lmstudio ?? []);
     } catch {
-        return PROVIDER_MODELS.llmstudio ?? [];
+        return PROVIDER_MODELS.lmstudio ?? [];
     }
 }
 
@@ -155,7 +155,7 @@ function buildOllamaSummary(envVars) {
 }
 
 function getEnvPrefix(provider) {
-    if (provider === 'llmstudio') return 'LLM_STUDIO';
+    if (provider === 'lmstudio') return 'LLM_STUDIO';
     if (provider === 'huggingface') return 'HF';
     if (provider === 'mtplx') return 'MTPLX';
     return provider.toUpperCase();
@@ -193,8 +193,8 @@ async function pickModel(provider, message, initialModel) {
     let baseList;
     if (provider === 'ollama') {
         baseList = getOllamaModels();
-    } else if (provider === 'llmstudio') {
-        baseList = await getLlmStudioModels();
+    } else if (provider === 'lmstudio') {
+        baseList = await getLmStudioModels();
     } else if (provider === 'mtplx') {
         baseList = await getMtplxModels();
     } else {
@@ -331,7 +331,7 @@ async function main() {
     // silently ignored. Prompted only for local providers (cloud models have large
     // fixed windows and rarely need REI's budget overrides).
     const usesOllama = envVars.MODEL_PROVIDER === 'ollama' || envVars.AGENT_MODEL_PROVIDER === 'ollama';
-    const LOCAL_PROVIDERS = ['ollama', 'llmstudio', 'mtplx'];
+    const LOCAL_PROVIDERS = ['ollama', 'lmstudio', 'mtplx'];
     const usesLocal =
         LOCAL_PROVIDERS.includes(envVars.MODEL_PROVIDER) ||
         LOCAL_PROVIDERS.includes(envVars.AGENT_MODEL_PROVIDER);

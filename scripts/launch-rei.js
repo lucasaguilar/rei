@@ -20,7 +20,7 @@ const CUSTOM = '[ enter custom model... ]';
 // Cloud providers authenticate with an API key; local providers expose an
 // OpenAI-compatible endpoint we can probe for models (the probe IS the validation).
 const CLOUD_PROVIDERS = ['openrouter', 'gemini', 'groq', 'huggingface'];
-const LOCAL_PROVIDERS = ['ollama', 'llmstudio', 'mtplx', 'omlx', 'openai-compat'];
+const LOCAL_PROVIDERS = ['ollama', 'lmstudio', 'mtplx', 'omlx', 'openai-compat'];
 
 // Env var that holds each cloud provider's API key (HF uses HF_TOKEN, not HF_API_KEY).
 const API_KEY_VAR = {
@@ -39,7 +39,7 @@ const API_KEY_URL = {
 // Default endpoint prefilled when configuring a local provider (host + port).
 const LOCAL_DEFAULT_URL = {
     ollama: 'http://127.0.0.1:11434',
-    llmstudio: 'http://127.0.0.1:1234/v1',
+    lmstudio: 'http://127.0.0.1:1234/v1',
     mtplx: 'http://127.0.0.1:8000/v1',
     omlx: 'http://127.0.0.1:8000/v1',
     'openai-compat': 'http://127.0.0.1:8000/v1',
@@ -47,7 +47,7 @@ const LOCAL_DEFAULT_URL = {
 // Concrete "how to get it running" hint shown when a local server can't be reached.
 const LOCAL_HINT = {
     ollama: 'Ollama: install from https://ollama.com, then `ollama serve` and `ollama pull <model>`.',
-    llmstudio: 'LM Studio: open the app → Developer tab → Start Server (default http://localhost:1234).',
+    lmstudio: 'LM Studio: open the app → Developer tab → Start Server (default http://localhost:1234).',
     mtplx: 'MTPLX: start the server (e.g. :8000) — set the URL + API key when prompted above.',
     omlx: 'oMLX: open the app (or `omlx serve`) — it answers 401 without a key, so set OMLX_API_KEY too.',
     'openai-compat': 'Any OpenAI-compatible server (vLLM, SGLang, llama.cpp, LiteLLM): give the URL and, if it needs one, the key.',
@@ -57,7 +57,7 @@ const LOCAL_HINT = {
 // Kept minimal (they age fast); [custom] always lets the user type anything else.
 const KNOWN_MODELS = {
     ollama: ['qwen3.8:27b-mlx', 'qwen3.6:35b-a3b-coding-nvfp4', 'llama3.2'],
-    llmstudio: ['ornith-1.5-35b-a3b-mlx', 'qwen/qwen3.6-27b', 'qwen/qwen3-vl-4b'],
+    lmstudio: ['ornith-1.5-35b-a3b-mlx', 'qwen/qwen3.6-27b', 'qwen/qwen3-vl-4b'],
     mtplx: ['mtplx-qwen38-27b-optimized-speed'],
     omlx: ['Qwen3.8-27B-MLX-4bit', 'Ornith-1.5-35B-A3B-MLX-4bit', 'gemma-4-26B-A4B-it-QAT-MLX-4bit'],
     'openai-compat': [],
@@ -88,7 +88,7 @@ function normalizeEndpoint(input) {
 }
 
 /** The BASE_URL form each provider's runtime client expects to be STORED (env var).
- *  ollama stores the ROOT (its client appends `/v1` itself); llmstudio/mtplx clients append
+ *  ollama stores the ROOT (its client appends `/v1` itself); lmstudio/mtplx clients append
  *  `/chat/completions` directly to the base, so their BASE_URL must END in `/v1`. `normalized` is a
  *  scheme-qualified base WITHOUT `/v1` (as produced by normalizeEndpoint). */
 function providerBaseUrl(provider, normalized) {
@@ -224,7 +224,7 @@ export const PROVIDER_MODELS = {
             ollama: ['llama3.2', 'qwen2.5-coder:14b'],
             openrouter: ['qwen/qwen3.6-plus'],
             gemini: ['gemini-2.5-flash'],
-            llmstudio: [],
+            lmstudio: [],
             mtplx: [],
             omlx: [],
             'openai-compat': []
@@ -295,7 +295,7 @@ function buildOllamaSummary(envVars) {
 }
 
 function getEnvPrefix(provider) {
-    if (provider === 'llmstudio') return 'LLM_STUDIO';
+    if (provider === 'lmstudio') return 'LLM_STUDIO';
     if (provider === 'huggingface') return 'HF';
     if (provider === 'mtplx') return 'MTPLX';
     // A provider name is a menu label; an env prefix is an identifier. `openai-compat` toUpperCase'd
@@ -349,7 +349,7 @@ async function configureLocalEndpoint(provider, envVars) {
         key = (keyIn || '').trim();
 
         const r = await probeModels(url, key);
-        // Store in the form the runtime client expects (with /v1 for mtplx/llmstudio), NOT the
+        // Store in the form the runtime client expects (with /v1 for mtplx/lmstudio), NOT the
         // probe form. Storing the bare host caused the provider to POST to /chat/completions → 404.
         const storedUrl = providerBaseUrl(provider, url);
         if (r.reachable && r.status === 200 && r.models.length > 0) {
@@ -931,7 +931,7 @@ async function main() {
     note(
         'REI needs one model provider:\n' +
         '  ☁ Cloud (openrouter/gemini/groq/huggingface) — asks for an API key, works instantly.\n' +
-        '  ⌂ Local (ollama/llmstudio/mtplx) — free & private; you give the endpoint and we list its models.',
+        '  ⌂ Local (ollama/lmstudio/mtplx) — free & private; you give the endpoint and we list its models.',
         'Choose your path',
     );
 

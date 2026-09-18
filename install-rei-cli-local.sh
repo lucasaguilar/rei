@@ -122,19 +122,9 @@ if [ "$want_help" -eq 1 ]; then
   echo "██╔══██╗██╔══╝  ██║"
   echo "██║  ██║███████╗██║"
   echo "╚═╝  ╚═╝╚══════╝╚═╝"
-  echo "REI — Just REI (Sniper-Precision Coding Agent)"
   echo ""
-  echo "Usage:"
-  echo "  rei                         Start the interactive terminal CLI (chat/ask mode)"
-  echo "  rei chat                    Start the interactive terminal CLI (chat/ask mode)"
-  echo "  rei plan \"<task>\"           Run a one-shot planning task"
-  echo ""
-  echo "Configuration:"
-  echo "  rei --config                Launch the interactive configuration wizard"
-  echo ""
-  echo "Global Options:"
-  echo "  --workspace <path>          Target project directory (defaults to current directory)"
-  echo "  --help, -h                  Show this help text"
+  # The CLI owns the command list — printing a second copy here is how the two drifted apart.
+  node "$HOME/.rei/bin/rei.js" --help
   exit 0
 fi
 
@@ -171,7 +161,14 @@ elif node "$HOME/.rei/scripts/launch-rei.js" --preflight; then
   # Preflight passed (may have just saved a new API key) — reload env so the launch sees it.
   [ -f "$HOME/.rei/.env" ] && load_env_file "$HOME/.rei/.env" machine
   [ -n "$project_env" ] && load_env_file "$project_env"
-  REI_WORKSPACE_PATH="${REI_WORKSPACE_PATH:-"$(pwd)"}" node "$HOME/.rei/bin/rei.js" chat "$@"
+  # Pass the subcommand through. This used to hardcode `chat`, so `rei ask|plan|agent "<task>"`
+  # — the one-shots the help and the README both advertise — silently opened an interactive
+  # session instead (and failed outright when piped, with no TTY).
+  case "${1:-}" in
+    ask|plan|agent|chat) REI_CMD="" ;;
+    *) REI_CMD="chat" ;;
+  esac
+  REI_WORKSPACE_PATH="${REI_WORKSPACE_PATH:-"$(pwd)"}" node "$HOME/.rei/bin/rei.js" ${REI_CMD} "$@"
 else
   echo "🔄 Launching setup wizard to finish configuration..."
   node "$HOME/.rei/scripts/launch-rei.js"

@@ -37,6 +37,6 @@ export const PROVIDER_MODELS = {
     huggingface: [
         'Qwen/Qwen2.5-Coder-32B-Instruct',
     ],
-    llmstudio: [],
+    lmstudio: [],
     mtplx: [],
 };

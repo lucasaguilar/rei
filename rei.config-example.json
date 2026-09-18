@@ -1,22 +1,30 @@
 {
-  "mcpServers": {
-    "spotify": {
-      "type": "stdio",
-      "command": "node",
-      "args": ["path/to/your/mcp-server/build/index.js"]
-    }
-  },
+  "$schema": "./docs/rei.config.schema.json",
+
   "providers": {
-    "lmstudio": {
+    "omlx": {
       "models": [
         {
-          "id": "deepreinforce-ai/ornith-1.0-35b",
+          "id": "Qwen3.8-27B-MLX-4bit",
           "contextWindow": 65536,
           "maxTokens": 8192,
-          "temperature": 0.6,
+          "temperature": 0.7,
           "topP": 0.95,
-          "topK": 20
-        },
+          "topK": 20,
+          "thinkingLevelMap": {
+            "none": "none",
+            "minimal": "low",
+            "low": "low",
+            "medium": "medium",
+            "high": "xhigh",
+            "xhigh": "xhigh"
+          }
+        }
+      ]
+    },
+
+    "lmstudio": {
+      "models": [
         {
           "id": "qwen/qwen3.6-35b-a3b",
           "contextWindow": 65536,
@@ -24,21 +32,10 @@
           "temperature": 0.6,
           "topP": 0.95,
           "topK": 20,
-          "presencePenalty": 0.0,
           "thinking": "off"
         },
         {
-          "id": "qwen/qwen3.6-27b",
-          "contextWindow": 65536,
-          "maxTokens": 8192,
-          "temperature": 0.7,
-          "topP": 0.8,
-          "topK": 20,
-          "presencePenalty": 1.5,
-          "thinking": "off"
-        },
-        {
-          "id": "gemma",
+          "id": "gemma-4-26B-A4B-it-QAT-MLX-4bit",
           "contextWindow": 65536,
           "maxTokens": 8192,
           "temperature": 0.4,
@@ -46,6 +43,27 @@
           "topK": 40
         }
       ]
+    },
+
+    "openrouter": {
+      "models": [
+        {
+          "id": "qwen/qwen3.6-plus",
+          "contextWindow": 128000,
+          "maxTokens": 16384,
+          "temperature": 0.6
+        }
+      ]
+    }
+  },
+
+  "mcpServers": {
+    "github": {
+      "type": "stdio",
+      "command": "/path/to/github-mcp-server",
+      "args": ["stdio"],
+      "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}" },
+      "enabled": false
     }
   }
 }
