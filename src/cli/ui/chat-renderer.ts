@@ -10,9 +10,12 @@ import {
   continuationPrompt,
   SPINNER_FRAMES,
   formatStatusLine,
+  formatThinkingBlock,
+  resolveThinkingLines,
   THINKING_TEXT,
-  SHORTCUT_HINT,
+  shortcutHint,
 } from "../constants/chat.constants.js";
+import { code, paint } from "../theme/palette.js";
 import {
   clamp,
   padRight,
@@ -114,9 +117,35 @@ export class ChatRenderer {
               String(state.activeStatus),
             Date.now() - (state.statusStartedAt ?? Date.now()),
           )
-        : SHORTCUT_HINT;
+        : shortcutHint();
 
     const uiLines: string[] = [];
+
+    // The reasoning goes HERE, as a paragraph of drawn state rather than a stream to stdout: the
+    // block is erased and repainted as a unit, so the prompt below it survives every token. Only
+    // while a phase is running — with no turn in flight the rows belong to the conversation.
+    //
+    // Its height is capped against the terminal as well as the setting: on a short window a
+    // four-row block plus the status, the bar, the indicators and the prompt would leave nothing
+    // of what was said before.
+    if (state.activeStatus || state.activeStatusText) {
+      const room = Math.max(1, Math.floor(rows / 6));
+      const thinkingLines = formatThinkingBlock(
+        state.thinkingTail,
+        cols,
+        Math.min(resolveThinkingLines(), room),
+      );
+      // An empty row on each side, and only when there is a paragraph to frame. Butted straight
+      // against the transcript above and the status line below, the block did not read as its own
+      // region — it read as more output that happened to be indented.
+      if (thinkingLines.length > 0) {
+        uiLines.push("");
+        for (const line of thinkingLines) {
+          uiLines.push(padRight(fitLine(line, cols), cols));
+        }
+        uiLines.push("");
+      }
+    }
 
     if (statusLine) {
       uiLines.push(padRight(fitLine(statusLine, cols), cols));
@@ -154,13 +183,14 @@ export class ChatRenderer {
     }
 
     const rawPrompt = MODE_PROMPTS[state.sessionMode as SessionMode];
-    const promptColor =
+    // One role per mode: the prompt's colour is how you tell agent from ask without reading it.
+    const promptRole =
       state.sessionMode === "ask"
-        ? "\x1b[1;32m"      // Bold Green
+        ? "promptAsk"
         : state.sessionMode === "planning"
-          ? "\x1b[1;33m"    // Bold Yellow
-          : "\x1b[1;35m";   // Bold Magenta/Purple
-    const promptText = `${promptColor}${rawPrompt}\x1b[0m`;
+          ? "promptPlanning"
+          : "promptAgent";
+    const promptText = paint(promptRole, rawPrompt);
     const promptLen = visibleLength(promptText);
 
     const inputInnerWidth = Math.max(1, cols - promptLen - 1);
@@ -188,13 +218,13 @@ export class ChatRenderer {
     // Newlines (from a multi-line paste) are drawn as a dim ↵ glyph: one column, so a row's drawn
     // width still equals the length of the slice it came from.
     const rowText = (r: InputRow): string =>
-      state.inputBuffer.slice(r.start, r.end).replace(/\n/g, "\x1b[90m↵\x1b[0m");
+      state.inputBuffer.slice(r.start, r.end).replace(/\n/g, paint("muted", "↵"));
 
     // Every fixed line is clipped to the terminal width before it goes in.
     //
     // `lastDrawnLinesCount` counts LOGICAL lines, and clearUI erases that many terminal ROWS. A line
     // wider than the terminal wraps to two rows, so one row survives every redraw — which is how a
-    // long model label ("llmstudio / qwen3.8-27b-reasoning-community") turned the status bar into a
+    // long model label ("lmstudio / qwen3.8-27b-reasoning-community") turned the status bar into a
     // wall of repeated shortcut hints marching up the screen.
     const fixedLine = (line: string): string => fitLine(line, cols);
 
@@ -213,8 +243,10 @@ export class ChatRenderer {
       // A manual /model outranks the role's preferredModel, so the role is active while NOT running
       // on its own model. The context bar names the model; this says why it is not the role's —
       // between the two there is nothing left to ask.
-      const overridden = state.manualModel ? " \x1b[33m· model overridden\x1b[0m\x1b[2m" : "";
-      uiLines.push(fixedLine(`\x1b[2m🎭 ${state.activeRole}${overridden}\x1b[0m`));
+      const overridden = state.manualModel
+        ? ` ${paint("warn", "· model overridden")}${code("dim")}`
+        : "";
+      uiLines.push(fixedLine(paint("dim", `🎭 ${state.activeRole}${overridden}`)));
     }
 
     // Active SDD artifacts. `/active` answers this on demand, but the pointer is STICKY by design —
@@ -222,17 +254,25 @@ export class ChatRenderer {
     // yesterday's plan against today's work. Seeing it costs one dim line; not seeing it cost a
     // `/trace` against a file nobody recognised.
     if (state.activeSpec || state.activePlan) {
-      const warn = state.activeArtifactsMissing ? " \x1b[33m⚠ file missing\x1b[0m\x1b[2m" : "";
+      const warn = state.activeArtifactsMissing
+        ? ` ${paint("warn", "⚠ file missing")}${code("dim")}`
+        : "";
       const pair = [state.activeSpec ?? "—", state.activePlan ?? "—"].join(" → ");
-      uiLines.push(fixedLine(`\x1b[2m📋 ${pair}${warn}\x1b[0m`));
+      uiLines.push(fixedLine(paint("dim", `📋 ${pair}${warn}`)));
     }
 
     // Active-document indicator: a dim 📄 line right above the prompt, ABOVE the input rows, so the
     // cursor math below is untouched.
     if (state.activeDocument) {
       const docName = state.activeDocument.split("/").pop() ?? state.activeDocument;
-      uiLines.push(fixedLine(`\x1b[2m📄 ${docName}\x1b[0m`));
+      uiLines.push(fixedLine(paint("dim", `📄 ${docName}`)));
     }
+
+    // One empty row between the indicators and the prompt. The block had grown to four or five
+    // stacked lines (status, context bar, role, artifacts, document) with the input welded to the
+    // bottom of the pile, and it read as a wall. Like the indicator lines above, it sits BEFORE the
+    // input rows, so the cursor math below is untouched.
+    uiLines.push("");
 
     // First input row carries the prompt; continuation rows carry a dim ⋮ of the SAME width, so the
     // input reads as one block that is still visibly the input. MODE_PROMPTS share one width for

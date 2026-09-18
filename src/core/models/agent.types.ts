@@ -6,6 +6,10 @@ export type TurnStatus =
   | "calling_model"
   | "producing_response"
   | "compacting_memory"
+  // Not a phase but an EVENT: the history just shrank. The CLI republishes the context gauge on it
+  // — the reading it is showing was measured before the compaction and is now stale, and a turn
+  // can run for minutes before its end-of-turn reading would have corrected it.
+  | "memory_compacted"
   | "indexing_repository"
   | "checking_hardware";
 

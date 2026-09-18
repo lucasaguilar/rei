@@ -36,6 +36,11 @@ export interface ChatRendererState {
   busy: boolean;
   activeStatus?: string; // TurnStatus
   activeStatusText?: string;
+  /** The model's reasoning as ONE rolling line, riding on the status row: the tail of what it is
+   *  thinking right now, whitespace collapsed. It lives in the DRAWN block rather than being
+   *  streamed to stdout, which is what keeps the input prompt pinned and legible while the model
+   *  thinks — a free-running stream erases the input block on every token. See THINKING_TAIL_MAX. */
+  thinkingTail?: string;
   /** When the current phase began — the status line counts up from it. */
   statusStartedAt?: number;
   /** Last turn's prompt size and the window it was measured against — the sticky context bar reads
@@ -67,6 +72,11 @@ export interface ChatUIState {
   busy: boolean;
   activeStatus?: string; // TurnStatus
   activeStatusText?: string;
+  /** The model's reasoning as ONE rolling line, riding on the status row: the tail of what it is
+   *  thinking right now, whitespace collapsed. It lives in the DRAWN block rather than being
+   *  streamed to stdout, which is what keeps the input prompt pinned and legible while the model
+   *  thinks — a free-running stream erases the input block on every token. See THINKING_TAIL_MAX. */
+  thinkingTail?: string;
   /** When the current phase began — the status line counts up from it. */
   statusStartedAt?: number;
   /** Last turn's prompt size and the window it was measured against — the sticky context bar reads

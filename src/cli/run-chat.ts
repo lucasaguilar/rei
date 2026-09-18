@@ -12,6 +12,10 @@ import {
   KeyboardActions,
 } from "./models/chat.types.js";
 import { clamp } from "./helpers/terminal.helpers.js";
+import { buildRenderState } from "./helpers/render-state.helper.js";
+import { paint } from "./theme/palette.js";
+import { rulesMigrationNotice } from "./helpers/rules-notice.helper.js";
+import { RULES_TEMPLATES_ROOT } from "../chat/commands/rules-commands.js";
 import {
   buildPaletteSources,
   sessionIndicators,
@@ -163,26 +167,13 @@ export async function runChat(
     state.sessionMode = session.mode;
     Object.assign(state, sessionIndicators(session));
 
-    const renderState: ChatRendererState = {
+    const renderState = buildRenderState({
+      state,
+      session,
+      palette: getPalette(),
       cols: process.stdout.columns || 80,
       rows: process.stdout.rows || 24,
-      activePalette: getPalette(),
-      selectedCommandIndex: state.selectedCommandIndex,
-      historySearchMode: state.historySearchMode,
-      historySearchQuery: state.historySearchQuery,
-      historySearchIndex: state.historySearchIndex,
-      inputHistory: state.inputHistory,
-      busy: state.busy,
-      activeStatus: state.activeStatus,
-      activeStatusText: state.activeStatusText,
-      statusStartedAt: state.statusStartedAt,
-      ...stickyIndicators(state),
-      spinnerIndex: state.spinnerIndex,
-      sessionMode: session.mode,
-      inputBuffer: state.inputBuffer,
-      inputCursor: state.inputCursor,
-      ...sessionIndicators(session),
-    };
+    });
 
     const paletteItems = renderState.activePalette.items; // selectedCommandIndex adjusted by draw
     state.selectedCommandIndex = clamp(
@@ -341,10 +332,18 @@ export async function runChat(
     const recent = mostRecentSessionId(workspacePath);
     if (recent) {
       pushTranscript(
-        `\x1b[90m[REI] New session. Use 'rei -c' to resume the last one (${recent}), or 'rei --session <name>' for a named one.\x1b[0m`,
+        paint(
+          "muted",
+          `[REI] New session. Use 'rei -c' to resume the last one (${recent}), or 'rei --session <name>' for a named one.`,
+        ),
       );
     }
   }
+
+  // A project that used to receive REI's built-in stack rules gets told, once, that it no longer
+  // does — see rulesMigrationNotice.
+  const rulesNotice = rulesMigrationNotice(workspacePath, RULES_TEMPLATES_ROOT);
+  if (rulesNotice) pushTranscript(paint("muted", rulesNotice));
 
   // Show the context gauge on startup too (not only after the first turn), so the user sees
   // how full the assumed window already is from the resumed session / system prompt + the
@@ -380,7 +379,9 @@ export async function runChat(
   // The Proxy on `state` resolves this promise when `running` becomes false.
   await shutdownPromise;
 
-  releaseSessionLock(workspacePath, sessionId); // free the session for other terminals
+  // `getActiveSessionId()`, not the id captured at startup: `/session save-as` and `/session load`
+  // rebind this instance mid-run, and releasing the old name would wedge the one it really holds.
+  releaseSessionLock(workspacePath, getActiveSessionId()); // free the session for other terminals
   stopSpinner();
   process.stdout.write("\x1b[?2004l"); // disable bracketed paste
   process.stdin.off("keypress", onKeypress);

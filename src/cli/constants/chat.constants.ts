@@ -1,6 +1,9 @@
 import { TurnStatus } from "../../core/models/agent.types.js";
 import { SessionMode } from "../../chat/types.js";
 import { REI_LOGO } from "../rei-logo.js";
+import { visibleLength } from "../helpers/terminal.helpers.js";
+import { wrapInput } from "../ui/input-wrap.js";
+import { code, paint, RESET } from "../theme/palette.js";
 
 export const getWelcomeMessage = (mode: SessionMode): string => {
   return `${REI_LOGO}
@@ -52,7 +55,7 @@ export const MODE_PROMPTS: Record<SessionMode, string> = {
 export function continuationPrompt(promptWidth: number): string {
   // Below two columns there is no room for the marker and its trailing space — pad and move on.
   if (promptWidth < 2) return " ".repeat(Math.max(0, promptWidth));
-  return `${" ".repeat(promptWidth - 2)}\x1b[90m⋮\x1b[0m `;
+  return `${" ".repeat(promptWidth - 2)}${paint("muted", "⋮")} `;
 }
 
 /** What each phase is called on the status line. Lowercase and short: it sits under a wall of tool
@@ -63,6 +66,7 @@ export const THINKING_TEXT: Record<TurnStatus, string> = {
   calling_model: "thinking",
   producing_response: "writing",
   compacting_memory: "compacting memory",
+  memory_compacted: "compacted memory",
   indexing_repository: "indexing the repo",
   checking_hardware: "checking hardware",
 };
@@ -86,10 +90,59 @@ export function formatStatusLine(
   const secs = Math.floor(elapsedMs / 1000);
   const elapsed =
     secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2, "0")}s`;
-  return `\x1b[36m${frame}\x1b[0m \x1b[2m${label}\x1b[0m \x1b[2m·\x1b[0m \x1b[2m${elapsed}\x1b[0m`;
+  return `${paint("accent", frame)} ${paint("dim", label)} ${paint("dim", "·")} ${paint("dim", elapsed)}`;
 }
-export const SHORTCUT_HINT =
-  "\x1b[90mShortcuts: Up/Down history | / commands | @ files | Tab complete | Esc clear/close | Ctrl+R search\x1b[0m";
+/** How much of the reasoning the rolling tail keeps. Enough to refill the whole block after a
+ *  resize, not so much that a long think is carried around forever. */
+export const THINKING_TAIL_MAX = 1600;
+
+/** Rows the thinking block occupies by default. Four is a paragraph — enough to follow an argument
+ *  — while leaving the conversation above it on screen. `REI_THINKING_LINES` overrides it. */
+export const DEFAULT_THINKING_LINES = 4;
+
+/** Collapses a reasoning fragment into rolling-line material: one line, no runs of whitespace. */
+export function appendThinkingTail(tail: string | undefined, fragment: string): string {
+  return `${tail ?? ""}${fragment}`.replace(/\s+/g, " ").slice(-THINKING_TAIL_MAX);
+}
+
+/** How many rows the block may use: `REI_THINKING_LINES`, clamped to something a terminal can host. */
+export function resolveThinkingLines(): number {
+  const raw = Number(process.env.REI_THINKING_LINES);
+  if (!Number.isFinite(raw)) return DEFAULT_THINKING_LINES;
+  return Math.max(1, Math.min(12, Math.floor(raw)));
+}
+
+/**
+ * The reasoning as a paragraph: the LAST `maxLines` wrapped rows of the tail, each behind a dim
+ * gutter so the block reads as one region and never as REI's answer.
+ *
+ * The end is what is kept, because that is where the model currently is — the block scrolls under
+ * a fixed frame instead of growing. Returns [] when there is nothing to show, and never more rows
+ * than `maxLines`: the height of the drawn block has to be predictable, since clearUI erases
+ * exactly as many rows as the last draw wrote.
+ */
+export function formatThinkingBlock(
+  tail: string | undefined,
+  cols: number,
+  maxLines: number,
+): string[] {
+  if (!tail || maxLines < 1) return [];
+  const gutter = `${paint("muted", "│")} `;
+  const width = cols - visibleLength(gutter);
+  if (width < 20) return []; // a terminal this narrow needs its rows for the prompt
+  const rows = wrapInput(tail, width).slice(-maxLines);
+  return rows.map(
+    (r) => `${gutter}${paint("thinking", tail.slice(r.start, r.end).trimEnd())}`,
+  );
+}
+
+export const SHORTCUT_HINT_TEXT =
+  "Shortcuts: Up/Down history | / commands | @ files | Tab complete | Esc clear/close | Ctrl+R search";
+
+/** Built per draw, not once at import: the active theme can change mid-session (`/theme`). */
+export function shortcutHint(): string {
+  return paint("muted", SHORTCUT_HINT_TEXT);
+}
 
 /**
  * What tab-completion should actually type: the invocable part of an entry, without its usage hint.
@@ -126,7 +179,10 @@ export const COMMANDS: Array<{
   { command: "/decompose", description: "SDD step 2 — turn the current spec into a traceable plan" },
   { command: "/active", description: "show the active spec/plan (also: /active clear [spec|plan] to unset)" },
   { command: "/trace", description: "SDD check — cross the active spec's criteria against the plan's Satisfies: lines, both ways" },
-  { command: "/verbose [on|off]", description: "show or hide full command output, diffs and the model's reasoning" },
+  { command: "/verbose [on|off]", description: "show or hide full command output and diffs" },
+  { command: "/reasoning [on|off]", description: "the model's thinking as a live paragraph, or just count it (on by default)" },
+  { command: "/theme [name]", description: "repaint REI's chrome (default | matrix)" },
+  { command: "/rules [install <stack>]", description: "this repo's coding rules, and what they cost per turn" },
   { command: "/savespec <name>", description: "save the write-spec spec to disk as .rei/specs/<name>.md" },
   { command: "/think [level]", description: "set the reasoning level for this session (none|minimal|low|medium|high|xhigh)" },
   { command: "/loadspec <name>", description: "load a spec from disk into the session for decomposition" },
@@ -145,6 +201,7 @@ export const COMMANDS: Array<{
   { command: "/session", description: "show basic session info (use /session info for full details)" },
   { command: "/session info", description: "show full session info with token usage and repo summary" },
   { command: "/session list", description: "list archived sessions" },
+  { command: "/session save-as <name>", description: "name the CURRENT session and keep working in it" },
   { command: "/session archive [name]", description: "archive current session as <name>" },
   { command: "/session new [name]", description: "start new, archive current as <name>" },
   { command: "/session load <id>", description: "load an archived session by ID" },
