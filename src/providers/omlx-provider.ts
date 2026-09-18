@@ -9,7 +9,7 @@ import {
 /**
  * oMLX provider — thin wrapper over the OpenAI-compatible base.
  *
- * It exists as its own provider rather than being served by `llmstudio` with a different base URL,
+ * It exists as its own provider rather than being served by `lmstudio` with a different base URL,
  * because the two endpoints do NOT behave the same and the difference is not cosmetic: oMLX
  * forwards `chat_template_kwargs` to the chat template (verified: `enable_thinking:false` → zero
  * reasoning), while the same field sent to LM Studio returned a fatal backend exception and left it

@@ -11,14 +11,14 @@ import { OpenAiCompatibleProvider } from "./openai-compatible-provider.js";
 /**
  * LM Studio provider — thin wrapper around the OpenAI-compatible base.
  *
- * Customiza exclusivamente:
- *   - Prefijo de env vars (LLM_STUDIO_*)
- *   - URL base default (localhost:1234/v1)
- *   - API key default ("lm-studio")
+ * Customises only:
+ *   - the env-var prefix (LLM_STUDIO_*, kept as-is: it was never part of the `llmstudio` typo)
+ *   - the default base URL (localhost:1234/v1)
+ *   - the default API key ("lm-studio")
  *
- * Todo lo demás (streaming, tool calling, reasoning, penalties) es manejado por la clase base.
+ * Everything else (streaming, tool calling, reasoning, penalties) is handled by the base class.
  */
-export class LlmStudioProvider extends OpenAiCompatibleProvider {
+export class LmStudioProvider extends OpenAiCompatibleProvider {
   constructor(params?: { baseUrl?: string; apiKey?: string; model?: string }) {
     super();
 

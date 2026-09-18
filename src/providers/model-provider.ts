@@ -56,8 +56,12 @@ export interface ToolCall {
  * back to character-based estimation. Values are the provider's own numbers — never a guess.
  */
 export interface TokenUsage {
-  promptTokens?: number;      // tokens in the request (context as seen by the backend)
+  promptTokens?: number;      // PEAK tokens in a request this turn (the biggest single prompt sent)
   completionTokens?: number;  // tokens generated (includes reasoning + tool-call JSON)
+  /** Tokens in the LAST request of the turn — the context as it stands now, which is what the
+   *  sticky gauge must show. It differs from the peak only when the history SHRANK mid-turn, i.e.
+   *  after a compaction: the peak is then a state that no longer exists. */
+  lastPromptTokens?: number;
 }
 
 export interface ChatCompletionWithTools {
@@ -67,6 +71,10 @@ export interface ChatCompletionWithTools {
   reasoning?: string;     // model reasoning (reasoning_content) — present for reasoning models
                           // even when content is empty (e.g. qwen3.6 in tool-calling mode)
   usage?: TokenUsage;     // real token counts from the backend, when reported (see above)
+  /** Set when the stream was cut short by a consumer rather than by the model — today, the loop
+   *  guard. The content is whatever had arrived; the caller should say so rather than present it
+   *  as a finished answer. */
+  stoppedEarly?: "repetition";
 }
 
 /** A live fragment surfaced while streaming a tool-calling completion (see streamChatWithTools). */
@@ -74,6 +82,16 @@ export interface ToolStreamDelta {
   type: "text" | "reasoning";
   content: string; // incremental fragment (not the accumulated buffer)
 }
+
+/**
+ * What a delta consumer may answer.
+ *
+ * `"stop"` asks the provider to end the stream NOW and return what it has. It exists so a policy
+ * that lives outside the provider — the loop guard — can cut a runaway generation without
+ * throwing: an exception would lose the accumulated response and send the caller down its
+ * non-streaming fallback, re-running the very call we are trying to stop.
+ */
+export type ToolStreamVerdict = void | "stop";
 
 // ── Provider interface ───────────────────────────────────────────────────────
 
@@ -97,7 +115,7 @@ export interface ModelProvider {
   streamChatWithTools?(
     messages: ChatMessage[],
     tools: ToolDefinition[],
-    onDelta: (delta: ToolStreamDelta) => void,
+    onDelta: (delta: ToolStreamDelta) => ToolStreamVerdict,
     options?: CompletionOptions,
   ): Promise<ChatCompletionWithTools>;
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { MtplxProvider } from "./mtplx-provider.js";
-import { LlmStudioProvider } from "./llm-studio-provider.js";
+import { LmStudioProvider } from "./lm-studio-provider.js";
 
 /**
  * Qwen3.8's reasoning level is a chat-TEMPLATE variable, not an engine param, so it only takes
@@ -44,7 +44,7 @@ describe("chat_template_kwargs", () => {
 
   it("LM Studio sends only the top-level field (its bridge is the model.yaml wrapper)", async () => {
     const bodies = captureBody();
-    await new LlmStudioProvider().completeChat([{ role: "user", content: "hi" }], {
+    await new LmStudioProvider().completeChat([{ role: "user", content: "hi" }], {
       reasoningEffort: "low",
     });
     expect(bodies[0]).not.toHaveProperty("chat_template_kwargs");

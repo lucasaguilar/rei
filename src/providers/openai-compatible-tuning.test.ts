@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { LlmStudioProvider } from "./llm-studio-provider.js";
+import { LmStudioProvider } from "./lm-studio-provider.js";
 import { setActiveModelTuning } from "../config/model-tuning.js";
 
 /**
@@ -22,7 +22,7 @@ describe("fetchChat applies the active per-model tuning", () => {
         { status: 200 },
       );
     }) as unknown as typeof fetch;
-    const provider = new LlmStudioProvider({
+    const provider = new LmStudioProvider({
       baseUrl: "http://x/v1",
       apiKey: "k",
       model: "qwen/qwen3.6-27b",

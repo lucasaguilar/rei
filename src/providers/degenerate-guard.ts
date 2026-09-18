@@ -1,4 +1,4 @@
-import { isDegenerate } from "../agent-mode/helpers/loop-guard.js";
+import { isDegenerate, looksLooping } from "../agent-mode/helpers/loop-guard.js";
 import type { ModelProvider, CompletionOptions } from "./model-provider.js";
 import type { ChatMessage } from "../chat/types.js";
 
@@ -89,11 +89,38 @@ export function withDegenerateGuard(provider: ModelProvider): ModelProvider {
       return provider.completeChatWithTools!(messages, tools, options);
     };
   }
-  // Same for the streaming tools path — without this the wrapper hides streamChatWithTools and the
-  // native loop falls back to non-streaming (the live-streaming spike never engages).
+  // The streaming tools path — which, since the native unification, is EVERY agent turn.
+  //
+  // This used to be a bare delegation, and that made the guard dead code exactly where it was
+  // needed most: a 27B cycling through the same two paragraphs ran to 12,000 output tokens in one
+  // call, with nothing watching. The wrapper now reads the stream it is forwarding and answers
+  // "stop" when the text starts repeating; the provider cancels the response body, so the backend
+  // stops generating instead of finishing into the void.
   if (provider.streamChatWithTools) {
     wrapped.streamChatWithTools = (messages, tools, onDelta, options) => {
-      return provider.streamChatWithTools!(messages, tools, onDelta, options);
+      let seen = "";
+      let lastCheck = 0;
+      let stopped = false;
+      return provider.streamChatWithTools!(
+        messages,
+        tools,
+        (delta) => {
+          // Reasoning counts. The loop that prompted this lived entirely in the model's thinking,
+          // where `content` stayed empty until the very end.
+          seen += delta.content;
+          const verdict = onDelta(delta);
+          if (stopped) return "stop";
+          if (seen.length - lastCheck >= CHECK_INTERVAL) {
+            lastCheck = seen.length;
+            if (looksLooping(seen)) {
+              stopped = true;
+              return "stop";
+            }
+          }
+          return verdict;
+        },
+        options,
+      );
     };
   }
 

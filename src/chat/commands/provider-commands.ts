@@ -1,6 +1,7 @@
 import type { ChatSession } from "../types.js";
 import type { CommandHandler, CommandResult } from "./command-handler.js";
 import { loadRole } from "../../skills/role-loader.js";
+import { normalizeProviderName } from "../../providers/provider-names.js";
 
 const PROVIDER_RE = /^\/provider(?:\s+(agent))?(?:\s+(\S+))?$/i;
 const MODEL_RE = /^\/model(?:\s+(agent))?(?:\s+(\S+))?$/i;
@@ -12,7 +13,7 @@ const VALID_PROVIDERS = [
   "gemini",
   "openrouter",
   "huggingface",
-  "llmstudio",
+  "lmstudio",
   "mtplx",
   "omlx",
   "openai-compat",
@@ -41,7 +42,7 @@ function getModelEnvVar(providerName: string, mode?: string): string | undefined
       return mode === "agent"
         ? (process.env.HF_MODEL_AGENT ?? process.env.HF_MODEL)
         : process.env.HF_MODEL;
-    case "llmstudio":
+    case "lmstudio":
       return mode === "agent"
         ? (process.env.LLM_STUDIO_MODEL_AGENT ?? process.env.LLM_STUDIO_MODEL)
         : process.env.LLM_STUDIO_MODEL;
@@ -83,8 +84,8 @@ export const providerCommands: CommandHandler = {
     if (providerMatch) {
       const isAgentTarget = !!providerMatch[1];
       const requested = providerMatch[2];
-      const currentPrimary = (process.env.MODEL_PROVIDER || "mock").toLowerCase().trim();
-      const currentAgent = (process.env.AGENT_MODEL_PROVIDER || "").toLowerCase().trim();
+      const currentPrimary = normalizeProviderName(process.env.MODEL_PROVIDER || "mock");
+      const currentAgent = normalizeProviderName(process.env.AGENT_MODEL_PROVIDER || "");
 
       if (!requested) {
         if (isAgentTarget) {
@@ -100,11 +101,12 @@ export const providerCommands: CommandHandler = {
           : "";
         return {
           success: true,
-          response: `[REI] Active provider (Ask/Planning): '${currentPrimary}'${agentProv}\nAvailable: 'ollama', 'openrouter', 'gemini', 'groq', 'llmstudio', 'mtplx', 'huggingface', 'mock'.\nUsage:\n  '/provider <name>' to change Ask/Planning provider.\n  '/provider agent <name>' to change Agent provider.`,
+          response: `[REI] Active provider (Ask/Planning): '${currentPrimary}'${agentProv}\nAvailable: 'ollama', 'openrouter', 'gemini', 'groq', 'lmstudio', 'mtplx', 'huggingface', 'mock'.\nUsage:\n  '/provider <name>' to change Ask/Planning provider.\n  '/provider agent <name>' to change Agent provider.`,
         };
       }
 
-      const lower = requested.toLowerCase().trim();
+      // `/provider llmstudio` still works: the old spelling normalises to the canonical key.
+      const lower = normalizeProviderName(requested);
       if (isAgentTarget && (lower === "none" || lower === "clear" || lower === "disable")) {
         process.env.AGENT_MODEL_PROVIDER = "";
         return {
@@ -144,8 +146,8 @@ export const providerCommands: CommandHandler = {
     if (modelMatch) {
       const isAgentTarget = !!modelMatch[1];
       const requested = modelMatch[2];
-      const currentPrimaryProvider = (process.env.MODEL_PROVIDER || "ollama").toLowerCase().trim();
-      const currentAgentProvider = (process.env.AGENT_MODEL_PROVIDER || "").toLowerCase().trim();
+      const currentPrimaryProvider = normalizeProviderName(process.env.MODEL_PROVIDER || "ollama");
+      const currentAgentProvider = normalizeProviderName(process.env.AGENT_MODEL_PROVIDER || "");
       const targetProvider = isAgentTarget
         ? currentAgentProvider || currentPrimaryProvider
         : currentPrimaryProvider;
@@ -176,7 +178,7 @@ export const providerCommands: CommandHandler = {
           } catch {
             availableModelsText = "\n\n(Note: Could not fetch available models. Make sure Ollama is running.)";
           }
-        } else if (targetProvider === "llmstudio") {
+        } else if (targetProvider === "lmstudio") {
           try {
             const baseUrl = (process.env.LLM_STUDIO_BASE_URL || "http://localhost:1234/v1").replace(/\/+$/, "");
             const res = await fetch(`${baseUrl}/models`);
@@ -240,7 +242,7 @@ export const providerCommands: CommandHandler = {
           if (isAgentTarget) process.env.HF_MODEL_AGENT = requested;
           else process.env.HF_MODEL = requested;
           break;
-        case "llmstudio":
+        case "lmstudio":
           if (isAgentTarget) process.env.LLM_STUDIO_MODEL_AGENT = requested;
           else process.env.LLM_STUDIO_MODEL = requested;
           break;

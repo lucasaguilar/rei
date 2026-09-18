@@ -1,4 +1,8 @@
 import { loadReiConfig, type ReiConfig } from "../tools/mcp/mcp-config.js";
+import {
+  normalizeProviderKeys,
+  normalizeProviderName,
+} from "../providers/provider-names.js";
 
 /**
  * Per-model tuning read from `rei.config.json` (`providers.<provider>.models[]`) — lets an expert
@@ -93,11 +97,15 @@ export function resolveModelTuning(
   const config = loadReiConfig(workspacePath) as ReiConfig & {
     providers?: ProvidersConfig;
   };
-  const providers = config.providers ?? {};
+  // Re-keyed so a `rei.config.json` written against the old `llmstudio` spelling still tunes the
+  // same provider. This lookup fails SILENTLY when it misses — the model simply runs on env
+  // defaults — which is exactly why the alias is resolved here and not left to the user to notice.
+  const providers = normalizeProviderKeys(config.providers ?? {});
 
   // When the caller knows which provider is active, search only that list.
-  if (providerKey && providers[providerKey]?.models?.length) {
-    const hit = matchModel(modelName, providers[providerKey].models);
+  const canonicalKey = providerKey ? normalizeProviderName(providerKey) : undefined;
+  if (canonicalKey && providers[canonicalKey]?.models?.length) {
+    const hit = matchModel(modelName, providers[canonicalKey].models);
     if (hit) return hit;
   }
 

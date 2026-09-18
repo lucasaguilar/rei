@@ -1,7 +1,8 @@
 import type { ModelProvider } from "./model-provider.js";
 import type { SessionMode } from "../chat/types.js";
 import { GeminiProvider } from "./gemini-provider.js";
-import { LlmStudioProvider } from "./llm-studio-provider.js";
+import { LmStudioProvider } from "./lm-studio-provider.js";
+import { normalizeProviderName } from "./provider-names.js";
 import { MockProvider } from "./mock-provider.js";
 import { OllamaProvider } from "./ollama-provider.js";
 import { GroqProvider } from "./groq-provider.js";
@@ -20,15 +21,18 @@ export type ProviderName =
   | "gemini"
   | "openrouter"
   | "huggingface"
-  | "llmstudio"
-  | "mtplx";
+  | "lmstudio"
+  | "mtplx"
+  | "omlx"
+  | "openai-compat";
 
 export function createModelProvider(providerNameArg?: string): ModelProvider {
-  const providerName = (
-    providerNameArg ??
-    process.env.MODEL_PROVIDER ??
-    "mock"
-  ).toLowerCase();
+  // Normalised here rather than at each call site: this is where a provider name arrives from the
+  // outside world (env, flag, `/provider`), and an `.env` written before the `llmstudio` → `lmstudio`
+  // rename must keep starting the same provider.
+  const providerName = normalizeProviderName(
+    providerNameArg ?? process.env.MODEL_PROVIDER ?? "mock",
+  );
   let provider: ModelProvider;
 
   switch (providerName) {
@@ -50,8 +54,8 @@ export function createModelProvider(providerNameArg?: string): ModelProvider {
     case "huggingface":
       provider = new HuggingFaceProvider();
       break;
-    case "llmstudio":
-      provider = new LlmStudioProvider();
+    case "lmstudio":
+      provider = new LmStudioProvider();
       break;
     case "mtplx":
       provider = new MtplxProvider();
@@ -64,7 +68,7 @@ export function createModelProvider(providerNameArg?: string): ModelProvider {
       break;
     default:
       throw new Error(
-        `Unknown MODEL_PROVIDER: ${providerNameArg ?? process.env.MODEL_PROVIDER}. Expected one of: mock, ollama, groq, gemini, openrouter, huggingface, llmstudio, mtplx`,
+        `Unknown MODEL_PROVIDER: ${providerNameArg ?? process.env.MODEL_PROVIDER}. Expected one of: mock, ollama, groq, gemini, openrouter, huggingface, lmstudio, mtplx, omlx, openai-compat`,
       );
   }
 
@@ -97,7 +101,7 @@ const PROVIDER_ENV_PREFIX: Record<string, string> = {
   groq: "GROQ",
   gemini: "GEMINI",
   huggingface: "HF",
-  llmstudio: "LLM_STUDIO",
+  lmstudio: "LLM_STUDIO",
   mtplx: "MTPLX",
   omlx: "OMLX",
   "openai-compat": "OPENAI_COMPAT",
@@ -132,14 +136,12 @@ function cleanEnvModel(value: string | undefined): string | undefined {
  * constructor default.
  */
 export function resolveModelForMode(mode: SessionMode): string | undefined {
-  const primaryProvider = (process.env.MODEL_PROVIDER ?? "llmstudio")
-    .toLowerCase()
-    .trim();
+  const primaryProvider = normalizeProviderName(
+    process.env.MODEL_PROVIDER ?? "lmstudio",
+  );
   const provider =
     mode === "agent"
-      ? (process.env.AGENT_MODEL_PROVIDER || primaryProvider)
-          .toLowerCase()
-          .trim()
+      ? normalizeProviderName(process.env.AGENT_MODEL_PROVIDER || primaryProvider)
       : primaryProvider;
 
   const prefix = PROVIDER_ENV_PREFIX[provider];

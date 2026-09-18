@@ -39,7 +39,7 @@ describe("resolveModelForMode (uniform across providers)", () => {
   });
 
   it("every mode falls back to <PROVIDER>_MODEL when it has no override", () => {
-    process.env.MODEL_PROVIDER = "llmstudio";
+    process.env.MODEL_PROVIDER = "lmstudio";
     process.env.LLM_STUDIO_MODEL = "base-model";
     expect(resolveModelForMode("ask")).toBe("base-model");
     expect(resolveModelForMode("planning")).toBe("base-model");
@@ -49,7 +49,7 @@ describe("resolveModelForMode (uniform across providers)", () => {
   it("gives each mode its own model when each override is set", () => {
     // The modes want different things: ask is interactive and favours a fast model, planning the
     // strongest reasoner, agent a reliable tool-caller.
-    process.env.MODEL_PROVIDER = "llmstudio";
+    process.env.MODEL_PROVIDER = "lmstudio";
     process.env.LLM_STUDIO_MODEL = "base-model";
     process.env.LLM_STUDIO_MODEL_ASK = "ornith";
     process.env.LLM_STUDIO_MODEL_PLANNING = "qwen3.8";
@@ -60,7 +60,7 @@ describe("resolveModelForMode (uniform across providers)", () => {
   });
 
   it("lets one mode be overridden while the others keep the shared model", () => {
-    process.env.MODEL_PROVIDER = "llmstudio";
+    process.env.MODEL_PROVIDER = "lmstudio";
     process.env.LLM_STUDIO_MODEL = "base-model";
     process.env.LLM_STUDIO_MODEL_PLANNING = "qwen3.8";
     expect(resolveModelForMode("ask")).toBe("base-model");
@@ -71,7 +71,7 @@ describe("resolveModelForMode (uniform across providers)", () => {
   it("treats an EMPTY per-mode override as unset, like the agent one", () => {
     // The wizard writes these for every mode; an empty value must not reach the backend as a
     // blank model name.
-    process.env.MODEL_PROVIDER = "llmstudio";
+    process.env.MODEL_PROVIDER = "lmstudio";
     process.env.LLM_STUDIO_MODEL = "base-model";
     process.env.LLM_STUDIO_MODEL_ASK = "   ";
     expect(resolveModelForMode("ask")).toBe("base-model");
@@ -80,7 +80,7 @@ describe("resolveModelForMode (uniform across providers)", () => {
   it("reads the per-mode override from the provider that mode actually uses", () => {
     // agent may run on its own provider; ask/planning always use MODEL_PROVIDER, so a planning
     // override must be read off the primary prefix, not the agent one.
-    process.env.MODEL_PROVIDER = "llmstudio";
+    process.env.MODEL_PROVIDER = "lmstudio";
     process.env.AGENT_MODEL_PROVIDER = "ollama";
     process.env.LLM_STUDIO_MODEL_PLANNING = "qwen3.8";
     process.env.OLLAMA_MODEL_AGENT = "musler";
@@ -89,7 +89,7 @@ describe("resolveModelForMode (uniform across providers)", () => {
   });
 
   it("agent uses <PROVIDER>_MODEL_AGENT, falling back to <PROVIDER>_MODEL", () => {
-    process.env.MODEL_PROVIDER = "llmstudio";
+    process.env.MODEL_PROVIDER = "lmstudio";
     process.env.LLM_STUDIO_MODEL = "base-model";
     expect(resolveModelForMode("agent")).toBe("base-model"); // fallback
     process.env.LLM_STUDIO_MODEL_AGENT = "agent-model";
@@ -100,7 +100,7 @@ describe("resolveModelForMode (uniform across providers)", () => {
     // Regression: the config wizard writes LLM_STUDIO_MODEL_AGENT="" when no dedicated
     // agent model is chosen. "" must not be sent as the model name (LM Studio → 400
     // "No models loaded"); it must fall back to LLM_STUDIO_MODEL.
-    process.env.MODEL_PROVIDER = "llmstudio";
+    process.env.MODEL_PROVIDER = "lmstudio";
     process.env.LLM_STUDIO_MODEL = "base-model";
     process.env.LLM_STUDIO_MODEL_AGENT = "";
     expect(resolveModelForMode("agent")).toBe("base-model");

@@ -9,6 +9,7 @@ import type {
   CompletionOptions,
   TokenUsage,
   ToolStreamDelta,
+  ToolStreamVerdict,
 } from "./model-provider.js";
 import {
   getMaxOutputTokens,
@@ -308,6 +309,13 @@ export class ToolCallAccumulator {
     { id: string; name: string; args: string }
   >();
 
+  private stoppedEarly?: "repetition";
+
+  /** Marks the response as cut short by a consumer (the loop guard), not by the model. */
+  markStoppedEarly(reason: "repetition"): void {
+    this.stoppedEarly = reason;
+  }
+
   /** Records the backend-reported usage (from the final stream chunk); no-op when it reports nothing valid. */
   setUsage(raw?: RawOpenAIUsage): void {
     this.usage = sanitizeOpenAIUsage(raw);
@@ -362,10 +370,15 @@ export class ToolCallAccumulator {
     return {
       content: this.contentBuf,
       toolCalls,
+      // A stream cut by the guard has no finish_reason from the backend: it is reported as `stop`
+      // so the tools loop treats it as a plain end-of-answer, with `stoppedEarly` carrying WHY —
+      // a half-built tool call in a runaway generation must not be run.
       finishReason:
-        this.finishReason || (toolCalls.length > 0 ? "tool_calls" : "stop"),
+        this.finishReason ||
+        (this.stoppedEarly ? "stop" : toolCalls.length > 0 ? "tool_calls" : "stop"),
       ...(this.reasoningBuf ? { reasoning: this.reasoningBuf } : {}),
       ...(Object.keys(this.usage).length > 0 ? { usage: this.usage } : {}),
+      ...(this.stoppedEarly ? { stoppedEarly: this.stoppedEarly } : {}),
     };
   }
 }
@@ -444,8 +457,23 @@ export async function openaiStreamChatWithTools(
       const choice = json.choices?.[0];
       if (!choice) continue;
       const frag = acc.push(choice.delta ?? {}, choice.finish_reason);
-      if (frag.reasoning) onDelta({ type: "reasoning", content: frag.reasoning });
-      if (frag.text) onDelta({ type: "text", content: frag.text });
+      // A consumer answering "stop" ends the stream here: cancel the body (which closes the
+      // connection, so the backend stops generating too) and return what has arrived. Used by the
+      // loop guard — see ToolStreamVerdict.
+      // `void | "stop"` keeps plain void callbacks assignable; reading the answer needs the
+      // narrower view of the same value.
+      const asVerdict = (v: ToolStreamVerdict): "stop" | undefined =>
+        v as "stop" | undefined;
+      let verdict: "stop" | undefined;
+      if (frag.reasoning)
+        verdict = asVerdict(onDelta({ type: "reasoning", content: frag.reasoning }));
+      if (frag.text)
+        verdict = asVerdict(onDelta({ type: "text", content: frag.text })) ?? verdict;
+      if (verdict === "stop") {
+        await reader.cancel().catch(() => {});
+        acc.markStoppedEarly("repetition");
+        return acc.result();
+      }
     }
   }
 

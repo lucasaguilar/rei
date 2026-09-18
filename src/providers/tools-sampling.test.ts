@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { LlmStudioProvider } from "./llm-studio-provider.js";
+import { LmStudioProvider } from "./lm-studio-provider.js";
 import { setActiveModelTuning, type ModelTuning } from "../config/model-tuning.js";
 
 /**
@@ -16,7 +16,7 @@ async function capture(tuning: ModelTuning, tools: boolean): Promise<Record<stri
     return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
       { status: 200, headers: { "Content-Type": "application/json" } });
   }));
-  const p = new LlmStudioProvider();
+  const p = new LmStudioProvider();
   const msgs = [{ role: "user" as const, content: "hi" }];
   if (tools) await p.completeChatWithTools(msgs, [], {});
   else await p.completeChat(msgs, {});

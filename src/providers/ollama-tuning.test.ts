@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { OllamaProvider } from "./ollama-provider.js";
 import { setActiveModelTuning } from "../config/model-tuning.js";
 
-/** The per-model tuning (rei.config.json) must reach ollama's CHAT path (options), like llmstudio. */
+/** The per-model tuning (rei.config.json) must reach ollama's CHAT path (options), like lmstudio. */
 describe("ollama chat path applies the active per-model tuning", () => {
   const realFetch = globalThis.fetch;
   afterEach(() => {

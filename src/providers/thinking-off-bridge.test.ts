@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { OmlxProvider } from "./omlx-provider.js";
 import { OpenAiCompatProvider } from "./openai-compat-provider.js";
-import { LlmStudioProvider } from "./llm-studio-provider.js";
+import { LmStudioProvider } from "./lm-studio-provider.js";
 import { MtplxProvider } from "./mtplx-provider.js";
 
 /**
@@ -53,8 +53,8 @@ describe("the off switch reaches the backends that support it", () => {
 
 describe("backends that do NOT forward them are never sent kwargs", () => {
   it("LM Studio gets none — it answered a fatal error and went down", () => {
-    expect(kwargsOf(new LlmStudioProvider(), "none")).toBeUndefined();
-    expect(kwargsOf(new LlmStudioProvider(), "low")).toBeUndefined();
+    expect(kwargsOf(new LmStudioProvider(), "none")).toBeUndefined();
+    expect(kwargsOf(new LmStudioProvider(), "low")).toBeUndefined();
   });
 
   it("an unknown OpenAI-compatible endpoint is assumed not to forward them", () => {

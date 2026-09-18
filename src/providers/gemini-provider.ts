@@ -39,7 +39,7 @@ interface GeminiGenerateContentResponse extends GeminiErrorResponse {
 
 const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 // Google's OpenAI-compatibility layer — exposes /chat/completions with `tools`, so REI's shared
-// OpenAI tool-caller works unchanged (same path as llmstudio/ollama/openrouter/groq).
+// OpenAI tool-caller works unchanged (same path as lmstudio/ollama/openrouter/groq).
 const GEMINI_OPENAI_BASE_URL =
   "https://generativelanguage.googleapis.com/v1beta/openai";
 const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";

@@ -68,3 +68,50 @@ export function isDegenerate(text: string): boolean {
 
   return false;
 }
+
+/**
+ * Returns true when a LONG generation keeps coming back to the same sentences.
+ *
+ * `isDegenerate` looks for repeats that are back-to-back ("X. X. X. X."), and deliberately so: it
+ * must not fire on a spec whose sections legitimately echo each other. But a local reasoning model
+ * has a second failure mode it cannot see — it cycles through whole PARAGRAPHS, re-deriving the
+ * same three ideas with tens of words in between, for as long as you let it. Observed on a 27B:
+ * 12,000 output tokens in one call, the same two paragraphs four times over, and the turn ending
+ * wherever generation happened to stop.
+ *
+ * So distance is ignored here and the bar is raised elsewhere: a whole BLOCK — fifty words, word
+ * for word — coming back three times inside an output long enough that no answer needs it.
+ *
+ * The block length is the part that matters, and it is what keeps the old false positive away. A
+ * list with parallel structure repeats its phrasing but never a fifty-word span: something varies
+ * every sentence or two — an index, a filename, a criterion — and that break is enough. A cycling
+ * decoder reproduces the region verbatim, filler and all.
+ */
+const CYCLE_WINDOW = 50;
+const CYCLE_OCCURRENCES = 3;
+const CYCLE_MIN_WORDS = 400;
+
+export function isCyclicRepetition(text: string): boolean {
+  const words = text
+    .replace(/<think>[\s\S]*?(<\/think>|$)/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter((w) => /\p{L}/u.test(w));
+  if (words.length < CYCLE_MIN_WORDS) return false;
+
+  const seen = new Map<string, number>();
+  for (let i = 0; i <= words.length - CYCLE_WINDOW; i++) {
+    const gram = words.slice(i, i + CYCLE_WINDOW).join(" ").toLowerCase();
+    const count = (seen.get(gram) ?? 0) + 1;
+    if (count >= CYCLE_OCCURRENCES) return true;
+    seen.set(gram, count);
+  }
+  return false;
+}
+
+/** Either failure mode: the tight phrase loop, or the long paragraph cycle. */
+export function looksLooping(text: string): boolean {
+  return isDegenerate(text) || isCyclicRepetition(text);
+}
