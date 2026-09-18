@@ -119,8 +119,22 @@ export async function callModel(params: {
     result = await provider.completeChatWithTools!(messages, tools, opts);
   }
 
+  // The guard cut the stream: say so. Without this the turn simply ends mid-sentence and the only
+  // evidence is a token count nobody reads — which is exactly how a 12,000-token loop looked like
+  // "REI stopped answering for no reason".
+  if (result.stoppedEarly === "repetition") {
+    onChunk?.({
+      type: "status",
+      content:
+        `\n⚠️  [REI] The model started repeating itself — stopped it there. ` +
+        `What is above is partial. Lower the temperature, or raise the repetition penalty, ` +
+        `for this model.\n`,
+    });
+  }
+
   logger.logInfo("[tools] Response", {
     streamed,
+    ...(result.stoppedEarly ? { stoppedEarly: result.stoppedEarly } : {}),
     // deltaCount >> 1 proves token-by-token streaming; streamMs = span from first to last fragment.
     ...(streamed
       ? { deltaCount, streamMs: firstDeltaAt.t ? Date.now() - firstDeltaAt.t : 0 }
