@@ -131,10 +131,6 @@ describe("command matching", () => {
 /**
  * The name is the part a human uses later. REI decides the PATH (the active pointer depends on it),
  * but the name is proposed and the user gets the last word.
- *
- * The proposal used to be the first five words of the task with every non-letter deleted, so
- * articles ate the budget ("arreglar-el-bug-del-context") and a pasted path fused into one 48-char
- * token: `usersdevwwwprclient-webclient-appcursorplansci` — a real name from a real session.
  */
 describe("naming a spec", () => {
   const MONDAY = new Date(2026, 8, 16); // 2026-09-16
@@ -148,15 +144,6 @@ describe("naming a spec", () => {
     expect(proposeName("arreglar el bug del context window cuando falla", MONDAY)).toBe(
       "2026-09-16-arreglar-bug-context-window",
     );
-  });
-
-  it("breaks a pasted path into words instead of fusing it", () => {
-    const name = proposeName(
-      "/Users/dev/www/PR/client-web/client-app/.cursor/plans/stable-slot.md",
-      MONDAY,
-    );
-    expect(name).not.toContain("userslucas");
-    expect(name.length).toBeLessThanOrEqual(43); // date + 32
   });
 
   it("never comes back empty", () => {

@@ -37,12 +37,6 @@ const STOPWORDS = new Set([
 
 /**
  * A short, filesystem-safe name proposed for a spec (and the plan that follows it).
- *
- * The old version lowercased, deleted every non-letter and took the first FIVE words — which meant
- * articles and prepositions ate the budget ("arreglar-el-bug-del-context") and, because `/` and `.`
- * were deleted rather than treated as separators, a path pasted into the task collapsed into one
- * 48-char token: `usersdevwwwprclient-webclient-appcursorplansci`. The date goes in front so the
- * directory sorts chronologically, which is how you actually look for one of these later.
  */
 export function proposeName(task: string, today = new Date()): string {
   const date = [
