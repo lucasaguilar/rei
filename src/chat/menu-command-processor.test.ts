@@ -3,7 +3,13 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 import { processMenuCommand } from "./menu-command-processor.js";
-import { listSessions, loadCurrentSession, saveSession } from "./session-store.js";
+import {
+  getActiveSessionId,
+  listSessions,
+  loadCurrentSession,
+  saveSession,
+  setActiveSession,
+} from "./session-store.js";
 import {
   saveCurrentPlanContent,
   loadCurrentPlanContent,
@@ -24,6 +30,9 @@ describe("menu-command-processor session commands", () => {
 
   beforeEach(async () => {
     tmpWorkspace = await fs.mkdtemp(path.join(os.tmpdir(), "rei-session-test-"));
+    // The active session file is module state, and `/session save-as` rebinds it. Reset it per test
+    // so one test's rename cannot decide where the next one writes.
+    setActiveSession("current");
   });
 
   afterEach(async () => {
@@ -112,6 +121,81 @@ describe("menu-command-processor session commands", () => {
     expect(archived).toHaveLength(1);
     // Now always prefixed with the archive timestamp, then the custom name.
     expect(archived[0].id).toMatch(/^\d{4}-\d{2}-\d{2}-\d{6}-agregar-login-social$/);
+  });
+
+  it("/session load binds to the loaded session, so further turns go back into it", async () => {
+    const dir = path.join(tmpWorkspace, ".rei/sessions");
+    fsSync.mkdirSync(dir, { recursive: true });
+    fsSync.writeFileSync(
+      path.join(dir, "ayer.json"),
+      JSON.stringify({
+        version: 1,
+        workspace: tmpWorkspace,
+        mode: "agent",
+        createdAt: "2026-05-01T00:00:00.000Z",
+        updatedAt: "2026-05-01T00:00:00.000Z",
+        messages: [{ role: "user", content: "lo de ayer" }],
+      }),
+    );
+
+    const session: ChatSession = { mode: "agent", messages: [] };
+    const result = await processMenuCommand("/session load ayer", session, tmpWorkspace, provider);
+    expect(result.success).toBe(true);
+
+    // The point of the fix: the loaded session is now the ACTIVE file. Before, the load copied the
+    // messages into this instance's own file and left `ayer.json` frozen — every turn that followed
+    // was written somewhere the user never asked for.
+    expect(getActiveSessionId()).toBe("ayer");
+    saveSession(tmpWorkspace, [...result.newSession!.messages, { role: "user", content: "y hoy" }], "agent");
+    const reread = JSON.parse(fsSync.readFileSync(path.join(dir, "ayer.json"), "utf8"));
+    expect(reread.messages).toHaveLength(2);
+  });
+
+  it("/session load refuses a session another terminal holds open", async () => {
+    const dir = path.join(tmpWorkspace, ".rei/sessions");
+    fsSync.mkdirSync(dir, { recursive: true });
+    fsSync.writeFileSync(
+      path.join(dir, "ocupada.json"),
+      JSON.stringify({
+        version: 1, workspace: tmpWorkspace, mode: "agent",
+        createdAt: "2026-05-01T00:00:00.000Z", updatedAt: "2026-05-01T00:00:00.000Z",
+        messages: [{ role: "user", content: "x" }],
+      }),
+    );
+    // pid 1 always exists and is never us, so the lock reads as held by a live foreign process.
+    fsSync.writeFileSync(
+      path.join(dir, "ocupada.lock"),
+      JSON.stringify({ pid: 1, startedAt: "2026-05-01T00:00:00.000Z" }),
+    );
+
+    const session: ChatSession = { mode: "agent", messages: [] };
+    const result = await processMenuCommand("/session load ocupada", session, tmpWorkspace, provider);
+
+    expect(result.success).toBe(false);
+    expect(result.response).toContain("another terminal");
+    expect(getActiveSessionId()).toBe("current"); // we did not switch into it
+  });
+
+  it("names the session via /session save-as WITHOUT ending it", async () => {
+    const session: ChatSession = {
+      mode: "agent",
+      createdAt: "2026-05-16T00:00:00.000Z",
+      messages: [{ role: "user", content: "do something" }],
+    };
+
+    saveSession(tmpWorkspace, session.messages, session.mode, session.summary, session.createdAt);
+
+    const result = await processMenuCommand("/session save-as nombre-lindo", session, tmpWorkspace, provider);
+
+    expect(result.success).toBe(true);
+    // The contrast with /session archive, which is the whole reason this command exists: archive
+    // hands back an EMPTY newSession (the session is over), save-as hands back none at all, so the
+    // caller keeps the session it is already holding.
+    expect(result.newSession).toBeUndefined();
+
+    const sessions = listSessions(tmpWorkspace);
+    expect(sessions.map((s) => s.id)).toEqual(["nombre-lindo"]);
+    expect(sessions[0].createdAt).toBe("2026-05-16T00:00:00.000Z");
   });
 
   it("archives session with a custom name via /session archive", async () => {

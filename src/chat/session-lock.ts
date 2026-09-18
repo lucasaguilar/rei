@@ -1,6 +1,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { sessionsDir } from "./session-store.js";
+import {
+  getActiveSessionId,
+  renameActiveSession,
+  sanitizeSessionName,
+  sessionsDir,
+  setActiveSession,
+} from "./session-store.js";
 
 /**
  * Per-session advisory lock (multi-session safety, see docs/multi-session-spec.md). When an instance
@@ -104,4 +110,67 @@ export function releaseSessionLock(workspacePath: string, id: string): void {
   } catch {
     // best-effort; a stale lock is harmless (auto-stolen next time)
   }
+}
+
+/**
+ * Moves this instance's lock from the session it holds to `toId`, and binds it.
+ *
+ * The lock is taken once at startup, for whatever session the instance opened. Once a session can
+ * change its own file mid-run — `/session save-as` renames it, `/session load` switches to another
+ * one — that single acquisition stops describing reality: the instance would go on holding a lock
+ * on a name it no longer writes to, while writing to a name nobody locked. Two terminals would then
+ * share one history on last-write-wins, which is the exact corruption the lock exists to prevent.
+ *
+ * Refuses rather than steals when a live instance already holds `toId`, so switching into a session
+ * someone has open fails the same way opening it from the shell does.
+ */
+export function bindToSession(
+  workspacePath: string,
+  toId: string,
+  force = false,
+): LockResult {
+  const fromId = getActiveSessionId();
+  if (fromId === toId) return { ok: true };
+
+  const lock = acquireSessionLock(workspacePath, toId, force);
+  if (!lock.ok) return lock;
+
+  releaseSessionLock(workspacePath, fromId);
+  setActiveSession(toId);
+  return { ok: true };
+}
+
+export type ClaimNameResult =
+  | { ok: true; id: string; previousId: string }
+  | { ok: false; reason: "invalid" | "reserved" | "exists" }
+  | { ok: false; reason: "locked"; holderPid: number; startedAt: string };
+
+/**
+ * `/session save-as`: takes the lock on the new name, renames the running session onto it, and
+ * releases the old lock — in that order, so a failed rename never leaves a lock behind on a name
+ * this instance does not own.
+ */
+export function claimSessionName(
+  workspacePath: string,
+  name: string,
+  force = false,
+): ClaimNameResult {
+  const previousId = getActiveSessionId();
+  const id = sanitizeSessionName(name);
+  if (!id) return { ok: false, reason: "invalid" };
+  if (id === previousId) return { ok: true, id, previousId };
+
+  const lock = acquireSessionLock(workspacePath, id, force);
+  if (!lock.ok) {
+    return { ok: false, reason: "locked", holderPid: lock.holderPid, startedAt: lock.startedAt };
+  }
+
+  const renamed = renameActiveSession(workspacePath, name);
+  if (!renamed.ok) {
+    releaseSessionLock(workspacePath, id); // we never took this session — give the name back
+    return renamed;
+  }
+
+  releaseSessionLock(workspacePath, previousId);
+  return renamed;
 }

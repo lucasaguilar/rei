@@ -156,6 +156,62 @@ export function archiveCurrentSession(
   }
 }
 
+/** Filesystem-safe session id from whatever the user typed. Empty when nothing survives. */
+export function sanitizeSessionName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/\.json$/, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+}
+
+export type RenameActiveResult =
+  | { ok: true; id: string; previousId: string }
+  | { ok: false; reason: "invalid" | "reserved" | "exists" };
+
+/**
+ * Gives the RUNNING session a name and keeps writing to it — the "Save As" of a session.
+ *
+ * `/session archive` already names a session, but it names it on the way out: the file is dated,
+ * sealed, and a new empty session takes its place. That is the wrong shape for the common case,
+ * which is realising halfway through that the thing you are doing deserves a name and wanting to
+ * carry on doing it.
+ *
+ * Nothing in memory moves, because nothing needs to: the session is the message array the CLI is
+ * already holding, and this only changes which file `saveSession` writes it to. The rename is a
+ * `fs.rename`, so the history written so far moves with it rather than being left behind in an
+ * orphan file.
+ */
+export function renameActiveSession(
+  workspacePath: string,
+  name: string,
+): RenameActiveResult {
+  const id = sanitizeSessionName(name);
+  if (!id) return { ok: false, reason: "invalid" };
+  // `current.json` is the shared default file every non-CLI caller writes to; a session that
+  // renamed itself onto it would be picked up by the next server run as its own.
+  if (`${id}.json` === CURRENT_FILE) return { ok: false, reason: "reserved" };
+
+  const previousId = getActiveSessionId();
+  if (id === previousId) return { ok: true, id, previousId };
+
+  const dest = path.join(sessionsDir(workspacePath), `${id}.json`);
+  // Never overwrite: the file under that name is somebody's history, possibly a session open in
+  // another terminal. The caller reports the clash and the user picks another name.
+  if (fs.existsSync(dest)) return { ok: false, reason: "exists" };
+
+  const src = currentPath(workspacePath);
+  ensureSessionsDir(workspacePath);
+  // No file yet means the session has not been saved once; there is nothing to move, and the
+  // rebind below is enough — the next save lands on the new name.
+  if (fs.existsSync(src)) fs.renameSync(src, dest);
+
+  setActiveSession(id);
+  return { ok: true, id, previousId };
+}
+
 export interface SessionSummaryEntry {
   id: string; // filename without .json
   createdAt: string;

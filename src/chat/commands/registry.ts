@@ -1,5 +1,6 @@
 import type { CommandContext, CommandResult } from "./command-handler.js";
 import { sessionCommands } from "./session-commands.js";
+import { compactCommand } from "./compact-command.js";
 import { documentCommands } from "./document-commands.js";
 import { activeDocumentCommands } from "./active-document-commands.js";
 import { miscCommands } from "./misc-commands.js";
@@ -13,6 +14,9 @@ import { thinkCommands } from "./think-commands.js";
 import { sddCommands } from "./sdd-commands.js";
 import { activeCommands } from "./active-commands.js";
 import { traceCommands } from "./trace-commands.js";
+import { reasoningCommands } from "./reasoning-commands.js";
+import { rulesCommands } from "./rules-commands.js";
+import { themeCommands } from "./theme-commands.js";
 import { verboseCommands } from "./verbose-commands.js";
 import { roleAgentCommands } from "./role-agent-commands.js";
 
@@ -23,6 +27,7 @@ import { roleAgentCommands } from "./role-agent-commands.js";
  */
 const COMMAND_HANDLERS = [
   sessionCommands,
+  compactCommand,
   documentCommands,
   activeDocumentCommands,
   miscCommands,
@@ -37,6 +42,9 @@ const COMMAND_HANDLERS = [
   sddCommands,
   activeCommands,
   traceCommands,
+  reasoningCommands,
+  rulesCommands,
+  themeCommands,
   verboseCommands,
   // LAST on purpose: it matches `/<role-name>`, which is whatever is on disk. Every static command
   // above therefore wins a name collision, and a role that shadows one simply never fires — which

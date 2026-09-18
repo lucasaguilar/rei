@@ -6,16 +6,16 @@ import {
   archiveCurrentSession,
   currentPath,
   listSessions,
+  getActiveSessionId,
   loadSessionById,
   saveSession,
 } from "../session-store.js";
+import { bindToSession, claimSessionName } from "../session-lock.js";
 import { estimateTokens } from "../helpers/token-estimator.js";
 import {
   clearCurrentPlan,
   restoreCurrentPlanFromSession,
 } from "../plan-tracker.js";
-import { resolveSessionModel } from "../manual-model.js";
-import { compactorModelFor, compactSession } from "../compactor.js";
 
 /**
  * Recursively counts files and collects top-level folders, excluding hidden dirs
@@ -53,114 +53,20 @@ function getRepoSummary(workspacePath: string): { fileCount: number; topFolders:
 }
 
 /**
- * Session lifecycle: `/session` (info · new · archive · list · load) and `/compact`.
- * Extracted verbatim from menu-command-processor (Phase 1 of the refactor — no behavior change).
+ * Session lifecycle: `/session` — info · save-as · new · archive · list · load.
+ * `/compact` lives in compact-command.ts: it edits the history, it does not move the session.
  */
 export const sessionCommands: CommandHandler = {
   match: (c) =>
     c === "/session" ||
     c === "/session info" ||
     c === "/session list" ||
-    c === "/compact" ||
+    /^\/session\s+save(?:-as)?(?:\s+.+)?$/.test(c) ||
     /^\/session\s+new(?:\s+.+)?$/.test(c) ||
     /^\/session\s+archive(?:\s+.+)?$/.test(c) ||
     /^\/session\s+load\s+\S+$/.test(c),
 
   run: async ({ command: trimmed, session, workspacePath, provider }): Promise<CommandResult> => {
-    if (trimmed === "/compact") {
-      const nonSystem = session.messages.filter((m) => m.role !== "system");
-      if (nonSystem.length < 2) {
-        return {
-          success: false,
-          response: "[REI] Session is too short to compact (nothing to summarize).",
-        };
-      }
-
-      // No override → summarize with the model this session is ALREADY running on. Falling back to
-      // the provider's default meant `<PREFIX>_MODEL` (the ask/planning one), so on a local backend
-      // /compact could load a SECOND model just to write a summary.
-      const compactorModel = compactorModelFor(
-        resolveSessionModel(session, workspacePath),
-      );
-
-      // Warn if the model name looks like OpenRouter format but the provider is Ollama.
-      const providerName = (process.env.MODEL_PROVIDER ?? "").toLowerCase();
-      const modelWarning =
-        compactorModel && providerName === "ollama" && compactorModel.includes("/")
-          ? `\n⚠️  COMPACTOR_MODEL="${compactorModel}" looks like OpenRouter format. ` +
-            `For Ollama use the local name (e.g. qwen3:4b). ` +
-            `Run \`ollama pull qwen3:4b\` and set COMPACTOR_MODEL=qwen3:4b.`
-          : "";
-
-      try {
-        const beforeCount = nonSystem.length;
-        const { messages: compactedMessages, skipped, model: summarizedBy } = await compactSession({
-          messages: session.messages,
-          provider,
-          modelOverride: compactorModel,
-          force: true, // manual /compact always bypasses the auto-threshold
-        });
-        const afterCount = compactedMessages.filter((m) => m.role !== "system").length;
-
-        // Compaction fails softly so a bad summary never kills a turn — which means SUCCESS here is
-        // not "no exception", it is "the history actually shrank". Reporting the former printed
-        // "Session compacted (model: qwen/qwen3-4b). 117 → 117 messages" over a 404, and the count
-        // that proved it was right there in the message.
-        if (skipped) {
-          return {
-            success: false,
-            recordInSession: false,
-            response:
-              `[REI] Nothing was compacted — the full history is intact (${beforeCount} messages).\n` +
-              `  Reason: ${skipped}` +
-              (compactorModel
-                ? `\n  COMPACTOR_MODEL is set to '${compactorModel}'. Clear it to summarize with the ` +
-                  `model already loaded — no second model to load, and no timeout on the call.`
-                : ""),
-          };
-        }
-
-        saveSession(
-          workspacePath,
-          compactedMessages,
-          session.mode,
-          session.summary,
-          session.createdAt,
-        );
-
-        // The model that WROTE it, not the one we asked for: a failed COMPACTOR_MODEL falls back to
-        // the provider's, and crediting the summary to a model that 404'd is how this command came
-        // to report `Session compacted (model: qwen/qwen3-4b)` over a failure.
-        const modelLabel = summarizedBy ? ` (model: ${summarizedBy})` : "";
-        const fellBack =
-          compactorModel && summarizedBy && summarizedBy !== compactorModel
-            ? `\n⚠️  COMPACTOR_MODEL='${compactorModel}' failed; summarized with '${summarizedBy}' instead.`
-            : "";
-        return {
-          success: true,
-          response:
-            `[REI] Session compacted${modelLabel}. ` +
-            `${beforeCount} → ${afterCount} messages. ` +
-            `Older turns were summarized to preserve context window.` +
-            fellBack +
-            modelWarning,
-          newSession: { ...session, messages: compactedMessages },
-        };
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        const hint =
-          compactorModel && errMsg.toLowerCase().includes("not found")
-            ? `\nHint: model "${compactorModel}" was not found. ` +
-              (providerName === "ollama"
-                ? `Run \`ollama pull ${compactorModel}\` or fix COMPACTOR_MODEL in your .env.`
-                : `Check COMPACTOR_MODEL in your .env.`)
-            : "";
-        return {
-          success: false,
-          response: `[REI] Error compacting session: ${errMsg}${hint}`,
-        };
-      }
-    }
 
     if (trimmed === "/session") {
       const nonSystem = session.messages.filter((m) => m.role !== "system");
@@ -223,6 +129,56 @@ export const sessionCommands: CommandHandler = {
           `  Total files scanned: ${repoSummary.fileCount}\n` +
           `  Top-level folders: ${repoSummary.topFolders.join(", ")}`,
         recordInSession: false,
+      };
+    }
+
+    // `/session save-as <name>` — name the session you are IN, and stay in it. `/session archive`
+    // names one on the way out; this is the other half, and the difference is the whole point.
+    const saveAsMatch = trimmed.match(/^\/session\s+save(?:-as)?(?:\s+(.+))?$/);
+    if (saveAsMatch) {
+      const requested = saveAsMatch[1]?.trim();
+      if (!requested) {
+        return {
+          success: false,
+          recordInSession: false,
+          response:
+            `[REI] Usage: /session save-as <name>\n` +
+            `Every turn is already saved automatically — this gives the session a NAME you can ` +
+            `come back to with \`rei -s <name>\`, without interrupting it.`,
+        };
+      }
+
+      const result = claimSessionName(workspacePath, requested);
+      if (!result.ok) {
+        const why =
+          result.reason === "exists"
+            ? `A session named '${requested}' already exists. Pick another name, or open that one with /session load ${requested}.`
+            : result.reason === "locked"
+              ? `A session named '${requested}' is open in another terminal (PID ${result.holderPid}, since ${result.startedAt}).`
+              : result.reason === "reserved"
+                ? `'${requested}' is reserved for REI's default session file.`
+                : `'${requested}' leaves nothing usable as a file name (letters and digits only).`;
+        return { success: false, recordInSession: false, response: `[REI] ${why}` };
+      }
+
+      // Re-saved immediately so the named file is on disk even if this session never takes another
+      // turn — the point of naming it is being able to come back to it.
+      saveSession(
+        workspacePath,
+        session.messages,
+        session.mode,
+        session.summary,
+        session.createdAt,
+      );
+
+      return {
+        success: true,
+        recordInSession: false,
+        response:
+          result.id === result.previousId
+            ? `[REI] This session is already named '${result.id}'.`
+            : `[REI] Session saved as '${result.id}' and still running — nothing was interrupted.\n` +
+              `Reopen it later with \`rei -s ${result.id}\`.`,
       };
     }
 
@@ -304,8 +260,28 @@ export const sessionCommands: CommandHandler = {
         return { success: false, response: `[REI] Session not found: ${id}` };
       }
 
-      const currentHadContent = session.messages.length > 0;
-      const archivedName = currentHadContent ? archiveCurrentSession(workspacePath) : null;
+      // The session being left keeps its OWN file — every instance has had one since multi-session,
+      // so there is nothing to rescue. Only the legacy shared `current.json` still needs archiving,
+      // because the load below would otherwise overwrite it.
+      const leaving = getActiveSessionId();
+      const archivedName =
+        session.messages.length > 0 && leaving === "current"
+          ? archiveCurrentSession(workspacePath)
+          : null;
+
+      // Bind to the loaded session, so what you do NEXT is written back into it. Without this the
+      // load was one-way: you continued in your own file and the session you opened stayed frozen
+      // at the state you found it in — the work silently went somewhere else.
+      const bound = bindToSession(workspacePath, id);
+      if (!bound.ok) {
+        return {
+          success: false,
+          recordInSession: false,
+          response:
+            `[REI] Session '${id}' is open in another terminal (PID ${bound.holderPid}, since ` +
+            `${bound.startedAt}). It was not loaded — two instances writing one history lose turns.`,
+        };
+      }
 
       saveSession(
         workspacePath,
@@ -319,8 +295,9 @@ export const sessionCommands: CommandHandler = {
       return {
         success: true,
         response: archivedName
-          ? `[REI] Archived current session as ${archivedName}. Loaded session ${id}.`
-          : `[REI] Loaded session ${id}.`,
+          ? `[REI] Archived current session as ${archivedName}. Loaded session ${id} — it is now the active one, and further turns are saved into it.`
+          : `[REI] Loaded session ${id} — it is now the active one, and further turns are saved into it.\n` +
+            `The session you were in stays on disk as '${leaving}'.`,
         newSession: {
           messages: loaded.messages,
           mode: loaded.mode,
