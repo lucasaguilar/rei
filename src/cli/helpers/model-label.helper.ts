@@ -1,5 +1,6 @@
 import type { SessionMode } from "../../chat/types.js";
 import { resolveModelForMode } from "../../providers/provider-factory.js";
+import { normalizeProviderName } from "../../providers/provider-names.js";
 
 /**
  * Resolves the active model label and maps it to its corresponding brand icon or emoji
@@ -11,12 +12,12 @@ export function resolveActiveModelLabel(
   actualModel?: string,
 ): string {
   const isAgentMode = mode === "agent";
-  const agentProvider = process.env.AGENT_MODEL_PROVIDER?.trim().toLowerCase();
+  const agentProvider = normalizeProviderName(process.env.AGENT_MODEL_PROVIDER ?? "");
 
   const provider =
     isAgentMode && agentProvider
       ? agentProvider
-      : (process.env.MODEL_PROVIDER ?? "").trim().toLowerCase();
+      : normalizeProviderName(process.env.MODEL_PROVIDER ?? "");
 
   // `actualModel` is what the turn REPORTED running on, and it wins: an active role's
   // preferredModel changes the model without changing the mode, so re-deriving from the mode
@@ -32,7 +33,7 @@ export function resolveActiveModelLabel(
     groq: "⚡",
     gemini: "♊",
     huggingface: "🤗",
-    llmstudio: "💻",
+    lmstudio: "💻",
     mock: "🧪",
   };
 

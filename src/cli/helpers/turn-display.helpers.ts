@@ -1,4 +1,5 @@
 import { formatCodeDiff } from "../markdown-renderer.js";
+import { code, paint } from "../theme/palette.js";
 import { isVerboseOutput } from "../../config/output-verbosity.js";
 import { estimateTokens } from "../../chat/helpers/token-estimator.js";
 
@@ -15,7 +16,7 @@ import { estimateTokens } from "../../chat/helpers/token-estimator.js";
 export function formatThinkingSummary(chars: number): string {
   // ~4 chars per token is the usual English/Spanish approximation; the point is the magnitude, not
   // an exact count — "did it think briefly or for a page?".
-  return `\x1b[3;2m💭  thought for ${Math.round(chars / 4)} tokens\x1b[0m\n`;
+  return `${code("thinking")}${paint("dim", `💭  thought for ${Math.round(chars / 4)} tokens`)}\n`;
 }
 
 export interface DisplayEdit {
@@ -27,11 +28,11 @@ export interface DisplayEdit {
 /** The edits a turn applied: `file +N -M` when quiet, the full hunks when verbose. */
 export function formatEdits(edits: readonly DisplayEdit[]): string[] {
   if (edits.length === 0) return [];
-  const out: string[] = ["\n\x1b[1;33mChanges:\x1b[0m"];
+  const out: string[] = [`\n${paint("heading", "Changes:")}`];
   for (const edit of edits) {
     if (isVerboseOutput()) {
       out.push(
-        `\x1b[1mFile:\x1b[0m ${edit.file}\n${formatCodeDiff(edit.search, edit.replace)}`,
+        `${paint("strong", "File:")} ${edit.file}\n${formatCodeDiff(edit.search, edit.replace)}`,
       );
       continue;
     }
@@ -39,7 +40,9 @@ export function formatEdits(edits: readonly DisplayEdit[]): string[] {
     // material — `git diff` shows it whenever it is actually wanted.
     const added = edit.replace ? edit.replace.split("\n").length : 0;
     const removed = edit.search ? edit.search.split("\n").length : 0;
-    out.push(`  \x1b[1m${edit.file}\x1b[0m  \x1b[32m+${added}\x1b[0m \x1b[31m-${removed}\x1b[0m`);
+    out.push(
+      `  ${paint("strong", edit.file)}  ${paint("success", `+${added}`)} ${paint("danger", `-${removed}`)}`,
+    );
   }
   return out;
 }
@@ -48,6 +51,8 @@ export function formatEdits(edits: readonly DisplayEdit[]): string[] {
 export interface PhaseState {
   activeStatus?: string;
   activeStatusText?: string;
+  /** The rolling reasoning tail shown on the status row (see ChatUIState.thinkingTail). */
+  thinkingTail?: string;
   statusStartedAt?: number;
   contextTokens?: number;
   contextWindow?: number;
@@ -98,5 +103,8 @@ export function publishContextReading(
 export function beginPhase(state: PhaseState, status: string): void {
   state.activeStatus = status;
   state.activeStatusText = undefined;
+  // The tail belongs to the thinking that just ended. Carrying it into the next phase would leave
+  // the model's last half-sentence sitting next to a label about something else.
+  state.thinkingTail = undefined;
   state.statusStartedAt = Date.now();
 }

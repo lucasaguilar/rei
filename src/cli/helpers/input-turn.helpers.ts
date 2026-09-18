@@ -4,24 +4,25 @@ import { renderMarkdown } from "../markdown-renderer.js";
 import type { InputHandlerContext } from "../models/input-handler.types.js";
 import { saveSession } from "../../chat/session-store.js";
 import { extractSREdits } from "../../agent-mode/response-handler.js";
-import { formatContextGauge } from "../markdown-renderer.js";
 import { resolveActiveModelLabel } from "./model-label.helper.js";
 // Re-exported: it lived here, and the status bar + its tests import it from this path.
 export { resolveActiveModelLabel } from "./model-label.helper.js";
-import { isVerboseOutput } from "../../config/output-verbosity.js";
+import { isReasoningShown, isVerboseOutput } from "../../config/output-verbosity.js";
+import { code, paint } from "../theme/palette.js";
 import {
   beginPhase,
   formatEdits,
   formatThinkingSummary,
-  publishContextReading,
 } from "./turn-display.helpers.js";
-import { estimateMessagesTokens } from "../../chat/helpers/token-estimator.js";
+import { reportTurnMetrics } from "./turn-metrics.helpers.js";
+import { publishCompactedReading, sessionSizeWarning } from "./startup-gauge.helper.js";
 import { getContextWindow } from "../../config/model-runtime.js";
 import { stripNativeToolSyntax } from "../../core/helpers/turn-message.helpers.js";
 import { describeAttachedImages } from "../../tools/vision-sidecar.js";
 import { resolveModelForMode } from "../../providers/provider-factory.js";
 import type { SessionMode } from "../../chat/types.js";
 import { displayUserLabel } from "./chat.helpers.js";
+import { appendThinkingTail } from "../constants/chat.constants.js";
 
 /**
  * Strips ANSI codes OUTSIDE fenced code blocks, but PRESERVES them inside ``` fences.
@@ -90,7 +91,7 @@ export async function handleInputTurn(
       trimmed,
       ctx.workspacePath,
       (message) => {
-        actions.pushTranscript(`\x1b[2m${message}\x1b[0m`);
+        actions.pushTranscript(paint("dim", message));
         actions.draw();
       },
     );
@@ -102,7 +103,7 @@ export async function handleInputTurn(
       if (vision.documents.length > 0)
         parts.push(`${vision.documents.length} PDF(s)`);
       actions.pushTranscript(
-        `\x1b[2m🖼️  ${parts.join(" + ")} analyzed; extracted text added to context.\x1b[0m`,
+        paint("dim", `🖼️  ${parts.join(" + ")} analyzed; extracted text added to context.`),
       );
       // Auto-activate the freshly-saved OCR doc as the /ask-document target (last one wins), so the
       // user can ask grounded questions without re-typing the path. Store it workspace-relative.
@@ -113,7 +114,10 @@ export async function handleInputTurn(
         session.activeDocument = active;
         state.activeDocument = active;
         actions.pushTranscript(
-          `\x1b[2m📄 Active document: ${active} — ask it with /ask-document <question> (or /doc clear)\x1b[0m`,
+          paint(
+            "dim",
+            `📄 Active document: ${active} — ask it with /ask-document <question> (or /doc clear)`,
+          ),
         );
       }
       actions.pushTranscript("");
@@ -121,19 +125,14 @@ export async function handleInputTurn(
     }
   } catch (err) {
     actions.pushTranscript(
-      `\x1b[33m⚠️  Vision sidecar error: ${err instanceof Error ? err.message : String(err)}\x1b[0m`,
+      paint("warn", `⚠️  Vision sidecar error: ${err instanceof Error ? err.message : String(err)}`),
     );
     actions.draw();
   }
 
-  const estimatedTokens = estimateMessagesTokens(session.messages);
-  const contextWindow = getContextWindow();
-  const warningThreshold = Math.round(contextWindow * 0.75);
-  if (estimatedTokens > warningThreshold) {
-    actions.pushTranscript(
-      `\x1b[33m⚠️  [REI] Warning: The accumulated session exceeds ${warningThreshold.toLocaleString()} tokens (approximately ${estimatedTokens.toLocaleString()} tokens). ` +
-        `If you notice slowdowns or context-related errors, consider using /session new.\x1b[0m`,
-    );
+  const sizeWarning = sessionSizeWarning(session);
+  if (sizeWarning) {
+    actions.pushTranscript(sizeWarning);
     actions.pushTranscript("");
   }
 
@@ -172,6 +171,16 @@ export async function handleInputTurn(
       // belongs to this turn. Anything typed after the last drain survives for the next one.
       drainUserMessages: () => state.queuedUserMessages?.splice(0) ?? [],
       onStatus: (status) => {
+        // Not a phase: the history just SHRANK. Re-measure and republish now — the bar is showing a
+        // figure taken before the compaction, and the end-of-turn reading that would correct it is
+        // minutes away in an agent turn. Handled before the dedupe so two compactions in one turn
+        // (auto at the start, the overflow retry later) both land.
+        if (status === "memory_compacted") {
+          publishCompactedReading(state, agent, session);
+          actions.draw();
+          return;
+        }
+
         if (lastStatus === status) return;
         if (status === "producing_response") return;
 
@@ -203,12 +212,27 @@ export async function handleInputTurn(
         // whitespace so paragraph breaks in the reasoning render correctly.
         if (!liveContentShown && !cleanToken.trim()) continue;
 
-        // Quiet mode does not print the reasoning — on a reasoning model it is most of the screen,
-        // and it buries the tool calls and the answer. It is still COUNTED, and reported as one
-        // line per block, so the length of the thinking stays visible without being readable.
-        if (!isVerboseOutput()) {
+        // With the reasoning stream off, the thinking is still COUNTED and reported as one line
+        // per block, so its length stays visible without being readable. That is the right trade
+        // on a model that thinks for most of the screen — but it is no longer the default, because
+        // on a local model the thinking is also the only sign of life before the first tool call.
+        if (!isReasoningShown()) {
           thinkingChars += cleanToken.length;
           continue; // the spinner keeps saying REI is working — see onStatus below
+        }
+
+        // DEFAULT: the reasoning rolls along the status line instead of being streamed.
+        //
+        // Streaming it free-hand costs the input prompt: every token calls streamText, which erases
+        // the drawn block to write — so the prompt is gone for the whole think, and a keystroke
+        // repaints it INTO the half-written sentence, whose row the next token then wipes. Exactly
+        // when you want to type ("está sobrepensando, le corrijo") is when you were typing blind.
+        // As drawn state it repaints with the block, the spinner keeps ticking, and the prompt
+        // stays put. Verbose still dumps the whole stream — that is what verbose is for.
+        if (!isVerboseOutput()) {
+          thinkingChars += cleanToken.length;
+          state.thinkingTail = appendThinkingTail(state.thinkingTail, cleanToken);
+          continue; // the spinner's 100ms redraw carries it to the screen
         }
 
         // Stop the spinner EVERY time reasoning is about to stream, not just the first time in the
@@ -224,7 +248,7 @@ export async function handleInputTurn(
         liveContentShown = true;
         // Collapse 3+ consecutive newlines to 2 to avoid excessive blank lines in thinking
         const normalized = cleanToken.replace(/\n{3,}/g, "\n\n");
-        actions.streamText(`\x1b[3;2m${normalized}\x1b[0m`);
+        actions.streamText(`${code("thinking")}${paint("dim", normalized)}`);
       } else {
         // text (\x11) or raw status/agent-response token: accumulate in buffer
         const wasInside = isInsideXmlBlock(buffer);
@@ -234,6 +258,9 @@ export async function handleInputTurn(
         if (state.activeStatus && cleanToken.trim()) {
           actions.stopSpinner();
           state.activeStatus = undefined;
+          // The answer is arriving: the thinking that produced it is over, and its last half
+          // sentence must not sit on screen next to the reply.
+          state.thinkingTail = undefined;
         }
 
         const shownLive =
@@ -296,7 +323,7 @@ export async function handleInputTurn(
       }
       // Distinct badge so the user instantly spots REI's actual answer (vs thinking/status/
       // diffs). White-bold on magenta background — visually unmistakable.
-      actions.pushTranscript(`\x1b[1;97;45m REI \x1b[0m ${rendered}`);
+      actions.pushTranscript(`${paint("badge", " REI ")} ${rendered}`);
     }
 
     // Display formatted S&R diffs (ANSI diff, already styled by formatCodeDiff)
@@ -304,71 +331,14 @@ export async function handleInputTurn(
       actions.pushTranscript(line);
     }
 
-    if (firstTokenTime < 0) firstTokenTime = endTime;
-    const prepMs =
-      callingModelTime > 0 ? Math.max(0, callingModelTime - startTime) : 0;
-    const ttftMs =
-      callingModelTime > 0
-        ? Math.max(0, firstTokenTime - callingModelTime)
-        : Math.max(0, firstTokenTime - startTime);
-    const generationMs = Math.max(1, endTime - firstTokenTime);
-
-    // Token counts: prefer the backend's REAL usage (aggregated across the turn's model calls);
-    // fall back to the chars/4 estimate when the provider doesn't report it.
-    const realUsage = agent.getLastTurnUsage();
-    let sentTokens: number;
-    let recTokens: number;
-    if (realUsage) {
-      // Real numbers from the backend — no `~`, and the tools array is already counted in
-      // promptTokens (the backend tokenized it), so no separate tools estimate is added.
-      sentTokens = realUsage.promptTokens ?? 0;
-      recTokens =
-        realUsage.completionTokens ??
-        Math.max(1, Math.round(totalOutputChars / 4));
-    } else {
-      // Approximate token counts (1 token ~= 4 chars in mixed code/text prompts)
-      const inputMsgs = session.messages.slice(0, -1);
-      const inputChars = inputMsgs.reduce(
-        (acc, m) => acc + m.content.length,
-        0,
-      );
-      const historyTokens = Math.round(inputChars / 4);
-      // The function-calling tools array (built-in + MCP schemas) is sent on every agent
-      // request but is NOT in the message history — include it so the gauge reflects real
-      // context usage. Large MCP servers can occupy a big share of the window invisibly.
-      const toolsTokens = agent.estimateActiveToolsTokens(session.mode);
-      sentTokens = historyTokens + toolsTokens;
-      recTokens = Math.max(1, Math.round(totalOutputChars / 4));
-    }
-
-    // Speed = decoded tokens (visible + thinking) / generation time.
-    // `generationMs` is clamped to >= 1ms so single-chunk turns never produce Infinity.
-    const speedValue = recTokens / (generationMs / 1000);
-    const formatSpeed = (value: number): string =>
-      value > 0 && value < 0.1 ? "<0.1" : value.toFixed(1);
-    const speedText = `${formatSpeed(speedValue)} tok/s`;
-
-    const activeModel = resolveActiveModelLabel(
-      session.mode,
-      agent.getLastTurnModel(),
-    );
-
-    // Visual context-usage gauge: how much of the assumed window the prompt consumed this turn.
-    // Helps spot when history/files are about to overflow (and explains slow prefill).
-    const gauge = formatContextGauge(
-      sentTokens,
-      getContextWindow(),
-      activeModel,
-    );
-    if (gauge) actions.pushTranscript(`\n${gauge}`);
-    publishContextReading(state, sentTokens, getContextWindow(), activeModel);
-
-    // `~` marks estimated counts; real backend-reported numbers are shown bare.
-    const approx = realUsage ? "" : "~";
-    actions.pushTranscript(
-      `${gauge ? "" : "\n"}\x1b[90m⏱️  Prep: ${(prepMs / 1000).toFixed(2)}s | TTFT(model): ${(ttftMs / 1000).toFixed(2)}s | Speed: ${speedText} | Tokens: ${approx}${sentTokens} tok in, ${approx}${recTokens} tok out\x1b[0m`,
-    );
-    actions.pushTranscript("");
+    reportTurnMetrics({
+      state,
+      session,
+      agent,
+      pushTranscript: actions.pushTranscript,
+      totalOutputChars,
+      timings: { firstTokenTime, endTime, callingModelTime, startTime },
+    });
   } catch (err: unknown) {
     actions.pushTranscript(
       `Error: ${err instanceof Error ? err.message : String(err)}`,
@@ -376,6 +346,7 @@ export async function handleInputTurn(
   } finally {
     state.busy = false;
     state.activeStatus = undefined;
+    state.thinkingTail = undefined;
     actions.stopSpinner();
 
     saveSession(

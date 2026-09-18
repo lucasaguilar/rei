@@ -2,6 +2,7 @@ import type { Agent } from "../../core/agent.js";
 import type { ChatSession } from "../../chat/types.js";
 import { formatContextGauge } from "../markdown-renderer.js";
 import { getContextWindow } from "../../config/model-runtime.js";
+import { estimateMessagesTokens } from "../../chat/helpers/token-estimator.js";
 import { resolveModelForMode } from "../../providers/provider-factory.js";
 import { resolveModelTuning, setActiveModelTuning } from "../../config/model-tuning.js";
 import { resolveActiveModelLabel } from "./input-turn.helpers.js";
@@ -138,4 +139,45 @@ export function refreshStickyReading(
   state.contextWindow = getContextWindow();
   state.contextTokens = historyTokens + agent.estimateActiveToolsTokens(session.mode);
   refreshActiveArtifacts(state, workspacePath);
+}
+
+/**
+ * Republishes the bar's token reading after a COMPACTION, mid-turn.
+ *
+ * The end-of-turn reading (input-turn.helpers) is the authoritative one, but an agent turn compacts
+ * at its start and then runs for minutes — so without this the bar spends the whole turn showing a
+ * history that no longer exists, and the compaction appears to have done nothing.
+ *
+ * The model label is deliberately left alone: nothing about the model changed, only its history.
+ * Uses the same chars/4 arithmetic as the turn's own fallback estimate, so this provisional figure
+ * and the measured one that replaces it are on the same scale. The whole history IS counted here,
+ * including the message being sent — at this point in a turn it is the user's turn, not a reply.
+ */
+export function publishCompactedReading(
+  state: ContextBar,
+  agent: Pick<Agent, "estimateActiveToolsTokens">,
+  session: ChatSession,
+): void {
+  const historyTokens = Math.round(
+    session.messages.reduce((acc, m) => acc + (m.content?.length ?? 0), 0) / 4,
+  );
+  state.contextTokens = historyTokens + agent.estimateActiveToolsTokens(session.mode);
+  state.contextWindow = getContextWindow();
+}
+
+/**
+ * The pre-turn "this session is getting big" warning, or null when it is not.
+ *
+ * Fires at 75% of the window — ABOVE the 65% where auto-compaction kicks in (compactor.ts), so by
+ * the time you see it the compactor has already had its turn and the history is still large.
+ */
+export function sessionSizeWarning(session: ChatSession): string | null {
+  const estimatedTokens = estimateMessagesTokens(session.messages);
+  const threshold = Math.round(getContextWindow() * 0.75);
+  if (estimatedTokens <= threshold) return null;
+  return (
+    `\x1b[33m⚠️  [REI] Warning: The accumulated session exceeds ${threshold.toLocaleString()} tokens ` +
+    `(approximately ${estimatedTokens.toLocaleString()} tokens). ` +
+    `If you notice slowdowns or context-related errors, consider using /session new.\x1b[0m`
+  );
 }
