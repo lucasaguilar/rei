@@ -18,10 +18,10 @@ scripts/launch-rei.config.js
 .aider*
 
 # Visual Studio Code
+# launch.json stays local: debug configs carry absolute paths and LAN addresses.
 .vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json
-!.vscode/launch.json
 !.vscode/extensions.json
 !.vscode/mcp.json
 .history/*

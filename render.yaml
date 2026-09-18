@@ -1,0 +1,43 @@
+# Blueprint de despliegue para Render (https://render.com)
+#
+# Uso: en Render → "New" → "Blueprint" → elegí este repo. Render crea el
+# servicio ya configurado (plan, puerto, health check, env vars).
+#
+# Nota: el Dockerfile ya define REI_WORKSPACE_PATH=/app y ALLOWED_WORKSPACES=/app,
+# así que el agente opera sobre el propio repo de REI. No hace falta repetirlo acá.
+
+services:
+  - type: web # expone un puerto (el server OpenAI-compatible), no es un worker
+    name: rei
+    runtime: docker # usa el Dockerfile de la raíz
+    plan: starter # $7/mes, 512MB, no duerme. Cambiar a "free" si querés el plan sin costo (duerme tras ~15 min sin tráfico).
+    # /healthz responde 200 SIN autenticación, que es la razón de que exista: el health check de
+    # Render no puede mandar el bearer token, y contra /models (que sí lo exige) recibiría un 401
+    # y reiniciaría el servicio en loop.
+    healthCheckPath: /healthz
+    env:
+      # Provider en la nube. El .env local usa "lmstudio" (IP de LAN 192.168.x.x)
+      # que NO es alcanzable desde Render, por eso se sobreescribe con OpenRouter.
+      # Para usar otro provider, cambiá MODEL_PROVIDER y la key/model de abajo
+      # (groq → GROQ_API_KEY/GROQ_MODEL, gemini → GEMINI_API_KEY/GEMINI_MODEL).
+      MODEL_PROVIDER: openrouter
+      OPENROUTER_MODEL: qwen/qwen3.6-plus
+      # La key es secreta: sync:false la crea vacía para que la setees por la UI
+      # de Render (Environment) sin commitearla a git.
+      OPENROUTER_API_KEY:
+        sync: false
+      # Laminar (telemetría) apunta a localhost en el .env local; en la nube no
+      # existe, así que se deshabilita para no agregar latencia al arranque.
+      REI_TELEMETRY_DISABLED: "true"
+      # OBLIGATORIO. El Dockerfile abre el server a 0.0.0.0, y con eso server.ts NO ARRANCA sin
+      # este token: lo que queda publicado es un agente que escribe archivos y corre comandos, así
+      # que la puerta no puede quedar abierta. sync:false lo crea vacío → generá un secreto largo
+      # y cargalo en Render → Environment ANTES del primer deploy, o el servicio no levanta.
+      # Los clientes lo mandan como `Authorization: Bearer <token>`.
+      REI_SERVER_TOKEN:
+        sync: false
+      # Con token, el CORS deja de ser `*`: un `*` permitiría que cualquier página que visites
+      # replique un request con credenciales adjuntas. Poné acá el origen de tu frontend
+      # (https://tu-app.com) o dejalo vacío si solo lo vas a usar desde un IDE o curl.
+      REI_SERVER_ORIGIN:
+        sync: false
