@@ -8,7 +8,7 @@ const XENOVA_DEFAULT_MODEL = "Xenova/multilingual-e5-small";
 
 // The embedder is now PARAMETRIZABLE. The default is the in-process Xenova MiniLM (zero-config,
 // English-centric, 384-dim). For multilingual docs (Spanish, etc.) point it at a server model
-// via REI_EMBEDDER_PROVIDER=llmstudio (OpenAI-compatible /v1/embeddings, e.g. bge-m3). Indexing
+// via REI_EMBEDDER_PROVIDER=lmstudio (OpenAI-compatible /v1/embeddings, e.g. bge-m3). Indexing
 // and querying MUST use the same embedder — getEmbedderId() is stamped into the index so a
 // change triggers a reindex (different models emit different dims → vector spaces don't align).
 
@@ -132,7 +132,6 @@ export async function generateEmbedding(
   switch (embedderProvider()) {
     case "ollama":
       return embedOllama(input);
-    case "llmstudio":
     case "lmstudio":
     case "openai":
       return embedOpenAICompatible(input);

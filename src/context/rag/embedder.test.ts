@@ -29,15 +29,15 @@ describe("getEmbedderId", () => {
   });
 
   it("reflects a configured server embedder (provider:model)", () => {
-    process.env.REI_EMBEDDER_PROVIDER = "llmstudio";
+    process.env.REI_EMBEDDER_PROVIDER = "lmstudio";
     process.env.REI_EMBEDDER_MODEL = "bge-m3";
-    expect(getEmbedderId()).toBe("llmstudio:bge-m3");
+    expect(getEmbedderId()).toBe("lmstudio:bge-m3");
   });
 });
 
 describe("generateEmbedding — OpenAI-compatible backend (LM Studio)", () => {
   it("POSTs to /embeddings and returns the vector", async () => {
-    process.env.REI_EMBEDDER_PROVIDER = "llmstudio";
+    process.env.REI_EMBEDDER_PROVIDER = "lmstudio";
     process.env.REI_EMBEDDER_MODEL = "bge-m3";
     process.env.REI_EMBEDDER_BASE_URL = "http://x/v1";
 
@@ -59,13 +59,13 @@ describe("generateEmbedding — OpenAI-compatible backend (LM Studio)", () => {
   });
 
   it("throws when no model is configured for a server embedder", async () => {
-    process.env.REI_EMBEDDER_PROVIDER = "llmstudio";
+    process.env.REI_EMBEDDER_PROVIDER = "lmstudio";
     delete process.env.REI_EMBEDDER_MODEL;
     await expect(generateEmbedding("x")).rejects.toThrow(/REI_EMBEDDER_MODEL/);
   });
 
   it("prefixes the input with query:/passage: for an e5 model (and only e5)", async () => {
-    process.env.REI_EMBEDDER_PROVIDER = "llmstudio";
+    process.env.REI_EMBEDDER_PROVIDER = "lmstudio";
     process.env.REI_EMBEDDER_MODEL = "intfloat/multilingual-e5-small";
     process.env.REI_EMBEDDER_BASE_URL = "http://x/v1";
 

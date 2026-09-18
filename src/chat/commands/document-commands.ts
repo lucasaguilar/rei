@@ -13,6 +13,7 @@ import {
   getActiveModelTuning,
 } from "../../config/model-tuning.js";
 import { resolveModelForMode } from "../../providers/provider-factory.js";
+import { normalizeProviderName } from "../../providers/provider-names.js";
 
 /** Renders an ask-document result: answer + per-claim citations (✅ verified / ≈ fuzzy / ⚠️ unverified). */
 function formatAskResult(r: AskResult): string {
@@ -184,10 +185,10 @@ export const documentCommands: CommandHandler = {
       // could return "" if the provider was initialized without an explicit model param.
       // See docs/model-config-spec.md.
       const prevTuning = getActiveModelTuning();
-      const primaryProvider = (process.env.MODEL_PROVIDER ?? "llmstudio").toLowerCase().trim();
+      const primaryProvider = normalizeProviderName(process.env.MODEL_PROVIDER ?? "lmstudio");
       const providerKey =
         session.mode === "agent"
-          ? (process.env.AGENT_MODEL_PROVIDER ?? primaryProvider).toLowerCase().trim()
+          ? normalizeProviderName(process.env.AGENT_MODEL_PROVIDER ?? primaryProvider)
           : primaryProvider;
 
       const modelName = resolveModelForMode(session.mode);

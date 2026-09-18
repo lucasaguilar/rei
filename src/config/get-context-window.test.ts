@@ -35,7 +35,7 @@ describe("getContextWindow (per-provider auto-detection)", () => {
   });
 
   it("local provider with no explicit value → 0 (no trimming)", () => {
-    process.env.MODEL_PROVIDER = "llmstudio";
+    process.env.MODEL_PROVIDER = "lmstudio";
     expect(getContextWindow()).toBe(0);
     process.env.MODEL_PROVIDER = "ollama";
     expect(getContextWindow()).toBe(0);
@@ -55,7 +55,7 @@ describe("getContextWindow (per-provider auto-detection)", () => {
   });
 
   it("uses the AGENT provider when set (drives the heavy turns)", () => {
-    process.env.MODEL_PROVIDER = "llmstudio"; // local for ask/planning
+    process.env.MODEL_PROVIDER = "lmstudio"; // local for ask/planning
     process.env.AGENT_MODEL_PROVIDER = "openrouter"; // cloud for agent
     expect(getContextWindow()).toBe(128000);
   });

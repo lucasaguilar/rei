@@ -12,7 +12,7 @@ describe("needsCompaction (window-aware)", () => {
   };
   beforeEach(() => {
     delete process.env.OLLAMA_NUM_CTX;
-    process.env.MODEL_PROVIDER = "llmstudio";
+    process.env.MODEL_PROVIDER = "lmstudio";
     process.env.REI_MAX_OUTPUT_TOKENS = "8192";
   });
   afterEach(() => {

@@ -58,7 +58,7 @@ describe("VectorStore — embedder-aware index invalidation (real disk)", () => 
     await s.save();
 
     // Switch embedder → the cached vectors are incompatible.
-    process.env.REI_EMBEDDER_PROVIDER = "llmstudio";
+    process.env.REI_EMBEDDER_PROVIDER = "lmstudio";
     process.env.REI_EMBEDDER_MODEL = "bge-m3";
 
     const s2 = new VectorStore(ws);

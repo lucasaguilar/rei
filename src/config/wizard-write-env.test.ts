@@ -31,9 +31,9 @@ const readEnv = () => readFileSync(envPath(), "utf8");
 
 describe("writeProjectEnv", () => {
   it("creates .env inside the workspace's .rei/ and returns its path", () => {
-    const out = writeProjectEnv(ws, { MODEL_PROVIDER: "llmstudio" });
+    const out = writeProjectEnv(ws, { MODEL_PROVIDER: "lmstudio" });
     expect(out).toBe(envPath());
-    expect(readEnv()).toMatch(/^MODEL_PROVIDER=llmstudio$/m);
+    expect(readEnv()).toMatch(/^MODEL_PROVIDER=lmstudio$/m);
   });
 
   it("updates an existing key in place instead of appending a duplicate", () => {
@@ -48,7 +48,7 @@ describe("writeProjectEnv", () => {
   it("preserves variables the user added by hand", () => {
     mkdirSync(join(ws, ".rei"), { recursive: true });
     writeFileSync(envPath(), "MY_SECRET=abc123\nGITHUB_TOKEN=ghp_xyz\n");
-    writeProjectEnv(ws, { MODEL_PROVIDER: "llmstudio" });
+    writeProjectEnv(ws, { MODEL_PROVIDER: "lmstudio" });
     const env = readEnv();
     expect(env).toMatch(/^MY_SECRET=abc123$/m);
     expect(env).toMatch(/^GITHUB_TOKEN=ghp_xyz$/m);
@@ -56,7 +56,7 @@ describe("writeProjectEnv", () => {
 
   it("writes several keys in one call", () => {
     writeProjectEnv(ws, {
-      MODEL_PROVIDER: "llmstudio",
+      MODEL_PROVIDER: "lmstudio",
       LLM_STUDIO_MODEL: "qwen3.8-27b-reasoning",
       REI_WORKSPACE_PATH: ws,
     });
@@ -68,7 +68,7 @@ describe("writeProjectEnv", () => {
   it("reports and returns null when the directory is not writable — never throws", () => {
     chmodSync(ws, 0o555); // read-only
     let out: string | null = "not-set";
-    expect(() => { out = writeProjectEnv(ws, { MODEL_PROVIDER: "llmstudio" }); }).not.toThrow();
+    expect(() => { out = writeProjectEnv(ws, { MODEL_PROVIDER: "lmstudio" }); }).not.toThrow();
     expect(out).toBeNull();
     expect(console.error).toHaveBeenCalled();
     expect(existsSync(envPath())).toBe(false);

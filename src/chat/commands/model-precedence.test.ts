@@ -17,7 +17,7 @@ beforeEach(() => {
     join(ws, ".rei", "roles", "reviewer.md"),
     "---\nname: reviewer\ndescription: d\nbaseMode: agent\npreferredModel: role-model\n---\nBody.\n",
   );
-  process.env.MODEL_PROVIDER = "llmstudio";
+  process.env.MODEL_PROVIDER = "lmstudio";
   process.env.LLM_STUDIO_MODEL = "base-model";
   process.env.LLM_STUDIO_MODEL_AGENT = "base-agent-model";
 });

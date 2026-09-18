@@ -11,6 +11,7 @@
  * defaults here — see docs/model-config-spec.md.
  */
 import { getActiveModelTuning } from "./model-tuning.js";
+import { normalizeProviderName } from "../providers/provider-names.js";
 
 function positiveInt(value: string | undefined, fallback: number): number {
   const n = parseInt(value ?? "", 10);
@@ -34,7 +35,7 @@ const CLOUD_CONTEXT_DEFAULTS: Record<
   huggingface: { window: 32000, envPrefix: "HF" },
 };
 
-/** Per-provider runtime config. Local providers (ollama, llmstudio, mtplx) use contextWindow=0
+/** Per-provider runtime config. Local providers (ollama, lmstudio, mtplx) use contextWindow=0
  *  (no trimming; user sets the loaded window). Cloud providers get a large default so they
  *  aren't trimmed prematurely. */
 const PROVIDER_RUNTIME_CONFIGS: Record<
@@ -49,7 +50,7 @@ const PROVIDER_RUNTIME_CONFIGS: Record<
   }
 > = {
   ollama: { contextWindow: 0, supportsToolCalling: true, supportsReasoning: false, isLocal: true },
-  llmstudio: { contextWindow: 0, supportsToolCalling: true, supportsReasoning: false, isLocal: true },
+  lmstudio: { contextWindow: 0, supportsToolCalling: true, supportsReasoning: false, isLocal: true },
   mtplx: { contextWindow: 0, supportsToolCalling: true, supportsReasoning: false, isLocal: true },
   openrouter: { contextWindow: 128000, supportsToolCalling: true, supportsReasoning: true, isLocal: false },
   gemini: { contextWindow: 128000, supportsToolCalling: true, supportsReasoning: false, isLocal: false },
@@ -82,15 +83,11 @@ export function getContextWindow(): number {
   );
   if (explicit > 0) return explicit;
 
-  const provider = (
-    process.env.AGENT_MODEL_PROVIDER ||
-    process.env.MODEL_PROVIDER ||
-    ""
-  )
-    .toLowerCase()
-    .trim();
+  const provider = normalizeProviderName(
+    process.env.AGENT_MODEL_PROVIDER || process.env.MODEL_PROVIDER || "",
+  );
 
-  // Check runtime config first (local providers like mtplx/llmstudio have contextWindow=0)
+  // Check runtime config first (local providers like mtplx/lmstudio have contextWindow=0)
   const runtime = PROVIDER_RUNTIME_CONFIGS[provider];
   if (runtime && runtime.contextWindow === 0) return 0;
 
