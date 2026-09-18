@@ -7,9 +7,17 @@ import { createModelProvider } from "../providers/provider-factory.js";
 import { runOneShot } from "./run-oneshot.js";
 import { runChat } from "./run-chat.js";
 import { getVersion } from "./version.js";
+import { helpText } from "./help.js";
 
 export async function runCli(args: string[]): Promise<void> {
   const parsed = parseCliArgs(args);
+
+  // --help before everything: it must answer even when nothing is configured and no provider can
+  // be built, which is exactly when someone types it.
+  if (parsed.help) {
+    console.log(helpText());
+    process.exit(0);
+  }
 
   // --version is a zero-dependency shortcut: prints version and exits before anything else
   if (parsed.version) {
@@ -23,7 +31,7 @@ export async function runCli(args: string[]): Promise<void> {
 
   if (!command) {
     console.error("Usage: rei [--workspace <path>] <command>");
-    console.error("Available commands: ask, plan, agent, chat");
+    console.error("Available commands: ask, plan, agent, chat — see `rei --help`.");
     process.exit(1);
   }
 
@@ -86,7 +94,7 @@ export async function runCli(args: string[]): Promise<void> {
     }
 
     console.error(`Unknown command: ${command}`);
-    console.error("Available commands: ask, plan, agent, chat");
+    console.error("Available commands: ask, plan, agent, chat — see `rei --help`.");
     process.exit(1);
   } finally {
     await agent.disposeMcp();
@@ -104,6 +112,7 @@ function parseCliArgs(args: string[]): {
   sessionName?: string;
   continueSession: boolean;
   forceSession: boolean;
+  help: boolean;
 } {
   const positional: string[] = [];
   let workspaceInput: string | undefined;
@@ -114,6 +123,7 @@ function parseCliArgs(args: string[]): {
   let sessionName: string | undefined;
   let continueSession = false;
   let forceSession = false;
+  let help = false;
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -177,6 +187,10 @@ function parseCliArgs(args: string[]): {
       continue;
     }
 
+    if (arg === "--help" || arg === "-h" || arg === "help") {
+      help = true;
+      continue;
+    }
     if (arg === "--version") {
       version = true;
       continue;
@@ -208,11 +222,20 @@ function parseCliArgs(args: string[]): {
     sessionName,
     continueSession,
     forceSession,
+    help,
   };
 }
 
-function resolveWorkspacePath(workspaceInput?: string): string {
-  const resolvedPath = path.resolve(workspaceInput ?? process.cwd());
+/**
+ * `--workspace <path>` → `REI_WORKSPACE_PATH` → cwd, the same order `load-env.ts` uses to decide
+ * WHICH `.env` to read. Skipping the env var here split the two: the wizard's variable picked the
+ * config while the agent wrote into whatever directory it was launched from — which is how a
+ * one-shot run aimed at a temp workspace ended up creating files inside this repo.
+ */
+export function resolveWorkspacePath(workspaceInput?: string): string {
+  const resolvedPath = path.resolve(
+    workspaceInput ?? process.env.REI_WORKSPACE_PATH ?? process.cwd(),
+  );
 
   let stats: fs.Stats;
   try {
