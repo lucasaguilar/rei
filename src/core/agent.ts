@@ -13,7 +13,7 @@ import {
   getAgentEditFormat,
 } from "../prompts/prompt-builder.js";
 import { buildTurnContext } from "../context/context-builder.js";
-import { AGENT_REMINDER_BY_FORMAT, buildMessagesForModel } from "../chat/message-builder.js";
+import { buildMessagesForModel } from "../chat/message-builder.js";
 import { isContextOverflowError } from "../providers/backend-error.js";
 import { compactorModelFor, compactSession, needsCompaction } from "../chat/compactor.js";
 import { type ChatSession } from "../chat/types.js";
@@ -780,11 +780,9 @@ export class Agent {
     // the model discovers structure with tools (ls / find / git ls-files / read_files). Only a mode
     // explicitly opted out (REI_ON_DEMAND_FILE_CONTEXT_<MODE>=0) injects the proactive map + tree.
     // `onDemand` was computed above (it also gated the map generation).
-    // The agent-mode format reminder rides INSIDE the stored message: small models weigh what is
-    // near the generation point, and putting it here keeps that recency without rewriting the
-    // previous turn's message on every render (which is what broke the cached prefix).
-    const reminder =
-      session.mode === "agent" ? AGENT_REMINDER_BY_FORMAT[getAgentEditFormat()] : "";
+    // No agent-mode format reminder is appended here any more: the edit format now comes from ONE
+    // place, the stored message built by buildTurnUserMessage (see message-builder.ts). There is
+    // nothing to duplicate, and the stored message is what goes out.
     const enrichedMessage = buildTurnUserMessage({
       userInput,
       context,
@@ -793,8 +791,6 @@ export class Agent {
         ? undefined
         : buildProjectFileTree(scannedFiles),
     });
-
-    const enrichedWithReminder = enrichedMessage + reminder;
 
     this.logger.logInfo("Enriched user message size", {
       chars: enrichedMessage.length,
@@ -819,11 +815,11 @@ export class Agent {
     // cached prefix instead of diverging from it.
     session.messages.push({
       role: "user",
-      content: enrichedWithReminder,
+      content: enrichedMessage,
       turnId: this.currentTurnId,
     });
 
-    return enrichedWithReminder;
+    return enrichedMessage;
   }
 
   private async compactSessionIfNeeded(

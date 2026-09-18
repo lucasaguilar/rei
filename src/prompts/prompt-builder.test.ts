@@ -21,7 +21,13 @@ describe("buildSystemMessage — native tool prompts", () => {
   }
 
   it("agent: loads the agent-tools prompt", () => {
+    // Asserted through what the prompt is FOR, not through a sentence of it: the agent file is the
+    // one that names the write tools and forbids editing through the shell. Pinning a phrase made
+    // this fail on a rewrite that changed nothing about which file was loaded.
     const prompt = buildSystemMessage("agent", undefined);
-    expect(prompt).toMatch(/AGENT mode with structured tool calling/i);
+    expect(prompt).toMatch(/AGENT mode/i);
+    expect(prompt).toMatch(/edit_file/);
+    expect(prompt).toMatch(/rewrite_file/);
+    expect(prompt).not.toMatch(/PLANNING mode/i);
   });
 });

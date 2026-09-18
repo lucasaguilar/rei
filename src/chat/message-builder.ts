@@ -230,16 +230,14 @@ export function buildMessagesForModel(
 
   const modeNormalized = finalNonSystem;
 
-  // Aider-style system_reminder: append a format reminder to the LAST user message
-  // in agent mode. Small models have recency bias — instructions near the generation
-  // point outweigh the system prompt at position 0 as context grows.
-  // No reminder injection here any more — it lives inside the stored user message (see
-  // AGENT_REMINDER_BY_FORMAT). Appending it at render time rewrote history on every turn.
-  const withReminder = modeNormalized;
+  // No format reminder is injected any more. The XML `<edit>`/`<wholefile>` reminder that used to
+  // ride inside the stored user message was removed: it contradicted the native tool-calling
+  // system prompt (which forbids XML tags) and pointed the model at a path the runtime no longer
+  // parses. The system prompt + native tools are the single source of truth for how edits are made.
 
   // Enforce strict role alternation and ensure conversation starts with 'user'
   const alternating: ChatMessage[] = [];
-  for (const msg of withReminder) {
+  for (const msg of modeNormalized) {
     if (alternating.length === 0) {
       if (msg.role === "assistant") {
         alternating.push({ role: "user", content: "Initialize conversation." });
@@ -257,18 +255,4 @@ export function buildMessagesForModel(
 
   return systemMessage ? [systemMessage, ...alternating] : alternating;
 }
-
-/**
- * The format reminder, kept where a small model still sees it: at the end of the user message.
- *
- * It used to be appended at RENDER time to whichever user message was last, which moved it one
- * message forward every turn — rewriting the previous turn's message and breaking the prefix the
- * backend had cached. It is now part of the message when it is built (agent.ts), so it is stored
- * once, never moves, and every turn still ends with it right before generation.
- */
-export const AGENT_REMINDER_BY_FORMAT: Record<AgentEditFormat, string> = {
-  wholefile:
-    '\n\n---\nREMINDER: You are in agent mode. ALL file changes MUST use `<wholefile path="...">complete file</wholefile>` blocks. Do NOT use plain text descriptions, "Direct Answer", or any other format.',
-  sr: '\n\n---\nREMINDER: You are in agent mode. ALL file changes MUST use `<edit>` or `<create>` XML blocks. Do NOT use plain text descriptions, "Direct Answer", or any other format.',
-};
 

@@ -1,6 +1,5 @@
 import type { SessionMode } from "../chat/types.js";
 import { loadLocalRules, loadPrompt } from "./loader.js";
-import { detectProjectType } from "../workspace/project-type.js";
 
 export type AgentEditFormat = "sr" | "wholefile";
 
@@ -9,34 +8,25 @@ export function getAgentEditFormat(): AgentEditFormat {
   return val === "wholefile" ? "wholefile" : "sr";
 }
 
-const ANGULAR_RULES = `### Angular Project Rules (mandatory — violations are bugs):
-- Control flow: use \`@if\`, \`@for (item of list; track item.id)\`, \`@switch\`. NEVER use *ngIf, *ngFor, *ngSwitch.
-- Components: always \`standalone: true\` and \`ChangeDetectionStrategy.OnPush\`.
-- Inputs: use \`input()\` or \`input.required<T>()\`. NEVER use the \`@Input()\` decorator.
-- Outputs: use \`output<T>()\`. NEVER use \`@Output()\` or \`EventEmitter\`.
-- Reactivity: use \`signal()\`, \`computed()\`, \`effect()\` from \`@angular/core\`.
-- Dependency injection: use \`inject()\`. NEVER use constructor parameter injection.
-- Async: \`async/await\` for one-off HTTP calls. Observables only for streams.
-- Strict types: no \`any\`. Use TypeScript strict mode.
-- Atomicity (planning): a component (class + template + styles) is ONE atomic unit — never split its
-  files across separate stages. An orphan \`.html\`/\`.scss\` without its \`.ts\` gives a false-green
-  \`ngc\` check, because the template is only type-validated once the component class references it.`;
 
-function buildProjectRules(workspacePath?: string): string {
-  const wsPath = workspacePath ?? process.env.REI_WORKSPACE_PATH;
-  if (!wsPath) return "";
-  const { type } = detectProjectType(wsPath);
-  if (type === "angular") return ANGULAR_RULES;
-  return "";
-}
-
+/**
+ * REI ships NO rules about your stack.
+ *
+ * There used to be an `ANGULAR_RULES` constant here, injected into every turn of any workspace
+ * detected as Angular. It was the tool having an opinion about the user's code: arbitrary (rules
+ * for Angular and for no other stack REI supports), invisible (nothing on screen said those 287
+ * tokens were being sent), frozen (pinned to whatever Angular looked like the day it was written)
+ * and duplicated (a project with its own conventions received both copies).
+ *
+ * Rules now come from ONE place, the repo that owns them: `<workspace>/.rei/rules.md`, versioned
+ * with the code, editable by the people who wrote it. `/rules install angular` writes the same
+ * ruleset THERE, as a starting point to edit rather than a constant to inherit.
+ */
 export function buildSystemMessage(
   mode: SessionMode,
   workspacePath?: string,
   roleBody?: string,
 ): string {
-  const projectRules = buildProjectRules(workspacePath);
-
   // Current date — the model has a training cutoff and otherwise hallucinates
   // "today", breaking date-relative tasks (e.g. "today's emails", "last week").
   const now = new Date();
@@ -58,9 +48,7 @@ export function buildSystemMessage(
     "",
     loadPrompt("shared/response-rules"),
     "",
-    // Project-type rules (Angular, etc.) injected before local overrides
-    ...(projectRules ? [projectRules, ""] : []),
-    // Per-workspace and global custom rules (highest priority)
+    // The workspace's own rules — the only stack rules REI sends (see above).
     loadLocalRules(workspacePath),
     "",
   ];
