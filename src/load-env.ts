@@ -57,26 +57,37 @@ function apply(file: string, only?: (key: string) => boolean): void {
   }
 }
 
-// 1. Resolve the workspace: --workspace <path> (the wizard always passes it) → REI_WORKSPACE_PATH.
+// 1. Resolve the workspace: --workspace <path> (the wizard always passes it) → REI_WORKSPACE_PATH
+//    → the cwd.
+//
+// The cwd fallback matters for an entrypoint started WITHOUT either — `node dist/server.js` run by
+// hand, say. Both launchers export REI_WORKSPACE_PATH (defaulting it to `pwd`), so they never hit
+// this; a bare invocation did, and then the workspace was undefined HERE while the app still
+// picked the cwd as its workspace (getDefaultWorkspace). The result was a REI operating on a
+// project whose own config it had never read: `<cwd>/.rei/.env` skipped entirely, and `<cwd>/.env`
+// filtered down to machine-scoped keys — so per-project settings like
+// REI_ON_DEMAND_FILE_CONTEXT_<MODE> silently did not apply. Agreeing with getDefaultWorkspace
+// closes that; the ghost-config protection is untouched, since it guards the case this does not
+// change (a workspace that is NOT the cwd, which is how the wizard invokes REI).
 const argv = process.argv;
 const wi = argv.indexOf("--workspace");
 const wsDir =
-  wi !== -1 && argv[wi + 1] ? argv[wi + 1] : process.env.REI_WORKSPACE_PATH;
-const ws = wsDir ? path.resolve(wsDir) : undefined;
+  wi !== -1 && argv[wi + 1]
+    ? argv[wi + 1]
+    : process.env.REI_WORKSPACE_PATH || process.cwd();
+const ws = path.resolve(wsDir);
 
 // 2. cwd/.env. Running from inside the project, this IS the project's own (legacy) file and is
 //    taken whole; under the wizard it is the install's, and only machine-scoped keys cross.
-const cwdIsWorkspace = ws !== undefined && ws === process.cwd();
+const cwdIsWorkspace = ws === process.cwd();
 apply(
   path.join(process.cwd(), ".env"),
   cwdIsWorkspace || inheritAll ? undefined : isInstallScoped,
 );
 
 // 3. The workspace's own files, which override the machine's.
-if (ws) {
-  // Legacy location first, so `.rei/.env` wins during a migration where both exist. Skipped when
-  // the workspace IS the cwd — step 2 already read that exact file.
-  if (!cwdIsWorkspace) apply(path.join(ws, ".env"));
-  // Canonical location, always read: step 2 never reaches it, not even from inside the project.
-  apply(path.join(ws, ".rei", ".env"));
-}
+// Legacy location first, so `.rei/.env` wins during a migration where both exist. Skipped when
+// the workspace IS the cwd — step 2 already read that exact file.
+if (!cwdIsWorkspace) apply(path.join(ws, ".env"));
+// Canonical location, always read: step 2 never reaches it, not even from inside the project.
+apply(path.join(ws, ".rei", ".env"));
