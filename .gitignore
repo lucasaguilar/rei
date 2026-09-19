@@ -49,3 +49,11 @@ bench/
 # Generated on every build (scripts/write-build-info.js) and carried into the install by rsync.
 # Never committed: it changes with each build and describes the machine, not the code.
 .build-info.json
+
+# The git worktrees Claude Code creates INSIDE the repo. Each one is a COMPLETE working copy, so
+# untracked it shows up in the main checkout as a pile of new files, and a `git add -A` there
+# would commit a second copy of the whole project.
+#
+# Only worktrees/ — NOT all of .claude/. Skills under .claude/skills/ are committed on purpose
+# (grill-with-docs is one), and a blanket rule would silently ignore the next one added.
+.claude/worktrees/
