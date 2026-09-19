@@ -207,6 +207,7 @@ carrying them will start taking effect.)
 | CLI `--session <name>` / `-s` | open/create a named session (parallel agents on one repo) | new auto-id |
 | CLI `--continue` / `-c` | resume the most recent session | — |
 | CLI `--force` | steal a session lock held by another/stale instance | — |
+| CLI `--version` | version plus the build's commit and date (`rei 0.1.0 (ed95a6a, 2026-09-19 12:40)`); `+dirty` marks a build made with uncommitted edits. Stamped by scripts/write-build-info.js on every build — the answer to "which build is this machine running?" | — |
 | `REI_SUBAGENT_ENABLED` | expose the `delegate` tool (isolated-context sub-agents) — opt-in | `false` |
 | `REI_SUBAGENT_MODEL` | worker model for `delegate` sub-agents (e.g. a fast reliable executor like ornith) | same as agent model |
 | `REI_RUNPLAN_DELEGATE` | `/runplan` executes each stage in an isolated sub-agent (report stages excepted) | `true` |

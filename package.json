@@ -26,6 +26,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "postbuild": "node scripts/write-build-info.js",
     "dev": "tsx src/main.ts",
     "check": "tsc --noEmit",
     "log:viewer": "node tools/log-viewer/server.mjs",

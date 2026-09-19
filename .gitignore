@@ -45,3 +45,7 @@ docs-previous/
 bench/
 
 .continue/
+
+# Generated on every build (scripts/write-build-info.js) and carried into the install by rsync.
+# Never committed: it changes with each build and describes the machine, not the code.
+.build-info.json

@@ -6,7 +6,7 @@ import type { SessionMode } from "../chat/types.js";
 import { createModelProvider } from "../providers/provider-factory.js";
 import { runOneShot } from "./run-oneshot.js";
 import { runChat } from "./run-chat.js";
-import { getVersion } from "./version.js";
+import { getVersionLine } from "./version.js";
 import { helpText } from "./help.js";
 
 export async function runCli(args: string[]): Promise<void> {
@@ -21,7 +21,7 @@ export async function runCli(args: string[]): Promise<void> {
 
   // --version is a zero-dependency shortcut: prints version and exits before anything else
   if (parsed.version) {
-    console.log(`rei ${getVersion()}`);
+    console.log(`rei ${getVersionLine()}`);
     process.exit(0);
   }
 
