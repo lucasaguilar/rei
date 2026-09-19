@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { isCyclicRepetition, isDegenerate, looksLooping } from "./loop-guard.js";
 
 /**
@@ -53,5 +53,28 @@ describe("isCyclicRepetition", () => {
     expect(looksLooping("I will be. I will be. I will be. I will be. I will be. ".repeat(6))).toBe(
       true,
     );
+  });
+});
+
+describe("the off switch", () => {
+  const saved = process.env.REI_LOOP_GUARD;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.REI_LOOP_GUARD;
+    else process.env.REI_LOOP_GUARD = saved;
+  });
+
+  it("stops flagging anything when REI_LOOP_GUARD=off", () => {
+    // The escape hatch for the case this cannot get right on its own: a legitimately repetitive
+    // answer. A guard that can stop a turn must be one the user can stop.
+    process.env.REI_LOOP_GUARD = "off";
+    expect(looksLooping(CYCLING)).toBe(false);
+    expect(looksLooping("I will be. ".repeat(40))).toBe(false);
+    // The detectors themselves still answer honestly — only the guard defers.
+    expect(isCyclicRepetition(CYCLING)).toBe(true);
+  });
+
+  it("is on unless told otherwise", () => {
+    delete process.env.REI_LOOP_GUARD;
+    expect(looksLooping(CYCLING)).toBe(true);
   });
 });

@@ -214,6 +214,7 @@ carrying them will start taking effect.)
 | `REI_VERBOSE` | full command output and full diffs (the reasoning has its own switch below) | `false` |
 | `REI_SHOW_REASONING` | the model's thinking as a live paragraph above the status row; `false` counts it instead (one line per block). `REI_VERBOSE` streams it in full | `true` |
 | `REI_THINKING_LINES` | rows that paragraph may use (1–12, and never more than a sixth of the terminal) | `4` |
+| `REI_LOOP_GUARD` | `off` disables the repetition guard that cuts a runaway generation. On by default; turn it off if it ever stops a legitimately repetitive answer (a long plan with parallel sections is the shape at risk) | `on` |
 | `REI_THEME` | colours for REI's chrome: `default` or `matrix`. `/theme` switches mid-session. Diffs and syntax highlighting are never themed | `default` |
 | `REI_HYPERLINKS` | `on`/`off` to force or disable clickable file links in tables | auto-detected |
 

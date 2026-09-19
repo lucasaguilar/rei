@@ -111,7 +111,22 @@ export function isCyclicRepetition(text: string): boolean {
   return false;
 }
 
-/** Either failure mode: the tight phrase loop, or the long paragraph cycle. */
+/**
+ * Whether the loop guard is allowed to cut a stream at all.
+ *
+ * It ships ON, and it ships with an OFF switch, because a detector that stops a turn is one that
+ * can stop the WRONG turn — and a user who hits that has no way around it otherwise. The shape most
+ * at risk is a long plan whose sections are deliberately parallel: repetition there is the format,
+ * not a decoder stuck in a groove. `REI_LOOP_GUARD=off` turns it off for the session; the thinking
+ * is still counted and the turn simply runs to its natural end.
+ */
+export function loopGuardEnabled(): boolean {
+  const raw = process.env.REI_LOOP_GUARD?.trim().toLowerCase();
+  return !(raw === "off" || raw === "false" || raw === "0" || raw === "no");
+}
+
+/** Either failure mode: the tight phrase loop, or the long paragraph cycle. Off → neither. */
 export function looksLooping(text: string): boolean {
+  if (!loopGuardEnabled()) return false;
   return isDegenerate(text) || isCyclicRepetition(text);
 }

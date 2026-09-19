@@ -126,9 +126,9 @@ export async function callModel(params: {
     onChunk?.({
       type: "status",
       content:
-        `\n⚠️  [REI] The model started repeating itself — stopped it there. ` +
-        `What is above is partial. Lower the temperature, or raise the repetition penalty, ` +
-        `for this model.\n`,
+        `\n⚠️  [REI] The model started repeating itself — stopped it there. What is above is ` +
+        `partial. If it WAS repeating: raise this model's repetition penalty, or shorten what it ` +
+        `is being fed. If it was NOT: REI_LOOP_GUARD=off turns this check off.\n`,
     });
   }
 
