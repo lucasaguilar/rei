@@ -23,6 +23,30 @@ const MAX_OUTPUT_BYTES = 2_000_000;
 /** Per-line cap, matching the `--max-columns` value passed to ripgrep. */
 const MAX_LINE_CHARS = 240;
 
+/**
+ * Directories the POSIX fallbacks prune.
+ *
+ * Ripgrep reads `.gitignore` and needs no list; `grep` and `find` read nothing, so without this
+ * they walk `node_modules/` and `.rei/` — the two places where a single minified line (a vendored
+ * bundle, a 13 MB rag-index on ONE line) eats the entire output budget and starves every real
+ * result. This is an approximation of `.gitignore`, not a substitute: it covers the directories
+ * that are ignored in practice in every project, and nothing project-specific.
+ */
+const FALLBACK_PRUNE_DIRS = [
+  "node_modules",
+  ".git",
+  ".rei",
+  "dist",
+  "build",
+  "coverage",
+  "vendor",
+  ".venv",
+  "venv",
+  "target",
+  ".next",
+  ".cache",
+];
+
 function run(cmd: string, args: string[], cwd: string, timeoutMs = 15_000): Promise<RunResult> {
   return new Promise((resolve) => {
     let stdout = "";
@@ -99,7 +123,14 @@ export async function grepCode(workspacePath: string, params: GrepParams): Promi
     // Fallback: POSIX grep. -r recursive, -n line numbers, -E extended regex, -I skip binary.
     // BSD (macOS) and GNU grep both accept --include / --exclude-dir, so the fallback can honor the
     // glob and skip vendor dirs instead of silently searching everything.
-    const grepArgs = ["-rnIE", "--", pattern, params.path || "."];
+    // --include / --exclude-dir are accepted by both BSD (macOS) and GNU grep, so the fallback can
+    // honor the glob and skip vendor dirs instead of searching everything. They used to be
+    // described in this comment but never passed, which is how a run without ripgrep came back
+    // with matches from node_modules and from a 13 MB minified line.
+    const grepArgs = ["-rnIE"];
+    if (params.glob) grepArgs.push(`--include=${params.glob.replace(/^.*\//, "")}`);
+    for (const dir of FALLBACK_PRUNE_DIRS) grepArgs.push(`--exclude-dir=${dir}`);
+    grepArgs.push("--", pattern, params.path || ".");
     degraded = true;
     res = await run("grep", grepArgs, workspacePath);
     if (res.missing) {
@@ -135,7 +166,7 @@ export async function grepCode(workspacePath: string, params: GrepParams): Promi
     out += `\n… and ${allLines.length - max} more — narrow the pattern, or pass a 'path'/'glob' to scope the search.`;
   }
   if (degraded) {
-    out += `\n(WARNING: ripgrep is not installed — this used POSIX grep, which IGNORED any 'glob' and searched ignored dirs. Install ripgrep for accurate results.)`;
+    out += `\n(NOTE: ripgrep is not installed — this used POSIX grep, which matches the glob on the FILE NAME only and prunes a fixed list of vendor dirs rather than reading .gitignore. Install ripgrep for exact results.)`;
   }
   return out;
 }
@@ -160,8 +191,17 @@ export async function listFiles(workspacePath: string, params: ListFilesParams):
 
   if (res.missing) {
     // Fallback: find. Approximate a glob with -name on the basename pattern.
-    const findArgs = [params.path || ".", "-type", "f"];
+    // `find` walks everything unless told otherwise: without the prune, list_files answered with
+    // thousands of node_modules paths on any machine without ripgrep.
+    const findArgs = [params.path || "."];
+    findArgs.push("(");
+    FALLBACK_PRUNE_DIRS.forEach((dir, i) => {
+      if (i > 0) findArgs.push("-o");
+      findArgs.push("-name", dir);
+    });
+    findArgs.push(")", "-prune", "-o", "-type", "f");
     if (params.glob) findArgs.push("-name", params.glob.replace(/^.*\//, ""));
+    findArgs.push("-print");
     res = await run("find", findArgs, workspacePath);
     if (res.missing) return "ERROR: neither ripgrep (rg) nor find is available to list files.";
   }
