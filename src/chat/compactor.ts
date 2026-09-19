@@ -5,6 +5,7 @@ import {
   getMaxOutputTokens,
 } from "../config/model-runtime.js";
 import { estimateTokens } from "./helpers/token-estimator.js";
+import { resolveModelForRole } from "../providers/provider-factory.js";
 
 const VERBATIM_KEEP = 8; // Number of recent non-system messages to keep verbatim
 // Compaction triggers when the conversation grows large RELATIVE TO the context window —
@@ -78,17 +79,29 @@ export function compactorTimeoutMs(promptChars = 0): number {
 }
 
 /**
- * Which model summarizes: `COMPACTOR_MODEL` when set, else the model the session is ALREADY running
- * on.
+ * Which model summarizes, most specific first:
+ *
+ *   1. `<PROVIDER>_MODEL_COMPACTOR` — this backend's own summariser.
+ *   2. `COMPACTOR_MODEL` — one summariser for every backend.
+ *   3. the model the session is ALREADY running on.
  *
  * It used to fall back to the provider's own default, which is `<PREFIX>_MODEL` — the ask/planning
  * model, not the agent's and not one picked with `/model`. On a local backend that means loading a
  * SECOND model to summarize: minutes of swap, memory pressure, and a 404 when the id belongs to a
  * different backend (a real case: COMPACTOR_MODEL=qwen/qwen3-4b, an LM Studio name, against oMLX).
  * Reusing the loaded model costs nothing to start and keeps its cached prefix warm.
+ *
+ * The per-provider form exists for exactly that 404: a single global has to be re-edited every
+ * time `MODEL_PROVIDER` changes, and when it is forgotten compaction fails silently and the
+ * session sails past its window. Leaving BOTH unset is still the best default.
  */
 export function compactorModelFor(activeModel?: string): string | undefined {
-  return process.env.COMPACTOR_MODEL?.trim() || activeModel || undefined;
+  return (
+    resolveModelForRole("compactor") ||
+    process.env.COMPACTOR_MODEL?.trim() ||
+    activeModel ||
+    undefined
+  );
 }
 
 /**

@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { fetchWithRetry } from "../providers/fetch-retry.js";
+import { resolveModelForRole } from "../providers/provider-factory.js";
 import { extractPdfText, stripPageMarkers } from "../ocr/pdf-text.js";
 import {
   checkpointPath,
@@ -195,7 +196,11 @@ export interface VisionConfig {
  * Defaults target a local LM Studio server.
  */
 export function getVisionConfig(): VisionConfig | null {
+  // Most specific first: this backend's own vision model, then one shared across backends, then
+  // the legacy LM Studio default. The per-provider form is what stops `MODEL_PROVIDER` from
+  // leaving this pointing at a model the new backend has never heard of.
   const model = (
+    resolveModelForRole("vision") ||
     process.env.REI_VISION_MODEL ||
     process.env.LLM_STUDIO_MODEL ||
     ""
