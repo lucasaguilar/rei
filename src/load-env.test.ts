@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +13,18 @@ import { join } from "node:path";
  * this layout exists to remove.
  */
 const LOADER = join(process.cwd(), "dist", "load-env.js");
+
+/**
+ * This suite runs the COMPILED loader, so it needs `dist/`. On a dev machine that is always there
+ * from the last build and the dependency is invisible; on a clean checkout it is not, and node
+ * reports it as `ERR_MODULE_NOT_FOUND` on a generated probe file — which says nothing about what
+ * to do. CI builds first (see .github/workflows/ci.yml); this says so when something else does not.
+ */
+if (!existsSync(LOADER)) {
+  throw new Error(
+    `load-env.test.ts needs the compiled loader at ${LOADER}. Run \`npm run build\` first.`,
+  );
+}
 
 let ws: string;
 let cwdDir: string;

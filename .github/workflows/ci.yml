@@ -26,10 +26,13 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
-      - name: Tests
-        run: npx vitest run
-
-      # The build is a separate step so a compile error reads as a build failure rather than
-      # hiding inside the test run.
+      # Before the tests, not after: `load-env.ts` is a side-effect module that reads process.argv,
+      # so its suite exercises the COMPILED entrypoint in a child process. With no dist/ it fails
+      # with ERR_MODULE_NOT_FOUND — invisible on a dev machine, where dist/ is always lying around
+      # from the last build. Still its own step, so a compile error reads as a build failure
+      # instead of hiding inside the test run.
       - name: Build
         run: npm run build
+
+      - name: Tests
+        run: npx vitest run
