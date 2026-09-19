@@ -281,7 +281,9 @@ the compaction is skipped) · `<PROVIDER>_MODEL_COMPACTOR` and `<PROVIDER>_MODEL
 two roles, declared per backend: they win over `COMPACTOR_MODEL` / `REI_VISION_MODEL` when that
 provider is the active one, so switching `MODEL_PROVIDER` no longer leaves them naming a model the
 new backend has never heard of. Prefixes as in `<PROVIDER>_MODEL`; they follow `MODEL_PROVIDER`,
-never `AGENT_MODEL_PROVIDER`) · `COMPACTOR_TIMEOUT_MS` (overrides the timeout; by default it SCALES
+never `AGENT_MODEL_PROVIDER`. The vision ENDPOINT follows the active provider too when
+`REI_VISION_BASE_URL` is unset — otherwise the model came from one backend and the request
+went to another) · `COMPACTOR_TIMEOUT_MS` (overrides the timeout; by default it SCALES
 with the history — ~30s plus one second per 150 tokens, capped at 15 min — because prefilling a big
 history is the slow part and a flat value killed exactly the compactions that were needed) ·
 Laminar telemetry `LMNR_*`.

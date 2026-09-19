@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { resolveModelForRole } from "./provider-factory.js";
+import {
+  resolveEndpointForActiveProvider,
+  resolveModelForRole,
+} from "./provider-factory.js";
 import { compactorModelFor } from "../chat/compactor.js";
 
 /**
@@ -13,6 +16,9 @@ import { compactorModelFor } from "../chat/compactor.js";
  */
 const VARS = [
   "MODEL_PROVIDER",
+  "OMLX_BASE_URL",
+  "OMLX_API_KEY",
+  "LLM_STUDIO_BASE_URL",
   "AGENT_MODEL_PROVIDER",
   "COMPACTOR_MODEL",
   "OMLX_MODEL_COMPACTOR",
@@ -94,5 +100,30 @@ describe("compactorModelFor — precedence", () => {
   it("returns undefined when there is nothing at all", () => {
     process.env.MODEL_PROVIDER = "omlx";
     expect(compactorModelFor(undefined)).toBeUndefined();
+  });
+});
+
+describe("resolveEndpointForActiveProvider", () => {
+  it("returns the active provider's endpoint and key", () => {
+    process.env.MODEL_PROVIDER = "omlx";
+    process.env.OMLX_BASE_URL = "http://127.0.0.1:8000/v1";
+    process.env.OMLX_API_KEY = "una-clave";
+    expect(resolveEndpointForActiveProvider()).toEqual({
+      baseUrl: "http://127.0.0.1:8000/v1",
+      apiKey: "una-clave",
+    });
+  });
+
+  it("does not hand over another provider's address", () => {
+    // This is the mismatch it exists to prevent: a model resolved from OMLX_MODEL_VISION being
+    // POSTed to LM Studio, which answers 404 for an id it has never heard of.
+    process.env.MODEL_PROVIDER = "omlx";
+    process.env.LLM_STUDIO_BASE_URL = "http://127.0.0.1:1234/v1";
+    expect(resolveEndpointForActiveProvider().baseUrl).toBeUndefined();
+  });
+
+  it("returns nothing for an unknown provider, so the caller keeps its default", () => {
+    process.env.MODEL_PROVIDER = "un-backend-inventado";
+    expect(resolveEndpointForActiveProvider()).toEqual({});
   });
 });

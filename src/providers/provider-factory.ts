@@ -190,3 +190,25 @@ export function resolveModelForRole(role: ModelRole): string | undefined {
   if (!prefix) return undefined;
   return cleanEnvModel(process.env[`${prefix}${ROLE_ENV_SUFFIX[role]}`]);
 }
+
+/**
+ * The active provider's endpoint and key — `<PROVIDER>_BASE_URL`, `<PROVIDER>_API_KEY`.
+ *
+ * A helper model resolved per provider has to be SENT to that provider. The vision sidecar used
+ * to always fall back to LM Studio's endpoint, so with MODEL_PROVIDER=omlx it shipped an MLX model
+ * id to LM Studio and got a 404 — the model followed the provider and the address did not.
+ * Undefined for an unknown provider, or when that provider declares no base URL, so the caller
+ * keeps its own default.
+ */
+export function resolveEndpointForActiveProvider(): {
+  baseUrl?: string;
+  apiKey?: string;
+} {
+  const provider = normalizeProviderName(process.env.MODEL_PROVIDER ?? "lmstudio");
+  const prefix = PROVIDER_ENV_PREFIX[provider];
+  if (!prefix) return {};
+  return {
+    baseUrl: cleanEnvModel(process.env[`${prefix}_BASE_URL`]),
+    apiKey: cleanEnvModel(process.env[`${prefix}_API_KEY`]),
+  };
+}
