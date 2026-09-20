@@ -22,6 +22,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { getContextWindow } from "../../config/model-runtime.js";
 
 interface ToolOutputEntry {
   id: string;
@@ -53,6 +54,32 @@ export function getToolOutput(id?: string): ToolOutputEntry | undefined {
 }
 
 /**
+ * Share of the context window a single tool output may occupy inline before it is spilled to disk,
+ * and the absolute bounds on that share.
+ *
+ * The budget is a FRACTION of the window rather than a constant because that is what it was always
+ * approximating: how much of the model's attention one command's output deserves. A constant is
+ * either wasteful on a 128k window or fatal on an 8k one.
+ *
+ * WHY THE DEFAULT IS NO LONGER A FLAT 2000 — measured over 95 real spills in this repo's own
+ * sessions (~/.rei/sessions): the model fetched the spilled file back with `read_files` **66% of
+ * the time** (91% in the 8–16k band). When it does, the spill has saved nothing and cost plenty:
+ * the history ends up holding the receipt, the 2000-char preview AND the full output, in two tool
+ * results a few messages apart — an alternating pair of near-identical blocks — plus a whole extra
+ * model turn to go get it. In one session, 14 of 15 spills were read straight back and 20 of the 30
+ * tool results were halves of such pairs.
+ *
+ * That is the shape that feeds a repetition loop: a history built out of near-duplicate blocks is
+ * repetitive INPUT, and a model fed repetition produces repetition (docs: the loop-guard work).
+ * Replaying those 95 spills against candidate budgets, a window-relative budget capped at 16k
+ * removes 58 of the 63 read-back round-trips and ~8% of total history characters. Spilling still
+ * wins for output too big to belong in a prompt at all — that is what the ceiling is for.
+ */
+const INLINE_WINDOW_FRACTION = 0.08;
+const INLINE_CEILING = 16_000;
+const INLINE_FLOOR = 2_000;
+
+/**
  * Inline char budget before a tool output is spilled to disk (override via env).
  *
  * It is a BUDGET, so `0` means exactly that: no output travels inline, everything goes to disk and
@@ -60,7 +87,7 @@ export function getToolOutput(id?: string): ToolOutputEntry | undefined {
  * the receipt alone). That is the aggressive end of the knob, for answering "how much does the
  * model actually need to see?".
  *
- * The guard used to be `n > 0`, so 0 fell through to the 2000 default and the setting looked broken
+ * The guard used to be `n > 0`, so 0 fell through to the default and the setting looked broken
  * rather than ignored. A negative or unparseable value is still a mistake, and still falls back.
  */
 function inlineLimit(): number {
@@ -69,7 +96,12 @@ function inlineLimit(): number {
     const n = Number.parseInt(raw, 10);
     if (Number.isFinite(n) && n >= 0) return n;
   }
-  return 2000;
+  // An unknown window (local/unconfigured) already means "REI does not trim this history", so the
+  // same assumption applies here: take the ceiling rather than the most defensive number.
+  const windowTokens = getContextWindow();
+  if (windowTokens <= 0) return INLINE_CEILING;
+  const share = Math.floor(windowTokens * 4 * INLINE_WINDOW_FRACTION);
+  return Math.min(INLINE_CEILING, Math.max(INLINE_FLOOR, share));
 }
 
 /**

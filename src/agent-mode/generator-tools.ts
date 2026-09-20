@@ -24,6 +24,7 @@ import {
   handleTruncation,
   buildTurnLimitOutcome,
 } from "./tools-loop/turn-outcomes.js";
+import { handleRepetition } from "./tools-loop/repetition-recovery.js";
 import { buildMismatchEscalationMessage } from "./tools-loop/mismatch-escalation.js";
 import {
   evaluateBlockedRepeats,
@@ -152,6 +153,9 @@ export async function executeAgentTurnWithTools(params: {
   // before emitting a tool call — common with thinking models) is continued back into the loop.
   // Reset to 0 after any productive turn (see below), so an early streak doesn't starve later turns.
   let truncationContinuations = 0;
+  // Loop-guard retries used this user-turn (phase 2). A TOTAL, like truncationContinuations: one
+  // clean second attempt per turn, never one per loop iteration.
+  let repetitionRetries = 0;
   // Tracks consecutive search-block mismatches (edit_file whose <search> isn't found verbatim).
   // Two-tier escalation for weak local models that can't reproduce exact search text:
   //   - at 2: inject the file's exact content so it can copy the search verbatim.
@@ -259,6 +263,27 @@ export async function executeAgentTurnWithTools(params: {
 
       // Aggregate backend-reported usage for the turn (no-op when the provider doesn't report it).
       if (result.usage) turnUsage = mergeTurnUsage(turnUsage, result.usage);
+
+      // ── Loop guard, phase 2 ───────────────────────────────────────────────
+      // The guard cut this response for repetition. Handle it BEFORE anything else reads `result`:
+      // the looping text must not reach the history (re-feeding it continues the loop), nor
+      // firstTurnExplanation, nor the dispatcher — its tool calls may be cut mid-JSON.
+      if (result.stoppedEarly === "repetition") {
+        const outcome = await handleRepetition({
+          currentMessages,
+          repetitionRetries,
+          canAskUser: typeof elicit === "function",
+          logger,
+          emitStatus,
+          virtualEdits,
+          firstTurnExplanation,
+          appendCreatedSummary,
+        });
+        if (outcome.action === "finalize") return attachUsage(outcome.result);
+        currentMessages = outcome.messages;
+        repetitionRetries = outcome.repetitionRetries;
+        continue;
+      }
 
       // Truncated mid-output with no tool call yet — hit the output-token cap before acting.
       // Continue the partial output back into the loop (bounded) so its tool calls get processed,
