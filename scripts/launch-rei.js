@@ -421,26 +421,36 @@ async function pickModel(provider, message, initialModel, preFetched) {
     return custom.trim();
 }
 
-/** Family-aware default sampling for a local model — a sane starting point the user can calibrate. */
+/** Family-aware default sampling for a local model — a sane starting point the user can calibrate.
+ *
+ *  Calibrated for AGENT CODING, not chat: this block feeds resolveAgentSampling() (the tools path
+ *  only — chat/ask read <PREFIX>_TEMPERATURE), and a per-model value always wins over the global
+ *  REI_AGENT_* env. So these are the values a fresh setup actually runs with.
+ *
+ *  - temperature 0.35 (was 0.6, the Qwen CHAT recipe): lower = more deterministic tool calls and
+ *    fewer repetition loops. 0.6 is for prose; coding wants the model to commit, not improvise.
+ *  - frequencyPenalty 0.5 (was 0.3, the bare anti-loop floor): the lever that breaks loops at the
+ *    source on local models. 0.3 is safe; 0.5 is the coding-calibrated starting point.
+ *  - Anti-loop stays ON: writing 0.0 penalties would OVERRIDE resolveAgentSampling()'s global
+ *    protection back off, because a per-model value always wins (src/config/model-runtime.ts).
+ *    No repetition_penalty on top: stacking the multiplicative penalty with presence/frequency
+ *    tends to degrade the output. */
 function defaultTuning(modelId) {
     const n = modelId.trim().toLowerCase();
-    // Anti-loop ON by default. Decoding with every penalty at zero is the #1 cause of repetition
-    // loops on local models — the same reason resolveAgentSampling() defaults to 0.3/0.3 instead of
-    // greedy (src/config/model-runtime.ts). Writing 0.0 here would OVERRIDE that global protection
-    // back off, because a per-model value always wins. No repetition_penalty on top: stacking the
-    // multiplicative penalty with presence/frequency tends to degrade the output.
     const base = {
         id: modelId,
         contextWindow: PROBED_CONTEXT.get(n) || DEFAULT_LOCAL_CONTEXT,
         maxTokens: 16384,
-        temperature: 0.6, topP: 0.9, topK: 40,
-        presencePenalty: 0.3, frequencyPenalty: 0.3, minP: 0.02,
+        temperature: 0.35, topP: 0.9, topK: 40,
+        presencePenalty: 0.3, frequencyPenalty: 0.5, minP: 0.02,
     };
     // Qwen publishes its own sampling recipe (temp 0.6 / topP 0.95 / topK 20) and recommends a
     // presence_penalty between 0 and 2 when a quantized build falls into endless repetitions.
-    if (n.includes('qwen'))    return { ...base, temperature: 0.6, topP: 0.95, topK: 20, presencePenalty: 1.0 };
-    if (n.includes('deepseek'))return { ...base, temperature: 0.6, topP: 0.95, topK: 40 };
-    if (n.includes('gemma'))   return { ...base, temperature: 0.7, topP: 0.95, topK: 64 };
+    // Keep its nucleus (topP/topK) and the high presence penalty; drop the temperature to the
+    // coding value — 0.6 is the chat recipe and is the main loop risk on a tool-calling agent.
+    if (n.includes('qwen'))    return { ...base, temperature: 0.35, topP: 0.95, topK: 20, presencePenalty: 1.0 };
+    if (n.includes('deepseek'))return { ...base, temperature: 0.35, topP: 0.95, topK: 40 };
+    if (n.includes('gemma'))   return { ...base, temperature: 0.4, topP: 0.95, topK: 64 };
     return base;
 }
 

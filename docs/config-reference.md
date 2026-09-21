@@ -202,7 +202,7 @@ carrying them will start taking effect.)
 | `REI_PRESERVE_THINKING` | re-feed `<think>` (⚠️ loops) | false |
 | `REI_ON_DEMAND_FILE_CONTEXT[_ASK/_PLANNING/_AGENT]` | on-demand file context per mode | ask/plan=1, agent=0 |
 | `REI_REASONING_EFFORT_[ASK/PLANNING/AGENT]` | thinking cap (none/low/medium/high) | model default |
-| `REI_INVESTIGATE_BEFORE_PRODUCE` | produce-or-bail nudge threshold | 8 |
+| `REI_INVESTIGATE_BEFORE_PRODUCE` | produce-or-bail nudge threshold: at `n` consecutive investigate-only turns (reads/commands/searches that changed nothing) REI injects a "stop investigating, produce now" nudge, and at `n+4` it abandons the turn with what was gathered. **Disabled by default (`0`)** — it counts read-only/MCP calls as "investigate-only" and can prematurely cut legitimately read-heavy work (reading a Jira task over MCP, exploring a large repo). Set e.g. `8` to re-enable | `0` (off) |
 | `AGENT_EDIT_FORMAT` | edit format | — |
 | CLI `--session <name>` / `-s` | open/create a named session (parallel agents on one repo) | new auto-id |
 | CLI `--continue` / `-c` | resume the most recent session | — |
