@@ -177,6 +177,12 @@ export async function handleInputTurn(
         // (auto at the start, the overflow retry later) both land.
         if (status === "memory_compacted") {
           publishCompactedReading(state, agent, session);
+          // A line in the transcript, not just a refreshed bar: the bar is one number that moved,
+          // which is easy to miss under a wall of tool output, and not seeing it is what got
+          // /compact run by hand over an already-compacted session.
+          actions.pushTranscript(
+            paint("dim", "[REI] Memory compacted — older turns were summarized to free context."),
+          );
           actions.draw();
           return;
         }

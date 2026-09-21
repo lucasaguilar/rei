@@ -52,6 +52,59 @@ describe("needsCompaction (window-aware)", () => {
     // Same 20×4000-char history that compacted on 32K → on 128K it does NOT.
     expect(needsCompaction(msgs(20, 4000))).toBe(false);
   });
+
+  /**
+   * The gauge reports the backend's own prompt count; needsCompaction re-estimated it from
+   * `content` alone. A tool-calling session keeps its bulk OUTSIDE content — `edit_file` arguments
+   * carry whole files, and reasoning_content rides alongside — so the two rulers disagreed by
+   * 1.3-1.8x on real sessions: the bar read 81% of a 100k window while the compactor still thought
+   * the history was under threshold, and auto-compaction never fired once.
+   */
+  const toolCallMsgs = (n: number, argChars: number): ChatMessage[] => {
+    const out: ChatMessage[] = [{ role: "system", content: "sys" }];
+    for (let i = 0; i < n; i++) {
+      out.push({
+        role: "assistant",
+        content: "", // a tool-calling turn says nothing in `content`
+        tool_calls: [
+          {
+            id: `call_${i}`,
+            type: "function",
+            function: { name: "edit_file", arguments: "x".repeat(argChars) },
+          },
+        ],
+      });
+      out.push({ role: "tool", content: "ok", tool_call_id: `call_${i}` });
+    }
+    return out;
+  };
+
+  it("counts tool_call arguments, not just content", () => {
+    process.env.REI_CONTEXT_WINDOW = "32768"; // usable 24576 → threshold ≈ 15974 tok
+    // 20 assistant turns × 3000 chars of arguments ≈ 16.2k tokens of real prompt, ~0 in `content`.
+    expect(needsCompaction(toolCallMsgs(20, 3000))).toBe(true);
+  });
+
+  it("counts reasoning_content, which rides alongside content", () => {
+    process.env.REI_CONTEXT_WINDOW = "32768";
+    const out: ChatMessage[] = [{ role: "system", content: "sys" }];
+    for (let i = 0; i < 20; i++) {
+      out.push({ role: "user", content: "hi" });
+      out.push({ role: "assistant", content: "ok", reasoning_content: "y".repeat(3000) });
+    }
+    expect(needsCompaction(out)).toBe(true);
+  });
+
+  it("trusts the backend's measured prompt count over its own estimate", () => {
+    process.env.REI_CONTEXT_WINDOW = "100000"; // usable 91808 → threshold ≈ 59675 tok
+    // What the user hit: the bar read 81085 real tokens, the estimate stayed under threshold.
+    expect(needsCompaction(msgs(20, 4000), 0, 81085)).toBe(true);
+  });
+
+  it("a measured count still does not compact a small conversation", () => {
+    process.env.REI_CONTEXT_WINDOW = "100000";
+    expect(needsCompaction(msgs(6), 0, 81085)).toBe(false);
+  });
 });
 
 function makeMessages(): ChatMessage[] {
@@ -71,6 +124,45 @@ function makeProvider(
     completeChat: vi.fn(completeChat),
   } as unknown as ModelProvider;
 }
+
+describe("compactSession gates on the caller's own figures", () => {
+  const saved = {
+    REI_CONTEXT_WINDOW: process.env.REI_CONTEXT_WINDOW,
+    REI_MAX_OUTPUT_TOKENS: process.env.REI_MAX_OUTPUT_TOKENS,
+    MODEL_PROVIDER: process.env.MODEL_PROVIDER,
+  };
+  beforeEach(() => {
+    process.env.MODEL_PROVIDER = "lmstudio";
+    process.env.REI_MAX_OUTPUT_TOKENS = "8192";
+    process.env.REI_CONTEXT_WINDOW = "100000";
+  });
+  afterEach(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  /** The agent gated WITH the overhead and the measured count; this re-check used neither, so it
+   *  could refuse the compaction the agent had just decided on and log it as "skipped". */
+  it("does not refuse a compaction the caller already approved", async () => {
+    const provider = makeProvider(async () => "SUMMARY");
+    const messages: ChatMessage[] = [{ role: "system", content: "sys" }];
+    for (let i = 0; i < 20; i++) {
+      messages.push({ role: i % 2 === 0 ? "user" : "assistant", content: "x".repeat(4000) });
+    }
+    // Estimated content alone stays under the 59675-token threshold; the backend measured 81085.
+    expect(needsCompaction(messages, 0)).toBe(false);
+
+    const result = await compactSession({
+      messages,
+      provider,
+      measuredPromptTokens: 81085,
+    });
+    expect(result.skipped).toBeUndefined();
+    expect(result.messages.some((m) => m.content.includes("CONVERSATION SUMMARY"))).toBe(true);
+  });
+});
 
 describe("compactSession resilience", () => {
   const savedTimeout = process.env.COMPACTOR_TIMEOUT_MS;
