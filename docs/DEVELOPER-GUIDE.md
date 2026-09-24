@@ -12,14 +12,8 @@
 2. Follow the recipe (files → steps → pattern → verify).
 3. For the "why" / deep dive, follow the linked doc.
 
-**Search it (you don't have to scroll):** the guide is indexed into **engram** (REI's local memory), so
-you — and REI's own agent — can query it:
-
-```bash
-engram search "add a slash command" --project rei
-```
-
-(See [Maintaining this guide](#maintaining-this-guide) for how to re-index after edits.)
+**You don't have to scroll:** every recipe names the files it touches, so searching this page for a
+file name (`registry.ts`, `provider-factory.ts`) lands you in the right one.
 
 ---
 
@@ -207,8 +201,5 @@ Grouped pointers to the existing deep docs (the "why"/"how it works"):
   instead of duplicating it.
 - **Anti-rot:** a recipe names concrete files. A CI check verifies every `src/...` path referenced here
   exists (so a moved file fails the build, not a confused developer). _(Guard TBD — see checklist.)_
-- **Re-index into engram after edits** so search stays current:
-  ```bash
-  engram search "…" --project rei   # query
-  # (indexing command per your engram setup)
-  ```
+- **Keep the file paths real.** A recipe is only worth reading if its paths still exist; a stale one
+  sends a contributor to a file that moved.
