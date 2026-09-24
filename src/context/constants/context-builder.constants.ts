@@ -1,4 +1,4 @@
-// Archivos insignia del proyecto que identifican el ecosistema (Node, Rust, Go, Python, etc.) para aplicar reglas específicas.
+// Marker files that identify the project's ecosystem (Node, Rust, Go, Python, …) so its rules apply.
 export const PROJECT_MARKERS = [
   "package.json",
   "tsconfig.json",
@@ -10,32 +10,32 @@ export const PROJECT_MARKERS = [
   "requirements.txt",
 ];
 
-// Expresión regular para detectar si el usuario exige explícitamente ver el código completo o exacto de un archivo.
-// Si coincide, REI evita compresión y envía el archivo de manera íntegra.
+// Matches a request to see a file's COMPLETE or exact code. On a hit, REI skips compression and
+// sends the file whole — asking for "the full file" and getting a summary is a wasted turn.
 export const EXPLICIT_CONTENT_REQUEST_PATTERN =
   /c[oó]digo exacto|exact code|full code|complete code|contenido completo|c[oó]digo completo|full content|complete file|todas las funciones|all functions|show.{0,15}code|mostrame.{0,25}c[oó]digo|dame.{0,25}c[oó]digo/;
 
-// Expresión regular para identificar si la consulta del usuario implica intención de modificar o escribir código.
-// Si coincide, REI activará la búsqueda de dependencias y el análisis del grafo de llamadas (Caller Graph).
+// Matches an intent to modify or write code. On a hit, REI pulls in dependencies and the caller
+// graph: a change that compiles alone but breaks its callers is the failure this prevents.
 export const CHANGE_INTENT_PATTERN =
   /\b(add|change|modify|update|fix|implement|create|remove|delete|refactor|agreg|cambi|modific|actualiz|arregl|implement|cre[ar]|elimin|borr)\w*/i;
 
-// Cantidad máxima de referencias de símbolos a buscar en el Grafo de Llamadas antes de ordenarlas y filtrarlas.
+// Symbol references to collect from the caller graph before ranking and filtering them.
 export const MAX_CALLER_SEARCH_RESULTS = 15;
 
-// Cantidad máxima de archivos llamadores (dependencias directas) a inyectar en el contexto para cambios coordinados.
+// Caller files (direct dependents) injected into the context so a change can be made in step.
 export const MAX_CALLER_CONTEXT_FILES = 1;
 
-// Límite máximo de caracteres por fragmento de código (nodo AST) extraído desde la búsqueda semántica vectorial (RAG).
+// Character cap per code fragment (AST node) pulled from the RAG vector search.
 export const MAX_RAG_NODE_SNIPPET_CHARS = 1000;
 
-// Interruptor general para activar o desactivar por completo la búsqueda semántica RAG mediante embeddings locales.
+// Master switch for RAG semantic search over local embeddings.
 export const ENABLE_SEMANTIC_RAG_SEARCH = true;
 
-// Cantidad máxima de archivos sospechosos de ser relevantes a seleccionar por heurística en modo "agent".
+// Files the heuristic may pick as likely-relevant in "agent" mode.
 export const MAX_RELEVANT_FILES_AGENT = 3;
 
-// Cantidad máxima de archivos sospechosos de ser relevantes a seleccionar por heurística en modos no-agente ("ask" o "planning").
+// Files the heuristic may pick as likely-relevant in the read-only modes ("ask", "planning").
 export const MAX_RELEVANT_FILES_NON_AGENT = 2;
 
 // Minimum cosine-similarity score a RAG hit needs before its file preview is injected.

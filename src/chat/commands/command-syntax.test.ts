@@ -4,17 +4,17 @@ import { COMMANDS } from "../../cli/constants/chat.constants.js";
 import { commandInsertText } from "../../cli/constants/chat.constants.js";
 
 /**
- * The regression: `/Users/lucas/www/rei/Dockerfile y render.yaml no deberían ir al repo público`
+ * The regression: `/Users/dev/www/rei/Dockerfile y render.yaml no deberían ir al repo público`
  * came back as `Unknown command:` — a question about your own files, answered by the parser
  * instead of the model, because "starts with a slash" was the whole definition of a command.
  */
 describe("looksLikeCommand", () => {
   it("rejects an absolute path, typed or dragged in", () => {
-    expect(looksLikeCommand("/Users/lucas/www/rei/Dockerfile ¿va al repo público?")).toBe(false);
+    expect(looksLikeCommand("/Users/dev/www/rei/Dockerfile ¿va al repo público?")).toBe(false);
     expect(looksLikeCommand("/etc/hosts")).toBe(false);
     expect(looksLikeCommand("/tmp/captura.png")).toBe(false);
     // A file that does not exist yet is just as much not-a-command.
-    expect(looksLikeCommand("/Users/lucas/todavia-no-existe.yaml")).toBe(false);
+    expect(looksLikeCommand("/Users/dev/todavia-no-existe.yaml")).toBe(false);
   });
 
   it("accepts every command REI actually ships", () => {
@@ -26,7 +26,7 @@ describe("looksLikeCommand", () => {
 
   it("accepts a command with free-form arguments, including paths", () => {
     expect(looksLikeCommand("/mode ask")).toBe(true);
-    expect(looksLikeCommand("/ask-document /Users/lucas/notas/acta.pdf")).toBe(true);
+    expect(looksLikeCommand("/ask-document /Users/dev/notas/acta.pdf")).toBe(true);
     expect(looksLikeCommand("/session save-as refactor")).toBe(true);
   });
 

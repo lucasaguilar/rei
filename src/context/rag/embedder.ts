@@ -1,7 +1,7 @@
 import { pipeline, env, FeatureExtractionPipeline } from "@xenova/transformers";
 import { fetchWithRetry } from "../../providers/fetch-retry.js";
 
-// Permitimos descargar el modelo remoto la primera vez (Xenova).
+// Allow the model to be downloaded on first use (Xenova fetches it from the hub).
 env.allowRemoteModels = true;
 
 const XENOVA_DEFAULT_MODEL = "Xenova/multilingual-e5-small";

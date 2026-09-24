@@ -1,8 +1,11 @@
 import path from "path";
 
-// Configuración de workspaces permitidos para el servidor
-// Esto evita que cualquier directorio sea accedido por razones de seguridad
-// Leemos de variables de entorno para no hardcodear rutas personales
+// Which workspaces the server may open.
+//
+// The server runs an agent that edits files and executes commands, so the set of directories it
+// can be pointed at is a security boundary, not a convenience. It comes from the environment
+// rather than the source: a hardcoded path would be both wrong for everyone else and impossible
+// to narrow per machine.
 function getAllowedWorkspaces(): Set<string> {
   if (process.env.ALLOWED_WORKSPACES) {
     const paths = process.env.ALLOWED_WORKSPACES.split(',').map(p => p.trim());
@@ -15,7 +18,7 @@ function getAllowedWorkspaces(): Set<string> {
 
 export const ALLOWED_WORKSPACES = getAllowedWorkspaces();
 
-// Función para validar si un workspace es permitido (incluye subdirectorios recursivos)
+// Whether a path is inside an allowed workspace (subdirectories included).
 export function isWorkspaceAllowed(workspacePath: string): boolean {
   const target = path.resolve(workspacePath);
   
@@ -23,7 +26,7 @@ export function isWorkspaceAllowed(workspacePath: string): boolean {
     const allowedResolved = path.resolve(allowed);
     const relative = path.relative(allowedResolved, target);
     
-    // Si coincide exactamente o es un subdirectorio (no empieza con '..' ni es absoluto)
+    // An exact match, or a subdirectory: `relative` is then neither absolute nor starts with '..'
     if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
       return true;
     }
@@ -31,7 +34,7 @@ export function isWorkspaceAllowed(workspacePath: string): boolean {
   return false;
 }
 
-// Función para obtener el workspace por defecto
+// The workspace to use when none was given.
 export function getDefaultWorkspace(): string {
   if (process.env.REI_WORKSPACE_PATH) {
     return process.env.REI_WORKSPACE_PATH;
