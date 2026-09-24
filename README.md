@@ -594,8 +594,9 @@ mid-session), `/index` (build the RAG index).
 
 ## Documentation
 
-**Extending REI** — [Developer guide](docs/DEVELOPER-GUIDE.md): a recipe per task (add a slash
-command, a tool, a provider), each naming the exact files to touch and how to verify the change.
+**Extending REI** — [Developer guide](docs/DEVELOPER-GUIDE.md): a worked recipe for each of the
+three seams — a slash command the *user* types, a tool the *model* calls, a provider for a new
+backend — each naming the exact files, in the order the change travels, and how to verify it.
 
 **Everything else** — [docs/](docs/README.md), indexed by what each document actually is: shipped
 behaviour, contributor guides, designs that were never built, and records of how things got here.
