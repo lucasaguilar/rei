@@ -232,10 +232,14 @@ model you actually run. This is where a local setup stops being "it works" and b
 ```json
 { "providers": { "omlx": { "models": [ {
   "id": "Qwen3.8-27B-MLX-4bit",
-  "contextWindow": 65536,
-  "maxTokens": 8192,
-  "temperature": 0.7,
-  "thinkingLevelMap": { "none": "none", "high": "xhigh" }
+  "contextWindow": 100000,
+  "maxTokens": 12000,
+  "temperature": 0.6, "topP": 0.95, "topK": 20,
+  "presencePenalty": 1.5,
+  "thinkingLevelMap": {
+    "none": "none", "minimal": "low", "low": "low",
+    "medium": "medium", "high": "xhigh", "xhigh": "xhigh"
+  }
 } ] } } }
 ```
 
@@ -257,6 +261,71 @@ the rest onto it. Get this wrong and the model reasons for minutes before runnin
 The map's `none` is special: on a backend that forwards `chat_template_kwargs` (oMLX, MTPLX), REI
 turns it into `enable_thinking: false`, which actually switches reasoning off. Keep `"none": "none"`
 so it reaches that bridge.
+
+### On Apple Silicon
+
+The setup these numbers come from: a Mac with **48 GB of unified memory**, running Qwen3.8 27B at
+4-bit. Two backends worth knowing apart — **oMLX** forwards `chat_template_kwargs` to the chat
+template, so the thinking level is settable per request; **LM Studio** does not (more on that
+below).
+
+```json
+{ "providers": {
+  "omlx": { "models": [{
+    "id": "Qwen3.8-27B-MLX-4bit",
+    "contextWindow": 100000, "maxTokens": 12000,
+    "temperature": 0.6, "topP": 0.95, "topK": 20, "presencePenalty": 1.5,
+    "thinkingLevelMap": { "none": "none", "minimal": "low", "low": "low",
+                          "medium": "medium", "high": "xhigh", "xhigh": "xhigh" }
+  }, {
+    "id": "Ornith-1.5-35B-A3B-MLX-4bit",
+    "contextWindow": 100000, "maxTokens": 12000,
+    "temperature": 0.6, "topP": 0.95, "topK": 20, "presencePenalty": 1.5
+  }] },
+  "lmstudio": { "models": [{
+    "id": "qwen3.8-27b-splash",
+    "contextWindow": 100000, "maxTokens": 16000,
+    "temperature": 0.6, "topP": 0.95, "topK": 20, "minP": 0.02,
+    "presencePenalty": 0.3, "frequencyPenalty": 0.3,
+    "thinkingLevelMap": { "none": "none", "minimal": "low", "low": "low",
+                          "medium": "medium", "high": "xhigh", "xhigh": "xhigh" }
+  }] }
+} }
+```
+
+**`contextWindow: 100000` is the number to adjust first.** It assumes ~48 GB: the KV cache of this
+model is unusually cheap (only a quarter of its layers use full attention), so 100k fits with room
+to spare. On 16 or 24 GB start at 32768 and raise it while watching memory — over what the machine
+can hold, you do not get an error, you get swapping and a turn that takes minutes.
+
+**The two shapes, and when each wins.** The dense 27B reasons harder per decision; the 35B-A3B
+mixture activates 3B and runs roughly three times faster. Measured on one real task — grouping 126
+changed files into atomic commits — the MoE finished while the dense one looped. Many shallow
+decisions favour the MoE; few hard ones favour the dense model. That is what `_ASK` / `_PLANNING` /
+`_AGENT` are for.
+
+**LM Studio and the thinking level.** It accepts `chat_template_kwargs` over the API and ignores
+them, so `reasoning_effort` never reaches the template and the model runs at its default — `xhigh`,
+the most expensive one. The way through is a `model.yaml` in `~/.lmstudio/hub/models/<owner>/<name>/`
+that declares the level as a config field:
+
+```yaml
+model: <owner>/<a NEW name for the wrapper>
+base:
+  - key: <owner>/<the model you already have>
+customFields:
+  - key: reasoningEffort
+    type: select
+    defaultValue: medium
+    options: [{ value: low, label: Low }, { value: medium, label: Medium },
+              { value: xhigh, label: XHigh }]
+    effects:
+      - type: setJinjaVariable
+        variable: reasoning_effort
+```
+
+It wraps the installed weights under a new name and adds the selector, set once when the model
+loads. Restart LM Studio to pick it up.
 
 ### The rest of the speed
 
