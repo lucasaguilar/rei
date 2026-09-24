@@ -528,6 +528,9 @@ mid-session), `/index` (build the RAG index).
 **Extending REI** — [Developer guide](docs/DEVELOPER-GUIDE.md): a recipe per task (add a slash
 command, a tool, a provider), each naming the exact files to touch and how to verify the change.
 
+**Everything else** — [docs/](docs/README.md), indexed by what each document actually is: shipped
+behaviour, contributor guides, designs that were never built, and records of how things got here.
+
 [SDD workflow](docs/sdd-workflow.md) · [Configuration](docs/config-reference.md) ·
 [Command execution](docs/command-execution.md) · [Internals](docs/rei-internals.md) ·
 [Working rules for contributors](AGENTS.md)

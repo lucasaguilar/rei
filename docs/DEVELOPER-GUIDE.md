@@ -190,7 +190,7 @@ Grouped pointers to the existing deep docs (the "why"/"how it works"):
 - **Context/RAG:** [`rag-architecture.md`](./rag-architecture.md) · [`how-context-was-generated.md`](./how-context-was-generated.md)
 - **Config/models:** [`config-reference.md`](./config-reference.md) · [`model-config-spec.md`](./model-config-spec.md) · [`config-doctor-spec.md`](./config-doctor-spec.md) · [`local-model-configuration.md`](./local-model-configuration.md)
 - **Features/specs:** [`intent-router-spec.md`](./intent-router-spec.md) · [`sub-agent-spec.md`](./sub-agent-spec.md) · [`context-drift-spec.md`](./context-drift-spec.md) · [`ocr-architecture.md`](./ocr-architecture.md) · [`docs/features/`](./features/)
-- **Onboarding tours:** [`contributor-tour-story-style.md`](./contributor-tour-story-style.md) · [`contributor-tour-hop-on-hop-off-style.md`](./contributor-tour-hop-on-hop-off-style.md)
+- **Onboarding tour:** [`contributor-tour-hop-on-hop-off-style.md`](./contributor-tour-hop-on-hop-off-style.md) — the whole system end to end, no TypeScript expertise assumed.
 - **Decisions:** [`docs/adr/`](./adr/)
 
 ---
