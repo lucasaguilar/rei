@@ -229,3 +229,37 @@ describe("a bare invocation, with no workspace named", () => {
     expect(out.trim()).toBe("del-archivo");
   });
 });
+
+/**
+ * Prefix aliases.
+ *
+ * The provider is `lmstudio`; its variables are `LLM_STUDIO_*`, because the provider was renamed
+ * and the 14 variables were not. Someone who reasonably writes `LMSTUDIO_MODEL` gets no error and
+ * no model — the silence is the bug. The alias is applied where the environment is assembled, so
+ * it covers every variable with that prefix rather than a list somebody has to maintain.
+ */
+describe("the LMSTUDIO_ prefix alias", () => {
+  it("feeds the spelling the code actually reads", () => {
+    writeRei("LMSTUDIO_MODEL=qwen/qwen3-4b\n");
+    expect(resolve(["LLM_STUDIO_MODEL"]).LLM_STUDIO_MODEL).toBe("qwen/qwen3-4b");
+  });
+
+  it("covers variables nobody listed — it is a rule about prefixes", () => {
+    // Not just _MODEL: any suffix, including ones added after this was written.
+    writeRei("LMSTUDIO_BASE_URL=http://1.2.3.4:1234/v1\nLMSTUDIO_UNA_VARIABLE_FUTURA=x\n");
+    const env = resolve(["LLM_STUDIO_BASE_URL", "LLM_STUDIO_UNA_VARIABLE_FUTURA"]);
+    expect(env.LLM_STUDIO_BASE_URL).toBe("http://1.2.3.4:1234/v1");
+    expect(env.LLM_STUDIO_UNA_VARIABLE_FUTURA).toBe("x");
+  });
+
+  it("never overwrites the old spelling, so an existing .env keeps working", () => {
+    // Upgrading must not change what a configured machine resolves to.
+    writeRei("LLM_STUDIO_MODEL=el-viejo\nLMSTUDIO_MODEL=el-nuevo\n");
+    expect(resolve(["LLM_STUDIO_MODEL"]).LLM_STUDIO_MODEL).toBe("el-viejo");
+  });
+
+  it("leaves the new spelling in place too, for anything reading it directly", () => {
+    writeRei("LMSTUDIO_MODEL=qwen/qwen3-4b\n");
+    expect(resolve(["LMSTUDIO_MODEL"]).LMSTUDIO_MODEL).toBe("qwen/qwen3-4b");
+  });
+});

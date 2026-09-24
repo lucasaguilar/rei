@@ -200,9 +200,9 @@ opening REI in a new folder never inherits another project's model.
 ask questions, the strongest reasoner you have to plan, the most reliable tool-caller to execute:
 
 ```bash
-LLM_STUDIO_MODEL_ASK=ornith-1.5-35b        # interactive: favours speed
-LLM_STUDIO_MODEL_PLANNING=qwen3.8-27b      # favours reasoning
-LLM_STUDIO_MODEL_AGENT=qwen3.8-27b         # favours tool calling
+LMSTUDIO_MODEL_ASK=ornith-1.5-35b        # interactive: favours speed
+LMSTUDIO_MODEL_PLANNING=qwen3.8-27b      # favours reasoning
+LMSTUDIO_MODEL_AGENT=qwen3.8-27b         # favours tool calling
 ```
 
 Set none of them and `<PROVIDER>_MODEL` runs everything.
