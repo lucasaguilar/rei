@@ -12,14 +12,8 @@
 2. Follow the recipe (files → steps → pattern → verify).
 3. For the "why" / deep dive, follow the linked doc.
 
-**Search it (you don't have to scroll):** the guide is indexed into **engram** (REI's local memory), so
-you — and REI's own agent — can query it:
-
-```bash
-engram search "add a slash command" --project rei
-```
-
-(See [Maintaining this guide](#maintaining-this-guide) for how to re-index after edits.)
+**You don't have to scroll:** every recipe names the files it touches, so searching this page for a
+file name (`registry.ts`, `provider-factory.ts`) lands you in the right one.
 
 ---
 
@@ -60,12 +54,12 @@ Deep architecture: [`architecture-map.md`](./architecture-map.md) · agent loop:
 
 ## I want to…
 
-- **[Add a slash command](#recipe-add-a-slash-command)** ✅ _(the model recipe below — the template all others follow)_
-- Add a tool the model can call — _TBD_
-- Modify the agent loop / add a guard — _TBD_
-- Add a model provider — _TBD_
-- Add a skill — _TBD_
-- Add per-model config (sampling / context window) — _TBD_ (see [`model-config-spec.md`](./model-config-spec.md))
+- **[Add a slash command](#recipe-add-a-slash-command)** — for something the *user* types
+- **[Add a tool the model can call](#recipe-add-a-tool-the-model-can-call)** — for something the *model* invokes
+- **[Add a model provider](#recipe-add-a-model-provider)** — for a new backend
+- Modify the agent loop / add a guard — _no recipe yet; start from [`agent-loop.md`](./agent-loop.md)_
+- Add a skill — _no recipe yet; the catalog is `prompts/skills/*.md`, loaded by `use_skill`_
+- Add per-model config (sampling / context window) — no code needed: an entry in `rei.config.json`, see [`model-config-spec.md`](./model-config-spec.md)
 - Understand the extension seams — [↓ below](#the-three-extension-seams)
 
 ---
@@ -155,13 +149,124 @@ pattern (test `match` true/false + the `response`).
 
 ---
 
-## The three extension seams
+## Recipe: Add a tool the model can call
 
-REI extends through **three** seams — pick by cardinality:
+A tool is a capability the **model** invokes, not the user. Four files, in the order the call
+travels: definition → the per-turn tool list → dispatch → handler.
+
+### The 4 files you touch
+
+| Step | File | What you add |
+|---|---|---|
+| 1 | `src/contracts/tool-definitions.ts` | the `ToolDefinition` (name, description, JSON-schema parameters) |
+| 2 | `src/contracts/tool-definitions.ts` | add it to the mode set it belongs to (`AGENT_TOOLS` / `PLANNING_TOOLS` / `READONLY_TOOLS`), **or** export it standalone and push it in `buildTools` |
+| 3 | `src/agent-mode/tools-loop/dispatch-tool-calls.ts` | a `case "<name>":` that reads `args` and calls your handler |
+| 4 | `src/agent-mode/tools-loop/builtin-handlers.ts` | the handler itself — the only place that does I/O |
+
+### Step 1 — define it
+
+The description is not documentation: it is the whole instruction the model gets about when to
+reach for this. Say **when to use it and when not to**; a tool described as "searches the web" is
+called for things that are in the repo.
+
+### Step 2 — decide who gets it
+
+`toolsForMode()` hands out three sets. Agent mode gets the writing tools; `ask` and `planning` get
+read-only ones — a tool that edits must never appear there. For a tool that is not part of a mode
+set (conditional, opt-in), export it and push it inside `buildTools()` in
+`src/agent-mode/tools-loop/tool-selection.ts`, as `delegate` does behind
+`REI_SUBAGENT_ENABLED` and `search_tools` does when the tool list gets long.
+
+`buildTools()` runs **every turn**, which is what lets a tool become callable mid-turn after
+`search_tools` finds it.
+
+### Step 3 — dispatch
+
+Add the `case` next to `web_search` and `ask_user`. Read the arguments defensively
+(`(args.query as string) ?? ""`): they come from a model, and a local one will send a missing or
+misspelled field eventually.
+
+### Step 4 — the handler
+
+Handlers take `{ logger, emitStatus, … }` and return the string the model will read as the result.
+`emitStatus` is how the user sees what is happening while it runs. If your tool needs the user to
+answer something, take `elicit` — do not read stdin.
+
+### Verify
+
+```bash
+npm run build && npx vitest run src/agent-mode
+```
+
+Tools cost context: every definition travels in every request, and past ~25 tools REI hides them
+behind `search_tools`. A tool that could be a flag on an existing one should be that flag.
+
+### Reference implementation
+
+`ask_user` — definition in `tool-definitions.ts`, case in `dispatch-tool-calls.ts`, handler in
+`builtin-handlers.ts`. It is small and shows the `elicit` seam.
+
+---
+
+## Recipe: Add a model provider
+
+Most backends speak the OpenAI-compatible API, and for those a provider is a subclass that sets
+five fields. `src/providers/omlx-provider.ts` is the whole thing in 54 lines — read it first.
+
+### The 4 files you touch
+
+| Step | File | What you add |
+|---|---|---|
+| 1 | `src/providers/<name>-provider.ts` | a class extending `OpenAiCompatibleProvider` — **new file** |
+| 2 | `src/providers/provider-factory.ts` | import it, add the name to the union, add a `case` in the factory |
+| 3 | `src/providers/provider-factory.ts` | add its env prefix to `PROVIDER_ENV_PREFIX` |
+| 4 | `.env.example` + `docs/config-reference.md` | document its variables — a guardrail test fails if you skip this |
+
+### Step 1 — the class
+
+Set `baseUrl`, `apiKey`, `model`, `requestTimeoutMs` and the sampling defaults from
+`<PREFIX>_*` environment variables, with a sane default for each. Streaming, tool calling and
+reasoning all come from the base class.
+
+Subclass only for what genuinely differs. oMLX exists as its own provider for one reason, stated in
+its header: it forwards `chat_template_kwargs` to the chat template and LM Studio does not — a
+difference that changes behaviour, not cosmetics. A backend that differs only by URL needs no
+class: point `OPENAI_COMPAT_BASE_URL` at it.
+
+### Step 2 and 3 — register it
+
+The prefix in `PROVIDER_ENV_PREFIX` is what makes `<PREFIX>_MODEL`, `_MODEL_ASK`, `_MODEL_AGENT`,
+`_MODEL_VISION` and `_MODEL_COMPACTOR` resolve for your provider — all of them, from one entry.
+Derive it from the provider name (`omlx` → `OMLX`).
+
+### Step 4 — document it
+
+`src/meta/env-documented.test.ts` fails on any variable the code reads and the reference does not
+describe. That is deliberate: a variable nobody can find is a variable that does not exist.
+
+### Verify
+
+```bash
+npm run build && npx vitest run src/providers
+```
+
+Then, against the real backend: `rei ask "say ok"` and one agent turn that calls a tool — tool
+calling is where compat layers diverge, not chat.
+
+### Reference implementation
+
+`src/providers/omlx-provider.ts` (54 lines, one real difference documented) and
+`src/providers/openai-compatible-provider.ts` for what you inherit.
+
+---
+
+## The extension seams
+
+Four seams — pick by cardinality:
 
 | Seam | For | Example |
 |---|---|---|
-| **Command registry** | user-typed `/commands` | `/tree`, `/doctor` |
+| **Command registry** | user-typed `/commands` | `/tree`, `/theme`, `/rules` |
 | **Tool registration** | a single stable capability the *model* calls | `ask_user`, `delegate`, `web_search` (define in `tool-definitions.ts` → add to `tool-selection.ts` `buildTools` → `case` in dispatch → handler) |
 | **Data-driven (skills)** | *many* reusable procedures | `prompts/skills/*.md` via the `use_skill` catalog |
 | **Injected callback** | a frontend capability the core calls blind | `emitStatus`, `elicit` (`ElicitFn`) — added as a field on `DispatchContext` |
@@ -196,7 +301,7 @@ Grouped pointers to the existing deep docs (the "why"/"how it works"):
 - **Context/RAG:** [`rag-architecture.md`](./rag-architecture.md) · [`how-context-was-generated.md`](./how-context-was-generated.md)
 - **Config/models:** [`config-reference.md`](./config-reference.md) · [`model-config-spec.md`](./model-config-spec.md) · [`config-doctor-spec.md`](./config-doctor-spec.md) · [`local-model-configuration.md`](./local-model-configuration.md)
 - **Features/specs:** [`intent-router-spec.md`](./intent-router-spec.md) · [`sub-agent-spec.md`](./sub-agent-spec.md) · [`context-drift-spec.md`](./context-drift-spec.md) · [`ocr-architecture.md`](./ocr-architecture.md) · [`docs/features/`](./features/)
-- **Onboarding tours:** [`contributor-tour-story-style.md`](./contributor-tour-story-style.md) · [`contributor-tour-hop-on-hop-off-style.md`](./contributor-tour-hop-on-hop-off-style.md)
+- **Onboarding tour:** [`contributor-tour-hop-on-hop-off-style.md`](./contributor-tour-hop-on-hop-off-style.md) — the whole system end to end, no TypeScript expertise assumed.
 - **Decisions:** [`docs/adr/`](./adr/)
 
 ---
@@ -207,8 +312,5 @@ Grouped pointers to the existing deep docs (the "why"/"how it works"):
   instead of duplicating it.
 - **Anti-rot:** a recipe names concrete files. A CI check verifies every `src/...` path referenced here
   exists (so a moved file fails the build, not a confused developer). _(Guard TBD — see checklist.)_
-- **Re-index into engram after edits** so search stays current:
-  ```bash
-  engram search "…" --project rei   # query
-  # (indexing command per your engram setup)
-  ```
+- **Keep the file paths real.** A recipe is only worth reading if its paths still exist; a stale one
+  sends a contributor to a file that moved.

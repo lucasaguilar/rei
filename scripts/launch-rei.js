@@ -688,6 +688,23 @@ async function askOnDemandFileContext(last) {
 /** Reasoning effort per mode. Local models think by default, so ask/planning over-think (slow)
  *  unless capped. Whether the backend honors the param is model-dependent; unsupported ones
  *  ignore it. */
+/** The levels REI accepts. `null` means: write nothing, and let the model use its own default. */
+const REASON_LEVELS = [null, 'none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+
+/**
+ * A profile's levels per mode, or null to leave every mode unset.
+ *
+ * Separate from the prompt so it can be tested, and so adding a profile does not mean touching the
+ * question. `custom` returns null too: its levels come from the per-mode prompts, not from here.
+ */
+function reasoningProfileLevels(profile) {
+    switch (profile) {
+        case 'balanced': return { ASK: 'none', PLANNING: 'none', AGENT: 'medium' };
+        case 'minimal':  return { ASK: 'none', PLANNING: 'none', AGENT: 'none' };
+        default:         return null; // 'full' and 'custom'
+    }
+}
+
 async function askReasoningEffort(last) {
     const envVars = {};
     const config = {};
@@ -708,18 +725,41 @@ async function askReasoningEffort(last) {
                 { value: 'balanced', label: 'Balanced — ask/planning fast (none), agent reasons (medium)' },
                 { value: 'minimal',  label: 'Minimal — none everywhere (fastest, least deliberate)' },
                 { value: 'full',     label: 'Full — let the model decide (thinks in all modes)' },
+                { value: 'custom',   label: 'Custom — set each mode yourself' },
             ],
             initialValue: last.reasoningProfile ?? 'balanced',
         });
         if (isCancel(profile)) { cancel('Cancelled'); process.exit(0); }
-        // 'full' = leave unset so the request omits the field (model's own default).
-        const effort = profile === 'balanced'
-            ? { ASK: 'none', PLANNING: 'none', AGENT: 'medium' }
-            : profile === 'minimal'
-                ? { ASK: 'none', PLANNING: 'none', AGENT: 'none' }
-                : null;
+
+        // 'full' leaves every mode unset so the request omits the field (the model's own default).
+        let effort = reasoningProfileLevels(profile);
+
+        // The presets cover the two shapes most setups want, and no more: a combination as ordinary
+        // as none/low/low was unreachable, which turned the wizard into something to answer and then
+        // correct by hand in .env.
+        if (profile === 'custom') {
+            effort = {};
+            const previous = last.reasoningEffort ?? {};
+            for (const mode of REASON_MODES) {
+                const level = await select({
+                    message: `Thinking in ${mode.toLowerCase()} mode:`,
+                    options: REASON_LEVELS.map((v) => ({
+                        value: v ?? 'default',
+                        label: v === null
+                            ? "the model's own default (writes nothing)"
+                            : v === 'none' ? 'none — no thinking at all' : v,
+                    })),
+                    initialValue: previous[mode] ?? (mode === 'AGENT' ? 'medium' : 'none'),
+                });
+                if (isCancel(level)) { cancel('Cancelled'); process.exit(0); }
+                if (level !== 'default') effort[mode] = level;
+            }
+        }
+
         if (effort) for (const [m, v] of Object.entries(effort)) envVars[`REI_REASONING_EFFORT_${m}`] = v;
         Object.assign(config, { reasoningProfile: profile });
+        // Remembered so a re-run pre-fills what was chosen, not the preset's defaults.
+        if (profile === 'custom') Object.assign(config, { reasoningEffort: effort });
     }
     return { envVars, config };
 }
