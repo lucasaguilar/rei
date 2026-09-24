@@ -4,7 +4,7 @@
  * `startsWith("/")` was the whole test, and an absolute path is the obvious counter-example: a
  * dragged-in file or a question about one —
  *
- *   /Users/lucas/www/rei/Dockerfile y render.yaml no deberían ir al repo público, ¿es correcto?
+ *   /Users/dev/www/rei/Dockerfile y render.yaml no deberían ir al repo público, ¿es correcto?
  *
  * — came back as `Unknown command:` and never reached the model. The message was not lost (it
  * stays in the buffer) but the turn was, and on a path you did not type by hand that reads as REI

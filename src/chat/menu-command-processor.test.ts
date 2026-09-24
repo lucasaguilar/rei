@@ -363,11 +363,11 @@ describe("menu-command-processor /runplan and plan-tracker lifecycle", () => {
 
 ### Stage 1: Setup auth module
 We need to edit auth.ts.
-- Modify [auth.ts](file:///Users/lucas/www/rei/auth.ts)
+- Modify [auth.ts](file:///Users/dev/www/rei/auth.ts)
 
 ### Stage 2: Integrate routes
 We need to edit router.ts.
-- Modify [router.ts](file:///Users/lucas/www/rei/router.ts)
+- Modify [router.ts](file:///Users/dev/www/rei/router.ts)
 
 ## Verification
 Done.
@@ -412,7 +412,7 @@ Done.
     const planText = `
 # Implementation Plan
 ### Stage 1: Fix bug
-Modify [app.ts](file:///Users/lucas/www/rei/app.ts)
+Modify [app.ts](file:///Users/dev/www/rei/app.ts)
     `;
 
     const session: ChatSession = {
@@ -460,7 +460,7 @@ Modify [app.ts](file:///Users/lucas/www/rei/app.ts)
     const planText = `
 ### 📦 Stage 1: Capa de Datos (Services + Mock)
 We need to edit auth.ts.
-- Modify [auth.ts](file:///Users/lucas/www/rei/auth.ts)
+- Modify [auth.ts](file:///Users/dev/www/rei/auth.ts)
     `;
 
     const session: ChatSession = {
@@ -500,11 +500,11 @@ We need to edit auth.ts.
     const polyglotPlanText = `
 ### Stage 1: Implement Backend Logic
 We need to edit several files across languages.
-- Modify [Program.cs](file:///Users/lucas/www/rei/Program.cs)
-- Modify [app.py](file:///Users/lucas/www/rei/app.py)
-- Modify [main.rs](file:///Users/lucas/www/rei/main.rs)
-- Modify [handler.go](file:///Users/lucas/www/rei/handler.go)
-- Modify [index.php](file:///Users/lucas/www/rei/index.php)
+- Modify [Program.cs](file:///Users/dev/www/rei/Program.cs)
+- Modify [app.py](file:///Users/dev/www/rei/app.py)
+- Modify [main.rs](file:///Users/dev/www/rei/main.rs)
+- Modify [handler.go](file:///Users/dev/www/rei/handler.go)
+- Modify [index.php](file:///Users/dev/www/rei/index.php)
     `;
 
     const session: ChatSession = {

@@ -81,8 +81,11 @@ export function shouldCopyToSandbox(relativePath: string): boolean {
 
   const parts = normalized.split("/");
 
-  // Ignore binary/build folders and IDE specific lock/index files
-  const ignoreDirs = [".git", "node_modules", ".vs", "obj", "bin"];
+  // Ignore binary/build folders and IDE specific lock/index files.
+  // `.ai` is a symlink to a shared config dir OUTSIDE the repo (e.g. ~/www/.ai); fs.cp with
+  // recursive:true would otherwise copy the symlink into the sandbox, and tsc could then follow
+  // it into a foreign project with its own tsconfig and node_modules.
+  const ignoreDirs = [".git", "node_modules", ".vs", "obj", "bin", ".ai"];
 
   if (parts.some(p => ignoreDirs.includes(p))) {
     return false;

@@ -98,6 +98,9 @@ export function initWatcher(params: {
       "**/.git/**",
       "**/bin/**",
       "**/obj/**",
+      // .ai is a symlink to a shared config dir outside the repo — never index or watch it.
+      ".ai/**",
+      "**/.ai/**",
     ],
     persistent: true,
     ignoreInitial: true,
