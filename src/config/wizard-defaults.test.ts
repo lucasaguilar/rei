@@ -54,9 +54,9 @@ describe("wizard defaults", () => {
     expect(defaultTuning("some-random-7b").repetitionPenalty).toBeUndefined();
   });
 
-  it("qwen gets its official recipe plus a high presence penalty", () => {
+  it("qwen keeps its official nucleus (topP/topK) and high presence penalty, at the coding temperature", () => {
     const t = defaultTuning("orcarouter/qwen3.8-27b-mlx@4bit");
-    expect(t).toMatchObject({ temperature: 0.6, topP: 0.95, topK: 20, presencePenalty: 1.0 });
+    expect(t).toMatchObject({ temperature: 0.35, topP: 0.95, topK: 20, presencePenalty: 1.0 });
   });
 
   it("the default context is no longer 32768", () => {

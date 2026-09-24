@@ -6,7 +6,7 @@ import { clearPromptCache } from "../../prompts/loader.js";
 import { generateRepoMap } from "../../tools/repo-map-generator.js";
 import { startIndexingWorker } from "../../context/rag/rag-indexer.js";
 import { getHelpText } from "../../cli/constants/chat.constants.js";
-import { getVersion } from "../../cli/version.js";
+import { getVersionLine } from "../../cli/version.js";
 
 const MODE_RE = /^\/mode\s+(\S+)$/;
 
@@ -135,7 +135,7 @@ export const miscCommands: CommandHandler = {
     }
 
     if (trimmed === "/version") {
-      return { success: true, response: `[REI] rei ${getVersion()}` };
+      return { success: true, response: `[REI] rei ${getVersionLine()}` };
     }
 
     if (trimmed === "/help") {

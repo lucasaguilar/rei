@@ -114,6 +114,23 @@ const MODE_ENV_SUFFIX: Record<SessionMode, string> = {
   agent: "_MODEL_AGENT",
 };
 
+/**
+ * Helper models that are not a conversation mode: the one that summarises a session, and the one
+ * that reads images. Same `<PROVIDER>_MODEL_*` shape as the modes above, for the same reason.
+ *
+ * They used to be single global vars (`COMPACTOR_MODEL`, `REI_VISION_MODEL`), which meant that
+ * switching `MODEL_PROVIDER` — the one knob that is supposed to switch everything — left them
+ * pointing at a model from the previous backend. The real failure that follows is not obvious:
+ * `COMPACTOR_MODEL=qwen/qwen3-4b` (an LM Studio name) against oMLX 404s, compaction is skipped,
+ * and the session sails past its window instead of being summarised.
+ */
+const ROLE_ENV_SUFFIX = {
+  compactor: "_MODEL_COMPACTOR",
+  vision: "_MODEL_VISION",
+} as const;
+
+export type ModelRole = keyof typeof ROLE_ENV_SUFFIX;
+
 /** Trims a value and treats "" / whitespace as unset (so empty env vars fall back). */
 function cleanEnvModel(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -152,4 +169,46 @@ export function resolveModelForMode(mode: SessionMode): string | undefined {
   // <PREFIX>_MODEL instead of sending an empty model name to the backend.
   const base = cleanEnvModel(process.env[`${prefix}_MODEL`]);
   return cleanEnvModel(process.env[`${prefix}${MODE_ENV_SUFFIX[mode]}`]) ?? base;
+}
+
+/**
+ * The model for a helper role on the ACTIVE provider — `<PROVIDER>_MODEL_COMPACTOR`,
+ * `<PROVIDER>_MODEL_VISION`.
+ *
+ * Returns undefined when nothing is set for this provider, and the caller then falls back to its
+ * own global (`COMPACTOR_MODEL`, `REI_VISION_MODEL`) exactly as before. That order is what lets
+ * both spellings coexist: keep one global if a single model serves every backend, or declare one
+ * per provider and stop editing .env every time `MODEL_PROVIDER` changes.
+ *
+ * Reads MODEL_PROVIDER only — never AGENT_MODEL_PROVIDER. Summarising a session and reading an
+ * image are not the agent's work, and inheriting the agent's dedicated backend for them would be
+ * surprising in exactly the setup that flag exists for.
+ */
+export function resolveModelForRole(role: ModelRole): string | undefined {
+  const provider = normalizeProviderName(process.env.MODEL_PROVIDER ?? "lmstudio");
+  const prefix = PROVIDER_ENV_PREFIX[provider];
+  if (!prefix) return undefined;
+  return cleanEnvModel(process.env[`${prefix}${ROLE_ENV_SUFFIX[role]}`]);
+}
+
+/**
+ * The active provider's endpoint and key — `<PROVIDER>_BASE_URL`, `<PROVIDER>_API_KEY`.
+ *
+ * A helper model resolved per provider has to be SENT to that provider. The vision sidecar used
+ * to always fall back to LM Studio's endpoint, so with MODEL_PROVIDER=omlx it shipped an MLX model
+ * id to LM Studio and got a 404 — the model followed the provider and the address did not.
+ * Undefined for an unknown provider, or when that provider declares no base URL, so the caller
+ * keeps its own default.
+ */
+export function resolveEndpointForActiveProvider(): {
+  baseUrl?: string;
+  apiKey?: string;
+} {
+  const provider = normalizeProviderName(process.env.MODEL_PROVIDER ?? "lmstudio");
+  const prefix = PROVIDER_ENV_PREFIX[provider];
+  if (!prefix) return {};
+  return {
+    baseUrl: cleanEnvModel(process.env[`${prefix}_BASE_URL`]),
+    apiKey: cleanEnvModel(process.env[`${prefix}_API_KEY`]),
+  };
 }

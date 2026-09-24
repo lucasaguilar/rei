@@ -202,11 +202,12 @@ carrying them will start taking effect.)
 | `REI_PRESERVE_THINKING` | re-feed `<think>` (⚠️ loops) | false |
 | `REI_ON_DEMAND_FILE_CONTEXT[_ASK/_PLANNING/_AGENT]` | on-demand file context per mode | ask/plan=1, agent=0 |
 | `REI_REASONING_EFFORT_[ASK/PLANNING/AGENT]` | thinking cap (none/low/medium/high) | model default |
-| `REI_INVESTIGATE_BEFORE_PRODUCE` | produce-or-bail nudge threshold | 8 |
+| `REI_INVESTIGATE_BEFORE_PRODUCE` | produce-or-bail nudge threshold: at `n` consecutive investigate-only turns (reads/commands/searches that changed nothing) REI injects a "stop investigating, produce now" nudge, and at `n+4` it abandons the turn with what was gathered. **Disabled by default (`0`)** — it counts read-only/MCP calls as "investigate-only" and can prematurely cut legitimately read-heavy work (reading a Jira task over MCP, exploring a large repo). Set e.g. `8` to re-enable | `0` (off) |
 | `AGENT_EDIT_FORMAT` | edit format | — |
 | CLI `--session <name>` / `-s` | open/create a named session (parallel agents on one repo) | new auto-id |
 | CLI `--continue` / `-c` | resume the most recent session | — |
 | CLI `--force` | steal a session lock held by another/stale instance | — |
+| CLI `--version` | version plus the build's commit and date (`rei 0.1.0 (ed95a6a, 2026-09-19 12:40)`); `+dirty` marks a build made with uncommitted edits. Stamped by scripts/write-build-info.js on every build — the answer to "which build is this machine running?" | — |
 | `REI_SUBAGENT_ENABLED` | expose the `delegate` tool (isolated-context sub-agents) — opt-in | `false` |
 | `REI_SUBAGENT_MODEL` | worker model for `delegate` sub-agents (e.g. a fast reliable executor like ornith) | same as agent model |
 | `REI_RUNPLAN_DELEGATE` | `/runplan` executes each stage in an isolated sub-agent (report stages excepted) | `true` |
@@ -214,7 +215,7 @@ carrying them will start taking effect.)
 | `REI_VERBOSE` | full command output and full diffs (the reasoning has its own switch below) | `false` |
 | `REI_SHOW_REASONING` | the model's thinking as a live paragraph above the status row; `false` counts it instead (one line per block). `REI_VERBOSE` streams it in full | `true` |
 | `REI_THINKING_LINES` | rows that paragraph may use (1–12, and never more than a sixth of the terminal) | `4` |
-| `REI_LOOP_GUARD` | `off` disables the repetition guard that cuts a runaway generation. On by default; turn it off if it ever stops a legitimately repetitive answer (a long plan with parallel sections is the shape at risk) | `on` |
+| `REI_LOOP_GUARD` | `off` disables the repetition guard that cuts a runaway generation. On by default; a cut is followed by ONE clean retry (the looping text is dropped, never re-fed) before REI gives up on the turn. Turn it off if it ever stops a legitimately repetitive answer (a long plan with parallel sections is the shape at risk) | `on` |
 | `REI_THEME` | colours for REI's chrome: `default` or `matrix`. `/theme` switches mid-session. Diffs and syntax highlighting are never themed | `default` |
 | `REI_HYPERLINKS` | `on`/`off` to force or disable clickable file links in tables | auto-detected |
 
@@ -230,7 +231,7 @@ carrying them will start taking effect.)
 | `REI_CONFIRM_DESTRUCTIVE` | confirm before destructive commands (rm / git reset --hard / clean / checkout --) — interactive CLI only | `true` |
 | `REI_CONFIRM_GIT_MUTANT` | confirm before state-mutating git commands (commit / push / merge / rebase) — interactive CLI only | `true` |
 | `REI_READ_MAX_LINES` | page size for `read_files`, in lines | 1200 |
-| `REI_TOOL_OUTPUT_MAX_INLINE` | tool output kept inline before it spills to disk, in chars — **`0` = nada viaja inline** (todo se vuelca a disco, el modelo ve solo el recibo) | 2000 |
+| `REI_TOOL_OUTPUT_MAX_INLINE` | tool output kept inline before it spills to disk, in chars — **`0` = nada viaja inline** (todo se vuelca a disco, el modelo ve solo el recibo) | 8% of the context window, clamped to 2000–16000 (16000 when the window is unknown) |
 | `REI_TOOL_OUTPUT_PREVIEW` | chars of a spilled output the model still sees as a preview (`0` = receipt only) | 2000 |
 | `REI_TOOL_OUTPUT_DIR` | where spilled tool outputs are written | a temp dir, cleaned by the OS |
 | `REI_PROMPT_TRACE` | log how much of each prompt is a byte-exact prefix of the previous one (`1` = on) — diagnoses lost KV-cache reuse | off |
@@ -242,6 +243,15 @@ with `save_tool_output(id, dest)` — the runtime moves those bytes, so nothing 
 way. This is the main defence against a single build log eating a local model's window, and it
 matters more than it looks: results stay in the turn's history and are re-sent on every remaining
 model call, so an unspilled result costs its size once *per step*.
+
+**Why the budget is a share of the window, not a constant.** Spilling only pays when the model does
+NOT fetch the file back. Measured over 95 real spills in this repo's own sessions, it fetched it back
+**66% of the time** — 91% for outputs in the 8–16k band. When that happens the spill has saved
+nothing and cost an extra turn, and the history ends up holding the receipt, the preview AND the full
+output, as two near-identical blocks a few messages apart. A history shaped like that is repetitive
+input, and repetitive input is what feeds a repetition loop (see `REI_LOOP_GUARD`). So the budget is
+now 8% of the context window: below it an output travels once, above it the spill still protects the
+window. Raise `REI_TOOL_OUTPUT_MAX_INLINE` explicitly to override the computed value.
 
 The spill goes to a temp directory because nothing references those files after the process exits —
 in the project they became a directory that grew forever with no code to clean it. Point
@@ -276,7 +286,13 @@ PaaS calls without headers, and it answers `{"status":"ok"}` and nothing else. `
 a fallback for `REI_SERVER_PORT`, which is what Render/Fly/Heroku inject) · `REI_TELEMETRY_DISABLED` ·
 `COMPACTOR_MODEL` (which model writes the summary — **leave it empty** to reuse the model already
 loaded, which costs no swap and keeps its cached prefix; a name from another backend gives a 404 and
-the compaction is skipped) · `COMPACTOR_TIMEOUT_MS` (overrides the timeout; by default it SCALES
+the compaction is skipped) · `<PROVIDER>_MODEL_COMPACTOR` and `<PROVIDER>_MODEL_VISION` (the same
+two roles, declared per backend: they win over `COMPACTOR_MODEL` / `REI_VISION_MODEL` when that
+provider is the active one, so switching `MODEL_PROVIDER` no longer leaves them naming a model the
+new backend has never heard of. Prefixes as in `<PROVIDER>_MODEL`; they follow `MODEL_PROVIDER`,
+never `AGENT_MODEL_PROVIDER`. The vision ENDPOINT follows the active provider too when
+`REI_VISION_BASE_URL` is unset — otherwise the model came from one backend and the request
+went to another) · `COMPACTOR_TIMEOUT_MS` (overrides the timeout; by default it SCALES
 with the history — ~30s plus one second per 150 tokens, capped at 15 min — because prefilling a big
 history is the slow part and a flat value killed exactly the compactions that were needed) ·
 Laminar telemetry `LMNR_*`.

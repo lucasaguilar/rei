@@ -32,37 +32,37 @@ describe("spilled-output preview", () => {
 
   it("states exactly how much is shown, in lines and chars", () => {
     // A model deciding whether to fetch the rest needs the size of what it is missing.
-    const r = retainAndMaybeSpill("fetch", ("B".repeat(99) + "\n").repeat(50));
+    const r = retainAndMaybeSpill("fetch", ("B".repeat(99) + "\n").repeat(200));
     const m = r.match(/showing (\d+) of (\d+) lines \((\d+) of (\d+) chars\)/);
     expect(m, `no count line in: ${r.slice(0, 120)}`).not.toBeNull();
     const [, shownLines, totalLines, shownChars, totalChars] = m!.map(Number);
-    expect(totalChars).toBe(5000);
-    expect(totalLines).toBe(51); // 50 newline-terminated lines + the empty tail
+    expect(totalChars).toBe(20_000);
+    expect(totalLines).toBe(201); // 200 newline-terminated lines + the empty tail
     expect(shownChars).toBeLessThanOrEqual(2000);
     expect(shownLines).toBeLessThan(totalLines);
     expect(shownLines).toBeGreaterThan(0);
   });
 
   it("keeps path and id ahead of the preview, so they survive backend truncation", () => {
-    const r = retainAndMaybeSpill("fetch", "C".repeat(9000));
+    const r = retainAndMaybeSpill("fetch", "C".repeat(20_000));
     expect(r.indexOf("path:")).toBeLessThan(r.indexOf("--- preview"));
     expect(r.indexOf("id:")).toBeLessThan(r.indexOf("--- preview"));
   });
 
   it("is overridable with REI_TOOL_OUTPUT_PREVIEW", () => {
     process.env.REI_TOOL_OUTPUT_PREVIEW = "50";
-    expect(retainAndMaybeSpill("fetch", "D".repeat(9000))).toContain("(50 of 9000 chars)");
+    expect(retainAndMaybeSpill("fetch", "D".repeat(20_000))).toContain("(50 of 20000 chars)");
   });
 
   it("names both ways to get the rest back — that is what makes truncating safe", () => {
-    const r = retainAndMaybeSpill("fetch", "F".repeat(9000));
+    const r = retainAndMaybeSpill("fetch", "F".repeat(20_000));
     expect(r).toContain("read_files(");
     expect(r).toContain("save_tool_output(");
   });
 
   it("spills outside the workspace by default, where nothing has to clean it up", () => {
     delete process.env.REI_TOOL_OUTPUT_DIR;
-    const r = retainAndMaybeSpill("fetch", "G".repeat(9000));
+    const r = retainAndMaybeSpill("fetch", "G".repeat(20_000));
     expect(r).toContain(tmpdir().replace(/\/$/, ""));
   });
 
@@ -118,5 +118,50 @@ describe("the spill threshold honours its extremes", () => {
       const r = retainAndMaybeSpill("fetch", "C".repeat(50_000));
       expect(r, bad).toContain("Large tool output truncated");
     }
+  });
+});
+
+/**
+ * The inline budget is a share of the CONTEXT WINDOW, not a constant.
+ *
+ * Measured over 95 real spills in this repo's sessions, the model fetched the spilled file back 66%
+ * of the time — so for anything it was going to read anyway, spilling cost an extra turn and left
+ * the history holding the preview AND the full output as two near-identical blocks a few messages
+ * apart. That shape is repetitive input, which is what feeds a repetition loop. Below the budget the
+ * output travels once and the round-trip never happens.
+ */
+describe("the inline budget scales with the context window", () => {
+  afterEach(() => {
+    delete process.env.REI_CONTEXT_WINDOW;
+    delete process.env.REI_TOOL_OUTPUT_MAX_INLINE;
+  });
+
+  it("inlines a mid-size output that used to spill and be fetched right back", () => {
+    process.env.REI_CONTEXT_WINDOW = "32768"; // a roomy local window
+    const content = "M".repeat(9_000); // the 8–16k band: read back 91% of the time
+    expect(retainAndMaybeSpill("run_command", content)).toBe(content);
+  });
+
+  it("keeps a small window safe — the share shrinks with it", () => {
+    process.env.REI_CONTEXT_WINDOW = "8192";
+    // 8192 tokens ≈ 32k chars; 8% of that is ~2.6k, so a 9k output still spills.
+    expect(retainAndMaybeSpill("run_command", "N".repeat(9_000))).toContain(
+      "Large tool output truncated",
+    );
+  });
+
+  it("never lets one output eat the window, however big the window is", () => {
+    process.env.REI_CONTEXT_WINDOW = "1000000";
+    expect(retainAndMaybeSpill("run_command", "O".repeat(200_000))).toContain(
+      "Large tool output truncated",
+    );
+  });
+
+  it("still lets an explicit budget win over the computed one", () => {
+    process.env.REI_CONTEXT_WINDOW = "32768";
+    process.env.REI_TOOL_OUTPUT_MAX_INLINE = "100";
+    expect(retainAndMaybeSpill("run_command", "P".repeat(9_000))).toContain(
+      "Large tool output truncated",
+    );
   });
 });

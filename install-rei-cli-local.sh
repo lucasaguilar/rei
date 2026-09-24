@@ -12,10 +12,19 @@ mkdir -p "$BIN_DIR"
 echo "Installing REI CLI from local source: $SOURCE_DIR"
 echo "Target install dir: $INSTALL_DIR"
 
+# Stamp the build BEFORE syncing: this directory is a checkout, ~/.rei is not (the rsync below
+# drops .git), so this is the only moment the commit can be read. Without it `rei --version` can
+# only ever report the package version, and telling two machines' builds apart means grepping dist/.
+node "$SOURCE_DIR/scripts/write-build-info.js" || echo "(could not stamp the build — --version will say unknown)"
+
 # Sync current repository contents into ~/.rei (without heavyweight or local-only folders)
+# `.env` is excluded from BOTH sides of --delete: it is the machine's own file (API keys, endpoints)
+# and lives only in the install dir. Without the exclude, --delete removed it on every install,
+# because a fresh clone has no .env to replace it with. The cp fallback below always preserved it.
 if command -v rsync >/dev/null 2>&1; then
   rsync -a --delete \
     --exclude ".git" \
+    --exclude ".env" \
     --exclude "node_modules" \
     --exclude "dist" \
     --exclude ".rei" \

@@ -91,3 +91,44 @@ describe("a request the backend refuses for size is retried, not lost", () => {
     expect(provider.calls).toBe(1);
   });
 });
+
+/**
+ * Auto-compaction announced itself only through the "compacting memory" SPINNER label, which the
+ * next phase erases — so the history shrank and nothing on screen said it had. `memory_compacted`
+ * existed as a status and the CLI already handled it, but nothing ever emitted it.
+ */
+describe("auto-compaction reports itself", () => {
+  const savedWindow = process.env.REI_CONTEXT_WINDOW;
+  const savedMax = process.env.REI_MAX_OUTPUT_TOKENS;
+  afterAll(() => {
+    if (savedWindow === undefined) delete process.env.REI_CONTEXT_WINDOW;
+    else process.env.REI_CONTEXT_WINDOW = savedWindow;
+    if (savedMax === undefined) delete process.env.REI_MAX_OUTPUT_TOKENS;
+    else process.env.REI_MAX_OUTPUT_TOKENS = savedMax;
+  });
+
+  it("emits memory_compacted once the history is cut", async () => {
+    process.env.REI_CONTEXT_WINDOW = "32768"; // usable 24576 → threshold ≈ 15974 tok
+    process.env.REI_MAX_OUTPUT_TOKENS = "8192";
+    const agent = new Agent(new MockProvider() as never, ws);
+    const messages: ChatMessage[] = [];
+    for (let i = 0; i < 20; i++) {
+      messages.push({ role: i % 2 === 0 ? "user" : "assistant", content: "x".repeat(4000) });
+    }
+    const session = {
+      messages,
+      mode: "agent",
+      createdAt: Date.now(),
+    } as unknown as ChatSession;
+
+    const statuses: string[] = [];
+    for await (const _ of agent.streamTurn(session, "seguimos", {
+      onStatus: (s) => statuses.push(s),
+    })) {
+      /* drain */
+    }
+
+    expect(statuses).toContain("compacting_memory");
+    expect(statuses).toContain("memory_compacted");
+  });
+});

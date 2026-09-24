@@ -1,4 +1,4 @@
-import { getVersion } from "./version.js";
+import { getVersionLine } from "./version.js";
 
 /**
  * The one place the CLI's surface is written down.
@@ -9,7 +9,7 @@ import { getVersion } from "./version.js";
  * delegates `--help` here, so there is nothing left to keep in step.
  */
 export function helpText(): string {
-  return `REI ${getVersion()} — a local-first coding agent.
+  return `REI ${getVersionLine()} — a local-first coding agent.
 
 Usage:
   rei                            Interactive session in the current directory
@@ -30,7 +30,7 @@ Session:
 Output:
       --metrics                  Timings and token counts, on stderr
       --verbose                  Full tool output and diffs (reasoning is on by default)
-      --version                  Print the version and exit
+      --version                  Print the version, build commit and date, and exit
   -h, --help                     This text
 
 Configuration lives in .rei/.env and rei.config.json inside the project.

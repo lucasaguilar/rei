@@ -5,6 +5,7 @@ import {
   getMaxOutputTokens,
 } from "../config/model-runtime.js";
 import { estimateTokens } from "./helpers/token-estimator.js";
+import { resolveModelForRole } from "../providers/provider-factory.js";
 
 const VERBATIM_KEEP = 8; // Number of recent non-system messages to keep verbatim
 // Compaction triggers when the conversation grows large RELATIVE TO the context window —
@@ -78,17 +79,29 @@ export function compactorTimeoutMs(promptChars = 0): number {
 }
 
 /**
- * Which model summarizes: `COMPACTOR_MODEL` when set, else the model the session is ALREADY running
- * on.
+ * Which model summarizes, most specific first:
+ *
+ *   1. `<PROVIDER>_MODEL_COMPACTOR` — this backend's own summariser.
+ *   2. `COMPACTOR_MODEL` — one summariser for every backend.
+ *   3. the model the session is ALREADY running on.
  *
  * It used to fall back to the provider's own default, which is `<PREFIX>_MODEL` — the ask/planning
  * model, not the agent's and not one picked with `/model`. On a local backend that means loading a
  * SECOND model to summarize: minutes of swap, memory pressure, and a 404 when the id belongs to a
  * different backend (a real case: COMPACTOR_MODEL=qwen/qwen3-4b, an LM Studio name, against oMLX).
  * Reusing the loaded model costs nothing to start and keeps its cached prefix warm.
+ *
+ * The per-provider form exists for exactly that 404: a single global has to be re-edited every
+ * time `MODEL_PROVIDER` changes, and when it is forgotten compaction fails silently and the
+ * session sails past its window. Leaving BOTH unset is still the best default.
  */
 export function compactorModelFor(activeModel?: string): string | undefined {
-  return process.env.COMPACTOR_MODEL?.trim() || activeModel || undefined;
+  return (
+    resolveModelForRole("compactor") ||
+    process.env.COMPACTOR_MODEL?.trim() ||
+    activeModel ||
+    undefined
+  );
 }
 
 /**
@@ -123,8 +136,20 @@ export async function compactSession(params: {
   provider: ModelProvider;
   modelOverride?: string;
   force?: boolean;
+  /** Same two figures the caller gated on. Re-checking without them measured the history with a
+   *  different ruler than the caller did, so a session the agent had just decided to compact could
+   *  be refused here and logged as "skipped". */
+  fixedOverheadTokens?: number;
+  measuredPromptTokens?: number;
 }): Promise<CompactionResult> {
-  const { messages, provider, modelOverride, force } = params;
+  const {
+    messages,
+    provider,
+    modelOverride,
+    force,
+    fixedOverheadTokens = 0,
+    measuredPromptTokens = 0,
+  } = params;
 
   const systemMessage =
     messages.length > 0 && messages[0].role === "system"
@@ -133,7 +158,7 @@ export async function compactSession(params: {
   const nonSystem = systemMessage ? messages.slice(1) : messages;
 
   // Gate on the same window-aware check as auto-compaction (manual /compact passes force).
-  if (!force && !needsCompaction(messages)) {
+  if (!force && !needsCompaction(messages, fixedOverheadTokens, measuredPromptTokens)) {
     return { messages, skipped: "the history is still under the compaction threshold" };
   }
 
@@ -207,11 +232,35 @@ export async function compactSession(params: {
 /**
  * Checks if a session needs compacting.
  */
+/**
+ * Everything a message costs on the wire, not just its prose.
+ *
+ * `content` is only part of what gets sent: a tool-calling turn says nothing in `content` and
+ * carries its bulk in `tool_calls` (an `edit_file` argument is a whole file), and reasoning models
+ * return `reasoning_content` alongside. Estimating from `content` alone undercounted real sessions
+ * by 1.3-1.8x, which is how a 100k window could read 81% on the gauge while this function still
+ * thought the history was under threshold.
+ */
+function messageTokens(m: ChatMessage): number {
+  let tokens = estimateTokens(m.content);
+  if (m.reasoning_content) tokens += estimateTokens(m.reasoning_content);
+  for (const call of m.tool_calls ?? []) {
+    tokens += estimateTokens(call.function?.name ?? "");
+    tokens += estimateTokens(call.function?.arguments ?? "");
+  }
+  return tokens;
+}
+
 export function needsCompaction(
   messages: ChatMessage[],
   /** Tokens the request costs before any message — system prompt and tools schema. Counting only
    *  the messages meant compaction waited for a threshold the request had already blown past. */
   fixedOverheadTokens = 0,
+  /** The backend's own prompt count for the last call, when it reported one. It is the same figure
+   *  the context gauge shows, and it is ground truth: it already includes the system prompt, the
+   *  tools schema and the chat template's framing, none of which an estimate can see. Taken as a
+   *  FLOOR rather than a replacement, because it predates this turn's new message. */
+  measuredPromptTokens = 0,
 ): boolean {
   const nonSystem = messages.filter((m) => m.role !== "system");
   if (nonSystem.length <= COMPACT_MIN_MSGS) return false;
@@ -222,8 +271,9 @@ export function needsCompaction(
     // by tokens — only the hard message cap guards against unbounded growth.
     return nonSystem.length > COMPACT_MSG_HARD_CAP;
   }
-  const tokens =
-    estimateTokens(messages.map((m) => m.content).join("\n")) + fixedOverheadTokens;
+  const estimated =
+    messages.reduce((acc, m) => acc + messageTokens(m), 0) + fixedOverheadTokens;
+  const tokens = Math.max(estimated, measuredPromptTokens);
   const usable = Math.max(1, window - getMaxOutputTokens());
   return tokens > usable * COMPACT_TOKEN_FRACTION;
 }

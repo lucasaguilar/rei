@@ -2,6 +2,10 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { fetchWithRetry } from "../providers/fetch-retry.js";
+import {
+  resolveEndpointForActiveProvider,
+  resolveModelForRole,
+} from "../providers/provider-factory.js";
 import { extractPdfText, stripPageMarkers } from "../ocr/pdf-text.js";
 import {
   checkpointPath,
@@ -195,21 +199,32 @@ export interface VisionConfig {
  * Defaults target a local LM Studio server.
  */
 export function getVisionConfig(): VisionConfig | null {
+  // Most specific first: this backend's own vision model, then one shared across backends, then
+  // the legacy LM Studio default. The per-provider form is what stops `MODEL_PROVIDER` from
+  // leaving this pointing at a model the new backend has never heard of.
   const model = (
+    resolveModelForRole("vision") ||
     process.env.REI_VISION_MODEL ||
     process.env.LLM_STUDIO_MODEL ||
     ""
   ).trim();
   if (!model) return null;
 
+  // The endpoint has to follow the model. When the model came from <PROVIDER>_MODEL_VISION but the
+  // address stayed on LM Studio, an MLX id was shipped to LM Studio and came back 404 — the kind
+  // of mismatch that reads as "vision is broken" rather than "these two settings disagree".
+  // An explicit REI_VISION_BASE_URL still wins: a dedicated vision server is a real setup.
+  const active = resolveEndpointForActiveProvider();
   const baseUrl = (
     process.env.REI_VISION_BASE_URL ||
+    active.baseUrl ||
     process.env.LLM_STUDIO_BASE_URL ||
     "http://localhost:1234/v1"
   ).replace(/\/+$/, "");
 
   const apiKey =
     process.env.REI_VISION_API_KEY ||
+    active.apiKey ||
     process.env.LLM_STUDIO_API_KEY ||
     "lm-studio";
 

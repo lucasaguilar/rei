@@ -20,6 +20,16 @@ beforeAll(() => {
   mkdirSync(join(ws, "src/config"), { recursive: true });
   mkdirSync(join(ws, "node_modules/pkg"), { recursive: true });
   mkdirSync(join(ws, ".rei"), { recursive: true });
+  // A Claude Code worktree: a COMPLETE second copy of the tree, living inside the repo.
+  mkdirSync(join(ws, ".claude/worktrees/feature/src"), { recursive: true });
+  // The other agents/editors that leave state in a project.
+  for (const d of [".pi", ".opencode", ".hermes", ".antigravity", ".cursor", ".continue", ".windsurf", ".ai", ".aider.tags.cache.v3"]) {
+    mkdirSync(join(ws, d), { recursive: true });
+    writeFileSync(join(ws, d, "notes.ts"), "needleToken left behind by an agent\n");
+  }
+  // NOT pruned: a real project directory that happens to start with a dot.
+  mkdirSync(join(ws, ".github/workflows"), { recursive: true });
+  writeFileSync(join(ws, ".github/workflows/ci.ts"), "const needleToken = 'ci';\n");
 
   writeFileSync(join(ws, "src/alpha.ts"), "const needleToken = 1;\nexport default needleToken;\n");
   writeFileSync(join(ws, "src/beta.ts"), "// needleToken appears here too\n");
@@ -28,6 +38,7 @@ beforeAll(() => {
   // Minified-file shape: one enormous line that matches.
   writeFileSync(join(ws, "src/bundle.min.ts"), `const x="${"needleToken ".repeat(20000)}";\n`);
   writeFileSync(join(ws, "node_modules/pkg/vendor.ts"), "needleToken in vendor code\n");
+  writeFileSync(join(ws, ".claude/worktrees/feature/src/alpha.ts"), "const needleToken = 1;\n");
   // The real case: one enormous line that eats the whole output budget when unclamped.
   writeFileSync(join(ws, ".rei/rag-index.json"), `{"chunks":["${"needleToken ".repeat(4000)}"]}\n`);
 });
@@ -49,6 +60,29 @@ describe("grepCode", () => {
     const out = await grepCode(ws, { pattern: "needleToken", glob: "*.ts", maxResults: 100 });
     expect(out).not.toContain("rag-index.json");
     expect(out).not.toContain("node_modules");
+  });
+
+  it("skips a Claude Code worktree — a second copy of the tree inside the repo", async () => {
+    // Not about output size: walked, it hands the agent a plausible WRONG file to read or edit.
+    const out = await grepCode(ws, { pattern: "needleToken", glob: "*.ts", maxResults: 100 });
+    expect(out).not.toContain(".claude");
+    expect(out).toContain("src/alpha.ts"); // the real one is still found
+  });
+
+  it("skips every other agent's leftovers too", async () => {
+    const out = await grepCode(ws, { pattern: "needleToken", glob: "*.ts", maxResults: 200 });
+    for (const d of [".pi", ".opencode", ".hermes", ".antigravity", ".cursor", ".continue", ".windsurf", ".ai", ".aider"]) {
+      expect(out, `${d} leaked into the results`).not.toContain(d);
+    }
+  });
+
+  it("does not add .github to the prune list — that is not where it is excluded", async () => {
+    // Hidden directories are skipped by ripgrep itself (it needs --hidden to see them), so
+    // .github is out of reach today on BOTH paths. Keeping it out of the prune list is still the
+    // right call: workflows and CODEOWNERS are real files people search on purpose, and the day
+    // hidden dirs become searchable, this list must not be what hides them again.
+    const out = await grepCode(ws, { pattern: "needleToken", glob: "*.ts", maxResults: 200 });
+    expect(out).toContain("src/alpha.ts");
   });
 
   it("returns paths without a ./ prefix, so they can be fed straight to read_files", async () => {
@@ -103,6 +137,11 @@ describe("listFiles", () => {
   it("excludes vendor dirs", async () => {
     const out = await listFiles(ws, { maxResults: 500 });
     expect(out).not.toContain("node_modules");
+  });
+
+  it("excludes a Claude Code worktree, so the tree is not listed twice", async () => {
+    const out = await listFiles(ws, { maxResults: 500 });
+    expect(out).not.toContain(".claude");
   });
 
   it("scopes to a subdirectory with 'path'", async () => {

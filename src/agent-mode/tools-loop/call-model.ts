@@ -119,18 +119,9 @@ export async function callModel(params: {
     result = await provider.completeChatWithTools!(messages, tools, opts);
   }
 
-  // The guard cut the stream: say so. Without this the turn simply ends mid-sentence and the only
-  // evidence is a token count nobody reads — which is exactly how a 12,000-token loop looked like
-  // "REI stopped answering for no reason".
-  if (result.stoppedEarly === "repetition") {
-    onChunk?.({
-      type: "status",
-      content:
-        `\n⚠️  [REI] The model started repeating itself — stopped it there. What is above is ` +
-        `partial. If it WAS repeating: raise this model's repetition penalty, or shorten what it ` +
-        `is being fed. If it was NOT: REI_LOOP_GUARD=off turns this check off.\n`,
-    });
-  }
+  // `result.stoppedEarly === "repetition"` means the loop guard cut the stream. Reporting it and
+  // deciding what to do next belongs to the CALLER (tools-loop/repetition-recovery), which owns the
+  // retry budget; saying anything here would announce an ending that the retry then contradicts.
 
   logger.logInfo("[tools] Response", {
     streamed,

@@ -31,11 +31,18 @@ const MAX_LINE_CHARS = 240;
  * bundle, a 13 MB rag-index on ONE line) eats the entire output budget and starves every real
  * result. This is an approximation of `.gitignore`, not a substitute: it covers the directories
  * that are ignored in practice in every project, and nothing project-specific.
+ *
+ * The agent directories are here for a sharper reason than size. `.claude/worktrees/` can hold a
+ * COMPLETE second copy of the source tree, and the rest keep transcripts, plans and cached copies
+ * of the files they edited. Walked, they do not just double every result — they hand the agent a
+ * plausible WRONG file to read or edit, and feed its own old output back to it as if it were code.
+ *
+ * `.github` is deliberately NOT here: workflows, CODEOWNERS and issue templates are real project
+ * files people search for on purpose.
  */
 const FALLBACK_PRUNE_DIRS = [
   "node_modules",
   ".git",
-  ".rei",
   "dist",
   "build",
   "coverage",
@@ -45,6 +52,19 @@ const FALLBACK_PRUNE_DIRS = [
   "target",
   ".next",
   ".cache",
+  ".idea",
+  // Coding agents and AI editors: scratch state, transcripts, and sometimes whole checkouts.
+  ".rei",
+  ".claude",
+  ".pi",
+  ".opencode",
+  ".hermes",
+  ".antigravity",
+  ".cursor",
+  ".continue",
+  ".windsurf",
+  ".ai",
+  ".aider*",
 ];
 
 function run(cmd: string, args: string[], cwd: string, timeoutMs = 15_000): Promise<RunResult> {
