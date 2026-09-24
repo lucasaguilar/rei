@@ -38,6 +38,9 @@ scripts/launch-rei.config.js
 rei.config.json
 rei.config-backup-all.json
 
+# Graphify knowledge graph (built locally with `graphify .`; rebuilt on demand)
+graphify-out/
+
 # OpenCode
 opencode.json
 
