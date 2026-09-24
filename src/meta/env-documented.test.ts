@@ -48,8 +48,23 @@ const walk = (dir: string): string[] =>
 
 const doc = fs.readFileSync(DOC, "utf-8");
 
+/**
+ * Prefixes the environment rewrites before anything reads them (see load-env.ts). A variable whose
+ * legacy spelling the code still reads IS documented when the reference documents the spelling a
+ * user is meant to write — they are the same knob, and asking the reference to list both would
+ * re-enshrine the name the migration exists to retire.
+ */
+const PREFIX_ALIASES: ReadonlyArray<readonly [string, string]> = [
+  ["LLM_STUDIO_", "LMSTUDIO_"], // legacy → documented
+];
+
 export function isDocumented(name: string, reference = doc): boolean {
   if (reference.includes(name)) return true;
+  for (const [legacy, documented] of PREFIX_ALIASES) {
+    if (name.startsWith(legacy) && reference.includes(`${documented}${name.slice(legacy.length)}`)) {
+      return true;
+    }
+  }
   const parts = name.split("_");
   if (parts[0] in WILDCARD_FAMILIES && new RegExp(`\\b${parts[0]}_\\*`).test(reference)) return true;
   for (let i = 1; i < parts.length; i++) {

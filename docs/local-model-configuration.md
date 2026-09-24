@@ -109,7 +109,7 @@ REI_MODEL_SAMPLING_OVERRIDES={
 ```
 
 **How it works:**
-1. REI reads `LLM_STUDIO_MODEL` (e.g., `mlx-community/ornith-1.0-35b`)
+1. REI reads `LMSTUDIO_MODEL` (e.g., `mlx-community/ornith-1.0-35b`)
 2. Normalizes: strips prefix → `ornith-1.0-35b`
 3. Looks up in the JSON map
 4. Merges overrides on top of global defaults (`resolveAgentSampling()`)
@@ -184,7 +184,7 @@ Only enable for models that demonstrably benefit (rare with local models).
 
 ```env
 # ── Provider & model ──
-LLM_STUDIO_MODEL=mlx-community/ornith-1.0-35b
+LMSTUDIO_MODEL=mlx-community/ornith-1.0-35b
 
 # ── Global defaults (fallback for unknown models) ──
 REI_AGENT_TEMPERATURE=0.3

@@ -91,3 +91,28 @@ apply(
 if (!cwdIsWorkspace) apply(path.join(ws, ".env"));
 // Canonical location, always read: step 2 never reaches it, not even from inside the project.
 apply(path.join(ws, ".rei", ".env"));
+
+// 4. Prefix aliases: what the user writes → what the code reads.
+//
+// The LM Studio provider is `lmstudio`, and every other provider's variables are its own name in
+// caps (OMLX_, OLLAMA_, OPENROUTER_). This one's are `LLM_STUDIO_` — the provider was renamed and
+// its 14 variables were not. The mismatch has exactly one victim: someone who reasonably writes
+// LMSTUDIO_MODEL, gets no error, and spends an hour on a model that was never read.
+//
+// Aliased HERE, in the one place the environment is assembled, rather than at each of the 17 read
+// sites: this is a rule about prefixes, so it covers the 14 variables that exist today and every
+// one added later without anybody remembering to.
+//
+// Direction: the NEW spelling feeds the old one, and never overwrites it. An .env that already
+// declares LLM_STUDIO_MODEL keeps working untouched, so nothing breaks on upgrade.
+const PREFIX_ALIASES: ReadonlyArray<readonly [string, string]> = [
+  ["LMSTUDIO_", "LLM_STUDIO_"],
+];
+
+for (const [from, to] of PREFIX_ALIASES) {
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!key.startsWith(from) || value === undefined) continue;
+    const legacy = `${to}${key.slice(from.length)}`;
+    if (process.env[legacy] === undefined) process.env[legacy] = value;
+  }
+}

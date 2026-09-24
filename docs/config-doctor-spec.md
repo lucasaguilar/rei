@@ -87,8 +87,8 @@ These are the buildable form of what's already commented at the top of `.env.exa
 ### Lane A — LOCAL (LM Studio / Ollama, offline, free)
 ```
 MODEL_PROVIDER=lmstudio
-LLM_STUDIO_MODEL=<recommended agent model>      # ask + planning + agent
-LLM_STUDIO_MODEL_AGENT=<recommended agent model>
+LMSTUDIO_MODEL=<recommended agent model>      # ask + planning + agent
+LMSTUDIO_MODEL_AGENT=<recommended agent model>
 REI_CONTEXT_WINDOW=61440                         # MUST match window loaded in LM Studio (🔴 the #1 gotcha)
 REI_AGENT_TEMPERATURE=0.6                         # tool-calling path; below ~0.6 qwen-class drifts
 REI_REASONING_EFFORT_ASK=none                    # snappy ask
@@ -115,7 +115,7 @@ OPENROUTER_MODEL_AGENT=<recommended cloud model>
 ```
 MODEL_PROVIDER=lmstudio
 AGENT_MODEL_PROVIDER=openrouter                   # heavy agent turns → cloud
-LLM_STUDIO_MODEL=<recommended local model>        # fast local ask/planning
+LMSTUDIO_MODEL=<recommended local model>        # fast local ask/planning
 OPENROUTER_MODEL_AGENT=<recommended cloud model>  # reliable agent tool-calling
 OPENROUTER_API_KEY=<prompted>
 REI_CONTEXT_WINDOW=61440                           # applies to the local ask/planning provider

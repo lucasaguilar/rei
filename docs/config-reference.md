@@ -156,7 +156,12 @@ minutes has failed.
 
 | Var | Default | Why that number |
 |---|---|---|
-| `LLM_STUDIO_REQUEST_TIMEOUT_MS` | 600000 (10 min) | local inference — a long think is not a hang |
+**Prefix note:** the LM Studio variables are `LMSTUDIO_*`, matching `MODEL_PROVIDER=lmstudio` as
+every other provider does. The older `LLM_STUDIO_*` spelling is still read and takes precedence
+when both are set, so an existing `.env` keeps working — the alias is applied once, in
+`load-env.ts`, rather than at each of the seventeen read sites.
+
+| `LMSTUDIO_REQUEST_TIMEOUT_MS` | 600000 (10 min) | local inference — a long think is not a hang |
 | `MTPLX_REQUEST_TIMEOUT_MS` | 600000 (10 min) | idem |
 | `OLLAMA_REQUEST_TIMEOUT_MS` | 300000 (5 min) | local, but usually smaller models |
 | `GEMINI_REQUEST_TIMEOUT_MS` | 120000 (2 min) | remote |
@@ -323,7 +328,7 @@ server — vLLM, SGLang, llama.cpp, LiteLLM. Capabilities are declared, never pr
 
 | Provider | Sampling (chat) | Budget |
 |---|---|---|
-| LM Studio | `LLM_STUDIO_TEMPERATURE / _FREQUENCY_PENALTY / _PRESENCE_PENALTY / _REPEAT_PENALTY` | `LLM_STUDIO_MAX_TOKENS` |
+| LM Studio | `LMSTUDIO_TEMPERATURE / _FREQUENCY_PENALTY / _PRESENCE_PENALTY / _REPEAT_PENALTY` | `LMSTUDIO_MAX_TOKENS` |
 | MTPLX | `MTPLX_TEMPERATURE / _FREQUENCY_PENALTY / _PRESENCE_PENALTY / _REPEAT_PENALTY` | — |
 | oMLX | `OMLX_TEMPERATURE / _FREQUENCY_PENALTY / _PRESENCE_PENALTY`, `OMLX_REQUEST_TIMEOUT_MS` | — |
 | OpenAI-compatible (generic) | `OPENAI_COMPAT_TEMPERATURE / _FREQUENCY_PENALTY / _PRESENCE_PENALTY`, `OPENAI_COMPAT_REQUEST_TIMEOUT_MS` | — |
