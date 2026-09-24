@@ -35,6 +35,9 @@ scripts/launch-rei.config.js
 .windsurf/
 .ai/
 
+# .ai symlink -> {folder}/.ai (shared config outside the repo)
+.ai
+
 rei.config.json
 rei.config-backup-all.json
 
