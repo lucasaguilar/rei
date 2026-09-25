@@ -12,7 +12,7 @@ export interface GitChange {
 }
 
 /**
- * Detecta cambios en el repositorio Git desde el último commit
+ * Detects changes in the Git repository since the last commit.
  */
 export async function detectGitChanges(workspacePath: string): Promise<GitChange[]> {
   try {
@@ -55,7 +55,7 @@ export async function detectGitChanges(workspacePath: string): Promise<GitChange
 }
 
 /**
- * Obtiene el estado actual del repositorio (archivos modificados)
+ * Returns the repository's current state (modified files).
  */
 export async function getGitStatus(workspacePath: string): Promise<string[]> {
   try {
@@ -83,7 +83,7 @@ export async function getGitStatus(workspacePath: string): Promise<string[]> {
 }
 
 /**
- * Regenera el índice del repositorio con los cambios detectados
+ * Rebuilds the repository index with the detected changes.
  */
 export async function regenerateRepoIndex(workspacePath: string): Promise<void> {
   try {

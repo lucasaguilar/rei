@@ -219,6 +219,7 @@ Program.cs(10,5): error CS0029: Type error.
     it("should format successful batch results", () => {
       const result: VirtualBatchResult = {
         success: true,
+        verifyRan: true,
         diagnostics: [],
         applyErrors: [],
         fileCount: 3,
@@ -237,6 +238,7 @@ Program.cs(10,5): error CS0029: Type error.
     it("should format failed batch results", () => {
       const result: VirtualBatchResult = {
         success: false,
+        verifyRan: true,
         diagnostics: [
           {
             filePath: "Program.cs",
@@ -264,6 +266,7 @@ Program.cs(10,5): error CS0029: Type error.
     it("should format patch application errors", () => {
       const result: VirtualBatchResult = {
         success: false,
+        verifyRan: false, // the patches never applied, so nothing was checked
         diagnostics: [],
         applyErrors: ["Failed to apply patch to Program.cs"],
         fileCount: 1,

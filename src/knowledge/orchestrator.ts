@@ -34,7 +34,7 @@ export class KnowledgeOrchestrator {
     const q = query.trim().toLowerCase();
     if (!q) return [];
 
-    // Validar intención: Solo buscar si el usuario pide explícitamente consultar la web
+    // Intent check: search only when the user explicitly asked to consult the web.
     const isExplicitRequest =
       /@(docs|web)\b/i.test(q) ||
       /busca(r)?\s+(en\s+)?(internet|la\s+web|online)/i.test(q) ||
@@ -73,7 +73,7 @@ export class KnowledgeOrchestrator {
       //if (answer.toLowerCase() === 's') {
       const summarizer = createKnowledgeSummarizer(this.modelProvider, true);
       try {
-        // Limpiar frases introductorias comunes de búsqueda para obtener mejores términos en el motor
+        // Strip common lead-in phrases so the engine gets the actual search terms.
         let cleanQuery = query
           .replace(/@(docs|web)\b/gi, "")
           .replace(/busca(r)?\s+(en\s+)?(internet|la\s+web|online|google)?(\s+el|\s+la|\s+los|\s+las)?/gi, "")
@@ -90,7 +90,7 @@ export class KnowledgeOrchestrator {
           cleanQuery = query;
         }
 
-        // Pasar array vacío de dominios activa la búsqueda general en DuckDuckGo
+        // An empty domain array switches DuckDuckGo to a general search.
         const results = await this.searchClient.search(cleanQuery, []);
 
         const combinedContent = results

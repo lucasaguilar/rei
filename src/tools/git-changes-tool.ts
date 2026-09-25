@@ -71,7 +71,7 @@ export function summarizeGitChanges(changes: GitChange[]): string {
 }
 
 /**
- * Detecta los cambios del repositorio Git y los formatea para inyectar al modelo.
+ * Detects the Git repository's changes and formats them for injection into the prompt.
  */
 export async function getGitChanges(workspacePath: string): Promise<string> {
   const changes = await detectGitChanges(workspacePath);

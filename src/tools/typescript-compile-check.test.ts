@@ -24,6 +24,10 @@ vi.mock("node:fs", async (importOriginal) => {
   return {
     ...actual,
     existsSync: vi.fn().mockReturnValue(true), // Pretend tsconfig.json always exists
+    // The verify gate now asks detectProjectType() whether a real command exists, and that reads the
+    // directory. Unmocked, readdirSync throws on this fake path, the workspace looks EMPTY, and every
+    // check is skipped — which silently turned the tests below into no-ops.
+    readdirSync: vi.fn().mockReturnValue(["src", "tsconfig.json", "package.json"]),
     promises: {
       mkdtemp: vi.fn().mockResolvedValue("/mock/tmp/rei-sandbox-123"),
       cp: vi.fn().mockResolvedValue(undefined),
@@ -187,6 +191,7 @@ src/index.ts(10,5): error TS2322: Type error.
     it("should format successful batch result", () => {
       const result: VirtualBatchResult = {
         success: true,
+        verifyRan: true,
         diagnostics: [],
         applyErrors: [],
         fileCount: 1,
@@ -204,6 +209,7 @@ src/index.ts(10,5): error TS2322: Type error.
     it("should format apply errors (search and replace failed)", () => {
       const result: VirtualBatchResult = {
         success: false,
+        verifyRan: false, // the patches never applied, so nothing was checked
         diagnostics: [],
         applyErrors: ["Could not find exact match for search block in src/index.ts"],
         fileCount: 0,
@@ -221,6 +227,7 @@ src/index.ts(10,5): error TS2322: Type error.
     it("should format compilation diagnostics (tsc failed)", () => {
       const result: VirtualBatchResult = {
         success: false,
+        verifyRan: true,
         diagnostics: [
           { filePath: "src/index.ts", line: 10, column: 5, code: 2322, message: "Type mismatch" }
         ],
@@ -255,19 +262,32 @@ src/index.ts(10,5): error TS2322: Type error.
       expect(result.diagnostics[0].message).toBe("Fake error");
     });
     
-    it("should return immediate success if no tsconfig.json exists", async () => {
-      const originalMock = (fs.existsSync as any).getMockImplementation();
-      (fs.existsSync as any).mockImplementation((p: string) => {
-        if (p.includes("tsconfig.json")) return false;
-        return originalMock ? originalMock(p) : true;
-      });
-      
+    /**
+     * This used to assert "no tsconfig.json → immediate success", which is where REI's promise
+     * quietly shrank to one language: a Rust or Python workspace took that path and was reported
+     * green without running anything. The gate is now the VERIFY COMMAND, so the skip happens only
+     * when there is no check to run at all.
+     */
+    it("skips only when the project has NO verify command", async () => {
+      (fs.existsSync as any).mockImplementation(() => false); // no markers at all → unknown project
+      delete process.env.REI_SANDBOX_VERIFY_COMMAND;
+
       const result = await runTypeScriptCompileCheck("/mock/workspace");
       expect(result.success).toBe(true);
       expect(result.fileCount).toBe(0);
-      
-      // Restore
-      (fs.existsSync as any).mockImplementation(originalMock);
+
+      (fs.existsSync as any).mockReturnValue(true);
+    });
+
+    it("still verifies a project that has a command but no tsconfig.json", async () => {
+      (fs.existsSync as any).mockImplementation((p: string) => !p.includes("tsconfig.json"));
+      process.env.REI_SANDBOX_VERIFY_COMMAND = "fail-cmd";
+
+      const result = await runTypeScriptCompileCheck("/mock/workspace");
+      expect(result.success).toBe(false); // it RAN, and it failed — the whole point
+
+      delete process.env.REI_SANDBOX_VERIFY_COMMAND; // do not leak into the next test
+      (fs.existsSync as any).mockReturnValue(true);
     });
   });
 
@@ -286,12 +306,9 @@ src/index.ts(10,5): error TS2322: Type error.
       expect(result.diagnostics).toHaveLength(0);
     });
 
-    it("should return success immediately if tsconfig is missing (no validation)", async () => {
-      const originalMock = (fs.existsSync as any).getMockImplementation();
-      (fs.existsSync as any).mockImplementation((p: string) => {
-        if (p.includes("tsconfig.json")) return false;
-        return originalMock ? originalMock(p) : true;
-      });
+    it("returns success without running when there is no verify command", async () => {
+      (fs.existsSync as any).mockImplementation(() => false); // unknown project, nothing to run
+      delete process.env.REI_SANDBOX_VERIFY_COMMAND;
       
       const edits = [
         { file: "src/index.ts", search: "const a = 1;", replace: "const a = 2;" }
@@ -300,9 +317,10 @@ src/index.ts(10,5): error TS2322: Type error.
       const result = await applyVirtualBatch("/mock/workspace", edits);
       expect(result.success).toBe(true);
       expect(result.applyErrors).toHaveLength(0);
-      expect(result.virtualFiles.size).toBe(0); // We didn't even run the batch because we exited early
-      
-      (fs.existsSync as any).mockImplementation(originalMock);
+      expect(result.virtualFiles.size).toBe(0); // exited early: nothing applied, nothing checked
+      expect(result.verifyRan).toBe(false);      // and it says so, instead of passing for a green
+
+      (fs.existsSync as any).mockReturnValue(true);
     });
 
     it("should fail gracefully when applyFileEdits fails (e.g. search string not found)", async () => {

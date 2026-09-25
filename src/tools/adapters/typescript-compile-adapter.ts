@@ -2,10 +2,24 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 
 import type { CompileAdapter, GenericDiagnostic, GenericCompileCheckResult, GenericVirtualBatchResult } from "../compile-check-core.js";
+import { hasRealVerifyCommand } from "../compile-check-core.js";
 
 export class TypeScriptCompileAdapter implements CompileAdapter {
+  /**
+   * Whether this workspace can be verified at all.
+   *
+   * This used to be `existsSync("tsconfig.json")`, which quietly limited REI's central promise to
+   * TypeScript: `applyVirtualBatch` returns `{success: true, diagnostics: []}` when this says no, so
+   * a Rust project whose code did not compile got a GREEN final verify with empty output, and
+   * `cargo check` — the command REI had just told the model was the check — never ran.
+   *
+   * The right question is whether a real verify command exists. Running it and reading its exit code
+   * is language-agnostic; only PARSING diagnostics is TypeScript-specific, and a language whose
+   * output this adapter cannot parse still gets its exit code and its raw output (see
+   * formatVirtualBatchResult), which is what the model fixes from.
+   */
   canValidate(workspacePath: string): boolean {
-    return fs.existsSync(path.join(workspacePath, "tsconfig.json"));
+    return hasRealVerifyCommand(workspacePath);
   }
 
   parseDiagnostics(workspacePath: string, output: string): GenericDiagnostic[] {
@@ -112,12 +126,25 @@ export class TypeScriptCompileAdapter implements CompileAdapter {
       return lines.join("\n");
     }
 
+    if (result.success && result.verifyRan === false) {
+      // Not a pass: nothing checked it. The model has to report that honestly rather than claim green.
+      return (
+        `⚠️ Patches applied but NOT VERIFIED — \`${result.verifyCommand}\` could not run ` +
+        `(the tool does not appear to be installed here).\n` +
+        `Say so in your answer instead of claiming the change is verified.`
+      );
+    }
+
     if (result.success) {
       return `✅ All patches applied and validated successfully with sandbox command: \`${result.verifyCommand}\``;
     }
 
     lines.push(
-      `❌ Validation failed with ${result.diagnostics.length} compilation error(s).`,
+      result.diagnostics.length > 0
+        ? `❌ Validation failed with ${result.diagnostics.length} compilation error(s).`
+        : // No TSxxxx lines to parse — another language's checker, or a tool that failed to start.
+          // "0 error(s)" would read as a pass; the output below is what the model has to work with.
+          `❌ Verification failed: \`${result.verifyCommand}\` exited non-zero. Its output follows.`,
     );
     for (const d of result.diagnostics) {
       lines.push(

@@ -85,7 +85,7 @@ export async function generateRepoMap(workspacePath: string): Promise<string> {
     const relPath = path.relative(workspacePath, file).replace(/\\/g, "/");
     const content = fs.readFileSync(file, "utf8");
     const tags = Array.from(content.matchAll(/<([a-zA-Z0-9\-]+)/g))
-      .map((m) => m[1]) // Filtramos etiquetas genéricas para resaltar componentes (tags con guion o especiales)
+      .map((m) => m[1]) // Drop generic tags so components stand out (hyphenated or special tags)
       .filter(
         (tag) =>
           tag.includes("-") ||
@@ -584,7 +584,7 @@ function renderImports(sourceFile: SourceFile): string {
   const importPaths = importDeclarations.map((imp) => {
     const moduleSpecifier = imp.getModuleSpecifierValue();
     // Opcional: podrías filtrar solo imports locales (que empiecen con .)
-    // si quieres que el agente se enfoque solo en el grafo del proyecto.
+    // …if you want the agent to focus on the project graph alone.
     return moduleSpecifier;
   });
 

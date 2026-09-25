@@ -30,6 +30,13 @@ export interface ExecutionResult {
    * "not failed && has patches" heuristic.
    */
   verified?: boolean;
+  /**
+   * Whether a real verify command RAN for this turn. Three states, not two: `verified: true` is a
+   * pass, `false` is a failure, and `verifyRan: false` is neither — REI had no check for this project
+   * type, so it has nothing to report. Collapsing the third into a pass is the failure this whole
+   * layer exists to prevent.
+   */
+  verifyRan?: boolean;
   /** Aggregated token usage across all model calls in this turn (max prompt / sum completion). */
   usage?: TokenUsage;
   /**
@@ -136,22 +143,25 @@ export function finalizeOutcome(
   const validCount = outcome.validProposedPatches.length;
   const failedCount = outcome.failedProposedPatches?.length ?? 0;
   const rejectedCount = Math.max(0, generatedPatchCount - validCount);
-  // Prefer the explicit final-verify result; fall back to the legacy heuristic
-  // only when no final verify ran (e.g. turns that produced no edits).
+  // Prefer the explicit final-verify result. The legacy heuristic — "edits applied and nothing
+  // failed" — is inference from the model's own output, so it applies ONLY when no verify was
+  // attempted at all (a turn with no edits). When one was attempted and did not run, the answer
+  // stays undefined: unknown, which the turn reports as unknown.
   const sandboxVerified =
-    outcome.verified ?? (!outcome.failed && validCount > 0);
+    outcome.verified ??
+    (outcome.verifyRan === false ? undefined : !outcome.failed && validCount > 0);
 
   logger.logPatchOutcome({
     validCount,
     rejectedCount,
-    sandboxVerified,
+    sandboxVerified: sandboxVerified === true,
     confirmableCount: validCount,
   });
   logger.logPatchQuality({
     ideaDetected: generatedPatchCount > 0,
     patchGenerated: generatedPatchCount > 0,
     patchApplicable: validCount > 0 || failedCount > 0,
-    patchCompilable: sandboxVerified,
+    patchCompilable: sandboxVerified === true,
     generatedPatchCount,
     appliedPatchCount,
   });
@@ -205,6 +215,9 @@ export async function validateProposedPatches(params: {
   logger: AgentLogger;
 }): Promise<{
   success: boolean;
+  /** Whether a real check ran. `success: true, verifyRan: false` means nothing was checked — the
+   *  turn must not report that as verified. */
+  verifyRan: boolean;
   feedback: string | null;
   mismatchOnly: boolean;
   applyErrors: string[];
@@ -216,6 +229,7 @@ export async function validateProposedPatches(params: {
   if (valResult.success) {
     return {
       success: true,
+      verifyRan: valResult.verifyRan,
       feedback: null,
       mismatchOnly: false,
       applyErrors: [],
@@ -288,6 +302,7 @@ export async function validateProposedPatches(params: {
 
   return {
     success: false,
+    verifyRan: valResult.verifyRan,
     feedback,
     mismatchOnly,
     applyErrors: valResult.applyErrors,

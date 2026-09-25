@@ -142,7 +142,10 @@ export async function buildTurnLimitOutcome(params: {
             `Applied ${limitEdits.length} edit(s); stopped at the ${maxTurns}-turn limit (there may be more to do).`,
         ),
         validProposedPatches: limitEdits,
-        verified: finalCheck.success,
+        // Same rule as the normal completion path: no check ran → not verified, rather than a green
+        // that nothing stands behind.
+        verified: finalCheck.verifyRan ? finalCheck.success : undefined,
+        verifyRan: finalCheck.verifyRan,
       },
       limitEdits.length,
       limitEdits.length,

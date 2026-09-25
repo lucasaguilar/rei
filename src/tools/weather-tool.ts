@@ -20,7 +20,7 @@ export function formatWeatherOutput(result: WeatherResult): string {
 }
 
 /**
- * Obtiene el clima actual de una ubicación usando wttr.in.
+ * Fetches the current weather for a location via wttr.in.
  * @param location La ciudad o región (ej: "London", "Madrid").
  */
 export async function getWeather(location: string): Promise<WeatherResult> {
@@ -53,6 +53,6 @@ export async function getWeather(location: string): Promise<WeatherResult> {
     };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    throw new Error(`Error obteniendo el clima para "${location}": ${msg}`);
+    throw new Error(`Could not fetch the weather for "${location}": ${msg}`);
   }
 }

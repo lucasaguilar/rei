@@ -10,12 +10,16 @@ architecture — modes, the validation pipeline, prompt assembly, the token budg
 ## Verify before you finish
 
 ```bash
-npx tsc -p tsconfig.build.json --noEmit    # must be clean
+npx tsc --noEmit                           # must be clean — the SAME command CI runs
 npx vitest run                             # must be green
 ```
 
-`src/chat/compactor.test.ts` has one pre-existing type error. It is the only accepted failure; do
-not "fix" it as a side quest, and do not let it hide a new one.
+Use that exact typecheck, not `-p tsconfig.build.json`: the build config EXCLUDES the tests, so it
+compiles clean while CI fails on a test fixture that no longer matches a type you changed. That has
+already happened — adding a required field to a result type passed locally and broke the build.
+
+The typecheck is fully clean today. `src/chat/compactor.test.ts` used to carry one accepted type
+error; it no longer does, so there is no expected failure to look past. Any error you see is yours.
 
 ## Rules
 

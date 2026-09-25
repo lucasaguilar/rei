@@ -160,6 +160,7 @@ export async function handleTextResponse(params: {
   // check covered). If it fails and we still have budget, bounce the diagnostics back for one
   // more self-correction.
   let finalVerified: boolean | undefined = undefined;
+  let finalRan: boolean | undefined = undefined;
   const finalEdits = await virtualEdits();
   if (finalEdits.length > 0) {
     const finalCheck = await validateProposedPatches({
@@ -170,7 +171,11 @@ export async function handleTextResponse(params: {
       loopCount,
       logger,
     });
-    finalVerified = finalCheck.success;
+    // `undefined` when no check ran (an unrecognised project): the turn then reports "not verified"
+    // instead of a green that nothing stands behind. A pass has to come from a command that could
+    // have failed.
+    finalRan = finalCheck.verifyRan;
+    finalVerified = finalCheck.verifyRan ? finalCheck.success : undefined;
     if (
       !finalCheck.success &&
       verifyRetries < MAX_VERIFY_RETRIES &&
@@ -220,6 +225,7 @@ export async function handleTextResponse(params: {
         response: appendCreatedSummary(finalResponse),
         validProposedPatches: finalEdits,
         verified: finalVerified,
+        verifyRan: finalRan,
       },
       finalEdits.length,
       finalEdits.length,
