@@ -22,6 +22,23 @@ const CUSTOM = '[ enter custom model... ]';
 const CLOUD_PROVIDERS = ['openrouter', 'gemini', 'groq', 'huggingface'];
 const LOCAL_PROVIDERS = ['ollama', 'lmstudio', 'mtplx', 'omlx', 'openai-compat'];
 
+/**
+ * The providers the menu offers, in the order it offers them: local first, because that is what REI
+ * is for and the order is itself the recommendation.
+ *
+ * Derived from the taxonomy, NOT from the user's `PROVIDER_MODELS`. The menu used to be
+ * `Object.keys(PROVIDER_MODELS)`, which meant a file documented as "your paths and models" silently
+ * decided which backends existed: a typo added one that could not work, and a provider left out of
+ * the file could not be chosen at all. With no config file the built-in fallback listed seven of the
+ * ten, so a new user holding a Groq key could not select Groq.
+ *
+ * `mock` is deliberately absent: it is a valid name (scriptable, used by the tests) but not something
+ * to put in front of someone setting up their first session.
+ */
+export function menuProviders() {
+    return [...LOCAL_PROVIDERS, ...CLOUD_PROVIDERS];
+}
+
 /** Every provider name REI actually understands. `mock` is real (scriptable, used by the tests) and
  *  belongs here so listing it is not an error. */
 const KNOWN_PROVIDER_NAMES = [...CLOUD_PROVIDERS, ...LOCAL_PROVIDERS, 'mock'];
@@ -304,7 +321,9 @@ export const PROVIDER_MODELS = {
         PROJECTS.unshift(envWorkspace);
     }
 
-    PROVIDERS = Object.keys(PROVIDER_MODELS);
+    // The taxonomy decides the menu; PROVIDER_MODELS only supplies curated model NAMES for the
+    // fallback when a probe finds nothing.
+    PROVIDERS = menuProviders();
 }
 
 const OLLAMA_PERF_VARS = [

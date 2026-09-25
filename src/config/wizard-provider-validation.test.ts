@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 // Importing the wizard is safe: it only auto-runs when executed directly (guard at the bottom).
 // @ts-expect-error — plain JS script shipped standalone to ~/.rei/scripts, no .d.ts by design.
-import { validateProviderKeys, suggestProvider } from "../../scripts/launch-rei.js";
+import { validateProviderKeys, suggestProvider, menuProviders } from "../../scripts/launch-rei.js";
 
 /**
  * A single typo in the user's own `launch-rei.config.js` cost a debugging session. The key was
@@ -60,5 +60,39 @@ describe("validateProviderKeys", () => {
   it("survives a missing or malformed config", () => {
     expect(validateProviderKeys(undefined).unknown).toEqual([]);
     expect(validateProviderKeys({}).valid).toEqual({});
+  });
+});
+
+/**
+ * The provider menu used to be `Object.keys(PROVIDER_MODELS)` — the user's own curated model lists.
+ * A file whose documented purpose is "your paths and models" was therefore deciding which providers
+ * REI offers at all, with two consequences:
+ *
+ *  - a typo added a phantom provider (the bug above);
+ *  - and, worse, a provider ABSENT from that file could not be chosen. With no config file at all the
+ *    built-in fallback listed 7 of the 10 REI supports, so a new user with a Groq key could not pick
+ *    Groq in the wizard.
+ *
+ * The taxonomy is now the source of the menu; the config only supplies model NAMES.
+ */
+describe("the provider menu comes from what REI supports", () => {
+  it("offers every local and cloud provider, whatever the user's config says", () => {
+    expect(menuProviders()).toEqual([
+      // local first: this is a local-first tool, and the order is the recommendation
+      "ollama", "lmstudio", "mtplx", "omlx", "openai-compat",
+      "openrouter", "gemini", "groq", "huggingface",
+    ]);
+  });
+
+  it("includes the two a fresh install used to hide", () => {
+    expect(menuProviders()).toContain("groq");
+    expect(menuProviders()).toContain("huggingface");
+  });
+
+  it("does not offer mock, which exists for tests rather than for users", () => {
+    // Still a VALID name — validateProviderKeys accepts it — just not something to put in front of
+    // someone setting up their first session.
+    expect(menuProviders()).not.toContain("mock");
+    expect(validateProviderKeys({ mock: [] }).unknown).toEqual([]);
   });
 });
