@@ -16,6 +16,11 @@ export const STATIC_ALLOWED_COMMANDS = new Set([
   "cargo",
   // Java / Kotlin
   "mvn", "gradle", "java", "javac", "kotlin",
+  // Swift / Dart — the verify command of a SwiftPM or Dart/Flutter project. `project-type.ts` can
+  // only name a checker the sandbox will actually run: a blocked verify reads as REI being broken.
+  "swift", "dart", "flutter",
+  // Python type checkers (mypy runs as `python3 -m mypy`, so only pyright needs an entry).
+  "pyright",
   // PHP
   "php", "composer",
   // .NET / C#

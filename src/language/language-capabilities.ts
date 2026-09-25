@@ -94,6 +94,46 @@ const LANGUAGE_CAPABILITIES: readonly LanguageCapability[] = [
     supportsSemanticValidation: false,
   },
   {
+    // JVM and mobile languages REI detects and verifies. No AST support — as with Luau, the point is
+    // that these files are RECOGNISED: without an entry the matcher rejects every path, so a plan's
+    // "Files to modify" comes back empty and the repo map indexes nothing. `.java` was missing while
+    // java was already a supported project type.
+    id: "java",
+    extensions: [".java"],
+    preferredSourceFile: true,
+    supportsAstIndexing: false,
+    supportsCallerDiscovery: false,
+    supportsAstDependencyExtraction: false,
+    supportsSemanticValidation: false,
+  },
+  {
+    id: "kotlin",
+    extensions: [".kt", ".kts"],
+    preferredSourceFile: true,
+    supportsAstIndexing: false,
+    supportsCallerDiscovery: false,
+    supportsAstDependencyExtraction: false,
+    supportsSemanticValidation: false,
+  },
+  {
+    id: "swift",
+    extensions: [".swift"],
+    preferredSourceFile: true,
+    supportsAstIndexing: false,
+    supportsCallerDiscovery: false,
+    supportsAstDependencyExtraction: false,
+    supportsSemanticValidation: false,
+  },
+  {
+    id: "dart",
+    extensions: [".dart"],
+    preferredSourceFile: true,
+    supportsAstIndexing: false,
+    supportsCallerDiscovery: false,
+    supportsAstDependencyExtraction: false,
+    supportsSemanticValidation: false,
+  },
+  {
     // Roblox projects. `.luau` is the primary extension; `.lua` appears in older repos and in
     // Lua tooling generally. No AST support here — the point is that these files are RECOGNISED:
     // without an entry the file matcher rejects every path, so a plan's "Files to modify" came

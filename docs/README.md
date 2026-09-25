@@ -40,7 +40,7 @@ Start here. These describe shipped behaviour.
 
 | Document | What it covers |
 |---|---|
-| [DEVELOPER-GUIDE.md](DEVELOPER-GUIDE.md) | A recipe per extension task: add a slash command, a tool, a provider. Each names the exact files and how to verify |
+| [DEVELOPER-GUIDE.md](DEVELOPER-GUIDE.md) | A recipe per extension task: add a slash command, a tool, a provider, a language REI can verify. Each names the exact files and how to verify |
 | [contributor-tour-hop-on-hop-off-style.md](contributor-tour-hop-on-hop-off-style.md) | The whole system end to end, no TypeScript expertise assumed |
 
 See also [AGENTS.md](../AGENTS.md) in the repository root — the working rules, read at runtime as

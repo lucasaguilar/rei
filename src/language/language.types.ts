@@ -8,6 +8,7 @@ export interface LanguageCapability {
   id:
     | "typescript" | "javascript" | "csharp" | "c" | "cpp" | "python" | "rust" | "go" | "php"
     | "luau"
+    | "java" | "kotlin" | "swift" | "dart"
     | "generic-text";
 
   /**
