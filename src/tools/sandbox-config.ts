@@ -34,10 +34,14 @@ export const STATIC_ALLOWED_COMMANDS = new Set([
   // Read-only exploration/search (no writes, no sub-command execution): faster/cleaner
   // ways for the agent to search, compare and inspect the tree than the ones above.
   "rg", "egrep", "fgrep", "diff", "jq", "stat", "basename", "dirname", "realpath",
-  // macOS automation
-  "osascript",
   // REI internal
   "rtk",
+  // NOT here, on purpose:
+  //   `osascript` — `do shell script "…"` runs arbitrary shell behind a permitted first word, and
+  //     AppleScript reaches Mail, Messages and Notes besides. It is the only entry that was not a
+  //     build tool. clipboard-image.ts calls the binary directly, so nothing in REI loses it.
+  //   `env` — see the note above; its entire output is the process environment.
+  // Either comes back with REI_ALLOWED_COMMANDS for whoever needs it.
 ]);
 
 /**

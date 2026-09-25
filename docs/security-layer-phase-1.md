@@ -33,12 +33,15 @@ naming, because several entries are general-purpose execution:
 | Entry | What it actually grants |
 |---|---|
 | `python3`, `node`, `php` … with a heredoc | arbitrary code. REI's own error messages *recommend* the shape: ``python3 - <<'PY' … PY`` is what it tells the model to use instead of shell loops |
-| `osascript` | full macOS automation, including `do shell script` — the one entry that is not a build tool |
 | `npx`, `npm` | downloads a package and runs it |
 | `git` | `-c core.sshCommand=…`, hooks, `push` to a remote you did not expect |
 | `curl`, `wget` | sends anything readable to anywhere |
 
-None of that is an oversight — an agent that cannot run a script cannot do the job. What the
+`osascript` — full macOS automation, including `do shell script` — used to be on the list too, and was
+removed: it was the only entry that was not a build tool, and nothing in REI needs it through
+`run_command`. `env` went with it. Both come back via `REI_ALLOWED_COMMANDS` for whoever wants them.
+
+None of the rest is an oversight — an agent that cannot run a script cannot do the job. What the
 allow-list genuinely buys is worth stating plainly:
 
 - it stops the **accident**: a typo'd `mkfs`, a `sudo` the model invented, a command aimed at the
