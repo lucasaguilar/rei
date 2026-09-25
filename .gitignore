@@ -41,6 +41,9 @@ scripts/launch-rei.config.js
 rei.config.json
 rei.config-backup-all.json
 
+# Local worktree config (overrides the shared one in .ai); stays local like rei.config.json
+rei-worktree.config.json
+
 # Graphify knowledge graph (built locally with `graphify .`; rebuilt on demand)
 graphify-out/
 

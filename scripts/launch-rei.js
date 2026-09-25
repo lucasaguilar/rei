@@ -22,6 +22,59 @@ const CUSTOM = '[ enter custom model... ]';
 const CLOUD_PROVIDERS = ['openrouter', 'gemini', 'groq', 'huggingface'];
 const LOCAL_PROVIDERS = ['ollama', 'lmstudio', 'mtplx', 'omlx', 'openai-compat'];
 
+/** Every provider name REI actually understands. `mock` is real (scriptable, used by the tests) and
+ *  belongs here so listing it is not an error. */
+const KNOWN_PROVIDER_NAMES = [...CLOUD_PROVIDERS, ...LOCAL_PROVIDERS, 'mock'];
+
+/** Levenshtein distance, iterative and small — enough to tell a typo from a different word. */
+function editDistance(a, b) {
+    const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+        let diagonal = prev[0];
+        prev[0] = i;
+        for (let j = 1; j <= b.length; j++) {
+            const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+            const next = Math.min(prev[j] + 1, prev[j - 1] + 1, diagonal + cost);
+            diagonal = prev[j];
+            prev[j] = next;
+        }
+    }
+    return prev[b.length];
+}
+
+/** The known provider `name` is probably a typo of, or undefined when it resembles none.
+ *  Two edits at most: `llmstudio`→`lmstudio` is one, and anything further apart is a different word,
+ *  where "did you mean X?" would send the reader somewhere wrong. */
+export function suggestProvider(name) {
+    const candidate = String(name || '').trim().toLowerCase();
+    if (!candidate) return undefined;
+    let best;
+    let bestDistance = Infinity;
+    for (const known of KNOWN_PROVIDER_NAMES) {
+        const d = editDistance(candidate, known);
+        if (d < bestDistance) { bestDistance = d; best = known; }
+    }
+    return bestDistance > 0 && bestDistance <= 2 ? best : undefined;
+}
+
+/**
+ * Splits a user's PROVIDER_MODELS into the entries REI can actually use and the ones it cannot.
+ *
+ * The menu is built from these keys, so an unrecognised one used to become an option that could not
+ * work: `LOCAL_PROVIDERS` never matched it, so the endpoint was never probed, `prepareProvider`
+ * returned no models, and the curated fallback for local providers is empty by design — leaving the
+ * user with a provider that silently offers nothing. One `llmstudio` for `lmstudio` was enough.
+ */
+export function validateProviderKeys(providerModels) {
+    const valid = {};
+    const unknown = [];
+    for (const [key, models] of Object.entries(providerModels || {})) {
+        if (KNOWN_PROVIDER_NAMES.includes(key)) valid[key] = models;
+        else unknown.push({ key, suggestion: suggestProvider(key) });
+    }
+    return { valid, unknown };
+}
+
 // Env var that holds each cloud provider's API key (HF uses HF_TOKEN, not HF_API_KEY).
 const API_KEY_VAR = {
     openrouter: 'OPENROUTER_API_KEY',
@@ -217,7 +270,17 @@ export const PROVIDER_MODELS = {
     try {
         const config = await import('./launch-rei.config.js');
         PROJECTS = config.PROJECTS || [];
-        PROVIDER_MODELS = config.PROVIDER_MODELS || {};
+        // Validated, not trusted: the menu is built from these keys, so a name REI does not know
+        // becomes an option that cannot work — no endpoint probe, no models, no explanation.
+        const { valid, unknown } = validateProviderKeys(config.PROVIDER_MODELS);
+        PROVIDER_MODELS = valid;
+        for (const { key, suggestion } of unknown) {
+            console.warn(
+                `⚠️  launch-rei.config.js lists an unknown provider: '${key}'` +
+                (suggestion ? ` — did you mean '${suggestion}'?` : '') +
+                `\n   It is not offered in the menu. Supported: ${KNOWN_PROVIDER_NAMES.join(', ')}.`,
+            );
+        }
     } catch (err) {
         PROJECTS = [];
         PROVIDER_MODELS = {
@@ -611,7 +674,19 @@ async function runPreflight() {
 async function prepareProvider(provider, envVars) {
     if (CLOUD_PROVIDERS.includes(provider)) { await ensureCloudApiKey(provider, envVars); return { models: [] }; }
     if (LOCAL_PROVIDERS.includes(provider)) return configureLocalEndpoint(provider, envVars);
-    return { models: [] }; // mock / unknown — nothing to set up
+    // `mock` needs no setup. Anything else reaching here is a name REI does not know — it can only
+    // arrive from a saved last-config or an env var now that the menu is validated, and it must say
+    // so: an empty model list looked exactly like a server with nothing loaded.
+    if (provider !== 'mock') {
+        const suggestion = suggestProvider(provider);
+        note(
+            `'${provider}' is not a provider REI knows${suggestion ? ` — did you mean '${suggestion}'?` : ''}.\n` +
+            `Nothing was configured for it, so no models can be listed.\n` +
+            `Supported: ${KNOWN_PROVIDER_NAMES.join(', ')}.`,
+            'Unknown provider',
+        );
+    }
+    return { models: [] };
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
