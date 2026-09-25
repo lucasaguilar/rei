@@ -682,6 +682,43 @@ async function configureLocalRuntime(last) {
     };
 }
 
+/**
+ * Windows offered as presets, largest first so the list reads as a ceiling coming down.
+ *
+ * It used to stop at 61440, which meant a machine that can hold 100k had no way to say so — the
+ * author's own tuned setup was unreachable from the wizard whose job is to produce it. Anything the
+ * presets do not cover goes through the custom entry; `0` is a separate choice, not a size.
+ */
+export const CONTEXT_WINDOW_PRESETS = ['131072', '98304', '61440', '32768', '16384', '8192'];
+
+/** Smallest window a turn can actually run in: below this the system prompt alone does not fit, so a
+ *  value under it is a typo rather than a choice. */
+const MIN_CONTEXT_WINDOW = 1024;
+/** Above this it is always a typo — no local backend serves it, and REI would size its budget to a
+ *  window the server cannot honour. */
+const MAX_CONTEXT_WINDOW = 4_000_000;
+
+/** Validates a hand-typed window. Returns `{ ok: true, value }` or `{ ok: false, error }` — the error
+ *  is what the prompt shows, so it says what to type instead of just refusing. */
+export function parseContextWindow(input) {
+    const raw = String(input ?? '').trim();
+    if (!/^\d+$/.test(raw)) return { ok: false, error: 'Enter a whole number of tokens (e.g. 100000).' };
+    const n = Number(raw);
+    if (n < MIN_CONTEXT_WINDOW) {
+        return { ok: false, error: `Too small — ${MIN_CONTEXT_WINDOW} is the minimum a turn fits in.` };
+    }
+    if (n > MAX_CONTEXT_WINDOW) {
+        return { ok: false, error: 'That is larger than any backend serves — check the number.' };
+    }
+    return { ok: true, value: String(n) };
+}
+
+/** "131072 (128k)" — the round number is what people think in; the exact one is what gets written. */
+function labelForWindow(v) {
+    const k = Number(v) / 1024;
+    return Number.isInteger(k) ? `${v} (${k}k)` : v;
+}
+
 /** REI's history-trimming budget. Writes the provider-agnostic REI_* name that
  *  src/config/model-runtime.ts resolves — it takes precedence over OLLAMA_NUM_CTX /
  *  LLM_STUDIO_MAX_TOKENS, so writing anything else would be silently shadowed. */
@@ -694,12 +731,32 @@ async function askContextWindow(last) {
         // Already set — carry through so the wizard never overwrites a deliberate choice.
         envVars.REI_CONTEXT_WINDOW = process.env.REI_CONTEXT_WINDOW;
     } else {
-        const ctxValue = await select({
+        const CUSTOM_CTX = '[ enter a custom size... ]';
+        const options = [
+            ...CONTEXT_WINDOW_PRESETS.map(v => ({ value: v, label: labelForWindow(v) })),
+            { value: CUSTOM_CTX, label: CUSTOM_CTX },
+            { value: '0', label: '0 (no trimming — the model manages its own)' },
+        ];
+        let ctxValue = await select({
             message: 'REI_CONTEXT_WINDOW (history-trimming budget; 0 = model manages its own):',
-            options: ['61440', '32768', '16384', '8192', '0'].map(v => ({ value: v, label: v === '0' ? '0 (no trimming)' : v })),
-            initialValue: last.ctxWindow ?? '61440',   // proposed: 60 × 1024
+            options,
+            // 61440 (60 × 1024) stays the proposal: it fits the machines most people start on, and
+            // a budget larger than the window the server LOADED is the one mistake here that hurts.
+            initialValue: options.some(o => o.value === last.ctxWindow) ? last.ctxWindow : '61440',
         });
         if (isCancel(ctxValue)) { cancel('Cancelled'); process.exit(0); }
+        if (ctxValue === CUSTOM_CTX) {
+            const typed = await text({
+                message: 'Context window in tokens (must not exceed what your model is LOADED with):',
+                placeholder: '100000',
+                validate: v => {
+                    const r = parseContextWindow(v);
+                    return r.ok ? undefined : r.error;
+                },
+            });
+            if (isCancel(typed)) { cancel('Cancelled'); process.exit(0); }
+            ctxValue = parseContextWindow(typed).value;
+        }
         envVars.REI_CONTEXT_WINDOW = ctxValue;
         Object.assign(config, { ctxWindow: ctxValue });
     }
