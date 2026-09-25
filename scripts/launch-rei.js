@@ -12,7 +12,6 @@ const ROOT = path.join(__dirname, '..');
 dotenv.config({ path: path.join(ROOT, '.env'), quiet: true });
 
 let PROJECTS = [];
-let PROVIDER_MODELS = {};
 let PROVIDERS = [];
 const CUSTOM = '[ enter custom model... ]';
 
@@ -26,11 +25,11 @@ const LOCAL_PROVIDERS = ['ollama', 'lmstudio', 'mtplx', 'omlx', 'openai-compat']
  * The providers the menu offers, in the order it offers them: local first, because that is what REI
  * is for and the order is itself the recommendation.
  *
- * Derived from the taxonomy, NOT from the user's `PROVIDER_MODELS`. The menu used to be
- * `Object.keys(PROVIDER_MODELS)`, which meant a file documented as "your paths and models" silently
- * decided which backends existed: a typo added one that could not work, and a provider left out of
- * the file could not be chosen at all. With no config file the built-in fallback listed seven of the
- * ten, so a new user holding a Groq key could not select Groq.
+ * Derived from the taxonomy. The menu used to be `Object.keys(PROVIDER_MODELS)` — read from a
+ * launcher config file the wizard created for you — so a file documented as "your paths and models"
+ * silently decided which backends existed: a typo added one that could not work, and a provider left
+ * out of it could not be chosen at all. A fresh install listed seven of the ten, so a new user
+ * holding a Groq key could not select Groq. That file is gone; this is the source now.
  *
  * `mock` is deliberately absent: it is a valid name (scriptable, used by the tests) but not something
  * to put in front of someone setting up their first session.
@@ -72,24 +71,6 @@ export function suggestProvider(name) {
         if (d < bestDistance) { bestDistance = d; best = known; }
     }
     return bestDistance > 0 && bestDistance <= 2 ? best : undefined;
-}
-
-/**
- * Splits a user's PROVIDER_MODELS into the entries REI can actually use and the ones it cannot.
- *
- * The menu is built from these keys, so an unrecognised one used to become an option that could not
- * work: `LOCAL_PROVIDERS` never matched it, so the endpoint was never probed, `prepareProvider`
- * returned no models, and the curated fallback for local providers is empty by design — leaving the
- * user with a provider that silently offers nothing. One `llmstudio` for `lmstudio` was enough.
- */
-export function validateProviderKeys(providerModels) {
-    const valid = {};
-    const unknown = [];
-    for (const [key, models] of Object.entries(providerModels || {})) {
-        if (KNOWN_PROVIDER_NAMES.includes(key)) valid[key] = models;
-        else unknown.push({ key, suggestion: suggestProvider(key) });
-    }
-    return { valid, unknown };
 }
 
 // Env var that holds each cloud provider's API key (HF uses HF_TOKEN, not HF_API_KEY).
@@ -141,10 +122,9 @@ const KNOWN_MODELS = {
 // the bash wrapper already filters (your_..._here / placeholder).
 const isPlaceholder = (v) => !v || /_here$|^your_|placeholder/i.test(String(v).trim());
 
-/** User's own curated list (launch-rei.config.js) if non-empty, else the built-in KNOWN_MODELS. */
+/** Curated names to offer when no live list exists: a cloud provider (never probed) or a local server
+ *  that could not be reached. The live probe beats it whenever there is one. */
 function knownFallback(provider) {
-    const own = PROVIDER_MODELS[provider];
-    if (Array.isArray(own) && own.length > 0) return own;
     return KNOWN_MODELS[provider] ?? [];
 }
 
@@ -262,53 +242,27 @@ function persistEnv(envVars, key, value) {
     writeGlobalEnv(key, value);
 }
 
+/**
+ * Resolves the workspace list and the provider menu.
+ *
+ * It used to CREATE `scripts/launch-rei.config.js` on first run — copying the example, or writing a
+ * stub when that was missing — and then read `PROJECTS` and `PROVIDER_MODELS` out of it. Nobody asked
+ * for that file, and it cost two bugs: a typo in a provider key added a menu option that could not
+ * work (`llmstudio` for `lmstudio`, which silently skipped the endpoint probe), and a provider left
+ * out of the file could not be chosen at all — a fresh install offered seven of the ten.
+ *
+ * Neither field was needed. The workspace list already includes the cwd, and the curated model names
+ * live in KNOWN_MODELS, compiled in.
+ */
 async function loadConfiguration() {
-    const configPath = path.join(__dirname, 'launch-rei.config.js');
-    if (!fs.existsSync(configPath)) {
-        const examplePath = path.join(__dirname, 'launch-rei.config.example.js');
-        if (fs.existsSync(examplePath)) {
-            try {
-                fs.copyFileSync(examplePath, configPath);
-            } catch (err) {}
-        } else {
-            try {
-                fs.writeFileSync(configPath, `
-export const PROJECTS = [];
-export const PROVIDER_MODELS = {
-    ollama: ['llama3.2', 'qwen2.5-coder:14b'],
-    openrouter: ['qwen/qwen3.6-plus', 'deepseek/deepseek-r1:free'],
-    gemini: ['gemini-2.5-flash']
-};
-                `);
-            } catch (err) {}
-        }
-    }
-
-    try {
-        const config = await import('./launch-rei.config.js');
-        PROJECTS = config.PROJECTS || [];
-        // Validated, not trusted: the menu is built from these keys, so a name REI does not know
-        // becomes an option that cannot work — no endpoint probe, no models, no explanation.
-        const { valid, unknown } = validateProviderKeys(config.PROVIDER_MODELS);
-        PROVIDER_MODELS = valid;
-        for (const { key, suggestion } of unknown) {
-            console.warn(
-                `⚠️  launch-rei.config.js lists an unknown provider: '${key}'` +
-                (suggestion ? ` — did you mean '${suggestion}'?` : '') +
-                `\n   It is not offered in the menu. Supported: ${KNOWN_PROVIDER_NAMES.join(', ')}.`,
-            );
-        }
-    } catch (err) {
-        PROJECTS = [];
-        PROVIDER_MODELS = {
-            ollama: ['llama3.2', 'qwen2.5-coder:14b'],
-            openrouter: ['qwen/qwen3.6-plus'],
-            gemini: ['gemini-2.5-flash'],
-            lmstudio: [],
-            mtplx: [],
-            omlx: [],
-            'openai-compat': []
-        };
+    // A user who edited one deserves to know it stopped mattering. Silently ignoring it is the one
+    // outcome worse than reading it.
+    const staleConfig = path.join(__dirname, 'launch-rei.config.js');
+    if (fs.existsSync(staleConfig)) {
+        console.warn(
+            `ℹ️  ${staleConfig} is no longer read — the provider menu comes from REI itself and the\n` +
+            `   workspace is the directory you run \`rei\` in. You can delete the file.`,
+        );
     }
 
     const cwd = process.cwd();
@@ -321,8 +275,6 @@ export const PROVIDER_MODELS = {
         PROJECTS.unshift(envWorkspace);
     }
 
-    // The taxonomy decides the menu; PROVIDER_MODELS only supplies curated model NAMES for the
-    // fallback when a probe finds nothing.
     PROVIDERS = menuProviders();
 }
 
