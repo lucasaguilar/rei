@@ -57,6 +57,7 @@ Deep architecture: [`architecture-map.md`](./architecture-map.md) · agent loop:
 - **[Add a slash command](#recipe-add-a-slash-command)** — for something the *user* types
 - **[Add a tool the model can call](#recipe-add-a-tool-the-model-can-call)** — for something the *model* invokes
 - **[Add a model provider](#recipe-add-a-model-provider)** — for a new backend
+- **[Add a language REI can verify](#recipe-add-a-language-rei-can-verify)** — a compiler for a project type it does not know
 - Modify the agent loop / add a guard — _no recipe yet; start from [`agent-loop.md`](./agent-loop.md)_
 - Add a skill — _no recipe yet; the catalog is `prompts/skills/*.md`, loaded by `use_skill`_
 - Add per-model config (sampling / context window) — no code needed: an entry in `rei.config.json`, see [`model-config-spec.md`](./model-config-spec.md)
@@ -257,6 +258,75 @@ calling is where compat layers diverge, not chat.
 
 `src/providers/omlx-provider.ts` (54 lines, one real difference documented) and
 `src/providers/openai-compatible-provider.ts` for what you inherit.
+
+---
+
+## Recipe: Add a language REI can verify
+
+REI's whole bet is that an edit is worth nothing until something other than the model says it is
+sound. That something is the project's own verify command, so teaching REI a new language is
+teaching it which command to trust — and it is the smallest useful contribution in the repo.
+
+**The one rule:** the command must be able to FAIL. A check that always passes is worse than no
+check, because the agent reads the pass as proof and stops looking. This is not hypothetical — plain
+JavaScript used to verify with `node --check index.js 2>/dev/null || echo ok`, which printed `ok` for
+a project with a syntax error. If your language has no checker installed, return nothing and let REI
+say so.
+
+### The 3 files you touch
+
+| File | What you add |
+|---|---|
+| `src/workspace/project-type.ts` | the `ProjectType` id, how it is DETECTED, and the verify command |
+| `src/language/language.types.ts` + `language-capabilities.ts` | the file extensions, or the matcher rejects every path |
+| `src/tools/sandbox-config.ts` | the command's binary, or the sandbox refuses to run it |
+
+### Step 1 — detect it and name the command
+
+```ts
+} else if (has("Package.swift")) {
+  type = "swift";
+  command = "swift build";
+}
+```
+
+Order matters. Put your branch BEFORE a broader one that would claim the same repo: a Kotlin project
+carries `build.gradle`, so it has to be matched before the Java branch, which would verify it with
+`gradle compileJava` — compiling no Kotlin and exiting 0. Prefer the most specific marker you have
+(`Package.swift`, `pubspec.yaml`, `.luaurc`) over a file half the ecosystem ships.
+
+When a real checker is optional, use it only if the project DECLARED it. `declares(file, regex)`
+reads a config file for that purpose: Python upgrades from `py_compile` to mypy only when
+`mypy.ini` or `[tool.mypy]` is there, because mypy over a codebase that never opted in reports
+hundreds of pre-existing errors and the agent spends its attempts on findings it did not cause.
+
+### Step 2 — register the extensions
+
+Without an entry in `LANGUAGE_CAPABILITIES` the file matcher rejects every path in the language: a
+plan's "Files to modify" comes back empty and the repo map indexes nothing. Extensions alone are
+enough — set the AST flags to `false` unless you are also writing an indexer.
+
+### Step 3 — let the sandbox run it
+
+Add the binary to `STATIC_ALLOWED_COMMANDS`. Miss this and the turn ends on
+`Security Error: Command 'swift' is not in the allow-list`, which reads as REI being broken rather
+than as a missing entry.
+
+### Verify
+
+```bash
+npx vitest run src/workspace src/tools/sandbox-config.test.ts
+```
+
+`project-type.compilers.test.ts` already asserts the invariant for every language at once — that the
+first word of every verify command REI can produce is a command the sandbox allows. Add your fixture
+to its list and write the two cases that matter: your language detected with the checker configured,
+and detected WITHOUT it (which must not invent a command).
+
+### Reference implementation
+
+The Kotlin and Dart branches in `src/workspace/project-type.ts` — each is five lines and a comment
+saying which wrong thing it prevents. `project-type.compilers.test.ts` shows the fixtures.
 
 ---
 

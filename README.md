@@ -50,7 +50,9 @@ REI names which one it ran instead of implying they are equal.
   is the requirement, not the preference.
 - **An agent told you it made a change, and it hadn't.** Or it had, and nothing compiled. REI runs
   your project's real compiler before the turn ends, hands the model its own errors to fix, and
-  reports what it actually found.
+  reports what it actually found. TypeScript, Angular, C#, Go, Rust, Java, Kotlin, Swift, Dart,
+  Python, PHP, JavaScript, Luau — [what each one proves](#why-it-verifies), and your own command
+  when none of them fits.
 - **You are paying per token** for work a machine you already own can do — and you would rather
   split it than choose. Running part local and part cloud in the same session is a supported setup,
   not a workaround: ask and planning stay on your machine, only the agent turns you want to get
@@ -192,8 +194,10 @@ rei --config       # the wizard: provider, model, endpoint, key. Re-run it whene
 ```
 
 The wizard writes `.rei/.env` — **which** model runs. `rei.config.json`, next to it, is **how** it
-runs: context window, sampling, output cap, thinking level, per model. The wizard never touches that
-file, and tuning it is where a local model stops being a demo. That is the next section.
+runs: context window, sampling, output cap, thinking level, per model. For every local model you pick
+the wizard **offers** a starting block for that file — it shows you the values, asks, and only adds
+models that have none, so nothing you tuned by hand is ever overwritten. Those defaults are a
+starting point; tuning them is where a local model stops being a demo. That is the next section.
 
 These are the `.env` keys worth knowing by hand:
 
@@ -213,12 +217,29 @@ opening REI in a new folder never inherits another project's model.
 ask questions, the strongest reasoner you have to plan, the most reliable tool-caller to execute:
 
 ```bash
-LMSTUDIO_MODEL_ASK=ornith-1.5-35b        # interactive: favours speed
-LMSTUDIO_MODEL_PLANNING=qwen3.8-27b      # favours reasoning
-LMSTUDIO_MODEL_AGENT=qwen3.8-27b         # favours tool calling
+LMSTUDIO_MODEL_ASK=ornith-1.5-35b-a3b    # a MoE: many shallow decisions, fast
+LMSTUDIO_MODEL_PLANNING=qwen3.8-27b      # dense: fewer, harder decisions
+LMSTUDIO_MODEL_AGENT=qwen3.8-27b         # favours reliable tool calling
 ```
 
 Set none of them and `<PROVIDER>_MODEL` runs everything.
+
+**There are exactly two knobs, and it is worth knowing where the second one stops.** The model per
+mode, above — and the *provider* for agent mode, which is the hybrid setup:
+
+```bash
+MODEL_PROVIDER=lmstudio                  # ask + planning: local, free, most of the turns
+LMSTUDIO_MODEL_ASK=ornith-1.5-35b-a3b
+LMSTUDIO_MODEL_PLANNING=qwen3.8-27b
+
+AGENT_MODEL_PROVIDER=openrouter          # agent: the edits worth paying for
+OPENROUTER_MODEL_AGENT=<a frontier model>
+```
+
+Only **agent** can change provider. Ask and planning always run on `MODEL_PROVIDER`, so their model
+overrides are read off that provider's prefix — "ask local, planning in the cloud" is not a
+configuration that exists. Everything else combines freely: three local models, one local and one
+cloud, the same model everywhere with different thinking levels per mode.
 
 **Three models per mode does not mean three models in RAM.** What it costs depends on the backend,
 and the good ones already solve this: LM Studio loads a model on demand and unloads it after an idle
@@ -235,6 +256,18 @@ What that buys and what it costs, plainly:
   plus a cloud one costs nothing extra on the machine.
 - **On limited RAM, one good model beats three that swap.** Give it a tuned `thinkingLevelMap` and
   per-mode reasoning levels instead — same win on the chatty turns, no load time.
+
+**Keep the model loaded.** This is the single biggest lever on how fast a local session feels, and it
+is not about tokens per second. Every turn re-sends the conversation, and a backend that still holds
+the model can reuse its KV cache for the part of the prompt that did not change — so the second turn
+prefills only the new tail instead of the whole history. Unload the model between turns and every
+turn pays full prefill: on a long session that is the difference between a pause and a wait.
+
+In practice: give LM Studio an idle timeout longer than you think (or keep the model pinned), set
+`OLLAMA_KEEP_ALIVE` generously, and prefer fewer distinct models over a perfect one per mode — each
+swap throws the cache away. REI helps on its side by keeping the prompt's prefix stable; set
+`REI_PROMPT_TRACE=1` and it logs how much of each prompt was a byte-exact prefix of the previous one,
+so you can see the reuse on your own machine instead of taking this paragraph on faith.
 
 ### Tuning a local model: `rei.config.json`
 
@@ -317,10 +350,18 @@ changed files into atomic commits — the MoE finished while the dense one loope
 decisions favour the MoE; few hard ones favour the dense model. That is what `_ASK` / `_PLANNING` /
 `_AGENT` are for.
 
-**LM Studio and the thinking level.** It accepts `chat_template_kwargs` over the API and ignores
-them, so `reasoning_effort` never reaches the template and the model runs at its default — `xhigh`,
-the most expensive one. The way through is a `model.yaml` in `~/.lmstudio/hub/models/<owner>/<name>/`
-that declares the level as a config field:
+**The thinking level may not reach the model, and here is the symptom.** You set
+`REI_REASONING_EFFORT_ASK=none`, and the model still thinks for three paragraphs before answering
+"yes". That means the value never reached the chat template: it is being sent, the backend accepts it,
+and the template ignores it — so the model runs at its own default, which on a reasoning model is
+usually the most expensive level there is.
+
+Whether it reaches depends on the Jinja template the model ships with, not on REI, so test yours
+rather than assume: set `none`, ask something trivial, and watch whether it thinks. Verified here:
+LM Studio accepts `chat_template_kwargs` over the API and ignores them, so with it the value never
+arrives; oMLX forwards them. When it does not arrive, the way through is a `model.yaml` in
+`~/.lmstudio/hub/models/<owner>/<name>/` that declares the level as a config field, which sets the
+Jinja variable directly:
 
 ```yaml
 model: <owner>/<a NEW name for the wrapper>
@@ -346,9 +387,10 @@ Once the model entry is right, these are what a local session actually spends it
 
 - **`REI_REASONING_EFFORT_<MODE>`** — `ask=low`, `agent=medium` is a sane start. `/think <level>`
   changes it mid-session, and `/think none` turns thinking off where the backend supports it.
-- **`REI_TOOL_OUTPUT_MAX_INLINE`** (default 2000) — how much of a tool result travels in context.
-  `0` sends none of it, only a receipt. Raise it if the model keeps re-reading; lower it if the
-  context grows too fast.
+- **`REI_TOOL_OUTPUT_MAX_INLINE`** — how much of a tool result travels in context, in characters.
+  The default is 8% of your context window, floored at 2,000 and capped at 16,000 — so on a 100k
+  window it is 16,000. `0` sends none of it, only a receipt. Raise it if the model keeps re-reading;
+  lower it if the context grows too fast.
 - **`REI_ON_DEMAND_FILE_CONTEXT_<MODE>`** — on by default: REI injects no repo map and the model
   discovers structure with tools. Turn it off (`=0`) only in a small repo where the map is cheap.
 - **`REI_SHOW_REASONING`** — on by default: the model's thinking is drawn as a short paragraph
@@ -375,6 +417,39 @@ less with a small local model than with a frontier one.
 
 So REI does not take the model's word. It detects what the project is and runs that project's own
 verify command against the edits; a failure goes back to the model with the compiler's own message.
+
+**What it runs, and what that proves.** The strength of the check is not the same in every language,
+and REI says which one it ran rather than implying they are equal:
+
+| Project | Detected by | Verify command | Proves |
+|---|---|---|---|
+| TypeScript | `tsconfig.json` | `npx tsc --noEmit` | types |
+| Angular | `angular.json` | `npx ngc --noEmit` | types **and templates** (bare `tsc` passes a broken one) |
+| C# | `.csproj` · `.sln` | `dotnet build` | compiles |
+| Go | `go.mod` | `go build ./...` | compiles |
+| Rust | `Cargo.toml` | `cargo check` | compiles |
+| Java | `pom.xml` · `build.gradle` | `mvn compile -q` · `gradle compileJava -q` | compiles |
+| Kotlin | `build.gradle.kts` · `*.kt` | `gradle compileKotlin -q` | compiles |
+| Swift | `Package.swift` | `swift build` | compiles |
+| Dart · Flutter | `pubspec.yaml` | `dart analyze` · `flutter analyze` | types |
+| Python | a configured mypy or pyright | `python3 -m mypy .` · `pyright` | types |
+| Python | otherwise | `python3 -m py_compile` | **syntax only** |
+| JavaScript | `jsconfig.json` | `npx tsc -p jsconfig.json --noEmit` | types (`checkJs`) |
+| JavaScript | otherwise | `node --check` | **syntax only** |
+| PHP | `composer.json` · `*.php` | `php -l` | **syntax only** |
+| Luau | `.luaurc` · `selene.toml` · `default.project.json` | `luau-analyze` · `selene` · `rojo build` | analysis · parse |
+| anything else | — | **none** | nothing, on purpose |
+
+Two things follow from that table. A Python project that never configured a type checker gets a
+syntax check — real, and much weaker than `tsc`; configuring mypy or pyright upgrades it, and REI
+only uses one you declared, because running mypy over a codebase that never opted in reports
+hundreds of errors the agent did not cause. And `REI_SANDBOX_VERIFY_COMMAND` overrides all of it:
+point it at your own script — a linter, a test suite, a Makefile target — and that becomes the
+oracle. It is also the way to give REI a language this table does not list.
+
+Adding a language properly is about twenty lines in `src/workspace/project-type.ts` plus a test, and
+[the developer guide](docs/DEVELOPER-GUIDE.md) has the recipe. **Pull requests for one are welcome**
+— the only rule is the one below: the command has to be able to fail.
 
 **When the check runs.** By default, REI applies edits to disk and verifies once, when the model
 says it is finished — one verify per turn, not one per edit. A failure does not end the turn: the
