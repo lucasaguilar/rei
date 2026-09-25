@@ -405,8 +405,18 @@ actually asked for:
 /spec add a discount option to the cart total   → writes .rei/specs/<name>.md
 /decompose                                      → a plan whose every stage cites a criterion
 /trace                                          → do the two still agree?
-/runplan                                        → executes, one isolated sub-agent per stage
+/runplan stage 1                                → executes ONE stage, then hands the turn back
+/runplan                                        → executes every stage, one isolated sub-agent each
 ```
+
+**Run it a stage at a time.** That is not a lesser option, it is the point of having stages: each one
+ends with its own `Verify:` command, so you get a control point where the work either compiles and
+passes or does not, before the next stage builds on it. It is also how a local model does its best
+work — one bounded task with a criterion attached beats a fourteen-stage plan held in a context
+window. `/runplan` with no stage runs the lot when you already trust the plan.
+
+`/saveplan <name>` writes the plan to `.rei/plans/`, which is what lets you stop between stages and
+pick it up later — `/loadplan <name>` puts it back where `/runplan` finds it.
 
 The spec has numbered acceptance criteria. Every plan stage carries a `Satisfies: AC-2` line, and
 the last stage judges each criterion **MET / NOT MET / UNVERIFIED, with evidence** — three verdicts,
