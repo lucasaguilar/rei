@@ -191,6 +191,7 @@ src/index.ts(10,5): error TS2322: Type error.
     it("should format successful batch result", () => {
       const result: VirtualBatchResult = {
         success: true,
+        verifyRan: true,
         diagnostics: [],
         applyErrors: [],
         fileCount: 1,
@@ -208,6 +209,7 @@ src/index.ts(10,5): error TS2322: Type error.
     it("should format apply errors (search and replace failed)", () => {
       const result: VirtualBatchResult = {
         success: false,
+        verifyRan: false, // the patches never applied, so nothing was checked
         diagnostics: [],
         applyErrors: ["Could not find exact match for search block in src/index.ts"],
         fileCount: 0,
@@ -225,6 +227,7 @@ src/index.ts(10,5): error TS2322: Type error.
     it("should format compilation diagnostics (tsc failed)", () => {
       const result: VirtualBatchResult = {
         success: false,
+        verifyRan: true,
         diagnostics: [
           { filePath: "src/index.ts", line: 10, column: 5, code: 2322, message: "Type mismatch" }
         ],
