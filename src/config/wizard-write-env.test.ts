@@ -74,3 +74,34 @@ describe("writeProjectEnv", () => {
     expect(existsSync(envPath())).toBe(false);
   });
 });
+
+/**
+ * The file the wizard writes holds API keys, and it lands inside the user's repository. The code
+ * used to assume `.rei/` was already gitignored — true in REI's own repo, false in the project a
+ * new user runs `rei` in for the first time. One `git add -A` later, the key is in a commit.
+ *
+ * So the directory ignores itself: a nested `.gitignore` containing `*` needs no cooperation from
+ * the user's own ignore file, and git honours it wherever the project sits.
+ */
+describe("the .rei directory ignores itself", () => {
+  const ignorePath = () => join(ws, ".rei", ".gitignore");
+
+  it("writes a .gitignore next to the .env it just created", () => {
+    writeProjectEnv(ws, { OPENROUTER_API_KEY: "sk-or-v1-secret" });
+    expect(existsSync(ignorePath())).toBe(true);
+    expect(readFileSync(ignorePath(), "utf8")).toMatch(/^\*$/m);
+  });
+
+  it("leaves an existing .gitignore alone — the user may have narrowed it deliberately", () => {
+    mkdirSync(join(ws, ".rei"), { recursive: true });
+    writeFileSync(ignorePath(), "# mine\n.env\n");
+    writeProjectEnv(ws, { MODEL_PROVIDER: "lmstudio" });
+    expect(readFileSync(ignorePath(), "utf8")).toBe("# mine\n.env\n");
+  });
+
+  it("still writes the .env when the .gitignore cannot be written", () => {
+    // Best-effort: a protected .rei/ must not cost the user their configuration.
+    writeProjectEnv(ws, { MODEL_PROVIDER: "ollama" });
+    expect(existsSync(envPath())).toBe(true);
+  });
+});

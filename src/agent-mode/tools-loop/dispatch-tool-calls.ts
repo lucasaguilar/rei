@@ -260,7 +260,7 @@ export async function dispatchToolCalls(
           if (!isWriteAllowed(target, workspacePath, scope)) {
             logger.logInfo(`[tools] write denied (${mode}): ${target}`);
             emitStatus(`🚫  [REI] Write blocked in ${mode} mode: ${target}`);
-            toolResultsMap.set(call.id, writeDeniedMessage(target, scope));
+            toolResultsMap.set(call.id, writeDeniedMessage(target, scope, workspacePath));
             hasToolFailure = true;
             break;
           }

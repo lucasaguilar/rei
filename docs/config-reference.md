@@ -216,7 +216,7 @@ carrying them will start taking effect.)
 | `REI_SUBAGENT_ENABLED` | expose the `delegate` tool (isolated-context sub-agents) — opt-in | `false` |
 | `REI_SUBAGENT_MODEL` | worker model for `delegate` sub-agents (e.g. a fast reliable executor like ornith) | same as agent model |
 | `REI_RUNPLAN_DELEGATE` | `/runplan` executes each stage in an isolated sub-agent (report stages excepted) | `true` |
-| `REI_ALLOW_SENSITIVE_READS` | let `read_files` serve credential files (.env, .pem, .key, .netrc…) | `false` |
+| `REI_ALLOW_SENSITIVE_READS` | let `read_files` serve credential files (.env, .pem, .key, .netrc…) — and, with them, turn OFF the masking of secret-looking values in command output. One switch for "I meant to look at this" | `false` |
 | `REI_VERBOSE` | full command output and full diffs (the reasoning has its own switch below) | `false` |
 | `REI_SHOW_REASONING` | the model's thinking as a live paragraph above the status row; `false` counts it instead (one line per block). `REI_VERBOSE` streams it in full | `true` |
 | `REI_THINKING_LINES` | rows that paragraph may use (1–12, and never more than a sixth of the terminal) | `4` |
@@ -230,7 +230,7 @@ carrying them will start taking effect.)
 |---|---|---|
 | `REI_COMMAND_TIMEOUT_MS` | run_command timeout | 180000 |
 | `REI_MAX_COMMAND_OUTPUT` | command output cap | 24000 |
-| `REI_ALLOWED_DIRS` | extra dirs outside workspace | — |
+| `REI_ALLOWED_DIRS` | extra dirs outside the workspace, for `rm`, shell redirects, `save_tool_output` **and the file-writing tools**. Without it REI writes only inside the workspace it was opened in, in every mode | — |
 | `REI_ALLOWED_COMMANDS` | extra allowed commands | — |
 | `REI_SANDBOX_VERIFY_COMMAND` | override verify command | auto by project |
 | `REI_CONFIRM_DESTRUCTIVE` | confirm before destructive commands (rm / git reset --hard / clean / checkout --) — interactive CLI only | `true` |
@@ -284,9 +284,14 @@ regardless; a manual `/index` still builds it on demand. ·
 server executes commands and writes files in the workspace. Any other value requires
 `REI_SERVER_TOKEN` or startup refuses) · `REI_SERVER_TOKEN` (shared secret; when set, every request
 needs `Authorization: Bearer <token>`. Unset = no check, which is the default for a loopback-only
-server) · `REI_SERVER_ORIGIN` (value of `Access-Control-Allow-Origin` once a token is set; empty
-means the header is not sent at all, so browsers cannot call the API. Without a token the header
-stays `*`, which IDE clients need. `GET /healthz` is exempt from BOTH: it is the liveness probe a
+server) · `REI_SERVER_ORIGIN` (the browser origins allowed to call the
+server — one, or a comma-separated list. **Empty means none**: a request carrying an `Origin` header
+is refused with 403 whether or not a token is set, because loopback is no defence against a page the
+user happens to visit — it can POST to 127.0.0.1 and drive an agent that runs commands. Ordinary
+clients (curl, Cline, Continue, an extension's node process) send no Origin and are unaffected; a
+browser-based client needs its origin listed here. A request whose `Host` is not a loopback name
+while the server is bound to loopback is refused too — that is DNS rebinding. `*` waives the origin
+check. `GET /healthz` is exempt from ALL of it: it is the liveness probe a
 PaaS calls without headers, and it answers `{"status":"ok"}` and nothing else. `PORT` is honoured as
 a fallback for `REI_SERVER_PORT`, which is what Render/Fly/Heroku inject) · `REI_TELEMETRY_DISABLED` ·
 `COMPACTOR_MODEL` (which model writes the summary — **leave it empty** to reuse the model already

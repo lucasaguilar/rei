@@ -22,7 +22,11 @@ export const STATIC_ALLOWED_COMMANDS = new Set([
   "dotnet",
   // Shell utilities
   "ls", "find", "grep", "cat", "pwd", "mkdir",
-  "curl", "git", "env", "which", "date", "printf", "echo", "chmod", "command",
+  // `env` is deliberately absent: its entire output is the process environment, which is where the
+  // API keys live. Values are masked (see secret-masking.ts), but the variable NAMES alone describe
+  // the machine's whole configuration, and no build step needs them. `env FOO=bar cmd` goes away
+  // with it — write the assignment into the command's own invocation instead.
+  "curl", "git", "which", "date", "printf", "echo", "chmod", "command",
   "rm", "tar", "unzip", "file", "wget",
   "true", "false", "test",
   // Read-only text utilities (file exploration: read by parts, slice, count)

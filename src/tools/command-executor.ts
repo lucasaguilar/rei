@@ -4,6 +4,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { withToolSpan } from "../telemetry/spans.js";
 import { DENIED_KEYWORDS, getAllowedCommands, getAllowedDirs } from "./sandbox-config.js";
+import { maskSecrets } from "./secret-masking.js";
 
 export interface CommandResult {
   stdout: string;
@@ -870,9 +871,18 @@ export async function executeCommand(
   commandLine: string,
   workspacePath: string,
 ): Promise<CommandResult> {
-  return withToolSpan("run_command", { command: commandLine }, () =>
+  // Masking happens HERE, at the one public entry point, rather than in the handler that formats the
+  // result for the model: every caller — and the span, and the command log — then gets the masked
+  // text without having to remember to ask. Files written by a shell redirect keep their real
+  // contents, because this touches only the strings that come back.
+  const result = await withToolSpan("run_command", { command: maskSecrets(commandLine) }, () =>
     executeCommandImpl(commandLine, workspacePath),
   );
+  return {
+    ...result,
+    stdout: maskSecrets(result.stdout ?? ""),
+    stderr: maskSecrets(result.stderr ?? ""),
+  };
 }
 
 async function executeCommandImpl(

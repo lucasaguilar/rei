@@ -549,7 +549,16 @@ did that edit land?"* is answerable afterwards, from disk, with `grep` — which
 has write access to your repository.
 
 It is append-only and not rotated (this repo's holds 23k events), and the **code itself is never
-copied there** — only what was done to it.
+copied there** — only what was done to it. REI writes a `.gitignore` into `.rei/` so none of it —
+least of all the API keys — can be committed by an absent-minded `git add -A`.
+
+**What REI guards, and what it does not.** Writes cannot leave the workspace, in any mode. Credential
+files are not served to the model, and secret-looking values are masked in command output. Commands
+that delete or discard data need your confirmation — and refuse outright when there is no one to ask.
+Two things it does *not* do, and it is better to say so: the command allow-list is not a sandbox (a
+heredoc to `python3` is arbitrary code, by design — REI's own guidance recommends it), and a
+repository's `AGENTS.md`, `CLAUDE.md` or `.rei/rules.md` goes into the prompt, so **opening an
+unfamiliar repo is running its code**. `docs/security-layer-phase-1.md` has the detail.
 
 ## Use it from anywhere
 

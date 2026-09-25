@@ -1,3 +1,5 @@
+import { sensitiveMaterialAllowed } from "../../tools/secret-masking.js";
+
 export const FULL_READ_MAX_CHARS = 100_000;
 
 /** Files whose CONTENT is credentials, matched on basename so a nested copy counts too. */
@@ -44,7 +46,10 @@ export function isSensitiveFile(filePath: string): boolean {
   return dot > 0 && SENSITIVE_EXTENSIONS.has(base.slice(dot));
 }
 
-/** Escape hatch for deliberately asking REI to look at a config file. */
+/**
+ * Escape hatch for deliberately asking REI to look at a config file. Delegates, because the same
+ * switch also turns off the masking of secrets in command output — one variable, one reader.
+ */
 export function sensitiveReadsAllowed(): boolean {
-  return process.env.REI_ALLOW_SENSITIVE_READS === "true";
+  return sensitiveMaterialAllowed();
 }
