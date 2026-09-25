@@ -42,6 +42,9 @@ export interface GenericVirtualBatchResult {
   fileCount: number;
   virtualFiles: Map<string, string>;
   verifyCommand: string;
+  /** Whether the command actually RAN. A `success` with this false is an absence of verification,
+   *  not a pass — the two used to be indistinguishable. */
+  verifyRan: boolean;
   verifyStdout: string;
   verifyStderr: string;
 }
@@ -97,6 +100,36 @@ export function shouldCopyToSandbox(relativePath: string): boolean {
 export function resolveVerifyCommand(workspacePath: string): string {
   const detected = detectProjectType(workspacePath);
   return process.env.REI_SANDBOX_VERIFY_COMMAND ?? detected.verifyCommand;
+}
+
+/**
+ * The placeholder a project with no known checker gets. `echo ok` cannot fail, which is the point:
+ * it is a NO-OP, never a verdict. Anything that treats its exit code as verification is lying.
+ */
+export const NO_VERIFY_COMMAND = "echo ok";
+
+/**
+ * Whether a verify run means "the tool is not here" rather than "the code is wrong".
+ *
+ * A shell reports a missing binary as exit 127 plus "command not found"; reporting that as a failing
+ * type-check is the same lie as the silent green it replaced, pointing the other way — it did not
+ * run. The caller turns this into `verifyRan: false` and says which command was missing.
+ */
+export function verifyToolMissing(exitCode: number, output: string): boolean {
+  return (
+    exitCode === 127 ||
+    /command not found|: not found|is not recognized as an internal/i.test(output)
+  );
+}
+
+/**
+ * Whether this workspace has a check worth running. It is the gate on the whole verify step, so the
+ * question has to be "is there a real command?" and not "is this TypeScript?" — that mistake limited
+ * REI's central promise to two languages while reporting green for the rest.
+ */
+export function hasRealVerifyCommand(workspacePath: string): boolean {
+  const command = resolveVerifyCommand(workspacePath).trim();
+  return command.length > 0 && command !== NO_VERIFY_COMMAND;
 }
 
 export async function createSandboxWorkspace(workspacePath: string): Promise<string> {

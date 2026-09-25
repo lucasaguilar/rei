@@ -370,6 +370,14 @@ export class Agent {
         // implying the changes compile.
         if (outcome.verified === false) {
           yield `\n\x1b[33m⚠️  [REI] Applied, but the combined changes do NOT pass the project type-check. Review before relying on them.\x1b[0m\n`;
+        } else if (
+          outcome.verifyRan === false &&
+          outcome.validProposedPatches.length > 0
+        ) {
+          // The third state, which used to render as an ordinary success: REI has no check for this
+          // project type, so nothing here was verified by anything but the model's own claim. Saying
+          // so is the entire promise — a silent pass is the failure mode this product exists against.
+          yield `\n\x1b[33m⚠️  [REI] Applied, but NOT verified: no verify command is known for this project type. Nothing checked these changes. Set REI_SANDBOX_VERIFY_COMMAND to give REI a real check.\x1b[0m\n`;
         }
         yield msg.trimStart();
         // Show diff for each applied patch so the user can see exactly what changed.

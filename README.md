@@ -447,6 +447,12 @@ hundreds of errors the agent did not cause. And `REI_SANDBOX_VERIFY_COMMAND` ove
 point it at your own script — a linter, a test suite, a Makefile target — and that becomes the
 oracle. It is also the way to give REI a language this table does not list.
 
+**One known limit, worth saying plainly.** Detection looks at the workspace ROOT and picks one type
+for the whole project. In a monorepo — `package.json` at the root, a Rust crate in `crates/` — the
+check is chosen from the root, so it can verify something other than what the agent edited. Until the
+verify is routed from the edited path upward to its nearest project marker, point
+`REI_SANDBOX_VERIFY_COMMAND` at the command that covers your whole tree.
+
 Adding a language properly is about twenty lines in `src/workspace/project-type.ts` plus a test, and
 [the developer guide](docs/DEVELOPER-GUIDE.md) has the recipe. **Pull requests for one are welcome**
 — the only rule is the one below: the command has to be able to fail.
@@ -464,6 +470,12 @@ unrecognised project gets no verify command rather than a fake pass — a check 
 worse than none, because the agent reads the pass as proof and stops looking. (That was a real bug:
 plain JavaScript used to verify with `node --check index.js 2>/dev/null || echo ok`, which printed
 "ok" for a project with a syntax error.)
+
+**Three outcomes, not two.** A check that passed, a check that failed, and **no check at all** — and
+the third one is reported, not rounded up. If REI knows no command for the project, or the project's
+toolchain is not installed on this machine (`cargo` absent in a Rust repo), the turn ends with
+*"Applied, but NOT verified"* instead of the silence that reads as success. `REI_SANDBOX_VERIFY_COMMAND`
+is how you turn that third state into a real check.
 
 One thing REI is deliberately careful about: **`verified: true` means "what was applied compiles".
 It does not mean "the task is done".** A model can apply a partial change that compiles perfectly.

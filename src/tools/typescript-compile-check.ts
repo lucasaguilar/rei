@@ -5,6 +5,7 @@ import type { AgentSREdit } from "../contracts/agent-interaction.types.js";
 import {
   applyEditsInSandbox,
   resolveVerifyCommand,
+  verifyToolMissing,
   runVerifyCommand,
   withSandboxWorkspace,
   type GenericCompileCheckResult,
@@ -45,6 +46,7 @@ export interface VirtualBatchResult {
   fileCount: number;
   virtualFiles: Map<string, string>;
   verifyCommand: string;
+  verifyRan: boolean;
   verifyStdout: string;
   verifyStderr: string;
 }
@@ -95,6 +97,7 @@ export async function applyVirtualBatch(
       fileCount: 0,
       virtualFiles: new Map<string, string>(),
       verifyCommand: command,
+      verifyRan: false, // nothing ran: report it as an absence of verification, not as a green
       verifyStdout: "",
       verifyStderr: "",
     };
@@ -114,6 +117,7 @@ export async function applyVirtualBatch(
         fileCount: 0,
         virtualFiles,
         verifyCommand: command,
+        verifyRan: false, // the patches never applied, so the check never got to run
         verifyStdout: "",
         verifyStderr: "",
       };
@@ -121,6 +125,20 @@ export async function applyVirtualBatch(
 
     const verify = await runVerifyCommand(sandboxPath, command);
     const output = `${verify.stdout}\n${verify.stderr}`;
+    // A missing toolchain is an absence of verification, not a failed one.
+    if (verifyToolMissing(verify.exitCode, output)) {
+      return {
+        success: true,
+        diagnostics: [],
+        applyErrors: [],
+        fileCount: 0,
+        virtualFiles,
+        verifyCommand: command,
+        verifyRan: false,
+        verifyStdout: verify.stdout,
+        verifyStderr: verify.stderr,
+      };
+    }
     const diagnostics = adapter.parseDiagnostics(workspacePath, output) as TypeScriptCompileDiagnostic[];
 
     return {
@@ -130,6 +148,7 @@ export async function applyVirtualBatch(
       fileCount: 0,
       virtualFiles,
       verifyCommand: command,
+      verifyRan: true,
       verifyStdout: verify.stdout,
       verifyStderr: verify.stderr,
     };
