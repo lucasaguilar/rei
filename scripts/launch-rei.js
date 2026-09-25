@@ -12,7 +12,6 @@ const ROOT = path.join(__dirname, '..');
 dotenv.config({ path: path.join(ROOT, '.env'), quiet: true });
 
 let PROJECTS = [];
-let PROVIDER_MODELS = {};
 let PROVIDERS = [];
 const CUSTOM = '[ enter custom model... ]';
 
@@ -21,6 +20,58 @@ const CUSTOM = '[ enter custom model... ]';
 // OpenAI-compatible endpoint we can probe for models (the probe IS the validation).
 const CLOUD_PROVIDERS = ['openrouter', 'gemini', 'groq', 'huggingface'];
 const LOCAL_PROVIDERS = ['ollama', 'lmstudio', 'mtplx', 'omlx', 'openai-compat'];
+
+/**
+ * The providers the menu offers, in the order it offers them: local first, because that is what REI
+ * is for and the order is itself the recommendation.
+ *
+ * Derived from the taxonomy. The menu used to be `Object.keys(PROVIDER_MODELS)` — read from a
+ * launcher config file the wizard created for you — so a file documented as "your paths and models"
+ * silently decided which backends existed: a typo added one that could not work, and a provider left
+ * out of it could not be chosen at all. A fresh install listed seven of the ten, so a new user
+ * holding a Groq key could not select Groq. That file is gone; this is the source now.
+ *
+ * `mock` is deliberately absent: it is a valid name (scriptable, used by the tests) but not something
+ * to put in front of someone setting up their first session.
+ */
+export function menuProviders() {
+    return [...LOCAL_PROVIDERS, ...CLOUD_PROVIDERS];
+}
+
+/** Every provider name REI actually understands. `mock` is real (scriptable, used by the tests) and
+ *  belongs here so listing it is not an error. */
+const KNOWN_PROVIDER_NAMES = [...CLOUD_PROVIDERS, ...LOCAL_PROVIDERS, 'mock'];
+
+/** Levenshtein distance, iterative and small — enough to tell a typo from a different word. */
+function editDistance(a, b) {
+    const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+        let diagonal = prev[0];
+        prev[0] = i;
+        for (let j = 1; j <= b.length; j++) {
+            const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+            const next = Math.min(prev[j] + 1, prev[j - 1] + 1, diagonal + cost);
+            diagonal = prev[j];
+            prev[j] = next;
+        }
+    }
+    return prev[b.length];
+}
+
+/** The known provider `name` is probably a typo of, or undefined when it resembles none.
+ *  Two edits at most: `llmstudio`→`lmstudio` is one, and anything further apart is a different word,
+ *  where "did you mean X?" would send the reader somewhere wrong. */
+export function suggestProvider(name) {
+    const candidate = String(name || '').trim().toLowerCase();
+    if (!candidate) return undefined;
+    let best;
+    let bestDistance = Infinity;
+    for (const known of KNOWN_PROVIDER_NAMES) {
+        const d = editDistance(candidate, known);
+        if (d < bestDistance) { bestDistance = d; best = known; }
+    }
+    return bestDistance > 0 && bestDistance <= 2 ? best : undefined;
+}
 
 // Env var that holds each cloud provider's API key (HF uses HF_TOKEN, not HF_API_KEY).
 const API_KEY_VAR = {
@@ -71,10 +122,9 @@ const KNOWN_MODELS = {
 // the bash wrapper already filters (your_..._here / placeholder).
 const isPlaceholder = (v) => !v || /_here$|^your_|placeholder/i.test(String(v).trim());
 
-/** User's own curated list (launch-rei.config.js) if non-empty, else the built-in KNOWN_MODELS. */
+/** Curated names to offer when no live list exists: a cloud provider (never probed) or a local server
+ *  that could not be reached. The live probe beats it whenever there is one. */
 function knownFallback(provider) {
-    const own = PROVIDER_MODELS[provider];
-    if (Array.isArray(own) && own.length > 0) return own;
     return KNOWN_MODELS[provider] ?? [];
 }
 
@@ -192,43 +242,27 @@ function persistEnv(envVars, key, value) {
     writeGlobalEnv(key, value);
 }
 
+/**
+ * Resolves the workspace list and the provider menu.
+ *
+ * It used to CREATE `scripts/launch-rei.config.js` on first run — copying the example, or writing a
+ * stub when that was missing — and then read `PROJECTS` and `PROVIDER_MODELS` out of it. Nobody asked
+ * for that file, and it cost two bugs: a typo in a provider key added a menu option that could not
+ * work (`llmstudio` for `lmstudio`, which silently skipped the endpoint probe), and a provider left
+ * out of the file could not be chosen at all — a fresh install offered seven of the ten.
+ *
+ * Neither field was needed. The workspace list already includes the cwd, and the curated model names
+ * live in KNOWN_MODELS, compiled in.
+ */
 async function loadConfiguration() {
-    const configPath = path.join(__dirname, 'launch-rei.config.js');
-    if (!fs.existsSync(configPath)) {
-        const examplePath = path.join(__dirname, 'launch-rei.config.example.js');
-        if (fs.existsSync(examplePath)) {
-            try {
-                fs.copyFileSync(examplePath, configPath);
-            } catch (err) {}
-        } else {
-            try {
-                fs.writeFileSync(configPath, `
-export const PROJECTS = [];
-export const PROVIDER_MODELS = {
-    ollama: ['llama3.2', 'qwen2.5-coder:14b'],
-    openrouter: ['qwen/qwen3.6-plus', 'deepseek/deepseek-r1:free'],
-    gemini: ['gemini-2.5-flash']
-};
-                `);
-            } catch (err) {}
-        }
-    }
-
-    try {
-        const config = await import('./launch-rei.config.js');
-        PROJECTS = config.PROJECTS || [];
-        PROVIDER_MODELS = config.PROVIDER_MODELS || {};
-    } catch (err) {
-        PROJECTS = [];
-        PROVIDER_MODELS = {
-            ollama: ['llama3.2', 'qwen2.5-coder:14b'],
-            openrouter: ['qwen/qwen3.6-plus'],
-            gemini: ['gemini-2.5-flash'],
-            lmstudio: [],
-            mtplx: [],
-            omlx: [],
-            'openai-compat': []
-        };
+    // A user who edited one deserves to know it stopped mattering. Silently ignoring it is the one
+    // outcome worse than reading it.
+    const staleConfig = path.join(__dirname, 'launch-rei.config.js');
+    if (fs.existsSync(staleConfig)) {
+        console.warn(
+            `ℹ️  ${staleConfig} is no longer read — the provider menu comes from REI itself and the\n` +
+            `   workspace is the directory you run \`rei\` in. You can delete the file.`,
+        );
     }
 
     const cwd = process.cwd();
@@ -241,7 +275,7 @@ export const PROVIDER_MODELS = {
         PROJECTS.unshift(envWorkspace);
     }
 
-    PROVIDERS = Object.keys(PROVIDER_MODELS);
+    PROVIDERS = menuProviders();
 }
 
 const OLLAMA_PERF_VARS = [
@@ -611,7 +645,19 @@ async function runPreflight() {
 async function prepareProvider(provider, envVars) {
     if (CLOUD_PROVIDERS.includes(provider)) { await ensureCloudApiKey(provider, envVars); return { models: [] }; }
     if (LOCAL_PROVIDERS.includes(provider)) return configureLocalEndpoint(provider, envVars);
-    return { models: [] }; // mock / unknown — nothing to set up
+    // `mock` needs no setup. Anything else reaching here is a name REI does not know — it can only
+    // arrive from a saved last-config or an env var now that the menu is validated, and it must say
+    // so: an empty model list looked exactly like a server with nothing loaded.
+    if (provider !== 'mock') {
+        const suggestion = suggestProvider(provider);
+        note(
+            `'${provider}' is not a provider REI knows${suggestion ? ` — did you mean '${suggestion}'?` : ''}.\n` +
+            `Nothing was configured for it, so no models can be listed.\n` +
+            `Supported: ${KNOWN_PROVIDER_NAMES.join(', ')}.`,
+            'Unknown provider',
+        );
+    }
+    return { models: [] };
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
