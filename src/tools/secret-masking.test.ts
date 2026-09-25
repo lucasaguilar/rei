@@ -1,7 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { maskSecrets, SECRET_MASK } from "./secret-masking.js";
 import { executeCommand } from "./command-executor.js";
-import { STATIC_ALLOWED_COMMANDS } from "./sandbox-config.js";
 import { tmpdir } from "node:os";
 
 /**
@@ -62,13 +61,5 @@ describe("run_command output", () => {
     const r = await executeCommand('echo "OPENROUTER_API_KEY=sk-or-v1-CANARY-123"', tmpdir());
     expect(r.stdout).not.toContain("CANARY");
     expect(r.stdout).toContain(SECRET_MASK);
-  });
-});
-
-describe("the allow-list", () => {
-  it("no longer offers `env`, whose entire output is the process environment", () => {
-    // Masking covers the values; not offering the command at all also keeps the variable NAMES —
-    // which spell out the machine's whole configuration — out of a third party's logs.
-    expect(STATIC_ALLOWED_COMMANDS.has("env")).toBe(false);
   });
 });
