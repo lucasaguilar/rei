@@ -63,7 +63,7 @@ if (HOST !== "127.0.0.1" && HOST !== "localhost" && !AUTH_TOKEN) {
 }
 const WORKSPACE_PATH = process.env.REI_WORKSPACE_PATH || getDefaultWorkspace();
 
-// Validar que el workspace sea uno permitido
+// Refuse to start on a workspace that was not allowed.
 if (!isWorkspaceAllowed(WORKSPACE_PATH)) {
   console.error(`❌ Workspace not allowed: ${WORKSPACE_PATH}`);
   process.exit(1);
@@ -91,7 +91,7 @@ async function startServer() {
     });
   }
 
-  // 2. Instanciar Agente y Handler con el contexto inicial
+  // 2. Instantiate the agent and the handler with the initial context.
   const provider = createModelProvider();
   const agent = new Agent(provider, WORKSPACE_PATH);
   const chatHandler = new ChatHandler(agent, WORKSPACE_PATH);
@@ -192,7 +192,7 @@ async function startServer() {
         try {
           const jsonBody = JSON.parse(body);
 
-          // Configurar respuesta como Stream (SSE) compatible con OpenAI/Continue
+          // Respond as an OpenAI/Continue-compatible SSE stream.
           res.writeHead(200, {
             "Content-Type": "text/event-stream",
             "Cache-Control": "no-cache",
@@ -202,7 +202,7 @@ async function startServer() {
           const requestedModel = jsonBody.model || "rei-agent";
           const now = Math.floor(Date.now() / 1000);
 
-          // Función para enviar chunks en formato OpenAI SSE
+          // Sends one chunk in OpenAI SSE format.
           const sendChunk = (content: string) => {
             const payload = {
               id: `chatcmpl-${now}`,
@@ -220,11 +220,10 @@ async function startServer() {
             res.write(`data: ${JSON.stringify(payload)}\n\n`);
           };
 
-          // Ejecutar el flow de REI con streaming.
-          // Durante operaciones largas (ng build, tsc, etc.) no se envían
-          // tokens al cliente, lo que puede causar que el SSE idle timeout
-          // cierre la conexión. Enviamos SSE comments (": heartbeat") cada
-          // 10 segundos — son ignorados como datos pero mantienen el canal abierto.
+          // Run REI's flow with streaming.
+          // A long operation (ng build, tsc…) sends no tokens for a while, which lets the SSE idle
+          // timeout close the connection. An SSE comment (": heartbeat") every 10 seconds is ignored
+          // as data but keeps the channel open.
           const keepalive = setInterval(() => {
             if (!res.writableEnded) res.write(": heartbeat\n\n");
           }, 10_000);
@@ -235,7 +234,7 @@ async function startServer() {
             clearInterval(keepalive);
           }
 
-          // Enviar señal de finalización
+          // Signal the end of the stream.
           res.write(`data: [DONE]\n\n`);
           res.end();
         } catch (error) {

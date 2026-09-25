@@ -48,7 +48,7 @@ export class VectorStore {
   }
 
   /**
-   * Carga los embeddings cacheados en memoria.
+   * Loads the cached embeddings into memory.
    */
   async load(): Promise<void> {
     try {
@@ -116,7 +116,7 @@ export class VectorStore {
   }
 
   /**
-   * Busca los topK fragmentos semánticamente más similares al Query Vector.
+   * Finds the topK chunks most semantically similar to the query vector.
    */
   query(queryVector: number[], topK: number = 5): VectorSearchResult[] {
     const results = this.records.map((r) => ({
@@ -151,7 +151,7 @@ export class VectorStore {
   }
 
   /**
-   * Obtiene un registro vectorial completo por su ID único.
+   * Returns a complete vector record by its unique id.
    */
   getById(id: string): VectorRecord | undefined {
     return this.records.find((r) => r.metadata.id === id);

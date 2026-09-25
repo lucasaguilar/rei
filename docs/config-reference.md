@@ -236,7 +236,7 @@ carrying them will start taking effect.)
 | `REI_CONFIRM_DESTRUCTIVE` | confirm before destructive commands (rm / git reset --hard / clean / checkout --) — interactive CLI only | `true` |
 | `REI_CONFIRM_GIT_MUTANT` | confirm before state-mutating git commands (commit / push / merge / rebase) — interactive CLI only | `true` |
 | `REI_READ_MAX_LINES` | page size for `read_files`, in lines | 1200 |
-| `REI_TOOL_OUTPUT_MAX_INLINE` | tool output kept inline before it spills to disk, in chars — **`0` = nada viaja inline** (todo se vuelca a disco, el modelo ve solo el recibo) | 8% of the context window, clamped to 2000–16000 (16000 when the window is unknown) |
+| `REI_TOOL_OUTPUT_MAX_INLINE` | tool output kept inline before it spills to disk, in chars — **`0` = nothing travels inline** (everything spills to disk and the model sees only the receipt) | 8% of the context window, clamped to 2000–16000 (16000 when the window is unknown) |
 | `REI_TOOL_OUTPUT_PREVIEW` | chars of a spilled output the model still sees as a preview (`0` = receipt only) | 2000 |
 | `REI_TOOL_OUTPUT_DIR` | where spilled tool outputs are written | a temp dir, cleaned by the OS |
 | `REI_PROMPT_TRACE` | log how much of each prompt is a byte-exact prefix of the previous one (`1` = on) — diagnoses lost KV-cache reuse | off |

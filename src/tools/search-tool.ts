@@ -36,7 +36,7 @@ export async function searchWeb(query: string, provider: ModelProvider): Promise
   const searchClient = new DuckDuckGoLiteClient();
   const summarizer = createKnowledgeSummarizer(provider, true);
 
-  // Limpiar frases introductorias comunes de búsqueda para obtener mejores términos en el motor
+  // Strip common lead-in phrases so the engine gets the actual search terms.
   let cleanQuery = query
     .replace(/@(docs|web)\b/gi, "")
     .replace(/busca(r)?\s+(en\s+)?(internet|la\s+web|online|google)?(\s+el|\s+la|\s+los|\s+las)?/gi, "")

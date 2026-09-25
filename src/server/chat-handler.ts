@@ -77,7 +77,7 @@ export class ChatHandler {
 
     if (!promptTrimmed) throw new Error("No prompt provided.");
 
-    // Validar workspace antes de continuar
+    // Validate the workspace before going any further.
 
     if (!isWorkspaceAllowed(this.workspacePath)) {
       throw new Error(`Workspace not allowed, ${this.workspacePath}`);
@@ -138,7 +138,7 @@ export class ChatHandler {
       );
 
       if (cmdResult.success) {
-        // Si el comando actualiza la sesión (ej: /mode o /clear), aplicamos los cambios
+        // When the command updates the session (e.g. /mode or /clear), apply the changes.
         if (cmdResult.newSession) {
           Object.assign(session, cmdResult.newSession);
         }

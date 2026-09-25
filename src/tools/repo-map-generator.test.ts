@@ -16,7 +16,7 @@ describe("repo-map-generator (AST Extraction Quality)", () => {
 import { SomeDependency } from "./dependency.ts";
 
 /** 
- * Este es un comentario JSDoc importante que el LLM debe leer.
+ * This is an important JSDoc comment the LLM is meant to read.
  */
 export interface UserData {
   id: string;
@@ -111,7 +111,7 @@ describe('UserService', () => {
     expect(output).toContain("// Imports: ./dependency.ts");
 
     // Check Interfaces & JSDoc
-    expect(output).toContain("// Este es un comentario JSDoc importante");
+    expect(output).toContain("// This is an important JSDoc comment");
     expect(output).toContain("export interface UserData");
     expect(output).toContain("id: string;");
     expect(output).toContain("age?: number;");
