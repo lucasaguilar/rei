@@ -161,6 +161,46 @@ describe("builtin handlers", () => {
     expect(executeCommand).toHaveBeenCalled();
   });
 
+  /**
+   * The gates used to be skipped whenever no `elicit` was injected, on the reasoning that headless
+   * has nobody to ask. What that actually meant: over the HTTP server — which never passes one —
+   * `rm`, `git push` and `git reset --hard` ran unprompted, on a surface reachable by anything that
+   * can POST. Nobody to ask is a reason to refuse, not a reason to proceed.
+   */
+  it("REFUSES a destructive command when there is no frontend to ask", async () => {
+    const out = await handleRunCommand("rm src/foo.ts", { ...statusCtx, workspacePath: "/w" });
+    expect(executeCommand).not.toHaveBeenCalled();
+    expect(out).toMatch(/no interactive/i);
+    expect(out).toContain("REI_CONFIRM_DESTRUCTIVE"); // how an operator opts in
+  });
+
+  it("REFUSES a git-mutant command when there is no frontend to ask", async () => {
+    const out = await handleRunCommand("git push origin main", { ...statusCtx, workspacePath: "/w" });
+    expect(executeCommand).not.toHaveBeenCalled();
+    expect(out).toContain("REI_CONFIRM_GIT_MUTANT");
+  });
+
+  it("does not claim the USER declined when the user was never asked", async () => {
+    // The model reads this text and reports it back. "The user declined" would be an invention.
+    const out = await handleRunCommand("rm src/foo.ts", { ...statusCtx, workspacePath: "/w" });
+    expect(out).not.toMatch(/user DECLINED/i);
+  });
+
+  it("still runs a harmless command headless — this gates danger, not automation", async () => {
+    await handleRunCommand("npm test", { ...statusCtx, workspacePath: "/w" });
+    expect(executeCommand).toHaveBeenCalled();
+  });
+
+  it("lets an operator turn the gate off, which is what makes headless usable", async () => {
+    process.env.REI_CONFIRM_DESTRUCTIVE = "false";
+    try {
+      await handleRunCommand("rm src/foo.ts", { ...statusCtx, workspacePath: "/w" });
+      expect(executeCommand).toHaveBeenCalled();
+    } finally {
+      delete process.env.REI_CONFIRM_DESTRUCTIVE;
+    }
+  });
+
   it("handleRunCommand executes and reports exit code + stdout", async () => {
     const out = await handleRunCommand("npm test", { ...statusCtx, workspacePath: "/ws" });
     expect(executeCommand).toHaveBeenCalledWith("npm test", "/ws");

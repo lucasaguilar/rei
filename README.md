@@ -51,7 +51,12 @@ REI names which one it ran instead of implying they are equal.
 - **An agent told you it made a change, and it hadn't.** Or it had, and nothing compiled. REI runs
   your project's real compiler before the turn ends, hands the model its own errors to fix, and
   reports what it actually found.
-- **You are paying per token** for work a machine you already own can do.
+- **You are paying per token** for work a machine you already own can do — and you would rather
+  split it than choose. Running part local and part cloud in the same session is a supported setup,
+  not a workaround: ask and planning stay on your machine, only the agent turns you want to get
+  right go out, and the housekeeping models — the one that summarises a session, the one that reads
+  an image — follow the local side, so they never reach the API. See
+  [Mix them, and pay for less](#mix-them-and-pay-for-less).
 - **You want to shape the agent, not accept one.** Roles, skills and prompts are markdown files you
   edit — a reviewer with its own posture and model, a recipe for how your team writes tests. Nothing
   is compiled in.
@@ -155,6 +160,14 @@ Why that saves anything is not obvious: **exploring is the expensive half.** One
 here made **22 tool calls for 28,562 input tokens**, because every call re-sends a growing history.
 Reading and grepping is where the tokens go, and a local model does it well enough. The choice being
 per mode is the point — you stop paying frontier prices for a `grep`.
+
+The two housekeeping models stay on the local side by design: `<PROVIDER>_MODEL_COMPACTOR` (who
+writes the session summary) and `<PROVIDER>_MODEL_VISION` (who reads an image) follow
+`MODEL_PROVIDER`, never `AGENT_MODEL_PROVIDER`. Compaction re-reads the whole history, so billing it
+to the cloud would undo most of what the split saves.
+
+To move the line without editing `.env`, `/provider agent <name>` and `/model agent <name>` change
+only the agent slot for the rest of the session.
 
 ---
 
@@ -536,7 +549,16 @@ did that edit land?"* is answerable afterwards, from disk, with `grep` — which
 has write access to your repository.
 
 It is append-only and not rotated (this repo's holds 23k events), and the **code itself is never
-copied there** — only what was done to it.
+copied there** — only what was done to it. REI writes a `.gitignore` into `.rei/` so none of it —
+least of all the API keys — can be committed by an absent-minded `git add -A`.
+
+**What REI guards, and what it does not.** Writes cannot leave the workspace, in any mode. Credential
+files are not served to the model, and secret-looking values are masked in command output. Commands
+that delete or discard data need your confirmation — and refuse outright when there is no one to ask.
+Two things it does *not* do, and it is better to say so: the command allow-list is not a sandbox (a
+heredoc to `python3` is arbitrary code, by design — REI's own guidance recommends it), and a
+repository's `AGENTS.md`, `CLAUDE.md` or `.rei/rules.md` goes into the prompt, so **opening an
+unfamiliar repo is running its code**. `docs/security-layer-phase-1.md` has the detail.
 
 ## Use it from anywhere
 

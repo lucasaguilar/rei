@@ -894,10 +894,34 @@ async function configureMultiProvider(last) {
  *
  * Exported for tests — importing this module does not run the wizard (see the guard at the bottom).
  */
+/**
+ * Makes `<ws>/.rei/` ignore itself, so the API keys written into it cannot be committed by a
+ * `git add -A` in a project that never heard of REI. A nested `.gitignore` holding `*` is
+ * self-contained — git applies it from that directory down, and the user's own ignore file is left
+ * untouched, which is not ours to edit.
+ *
+ * Never overwrites an existing one: someone may have narrowed it on purpose. Best-effort, because
+ * failing to write it must not cost the user the configuration the wizard just collected.
+ */
+function ignoreReiDirectory(reiDir) {
+    const ignorePath = path.join(reiDir, '.gitignore');
+    try {
+        if (fs.existsSync(ignorePath)) return;
+        fs.writeFileSync(
+            ignorePath,
+            '# Written by REI: this directory holds API keys and session state.\n*\n',
+            'utf8',
+        );
+    } catch {
+        /* best effort — the .env still gets written */
+    }
+}
+
 export function writeProjectEnv(projectPath, envVars) {
     try {
-        // Canonical location: <ws>/.rei/.env — grouped with REI's other per-project state and
-        // covered by the `.rei/` line projects already gitignore.
+        // Canonical location: <ws>/.rei/.env — grouped with REI's other per-project state. It is
+        // kept out of git by the `.gitignore` written below, NOT by the host project's own ignore
+        // file: assuming `.rei/` was already ignored is how an API key ends up in a commit.
         const reiDir = path.join(projectPath, '.rei');
         const envFilePath = path.join(reiDir, '.env');
         const legacyEnvPath = path.join(projectPath, '.env');
@@ -915,6 +939,7 @@ export function writeProjectEnv(projectPath, envVars) {
             }
         }
         fs.mkdirSync(reiDir, { recursive: true });
+        ignoreReiDirectory(reiDir);
         envContent = applyEnvVars(envContent, envVars);
         fs.writeFileSync(envFilePath, envContent.trim() + '\n', 'utf8');
         console.log(`📝 Persisted complete configuration template to: ${envFilePath}`);

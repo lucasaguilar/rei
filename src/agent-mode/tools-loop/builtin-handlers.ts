@@ -15,6 +15,7 @@ import type { GitChange } from "../../workspace/git-changes.js";
 import { detectGitChanges, getGitStatus } from "../../workspace/git-changes.js";
 import {
   newElicitationId,
+  nonInteractiveElicit,
   type ElicitFn,
   type Elicitation,
 } from "../../chat/elicitation.js";
@@ -194,22 +195,37 @@ export async function handleRunCommand(
 ): Promise<string> {
   ctx.logger.logInfo(`[tools] run_command: ${cmd}`);
 
-  // Confirm destructive commands before running. Only with an interactive frontend (ctx.elicit set):
-  // headless/server has no one to ask, and the HARD blocks in command-executor still guard it there.
+  // Confirm destructive commands before running.
+  //
+  // The gate used to apply only when `ctx.elicit` was set, reasoning that headless has nobody to ask.
+  // The consequence was the opposite of safe: the HTTP server injects no frontend, so `rm` and
+  // `git reset --hard` ran there unprompted — on the surface anything that can POST reaches. Having
+  // nobody to ask is a reason to REFUSE, so an absent frontend resolves the confirm to its safe
+  // default ("no") and the command is declined. An operator who wants it automated says so with
+  // REI_CONFIRM_DESTRUCTIVE=false.
   const danger = describeDestructive(cmd);
-  if (danger && confirmDestructiveEnabled() && ctx.elicit) {
-    const { value } = await ctx.elicit({
+  if (danger && confirmDestructiveEnabled()) {
+    const interactive = !!ctx.elicit;
+    const { value } = await (ctx.elicit ?? nonInteractiveElicit)({
       id: newElicitationId(),
       kind: "confirm",
       message: `⚠️  This command will ${danger}:\n    ${cmd}\nRun it?`,
       default: "no",
     });
     if (value !== "yes") {
-      ctx.emitStatus(`🛑  [REI] Destructive command cancelled by the user: ${cmd}`);
-      return (
-        `The user DECLINED to run this command (it would ${danger}): ${cmd}\n` +
-        `Do NOT run it again. Continue without it, or ask the user how to proceed.`
+      ctx.emitStatus(
+        interactive
+          ? `🛑  [REI] Destructive command cancelled by the user: ${cmd}`
+          : `🛑  [REI] Destructive command refused (nobody to confirm with): ${cmd}`,
       );
+      // Two different facts, and the model repeats whichever it is told — so it is never told that a
+      // user declined when no user was asked.
+      return interactive
+        ? `The user DECLINED to run this command (it would ${danger}): ${cmd}\n` +
+            `Do NOT run it again. Continue without it, or ask the user how to proceed.`
+        : `REFUSED: this command would ${danger} and there is no interactive frontend to confirm ` +
+            `with: ${cmd}\nDo NOT run it again. Continue without it and report that it needs a ` +
+            `human, or the operator can set REI_CONFIRM_DESTRUCTIVE=false to allow it unattended.`;
     }
   }
 
@@ -217,19 +233,26 @@ export async function handleRunCommand(
   // Skipped when the destructive gate already fired for this command (e.g. `git reset --hard`),
   // so the user is never asked twice for one command. Same interactive-only guard as above.
   const gitMutant = describeGitMutant(cmd);
-  if (!danger && gitMutant && confirmGitMutantEnabled() && ctx.elicit) {
-    const { value } = await ctx.elicit({
+  if (!danger && gitMutant && confirmGitMutantEnabled()) {
+    const interactive = !!ctx.elicit;
+    const { value } = await (ctx.elicit ?? nonInteractiveElicit)({
       id: newElicitationId(),
       kind: "confirm",
       message: `🔀  This command will ${gitMutant}:\n    ${cmd}\nRun it?`,
       default: "no",
     });
     if (value !== "yes") {
-      ctx.emitStatus(`🛑  [REI] Git command cancelled by the user: ${cmd}`);
-      return (
-        `The user DECLINED to run this git command (it would ${gitMutant}): ${cmd}\n` +
-        `Do NOT run it again. Continue without it, or ask the user how to proceed.`
+      ctx.emitStatus(
+        interactive
+          ? `🛑  [REI] Git command cancelled by the user: ${cmd}`
+          : `🛑  [REI] Git command refused (nobody to confirm with): ${cmd}`,
       );
+      return interactive
+        ? `The user DECLINED to run this git command (it would ${gitMutant}): ${cmd}\n` +
+            `Do NOT run it again. Continue without it, or ask the user how to proceed.`
+        : `REFUSED: this git command would ${gitMutant} and there is no interactive frontend to ` +
+            `confirm with: ${cmd}\nDo NOT run it again. Report that it needs a human, or the ` +
+            `operator can set REI_CONFIRM_GIT_MUTANT=false to allow it unattended.`;
     }
   }
 

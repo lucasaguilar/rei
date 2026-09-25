@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { ensureReiDirIgnored } from "../workspace/rei-dir.js";
 
 export interface LogEntry {
   timestamp: string;
@@ -38,6 +39,10 @@ export class AgentLogger {
     if (!fs.existsSync(logDir)) {
       fs.mkdirSync(logDir, { recursive: true });
     }
+    // These logs hold every prompt, decision and patch of the session, inside the user's repo.
+    // The wizard ignores `.rei/` when it writes the .env; a hand-configured install never ran it,
+    // and this is the other place the directory comes into existence.
+    ensureReiDirIgnored(workspacePath);
     this.logFilePath = path.join(logDir, "agent-flow.jsonl");
     this.turnId = this.generateTurnId();
   }

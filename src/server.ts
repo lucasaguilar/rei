@@ -10,6 +10,7 @@ import {
 import { Agent } from "./core/agent.js";
 import { ChatHandler } from "./server/chat-handler.js";
 import { HEALTH_BODY, HEALTH_PATH, isHealthProbe, normalizeRoutePath } from "./server/health.js";
+import { evaluateBrowserRequest } from "./server/browser-guard.js";
 import { REI_LOGO } from "./cli/rei-logo.js";
 import {
   isWorkspaceAllowed,
@@ -38,9 +39,10 @@ const HOST = process.env.REI_SERVER_HOST || "127.0.0.1";
 const AUTH_TOKEN = process.env.REI_SERVER_TOKEN?.trim() || "";
 
 /**
- * With no token there is nothing to steal a browser into sending, so `*` is fine and IDE clients
- * need it. With a token, a wildcard origin would let any page the user visits replay a request the
- * browser attaches credentials to — so the allowed origin becomes explicit.
+ * The CORS header REI answers with. It is cosmetic now: a browser request is accepted or rejected by
+ * `evaluateBrowserRequest` (server/browser-guard.ts) on the Origin and Host headers, before this
+ * header can matter. The wildcard used to be the whole policy when no token was set, which let any
+ * page the user visited drive the agent and read the reply.
  */
 const ALLOWED_ORIGIN = AUTH_TOKEN ? (process.env.REI_SERVER_ORIGIN || "") : "*";
 
@@ -108,6 +110,27 @@ async function startServer() {
     if (ALLOWED_ORIGIN) res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+    // Before the preflight, so a page cannot even get a 204 for a request that would be refused.
+    // Health is checked after this on purpose: `{"status":"ok"}` tells an attacker nothing, and a
+    // platform probe arrives with the service's own hostname, which is not loopback.
+    const browserRejection = evaluateBrowserRequest({
+      origin: typeof req.headers.origin === "string" ? req.headers.origin : undefined,
+      host: req.headers.host,
+      boundHost: HOST,
+      // Not the `*` that ALLOWED_ORIGIN still answers with: an unlisted browser origin is refused
+      // whether or not a token is set, because the no-token case is exactly the exposed one.
+      allowedOrigin: process.env.REI_SERVER_ORIGIN || "",
+    });
+    if (browserRejection && !isHealthProbe(req.url, req.method)) {
+      res.writeHead(browserRejection.status, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: { message: browserRejection.message, type: "invalid_request_error" },
+        }),
+      );
+      return;
+    }
 
     if (req.method === "OPTIONS") {
       res.writeHead(204);
@@ -237,6 +260,12 @@ async function startServer() {
     console.log(REI_LOGO);
     console.log(`🚀 REI Server running at http://${HOST}:${PORT}`);
     if (AUTH_TOKEN) console.log(`Auth: Authorization: Bearer <REI_SERVER_TOKEN>`);
+    // Worth saying out loud: the reason a browser-based client gets a 403 is one line of config.
+    console.log(
+      process.env.REI_SERVER_ORIGIN
+        ? `Browser origins allowed: ${process.env.REI_SERVER_ORIGIN}`
+        : `Browser origins: none (a page cannot call this server — set REI_SERVER_ORIGIN to allow one)`,
+    );
     console.log(`Workspace: ${WORKSPACE_PATH}`);
     console.log(`Endpoint: http://${HOST}:${PORT}/chat/completions`);
     console.log(`Health:   http://${HOST}:${PORT}${HEALTH_PATH} (no auth — for platform probes)`);

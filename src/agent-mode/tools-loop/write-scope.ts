@@ -17,6 +17,20 @@
  */
 
 import * as path from "node:path";
+import { getExtraAllowedDirs } from "../../tools/sandbox-config.js";
+
+/**
+ * The roots REI may write into at all: the workspace, plus whatever `REI_ALLOWED_DIRS` adds.
+ *
+ * Deliberately NOT `getAllowedDirs()` from sandbox-config, which also includes `~/.rei`: that
+ * directory holds the global `.env` with the API keys and the launcher scripts that run on the next
+ * start, so `rm` being allowed to target it does not mean a model should be able to write it.
+ * Someone who wants that says so with REI_ALLOWED_DIRS.
+ */
+function isInsideAllowedRoots(abs: string, workspacePath: string): boolean {
+  const roots = [path.resolve(workspacePath), ...getExtraAllowedDirs().map((d) => path.resolve(d))];
+  return roots.some((root) => abs === root || abs.startsWith(root + path.sep));
+}
 
 /** Directories `planning` may create or edit files in (workspace-relative). */
 const PLANNING_WRITE_DIRS = [".rei/specs", ".rei/plans", "docs"];
@@ -75,8 +89,16 @@ export function isWriteAllowed(
   workspacePath: string,
   scope: WriteScope,
 ): boolean {
-  if (scope.unrestricted) return true;
   const abs = path.resolve(workspacePath, filePath);
+
+  // Containment comes FIRST, before the mode is even consulted: `unrestricted` describes how much
+  // of the PROJECT a mode may write, and used to be read as how much of the filesystem. An absolute
+  // path went through untouched (resolveWorkspacePath does not confine), so an agent turn could be
+  // talked into writing ~/.ssh/authorized_keys or a shell profile — the mode that edits source is
+  // exactly the one that must not reach outside it.
+  if (!isInsideAllowedRoots(abs, workspacePath)) return false;
+
+  if (scope.unrestricted) return true;
 
   // A role's glob is checked FIRST and on its own: it is the tighter of the two constraints, and a
   // role that names one is saying "only these files", not "these files anywhere the mode allows".
@@ -93,8 +115,25 @@ export function isWriteAllowed(
   });
 }
 
-/** The refusal the model sees — names the allowed dirs and the way forward. */
-export function writeDeniedMessage(filePath: string, scope: WriteScope): string {
+/**
+ * The refusal the model sees — names the allowed dirs and the way forward.
+ *
+ * `workspacePath` is optional only so existing call sites and tests keep compiling; pass it, and a
+ * path that failed CONTAINMENT gets told so, instead of the mode's directory list — which for agent
+ * is empty and would render as an error naming nothing.
+ */
+export function writeDeniedMessage(
+  filePath: string,
+  scope: WriteScope,
+  workspacePath?: string,
+): string {
+  if (workspacePath && !isInsideAllowedRoots(path.resolve(workspacePath, filePath), workspacePath)) {
+    return (
+      `ERROR: writing '${filePath}' is not allowed — it resolves outside the workspace. ` +
+      `REI writes inside the project it was opened in (add REI_ALLOWED_DIRS to widen that). ` +
+      `Use a path inside the workspace.`
+    );
+  }
   if (scope.glob) {
     return (
       `ERROR: writing '${filePath}' is not allowed while this role is active. ` +
