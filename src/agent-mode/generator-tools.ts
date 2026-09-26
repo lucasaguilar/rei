@@ -20,6 +20,7 @@ import { dispatchToolCalls } from "./tools-loop/dispatch-tool-calls.js";
 import type { ElicitFn } from "../chat/elicitation.js";
 import { applyEditBatch, setEditResults } from "./tools-loop/apply-edit-batch.js";
 import { handleTextResponse } from "./tools-loop/handle-text-response.js";
+import { splitCutToolCalls, cutToolCallNotice } from "./tools-loop/cut-tool-calls.js";
 import {
   handleTruncation,
   buildTurnLimitOutcome,
@@ -285,11 +286,21 @@ export async function executeAgentTurnWithTools(params: {
         continue;
       }
 
+      // A call cut mid-arguments by the output cap must neither run nor reach history: re-sent, its
+      // half-written JSON makes LM Studio fail the NEXT request with a 500. The model is told instead.
+      const { complete, cut } = splitCutToolCalls(result.finishReason, result.toolCalls);
+      const cutNotice = cut.length > 0 ? cutToolCallNotice(cut) : undefined;
+      if (cutNotice) {
+        logger.logInfo(`[truncation] dropped ${cut.length} tool call(s) cut mid-arguments`);
+        result.toolCalls = complete;
+      }
+
       // Truncated mid-output with no tool call yet — hit the output-token cap before acting.
       // Continue the partial output back into the loop (bounded) so its tool calls get processed,
       // or finish honestly once the continuation budget is exhausted.
       if (result.finishReason === "length" && result.toolCalls.length === 0) {
         const outcome = await handleTruncation({
+          continuation: cutNotice,
           content: result.content,
           reasoning: result.reasoning,
           currentMessages,
@@ -429,6 +440,9 @@ export async function executeAgentTurnWithTools(params: {
           name: call.function.name,
         });
       }
+
+      // The complete calls ran; the cut one did not, and the model must not assume it did.
+      if (cutNotice) currentMessages.push({ role: "user", content: cutNotice });
 
       // Anything you typed while the turn was running, handed over here: after the model's response
       // and its tool results, before the next call. Not mid-generation — a message cannot land
