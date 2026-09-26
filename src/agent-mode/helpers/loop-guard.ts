@@ -17,6 +17,12 @@
  * responses mid-spec.
  */
 export function isDegenerate(text: string): boolean {
+  return degenerateSpan(text) !== null;
+}
+
+/** The clustered n-gram that trips `isDegenerate`, or null. Separate from the boolean so a caller
+ *  can LOG what it found: a cut that cannot be inspected afterwards cannot be judged. */
+function degenerateSpan(text: string): { gram: string; occurrences: number; words: number } | null {
   // Strip XML tags and thinking blocks for a clean check
   const clean = text
     .replace(/<think>[\s\S]*?(<\/think>|$)/gi, "")
@@ -24,14 +30,14 @@ export function isDegenerate(text: string): boolean {
     .replace(/\s+/g, " ")
     .trim();
 
-  if (clean.length < 80) return false;
+  if (clean.length < 80) return null;
 
   // Only count WORD tokens (containing a letter). ASCII art / box-drawing logos, diagrams and
   // tables legitimately repeat SYMBOLS (█ ═ ╗ # = …), which is not a generation loop — a real
   // loop repeats actual words, which survive this filter. (Symbol-heavy art falls below the
   // word-count floor and is skipped.)
   const words = clean.split(" ").filter((w) => /\p{L}/u.test(w));
-  if (words.length < 12) return false;
+  if (words.length < 12) return null;
 
   // Sliding window: check 4- and 6-word n-grams. Record every position an n-gram
   // appears, then flag only when ≥4 of those occurrences are TIGHTLY CLUSTERED —
@@ -58,7 +64,10 @@ export function isDegenerate(text: string): boolean {
       for (let k = 1; k < occ.length; k++) {
         if (occ[k] - occ[k - 1] <= maxGap) {
           run++;
-          if (run >= 4) return true;
+          if (run >= 4) {
+            const gram = words.slice(occ[k - run + 1], occ[k] + windowSize).join(" ");
+            return { gram, occurrences: run, words: words.length };
+          }
         } else {
           run = 1;
         }
@@ -66,7 +75,7 @@ export function isDegenerate(text: string): boolean {
     }
   }
 
-  return false;
+  return null;
 }
 
 /**
@@ -92,6 +101,11 @@ const CYCLE_OCCURRENCES = 3;
 const CYCLE_MIN_WORDS = 400;
 
 export function isCyclicRepetition(text: string): boolean {
+  return cyclicSpan(text) !== null;
+}
+
+/** The repeated block that trips `isCyclicRepetition`, or null. */
+function cyclicSpan(text: string): { gram: string; occurrences: number; words: number } | null {
   const words = text
     .replace(/<think>[\s\S]*?(<\/think>|$)/gi, "")
     .replace(/<[^>]+>/g, " ")
@@ -99,16 +113,18 @@ export function isCyclicRepetition(text: string): boolean {
     .trim()
     .split(" ")
     .filter((w) => /\p{L}/u.test(w));
-  if (words.length < CYCLE_MIN_WORDS) return false;
+  if (words.length < CYCLE_MIN_WORDS) return null;
 
   const seen = new Map<string, number>();
   for (let i = 0; i <= words.length - CYCLE_WINDOW; i++) {
     const gram = words.slice(i, i + CYCLE_WINDOW).join(" ").toLowerCase();
     const count = (seen.get(gram) ?? 0) + 1;
-    if (count >= CYCLE_OCCURRENCES) return true;
+    if (count >= CYCLE_OCCURRENCES) {
+      return { gram, occurrences: count, words: words.length };
+    }
     seen.set(gram, count);
   }
-  return false;
+  return null;
 }
 
 /**
@@ -125,8 +141,50 @@ export function loopGuardEnabled(): boolean {
   return !(raw === "off" || raw === "false" || raw === "0" || raw === "no");
 }
 
+/** Longest excerpt worth putting on a log line: enough to recognise the span, short enough to read. */
+const EXCERPT_MAX = 200;
+
+/** What tripped the guard. `kind` distinguishes the two failure modes; `excerpt` is the repeated span
+ *  itself, which is the part that lets a human say "that was a real loop" or "that was my table". */
+export interface LoopDiagnosis {
+  kind: "phrase" | "cycle";
+  excerpt: string;
+  occurrences: number;
+  /** Words scanned — a cut after 8,000 words reads very differently from one after 200. */
+  words: number;
+}
+
+/**
+ * The same verdict `looksLooping` gives, with the evidence attached.
+ *
+ * The guard used to log only THAT it cut, so a false positive and a real loop were indistinguishable
+ * afterwards and the only way to judge it was to switch it off and see. Recording the span costs one
+ * log line and turns "it fires a lot lately" into something answerable.
+ */
+export function diagnoseLoop(text: string): LoopDiagnosis | null {
+  if (!loopGuardEnabled()) return null;
+  const phrase = degenerateSpan(text);
+  if (phrase) {
+    return {
+      kind: "phrase",
+      excerpt: phrase.gram.slice(0, EXCERPT_MAX),
+      occurrences: phrase.occurrences,
+      words: phrase.words,
+    };
+  }
+  const cycle = cyclicSpan(text);
+  if (cycle) {
+    return {
+      kind: "cycle",
+      excerpt: cycle.gram.slice(0, EXCERPT_MAX),
+      occurrences: cycle.occurrences,
+      words: cycle.words,
+    };
+  }
+  return null;
+}
+
 /** Either failure mode: the tight phrase loop, or the long paragraph cycle. Off → neither. */
 export function looksLooping(text: string): boolean {
-  if (!loopGuardEnabled()) return false;
-  return isDegenerate(text) || isCyclicRepetition(text);
+  return diagnoseLoop(text) !== null;
 }
