@@ -27,6 +27,8 @@ export type TruncationOutcome =
  * and report honestly. Extracted from executeAgentTurnWithTools (Phase 2).
  */
 export async function handleTruncation(params: {
+  /** Replaces the "continue where you left off" nudge — e.g. when the cut part was a tool call. */
+  continuation?: string;
   content: string;
   reasoning?: string;
   currentMessages: ChatMessage[];
@@ -38,6 +40,7 @@ export async function handleTruncation(params: {
   appendCreatedSummary: (resp: string) => string;
 }): Promise<TruncationOutcome> {
   const {
+    continuation = TRUNCATION_CONTINUATION,
     content,
     reasoning,
     currentMessages,
@@ -62,7 +65,7 @@ export async function handleTruncation(params: {
         content,
         ...(reasoning ? { reasoning_content: reasoning } : {}),
       },
-      { role: "user", content: TRUNCATION_CONTINUATION },
+      { role: "user", content: continuation },
     );
     return {
       action: "continue",
