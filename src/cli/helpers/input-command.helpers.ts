@@ -8,6 +8,7 @@ import { displayUserLabel } from "./chat.helpers.js";
 import { addContextReading } from "./turn-display.helpers.js";
 import { refreshStickyReading } from "./startup-gauge.helper.js";
 import { grabClipboardImage } from "../../tools/clipboard-image.js";
+import { parseShellEscape, handleShellEscape } from "../shell/shell-escape.js";
 import { saveSession } from "../../chat/session-store.js";
 import * as fs from "fs";
 import { LiveStatusEvent } from "../../chat/commands/command-handler.js";
@@ -61,6 +62,13 @@ export async function handleInputCommand(
         /* best-effort cleanup */
       }
     }
+    return true;
+  }
+
+  // `!cmd` runs in the user's own shell and never reaches the model (see docs/shell-escape-spec.md).
+  const shellCommand = parseShellEscape(trimmed);
+  if (shellCommand !== null) {
+    await handleShellEscape(shellCommand, ctx);
     return true;
   }
 

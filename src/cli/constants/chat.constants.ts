@@ -26,7 +26,10 @@ export function getHelpText(): string {
       (cmd) =>
         `  ${cmd.command.padEnd(16)}- ${cmd.description}` +
         (cmd.requiresArgs ? " <args>" : ""),
-    ).join("\n")
+    ).join("\n") +
+    // Not a slash command, so COMMANDS cannot list it — and a shortcut nobody can find is not one.
+    "\n\nShell:\n" +
+    `  ${"!<command>".padEnd(16)}- Run it in your shell, in the workspace. The model never sees it`
   );
 }
 

@@ -34,7 +34,8 @@ Start here. These describe shipped behaviour.
 [model-config-spec.md](model-config-spec.md) (per-model tuning in `rei.config.json`) ·
 [roles-spec.md](roles-spec.md) (`/role`) ·
 [multi-session-spec.md](multi-session-spec.md) (named sessions, `-c`, `--session`) ·
-[sub-agent-spec.md](sub-agent-spec.md) (isolated-context sub-agents, the `delegate` tool)
+[sub-agent-spec.md](sub-agent-spec.md) (isolated-context sub-agents, the `delegate` tool) ·
+[shell-escape-spec.md](shell-escape-spec.md) (`!cmd` in your own shell; phase 1 shipped, the rest designed)
 
 ## For contributors
 

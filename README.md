@@ -183,6 +183,11 @@ only the agent slot for the rest of the session.
 
 Switch with `/mode ask`, `/mode planning`, `/mode agent`.
 
+**Your own shell, without a turn.** Start a line with `!` — `!git status`, `!ls src`,
+`!npm test` — and it runs in your shell, in the workspace, with its output in the transcript. No
+inference, and nothing is added to the model's context. `Ctrl+C` stops the command, not REI.
+Details: [shell-escape-spec.md](docs/shell-escape-spec.md).
+
 ---
 
 ## Configuration

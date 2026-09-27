@@ -65,6 +65,8 @@ export interface ChatRendererState {
 }
 
 export interface ChatUIState {
+  /** Set while a `!cmd` runs: Ctrl+C stops THAT command instead of quitting REI. */
+  shellAbort?: () => void;
   /** Messages typed WHILE a turn was running, waiting to be handed to it. Delivered between the
    *  model's response and the next one — never mid-generation. See MAX_QUEUED_USER_MESSAGES. */
   queuedUserMessages?: string[];
