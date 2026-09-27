@@ -19,6 +19,16 @@ import {
   type ElicitFn,
   type Elicitation,
 } from "../../chat/elicitation.js";
+import {
+  confirmDestructiveEnabled,
+  confirmGitMutantEnabled,
+  describeDestructive,
+  describeGitMutant,
+} from "./command-gates.js";
+import { describeCommandImpact } from "./command-impact.js";
+
+// Re-exported: the gates moved to command-gates.ts, and callers import them from here.
+export { describeDestructive, describeGitMutant };
 
 /**
  * Built-in NON-edit tool handlers (web_search, weather, run_command, git_changes), extracted from
@@ -139,55 +149,6 @@ export async function handleAskUser(
     : "The user did not answer. Proceed with your best assumption and state it explicitly.";
 }
 
-// Deterministic safety gate: commands that DELETE or DISCARD data get an explicit user confirm
-// before running (the model may issue them without realising the cost). This complements the HARD
-// blocks already in command-executor (rm -rf and out-of-workspace rm are rejected outright) by
-// catching the permitted-but-destructive cases (a single-file rm, git reset --hard) that would
-// otherwise run silently. See docs/intent-router-spec.md — "deterministic gates".
-const DESTRUCTIVE_PATTERNS: Array<{ test: RegExp; describe: string }> = [
-  { test: /(^|[\s;&|])rm\s+/, describe: "delete file(s)" },
-  { test: /git\s+reset\s+--hard/, describe: "discard ALL uncommitted changes (git reset --hard)" },
-  { test: /git\s+clean\s+-[a-z]*f/, describe: "delete untracked files (git clean)" },
-  { test: /git\s+checkout\s+(--|\.(\s|$))/, describe: "discard local changes (git checkout)" },
-];
-
-/** Returns a human description if the command destroys/discards data, else null. */
-export function describeDestructive(cmd: string): string | null {
-  for (const p of DESTRUCTIVE_PATTERNS) if (p.test.test(cmd)) return p.describe;
-  return null;
-}
-
-function confirmDestructiveEnabled(): boolean {
-  return process.env.REI_CONFIRM_DESTRUCTIVE !== "false"; // default ON
-}
-
-// Deterministic safety gate for git commands that MUTATE state (commit, push, merge, rebase,
-// reset, clean, checkout --). Unlike the destructive gate above (which fires for data LOSS),
-// these are additive/rewriting but still change the repo or the remote, so they get their own
-// explicit confirm. Read-only git (status/diff/log/show) never prompts. `git reset --hard`,
-// `git clean -f` and `git checkout --` are ALSO destructive — the stronger destructive gate
-// catches them first, so this one is skipped for them (no double prompt). See
-// docs/intent-router-spec.md — "deterministic gates".
-const GIT_MUTANT_PATTERNS: Array<{ test: RegExp; describe: string }> = [
-  { test: /(^|[\s;&|])git\s+commit\b/, describe: "create a commit" },
-  { test: /(^|[\s;&|])git\s+push\b/, describe: "push to the remote (affects others)" },
-  { test: /(^|[\s;&|])git\s+merge\b/, describe: "merge branches" },
-  { test: /(^|[\s;&|])git\s+rebase\b/, describe: "rewrite history via rebase" },
-  { test: /(^|[\s;&|])git\s+reset\b/, describe: "move the branch pointer (git reset)" },
-  { test: /(^|[\s;&|])git\s+clean\b/, describe: "delete untracked files (git clean)" },
-  { test: /(^|[\s;&|])git\s+checkout\s+(--|\.(?:\s|$))/, describe: "discard local changes (git checkout)" },
-];
-
-/** Returns a human description if the command mutates git state, else null. */
-export function describeGitMutant(cmd: string): string | null {
-  for (const p of GIT_MUTANT_PATTERNS) if (p.test.test(cmd)) return p.describe;
-  return null;
-}
-
-function confirmGitMutantEnabled(): boolean {
-  return process.env.REI_CONFIRM_GIT_MUTANT !== "false"; // default ON
-}
-
 /** run_command → execute a shell command in the workspace; returns exit code + (limited) output. */
 export async function handleRunCommand(
   cmd: string,
@@ -204,12 +165,17 @@ export async function handleRunCommand(
   // default ("no") and the command is declined. An operator who wants it automated says so with
   // REI_CONFIRM_DESTRUCTIVE=false.
   const danger = describeDestructive(cmd);
+  const gitMutant = describeGitMutant(cmd);
   if (danger && confirmDestructiveEnabled()) {
     const interactive = !!ctx.elicit;
+    // A chain like `git reset --hard && git push` gets one prompt (this one), so it has to name the
+    // git actions as well — otherwise the push rides along undescribed.
+    const all = [danger, gitMutant].filter(Boolean).join(" + ");
+    const impact = interactive ? await describeCommandImpact(cmd, ctx.workspacePath) : "";
     const { value } = await (ctx.elicit ?? nonInteractiveElicit)({
       id: newElicitationId(),
       kind: "confirm",
-      message: `⚠️  This command will ${danger}:\n    ${cmd}\nRun it?`,
+      message: `⚠️  This command will ${all}:\n    ${cmd}\n${impact}Run it?`,
       default: "no",
     });
     if (value !== "yes") {
@@ -232,13 +198,13 @@ export async function handleRunCommand(
   // Confirm git commands that MUTATE state (commit/push/merge/rebase/reset/clean/checkout --).
   // Skipped when the destructive gate already fired for this command (e.g. `git reset --hard`),
   // so the user is never asked twice for one command. Same interactive-only guard as above.
-  const gitMutant = describeGitMutant(cmd);
   if (!danger && gitMutant && confirmGitMutantEnabled()) {
     const interactive = !!ctx.elicit;
+    const impact = interactive ? await describeCommandImpact(cmd, ctx.workspacePath) : "";
     const { value } = await (ctx.elicit ?? nonInteractiveElicit)({
       id: newElicitationId(),
       kind: "confirm",
-      message: `🔀  This command will ${gitMutant}:\n    ${cmd}\nRun it?`,
+      message: `🔀  This command will ${gitMutant}:\n    ${cmd}\n${impact}Run it?`,
       default: "no",
     });
     if (value !== "yes") {
