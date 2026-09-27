@@ -169,6 +169,8 @@ export const COMMANDS: Array<{
 }> = [
   { command: "/exit", description: "end the session" },
   { command: "/clear", description: "clear conversation history" },
+  { command: "/attach", description: "send the last !command's output with your next message" },
+  { command: "/detach", description: "don't send the attached !command output after all" },
   { command: "/help", description: "show available commands" },
   { command: "/version", description: "show REI version" },
   { command: "/mode ask", description: "switch to ask mode" },

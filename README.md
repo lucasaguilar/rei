@@ -59,6 +59,9 @@ REI names which one it ran instead of implying they are equal.
   right go out, and the housekeeping models — the one that summarises a session, the one that reads
   an image — follow the local side, so they never reach the API. See
   [Mix them, and pay for less](#mix-them-and-pay-for-less).
+- **You would rather type `git status` than wait for a model to.** `!cmd` runs in your own shell
+  with no inference, and the model sees the output only if you `/attach` it —
+  [you decide what enters its context](#your-shell-and-you-decide-what-the-model-sees).
 - **You want to shape the agent, not accept one.** Roles, skills and prompts are markdown files you
   edit — a reviewer with its own posture and model, a recipe for how your team writes tests. Nothing
   is compiled in.
@@ -183,9 +186,27 @@ only the agent slot for the rest of the session.
 
 Switch with `/mode ask`, `/mode planning`, `/mode agent`.
 
-**Your own shell, without a turn.** Start a line with `!` — `!git status`, `!ls src`,
-`!npm test` — and it runs in your shell, in the workspace, with its output in the transcript. No
-inference, and nothing is added to the model's context. `Ctrl+C` stops the command, not REI.
+### Your shell, and you decide what the model sees
+
+Half of what you ask an agent — `git status`, `ls src`, "run the tests" — you could type yourself in
+a second. On a local model each of those is a turn: tens of seconds, and output that stays in the
+context for the rest of the session. So type it yourself. A line starting with `!` runs in your own
+shell, in the workspace, and the model never sees it:
+
+```
+🧠 agent » !npm test
+$ npm test
+  1 failing — src/parser.test.ts
+↳ exit 1 · 2.3s · not sent to the model · /attach to hand it over
+🧠 agent » /attach
+🧾 npm test (exit 1 · 3.1k) goes with your next message · /detach to drop it
+🧠 agent » why does it fail?
+```
+
+Run ten commands to look around; hand over the one that matters. What you attach reaches the model
+as **verified evidence** — REI captured the command, exit code and output itself — so it does not
+re-run your tests "to confirm". Secrets are masked and a long log is spilled, not pasted.
+`Ctrl+C` stops the command, not REI. It exists in the terminal only: the HTTP server has no `!`.
 Details: [shell-escape-spec.md](docs/shell-escape-spec.md).
 
 ---

@@ -1,3 +1,4 @@
+import { receiptLabel } from "../shell/shell-receipt.js";
 import type {
   ActivePalette,
   ChatRendererState,
@@ -46,5 +47,8 @@ export function buildRenderState(params: {
     inputBuffer: state.inputBuffer,
     inputCursor: state.inputCursor,
     ...sessionIndicators(session),
+    receiptIndicator: state.shellReceipt?.attached
+      ? `🧾 ${receiptLabel(state.shellReceipt)}`
+      : undefined,
   };
 }

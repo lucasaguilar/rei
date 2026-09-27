@@ -8,7 +8,11 @@ import { displayUserLabel } from "./chat.helpers.js";
 import { addContextReading } from "./turn-display.helpers.js";
 import { refreshStickyReading } from "./startup-gauge.helper.js";
 import { grabClipboardImage } from "../../tools/clipboard-image.js";
-import { parseShellEscape, handleShellEscape } from "../shell/shell-escape.js";
+import {
+  parseShellEscape,
+  handleShellEscape,
+  handleReceiptCommand,
+} from "../shell/shell-escape.js";
 import { saveSession } from "../../chat/session-store.js";
 import * as fs from "fs";
 import { LiveStatusEvent } from "../../chat/commands/command-handler.js";
@@ -71,6 +75,7 @@ export async function handleInputCommand(
     await handleShellEscape(shellCommand, ctx);
     return true;
   }
+  if (handleReceiptCommand(trimmed, ctx)) return true;
 
   // Text that merely starts with a slash is not a command — an absolute path is the everyday case
   // (a dragged-in file, a question about one). This used to be handled only for images and PDFs,

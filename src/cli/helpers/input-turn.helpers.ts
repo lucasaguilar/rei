@@ -61,7 +61,8 @@ function isInsideXmlBlock(text: string): boolean {
 export async function handleInputTurn(
   trimmed: string,
   ctx: InputHandlerContext,
-  options?: { displayText?: string },
+  /** `note`: a dim line printed right under the user's label (e.g. what was attached to it). */
+  options?: { displayText?: string; note?: string },
 ): Promise<void> {
   const { state, agent, session, transcript, actions, elicit } = ctx;
 
@@ -69,6 +70,7 @@ export async function handleInputTurn(
   const displayLabel = options?.displayText ?? trimmed;
   actions.pushTranscript("");
   actions.pushTranscript(displayUserLabel(displayLabel));
+  if (options?.note) actions.pushTranscript(paint("dim", options.note));
   actions.pushTranscript("");
   actions.draw();
 

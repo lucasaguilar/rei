@@ -35,7 +35,7 @@ Start here. These describe shipped behaviour.
 [roles-spec.md](roles-spec.md) (`/role`) ·
 [multi-session-spec.md](multi-session-spec.md) (named sessions, `-c`, `--session`) ·
 [sub-agent-spec.md](sub-agent-spec.md) (isolated-context sub-agents, the `delegate` tool) ·
-[shell-escape-spec.md](shell-escape-spec.md) (`!cmd` in your own shell; phase 1 shipped, the rest designed)
+[shell-escape-spec.md](shell-escape-spec.md) (`!cmd` in your own shell, `/attach` to hand it to the model)
 
 ## For contributors
 
