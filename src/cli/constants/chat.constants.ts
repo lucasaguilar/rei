@@ -26,7 +26,10 @@ export function getHelpText(): string {
       (cmd) =>
         `  ${cmd.command.padEnd(16)}- ${cmd.description}` +
         (cmd.requiresArgs ? " <args>" : ""),
-    ).join("\n")
+    ).join("\n") +
+    // Not a slash command, so COMMANDS cannot list it — and a shortcut nobody can find is not one.
+    "\n\nShell:\n" +
+    `  ${"!<command>".padEnd(16)}- Run it in your shell, in the workspace. The model never sees it`
   );
 }
 
@@ -166,6 +169,8 @@ export const COMMANDS: Array<{
 }> = [
   { command: "/exit", description: "end the session" },
   { command: "/clear", description: "clear conversation history" },
+  { command: "/attach", description: "send the last !command's output with your next message" },
+  { command: "/detach", description: "don't send the attached !command output after all" },
   { command: "/help", description: "show available commands" },
   { command: "/version", description: "show REI version" },
   { command: "/mode ask", description: "switch to ask mode" },

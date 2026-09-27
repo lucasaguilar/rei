@@ -1,3 +1,4 @@
+import type { ShellReceipt } from "../shell/shell-receipt.js";
 export type MentionEntry = {
   value: string;
   description: string;
@@ -60,11 +61,17 @@ export interface ChatRendererState {
   inputCursor: number;
   /** Path of the active /ask-document target, shown as a 📄 indicator above the prompt. */
   activeDocument?: string;
+  /** `🧾 npm test (exit 1 · 3.1k)` while a !command's output is attached to the next message. */
+  receiptIndicator?: string;
   activeRole?: string;
   manualModel?: string;
 }
 
 export interface ChatUIState {
+  /** Set while a `!cmd` runs: Ctrl+C stops THAT command instead of quitting REI. */
+  shellAbort?: () => void;
+  /** The last `!cmd`'s captured result; sent with the next message only once /attach marks it. */
+  shellReceipt?: ShellReceipt;
   /** Messages typed WHILE a turn was running, waiting to be handed to it. Delivered between the
    *  model's response and the next one — never mid-generation. See MAX_QUEUED_USER_MESSAGES. */
   queuedUserMessages?: string[];
