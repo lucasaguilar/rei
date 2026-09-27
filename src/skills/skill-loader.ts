@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import type { ToolDefinition } from "../providers/model-provider.js";
@@ -10,10 +11,12 @@ import type { ToolDefinition } from "../providers/model-provider.js";
  * `use_skill` meta-tool. This keeps the prompt lean — you can have many skills
  * without burning context, which matters for local models.
  *
- * Skills come from two places:
- *   1. Built-in:        <rei>/prompts/skills/*.md
- *   2. Per-workspace:   {workspace}/.rei/skills/*.md   (a user's own skills)
- * Workspace skills override built-ins with the same name.
+ * Skills come from three places, each overriding the one before by name:
+ *   1. Built-in:        <rei>/prompts/skills/
+ *   2. User-global:     $XDG_CONFIG_HOME/rei/skills/   (default ~/.config/rei/skills/)
+ *   3. Per-workspace:   {workspace}/.rei/skills/
+ * Each directory accepts flat `<name>.md` files and the `<name>/SKILL.md` layout that Claude Code
+ * and installers like gentle-ai write, so skills from that ecosystem load unchanged.
  */
 export interface Skill {
   name: string;
@@ -42,12 +45,33 @@ function parseSkill(raw: string, fallbackName: string): Skill | null {
   const fm = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
   const meta = fm ? fm[1] : "";
   const body = (fm ? fm[2] : raw).trim();
-  const name =
-    meta.match(/^\s*name:\s*(.+)$/m)?.[1].trim() || fallbackName;
-  const description =
-    meta.match(/^\s*description:\s*(.+)$/m)?.[1].trim() || "";
+  const name = readScalar(meta, "name") || fallbackName;
+  const description = readScalar(meta, "description");
   if (!body) return null;
   return { name, description, modes: parseModes(meta), body };
+}
+
+/**
+ * Reads one top-level frontmatter string. Not a YAML parser — just the two shapes that ecosystem
+ * skills actually use beyond a bare value: a quoted string (`description: "Trigger: ..."`, where a
+ * colon forces the quotes) and a block scalar (`description: >` + indented lines). Without this the
+ * quotes leaked into the use_skill catalog and a block scalar left the description as a lone `>`.
+ */
+function readScalar(meta: string, key: string): string {
+  const lines = meta.split("\n");
+  const idx = lines.findIndex((l) => new RegExp(`^${key}:`).test(l));
+  if (idx === -1) return "";
+  const value = lines[idx].slice(key.length + 1).trim();
+  if (/^[>|][+-]?$/.test(value)) {
+    const block: string[] = [];
+    for (const line of lines.slice(idx + 1)) {
+      if (line.trim() && !/^\s/.test(line)) break; // next top-level key
+      block.push(line.trim());
+    }
+    return block.filter(Boolean).join(value.startsWith(">") ? " " : "\n");
+  }
+  const quoted = value.match(/^(["'])(.*)\1$/);
+  return quoted ? quoted[2] : value;
 }
 
 /**
@@ -69,35 +93,57 @@ function parseModes(meta: string): SkillMode[] {
 }
 
 function readSkillsFromDir(dir: string): Skill[] {
-  let files: string[];
+  let names: string[];
   try {
-    files = fs.readdirSync(dir).filter((f) => f.endsWith(".md"));
+    names = fs.readdirSync(dir);
   } catch {
     return []; // dir doesn't exist — fine
   }
   const skills: Skill[] = [];
-  for (const file of files) {
+  for (const name of names) {
+    // statSync, not Dirent: a Dirent reports a symlink as neither file nor directory, which
+    // silently dropped linked skills — and linking a skill from its own repo is the common case.
+    let stat: fs.Stats;
     try {
-      const raw = fs.readFileSync(path.join(dir, file), "utf-8");
-      const skill = parseSkill(raw, file.replace(/\.md$/, ""));
+      stat = fs.statSync(path.join(dir, name));
+    } catch {
+      continue; // dangling link
+    }
+    // `<name>.md`, or `<name>/SKILL.md` — there the directory, not "SKILL", is the fallback name.
+    const [file, fallbackName] = stat.isFile() && name.endsWith(".md")
+      ? [path.join(dir, name), name.replace(/\.md$/, "")]
+      : stat.isDirectory()
+        ? [path.join(dir, name, "SKILL.md"), name]
+        : [null, ""];
+    if (!file) continue;
+    try {
+      const skill = parseSkill(fs.readFileSync(file, "utf-8"), fallbackName);
       if (skill) skills.push(skill);
     } catch {
-      // skip unreadable/malformed skill files
+      // skip missing/unreadable/malformed skill files
     }
   }
   return skills;
 }
 
 /**
- * Loads built-in skills plus the workspace's own skills. Workspace skills with
- * the same name take precedence (so a project can tailor a built-in recipe).
+ * The user's own skills, shared across workspaces. Deliberately NOT under ~/.rei: that is REI's
+ * install directory, and the local installer's `rsync --delete` would wipe anything a user put there.
+ */
+function globalSkillsDir(): string {
+  const configHome = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
+  return path.join(configHome, "rei", "skills");
+}
+
+/**
+ * Loads built-in, user-global and workspace skills. Later sources win by name, so a user can
+ * tailor a built-in recipe everywhere and a project can tailor it again for itself.
  */
 export function loadSkills(workspacePath: string): Skill[] {
-  const builtin = readSkillsFromDir(BUILTIN_SKILLS_DIR);
-  const workspace = readSkillsFromDir(path.join(workspacePath, ".rei", "skills"));
   const byName = new Map<string, Skill>();
-  for (const s of builtin) byName.set(s.name, s);
-  for (const s of workspace) byName.set(s.name, s); // workspace overrides built-in
+  for (const dir of [BUILTIN_SKILLS_DIR, globalSkillsDir(), path.join(workspacePath, ".rei", "skills")]) {
+    for (const s of readSkillsFromDir(dir)) byName.set(s.name, s);
+  }
   return [...byName.values()];
 }
 
