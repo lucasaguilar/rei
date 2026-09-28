@@ -469,20 +469,40 @@ async function pickModel(provider, message, initialModel, preFetched) {
  *    protection back off, because a per-model value always wins (src/config/model-runtime.ts).
  *    No repetition_penalty on top: stacking the multiplicative penalty with presence/frequency
  *    tends to degrade the output. */
-function defaultTuning(modelId) {
+function defaultTuning(modelId, chosenWindow) {
     const n = modelId.trim().toLowerCase();
-    const base = {
-        id: modelId,
-        contextWindow: PROBED_CONTEXT.get(n) || DEFAULT_LOCAL_CONTEXT,
+    // The window picked at the context step must reach the block: a per-model contextWindow BEATS
+    // REI_CONTEXT_WINDOW at runtime (getContextWindow), so writing the fallback here silently
+    // replaced the user's 96k with 64k. `0` means "no trimming" — any number written would undo it,
+    // so the key is left out. A choice above what the server reported loading is capped to it.
+    const probed = PROBED_CONTEXT.get(n);
+    const chosen = chosenWindow === undefined ? NaN : Number(chosenWindow);
+    const base = { id: modelId };
+    if (chosen === 0) { /* no trimming: omit contextWindow */ }
+    else if (chosen > 0) base.contextWindow = probed ? Math.min(chosen, probed) : chosen;
+    else base.contextWindow = probed || DEFAULT_LOCAL_CONTEXT;
+    Object.assign(base, {
         maxTokens: 16384,
         temperature: 0.35, topP: 0.9, topK: 40,
         presencePenalty: 0.3, frequencyPenalty: 0.5, minP: 0.02,
-    };
-    // Qwen publishes its own sampling recipe (temp 0.6 / topP 0.95 / topK 20) and recommends a
-    // presence_penalty between 0 and 2 when a quantized build falls into endless repetitions.
-    // Keep its nucleus (topP/topK) and the high presence penalty; drop the temperature to the
-    // coding value — 0.6 is the chat recipe and is the main loop risk on a tool-calling agent.
-    if (n.includes('qwen'))    return { ...base, temperature: 0.35, topP: 0.95, topK: 20, presencePenalty: 1.0 };
+    });
+    // Qwen publishes its own sampling recipe (temp 0.6 / topP 0.95 / topK 20, presence_penalty up
+    // to 2 against quantized loops). Keep its nucleus (topP/topK) but not the chat temperature nor a
+    // high presence penalty: code has to repeat identifiers, and presence taxes every token already
+    // seen. frequencyPenalty 0.5 is the anti-loop lever for coding.
+    if (n.includes('qwen')) {
+        const qwen = { ...base, temperature: 0.35, topP: 0.95, topK: 20 };
+        // Qwen3.8's template only knows low/medium/xhigh; `high` or `minimal` are dropped silently
+        // by the backend, so the wizard's own reasoning-level choice would do nothing. Proposed, not
+        // imposed — the user sees and confirms this block. Other Qwen generations (3.6, the 8B
+        // "qwen3-8b") have their own range, so they get no map.
+        if (/qwen3\.8/.test(n)) {
+            qwen.thinkingLevelMap = {
+                none: 'none', minimal: 'low', low: 'low', medium: 'medium', high: 'xhigh', xhigh: 'xhigh',
+            };
+        }
+        return qwen;
+    }
     if (n.includes('deepseek'))return { ...base, temperature: 0.35, topP: 0.95, topK: 40 };
     if (n.includes('gemma'))   return { ...base, temperature: 0.4, topP: 0.95, topK: 64 };
     return base;
@@ -518,13 +538,13 @@ function isModelTuned(models, model) {
  * — nothing is dropped or reordered destructively. Idempotent: re-running with already-tuned models
  * yields added === 0 and a structurally-equal cfg.
  */
-function mergeReiConfig(cfg, pairs) {
+function mergeReiConfig(cfg, pairs, chosenWindow) {
     const next = { ...cfg, providers: { ...(cfg.providers || {}) } };
     let added = 0;
     for (const { provider, model } of pairs) {
         const existing = next.providers[provider] || {};
         const models = Array.isArray(existing.models) ? existing.models.slice() : [];
-        if (!isModelTuned(models, model)) { models.push(defaultTuning(model)); added++; }
+        if (!isModelTuned(models, model)) { models.push(defaultTuning(model, chosenWindow)); added++; }
         next.providers[provider] = { ...existing, models };
     }
     return { cfg: next, added };
@@ -541,7 +561,7 @@ function mergeReiConfig(cfg, pairs) {
  * Non-destructive either way (see mergeReiConfig): existing entries are never modified or reordered,
  * and a model already covered is skipped, so re-running over a configured repo asks nothing at all.
  */
-async function ensureReiConfig(projectPath, localModels) {
+async function ensureReiConfig(projectPath, localModels, chosenWindow) {
     const pairs = localModels.filter(m => m && m.model && LOCAL_PROVIDERS.includes(m.provider));
     if (pairs.length === 0) return;
 
@@ -564,10 +584,10 @@ async function ensureReiConfig(projectPath, localModels) {
     }
 
     const preview = missing.map(({ provider, model }) =>
-        `providers.${provider}.models[] +=\n${JSON.stringify(defaultTuning(model), null, 2)}`).join('\n\n');
+        `providers.${provider}.models[] +=\n${JSON.stringify(defaultTuning(model, chosenWindow), null, 2)}`).join('\n\n');
     note(
         `${preview}\n\n` +
-        `Context comes from what the server reported, else ${DEFAULT_LOCAL_CONTEXT}. Your model must be\n` +
+        `Context is the window you chose (capped to what the server reported), else ${DEFAULT_LOCAL_CONTEXT}. Your model must be\n` +
         `LOADED with at least that window. Sampling is a starting point — tune it in the file.`,
         `Proposed tuning for ${missing.length} model(s)`,
     );
@@ -580,7 +600,7 @@ async function ensureReiConfig(projectPath, localModels) {
         return;
     }
 
-    const { cfg: merged, added } = mergeReiConfig(cfg, missing);
+    const { cfg: merged, added } = mergeReiConfig(cfg, missing, chosenWindow);
     if (added > 0) {
         try {
             fs.writeFileSync(file, JSON.stringify(merged, null, 2) + '\n', 'utf8');
@@ -1223,7 +1243,7 @@ async function main() {
     }
 
     // Seed rei.config.json with default tuning for any LOCAL model chosen (non-destructive).
-    await ensureReiConfig(projectPath, selectedModels);
+    await ensureReiConfig(projectPath, selectedModels, envVars.REI_CONTEXT_WINDOW);
 
     // ── Step 7: save + launch ──────────────────────────────────────────────
     persistConfiguration(projectPath, envVars, config);
