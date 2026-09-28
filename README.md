@@ -551,8 +551,10 @@ Everything that shapes REI's behaviour is a markdown file in your project. Drop 
 there next session — no build, no plugin API, no fork.
 
 **Skills** — a markdown recipe the model loads when the task calls for it, from
-`{workspace}/.rei/skills/`. Ships with spec writing, task decomposition, test writing and spec
-verification.
+`{workspace}/.rei/skills/` or, for skills you want in every project, `~/.config/rei/skills/`
+(`$XDG_CONFIG_HOME/rei/skills/`). Either a flat `<name>.md` or the `<name>/SKILL.md` layout that
+Claude Code and installers like gentle-ai write, so their skills load unchanged. Ships with spec
+writing, task decomposition, test writing and spec verification.
 
 **Roles** — a whole posture: which mode it starts in, what it may write, which model it prefers.
 `{workspace}/.rei/roles/*.md`:

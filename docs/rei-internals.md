@@ -81,8 +81,16 @@ Defined in `src/contracts/tool-definitions.ts`:
 ## Skills & the spec-driven flow
 
 Skills are reusable Markdown recipes loaded **on demand** — only the catalog (name + description)
-rides in the prompt; the full body is injected when the model invokes `use_skill`. They live in
-`prompts/skills/` (built-in) and `{workspace}/.rei/skills/` (workspace overrides built-in).
+rides in the prompt; the full body is injected when the model invokes `use_skill`. They load from
+`prompts/skills/` (built-in), `$XDG_CONFIG_HOME/rei/skills/` (user-global, default
+`~/.config/rei/skills/`) and `{workspace}/.rei/skills/`, each overriding the previous by name.
+
+- **Two layouts** per directory: flat `<name>.md`, or `<name>/SKILL.md` (Claude Code / gentle-ai),
+  where the directory names the skill when the frontmatter has no `name:`. Entries are resolved with
+  `statSync` so symlinked skills load.
+- **Not under `~/.rei`**: that is the install directory, and `install-rei-cli-local.sh`'s
+  `rsync --delete` would wipe user skills there.
+- **Frontmatter strings** accept quoted values and YAML block scalars (`>` / `|`) — not full YAML.
 
 - **Mode-scoped** via `modes:` frontmatter (default `[agent]`). `skillsForMode()` filters: the native
   agent path exposes agent-mode skills in the tool schema; ask/planning inject the mode's catalog into

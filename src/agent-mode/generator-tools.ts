@@ -273,6 +273,9 @@ export async function executeAgentTurnWithTools(params: {
         const outcome = await handleRepetition({
           currentMessages,
           repetitionRetries,
+          // The cut text itself, so the log can say what looped and in which stream.
+          cutContent: result.content,
+          cutReasoning: result.reasoning,
           canAskUser: typeof elicit === "function",
           logger,
           emitStatus,
