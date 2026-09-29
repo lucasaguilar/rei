@@ -95,6 +95,8 @@ already has** if you picked LM Studio, Ollama, oMLX or MTPLX. Running something 
 OpenAI API — vLLM, SGLang, llama.cpp's server, LiteLLM, your own gateway — pick **`openai-compat`**
 and give it the URL. It writes `.rei/.env` in the project and drops you into the session.
 
+![REI's first screen: the mode, the context budget and the local model in use](docs/assets/rei-start.png)
+
 That is the whole setup. To change it later: **`rei --config`**. To make a local model actually
 fast — context, sampling, thinking level, per model — that is `rei.config.json`, two sections down.
 

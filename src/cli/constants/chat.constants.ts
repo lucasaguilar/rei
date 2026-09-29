@@ -7,7 +7,7 @@ import { code, paint, RESET } from "../theme/palette.js";
 
 export const getWelcomeMessage = (mode: SessionMode): string => {
   return `${REI_LOGO}
-REI — Repository-Aware AI Agent
+REI — A local-first agent you assemble yourself
 
 Mode: ${mode}
 Commands:
