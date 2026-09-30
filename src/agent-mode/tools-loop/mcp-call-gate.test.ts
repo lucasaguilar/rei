@@ -80,7 +80,10 @@ describe("MCP call gate in dispatchToolCalls", () => {
   let ctx: DispatchContext;
   let dispatch: ReturnType<typeof vi.fn>;
 
-  const SEND = tool("gmail/send_message", { readOnlyHint: false, openWorldHint: true });
+  const SEND: McpTool = {
+    ...tool("gmail/send_message", { readOnlyHint: false, openWorldHint: true }),
+    inputSchema: { type: "object", properties: { to: { type: "string" }, body: { type: "string" } } },
+  };
   const SEARCH = tool("gmail/search_messages", { readOnlyHint: true });
 
   beforeEach(() => {
@@ -155,6 +158,20 @@ describe("MCP call gate in dispatchToolCalls", () => {
     await dispatchToolCalls([call("mcp:gmail__send_message", { to: "x" })], { ...ctx, elicit });
     expect(elicit).toHaveBeenCalledOnce();
     expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  // Asking the user to approve arguments the server will reject wastes their attention and, as in
+  // PR #21, can succeed half-way (the PR opened, its body lost). Bad arguments go back to the model.
+  it("returns invalid arguments to the model before asking the user", async () => {
+    const elicit = answering("yes");
+    const { toolResultsMap, hasToolFailure } = await dispatchToolCalls(
+      [call("mcp:gmail/send_message", { to: "x", body: true }, "c1")],
+      { ...ctx, elicit },
+    );
+    expect(elicit).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(hasToolFailure).toBe(true);
+    expect(toolResultsMap.get("c1")).toMatch(/body must be string/);
   });
 
   describe("with REI_CONFIRM_MCP=false", () => {

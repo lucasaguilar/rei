@@ -27,6 +27,7 @@ import {
 } from "./edit-handlers.js";
 import { handleSearchTools, handleUseSkill } from "./meta-handlers.js";
 import { gateMcpCall } from "./mcp-call-gate.js";
+import { validateMcpArgs } from "./mcp-args-validation.js";
 
 type McpTool = ReturnType<McpRegistry["getAvailableTools"]>[number];
 
@@ -344,12 +345,18 @@ export async function dispatchToolCalls(
             // back with whatever it was given, so both forms resolve here.
             const qualifiedName = fromWireToolName(call.function.name.slice(4));
             logger.logInfo(`[tools] mcp: ${qualifiedName}`);
-            const refusal = await gateMcpCall(qualifiedName, args, {
-              allMcpTools,
-              elicit,
-              logger,
-              emitStatus,
-            });
+            // Schema first: a confirm prompt for arguments the server would reject is wasted.
+            const invalid = validateMcpArgs(
+              allMcpTools.find((t) => t.name === qualifiedName),
+              args,
+            );
+            const refusal =
+              invalid ??
+              (await gateMcpCall(qualifiedName, args, { allMcpTools, elicit, logger, emitStatus }));
+            if (invalid) {
+              logger.logInfo(`[tools] mcp args rejected: ${qualifiedName}`, { error: invalid });
+              hasToolFailure = true;
+            }
             if (refusal) {
               toolResult = refusal;
             } else {
