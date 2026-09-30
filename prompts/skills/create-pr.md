@@ -15,6 +15,9 @@ Steps:
    - `git branch --show-current` (the head branch)
    - `git log --oneline origin/main..HEAD` (commits ahead of base)
    - `git diff origin/main..HEAD --stat` (files changed)
+   - `git remote get-url origin` (the `owner` and `repo` for the tool: `git@github.com:OWNER/REPO.git`
+     or `https://github.com/OWNER/REPO.git`). Use `origin` only — a repo can have other remotes
+     (forks, collaborators), and `git remote -v | head` can list one of those first.
    If there are no commits ahead of base, STOP and tell the user there's nothing to PR.
 2. **Push the branch** if needed: `run_command` `git push -u origin <branch>`.
 3. **Search for the PR tool** if it's not already visible: `search_tools` with `"github create pull request"`,

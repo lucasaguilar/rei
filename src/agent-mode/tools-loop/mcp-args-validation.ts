@@ -50,7 +50,7 @@ function editDistance(a: string, b: string): number {
   return row[b.length];
 }
 
-function closestName(key: string, names: string[]): string | undefined {
+export function closestName(key: string, names: string[]): string | undefined {
   const k = normalizeKey(key);
   const exact = names.find((n) => normalizeKey(n) === k);
   if (exact) return exact;
@@ -87,13 +87,13 @@ function unknownArguments(schema: Record<string, unknown>, args: Record<string, 
 }
 
 /**
- * The error to hand back to the model when `args` do not match the tool's schema, or null when they
- * do — or when there is nothing to check against (no schema, unknown tool, uncompilable schema).
+ * Every way `args` break the tool's schema, one readable line each — empty when they fit, or when
+ * there is nothing to check against (no schema, unknown tool, uncompilable schema).
  */
-export function validateMcpArgs(tool: McpTool | undefined, args: Record<string, unknown>): string | null {
-  if (!tool?.inputSchema) return null;
+export function mcpArgProblems(tool: McpTool | undefined, args: Record<string, unknown>): string[] {
+  if (!tool?.inputSchema) return [];
   const validate = validatorFor(tool.inputSchema);
-  if (!validate) return null;
+  if (!validate) return [];
 
   const unknown = unknownArguments(tool.inputSchema, args);
   const result = validate(args);
@@ -106,9 +106,13 @@ export function validateMcpArgs(tool: McpTool | undefined, args: Record<string, 
         .split(", ")
         .filter((p) => !(unknown.length > 0 && /must NOT have additional properties/.test(p)))
         .map((p) => p.replace(/\bdata\//g, "").replace(/\bdata\b/g, "arguments"));
-  const problems = [...unknown, ...schemaProblems];
-  if (problems.length === 0) return null;
+  return [...unknown, ...schemaProblems];
+}
 
+/** The error to hand back to the model when `args` do not match the tool's schema, or null. */
+export function validateMcpArgs(tool: McpTool | undefined, args: Record<string, unknown>): string | null {
+  const problems = mcpArgProblems(tool, args);
+  if (problems.length === 0 || !tool) return null;
   return (
     `INVALID ARGUMENTS for ${tool.name}: ${problems.join(", ")}.\n` +
     `Nothing was sent. Fix the arguments to match the tool's schema and call it again.`
