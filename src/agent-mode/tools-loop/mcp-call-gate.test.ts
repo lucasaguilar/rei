@@ -174,6 +174,16 @@ describe("MCP call gate in dispatchToolCalls", () => {
     expect(toolResultsMap.get("c1")).toMatch(/body must be string/);
   });
 
+  it("counts the third identical invalid call as a blocked repeat, so the loop escalates", async () => {
+    const invalidMcpCalls = new Map<string, number>();
+    const bad = () => [call("mcp:gmail/send_message", { to: "x", body: true })];
+    const runCtx = { ...ctx, invalidMcpCalls };
+    expect((await dispatchToolCalls(bad(), runCtx)).blockedRepeatCount).toBe(0);
+    expect((await dispatchToolCalls(bad(), runCtx)).blockedRepeatCount).toBe(0);
+    expect((await dispatchToolCalls(bad(), runCtx)).blockedRepeatCount).toBe(1);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   describe("with REI_CONFIRM_MCP=false", () => {
     beforeEach(() => vi.stubEnv("REI_CONFIRM_MCP", "false"));
     afterEach(() => vi.unstubAllEnvs());

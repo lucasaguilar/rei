@@ -177,6 +177,7 @@ export async function executeAgentTurnWithTools(params: {
   // progress — the classic find/grep loop). Cleared after a turn that edits, so a legit post-edit
   // re-verification (`npx tsc --noEmit`) can run again.
   const commandHistory = new Map<string, number>();
+  const invalidMcpCalls = new Map<string, number>();
   // Streak of consecutive all-blocked-repeat turns; escalation policy lives in blocked-repeat-guard.
   let consecutiveBlockedTurns = 0;
   const MAX_BLOCKED_TURNS = 2;
@@ -390,6 +391,7 @@ export async function executeAgentTurnWithTools(params: {
           resolveTarget,
           createdFiles,
           commandHistory,
+          invalidMcpCalls,
         },
       );
 

@@ -27,7 +27,7 @@ import {
 } from "./edit-handlers.js";
 import { handleSearchTools, handleUseSkill } from "./meta-handlers.js";
 import { gateMcpCall } from "./mcp-call-gate.js";
-import { validateMcpArgs } from "./mcp-args-validation.js";
+import { checkMcpCall } from "./mcp-invalid-retry.js";
 
 type McpTool = ReturnType<McpRegistry["getAvailableTools"]>[number];
 
@@ -61,6 +61,9 @@ export interface DispatchContext {
    *  Mutated by reference; cleared by the loop after edits change disk state so a legit
    *  post-edit re-verification (e.g. `npx tsc --noEmit`) is allowed to run again. */
   commandHistory: Map<string, number>;
+  /** MCP schema rejections per tool+problem THIS run, to escalate the same mistake repeated.
+   *  Not cleared by edits: a disk change does not fix a misnamed argument. Absent → no memory. */
+  invalidMcpCalls?: Map<string, number>;
 }
 
 export interface DispatchResult {
@@ -104,6 +107,7 @@ export async function dispatchToolCalls(
     resolveTarget,
     createdFiles,
     commandHistory,
+    invalidMcpCalls = new Map<string, number>(),
   } = ctx;
 
   let hasToolFailure = false;
@@ -346,16 +350,21 @@ export async function dispatchToolCalls(
             const qualifiedName = fromWireToolName(call.function.name.slice(4));
             logger.logInfo(`[tools] mcp: ${qualifiedName}`);
             // Schema first: a confirm prompt for arguments the server would reject is wasted.
-            const invalid = validateMcpArgs(
+            const invalid = checkMcpCall(
               allMcpTools.find((t) => t.name === qualifiedName),
               args,
+              invalidMcpCalls,
             );
             const refusal =
-              invalid ??
+              invalid?.message ??
               (await gateMcpCall(qualifiedName, args, { allMcpTools, elicit, logger, emitStatus }));
             if (invalid) {
-              logger.logInfo(`[tools] mcp args rejected: ${qualifiedName}`, { error: invalid });
+              logger.logInfo(`[tools] mcp args rejected: ${qualifiedName}`, {
+                error: invalid.message,
+                repeatBlocked: invalid.repeatBlocked,
+              });
               hasToolFailure = true;
+              if (invalid.repeatBlocked) blockedRepeatCount++;
             }
             if (refusal) {
               toolResult = refusal;
