@@ -16,6 +16,25 @@ export interface McpTool {
   readonly description: string;
   /** JSON Schema object describing the input parameters (optional). */
   readonly inputSchema?: Record<string, unknown>;
+  /** The server's own declaration of what the tool does to the world. Kept because it is the only
+   *  signal, short of guessing from the name, for whether a call needs the user's confirm. */
+  readonly annotations?: McpToolAnnotations;
+}
+
+/**
+ * Behaviour hints from the MCP spec (`Tool.annotations`). They are HINTS: a server can omit or
+ * misstate them, so the gate treats a missing hint as unknown, never as "safe".
+ */
+export interface McpToolAnnotations {
+  readonly title?: string;
+  /** True: the tool does not modify its environment. */
+  readonly readOnlyHint?: boolean;
+  /** Only meaningful when not read-only. True (the spec default): may delete or overwrite. */
+  readonly destructiveHint?: boolean;
+  /** Calling it again with the same arguments has no further effect. */
+  readonly idempotentHint?: boolean;
+  /** Reaches outside a closed domain — sends mail, posts, hits the public web. */
+  readonly openWorldHint?: boolean;
 }
 
 /**

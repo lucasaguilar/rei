@@ -26,6 +26,7 @@ import {
   type EditHandlerContext,
 } from "./edit-handlers.js";
 import { handleSearchTools, handleUseSkill } from "./meta-handlers.js";
+import { gateMcpCall } from "./mcp-call-gate.js";
 
 type McpTool = ReturnType<McpRegistry["getAvailableTools"]>[number];
 
@@ -343,8 +344,18 @@ export async function dispatchToolCalls(
             // back with whatever it was given, so both forms resolve here.
             const qualifiedName = fromWireToolName(call.function.name.slice(4));
             logger.logInfo(`[tools] mcp: ${qualifiedName}`);
-            emitStatus(`🔧  [REI] Tool: ${qualifiedName}`);
-            toolResult = await mcpRegistry.dispatch(qualifiedName, args);
+            const refusal = await gateMcpCall(qualifiedName, args, {
+              allMcpTools,
+              elicit,
+              logger,
+              emitStatus,
+            });
+            if (refusal) {
+              toolResult = refusal;
+            } else {
+              emitStatus(`🔧  [REI] Tool: ${qualifiedName}`);
+              toolResult = await mcpRegistry.dispatch(qualifiedName, args);
+            }
           } else {
             toolResult = `ERROR: Unknown tool "${call.function.name}"`;
             hasToolFailure = true;

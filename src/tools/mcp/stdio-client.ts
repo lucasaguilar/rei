@@ -100,6 +100,7 @@ export class StdioMcpClient implements McpClient {
       name: `${this.serverName}/${t.name}`,
       description: t.description ?? t.name,
       inputSchema: t.inputSchema as Record<string, unknown> | undefined,
+      annotations: t.annotations,
     }));
   }
 
