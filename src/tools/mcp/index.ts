@@ -5,7 +5,7 @@
  * @module rei/tools/mcp
  */
 
-export type { McpClient, McpTool, McpResource, McpPrompt } from "./mcp-client.js";
+export type { McpClient, McpTool, McpToolAnnotations, McpResource, McpPrompt } from "./mcp-client.js";
 export type { McpConnectionConfig, ReiConfig } from "./mcp-config.js";
 export { loadReiConfig } from "./mcp-config.js";
 export { StdioMcpClient } from "./stdio-client.js";
