@@ -33,6 +33,59 @@ function validatorFor(schema: Record<string, unknown>): JsonSchemaValidator<unkn
   return validator;
 }
 
+// Case, spaces and separators are the slips a model makes in a key (`"body "`, `Body`, `draft-`).
+const normalizeKey = (k: string) => k.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+function editDistance(a: string, b: string): number {
+  const row = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let diag = row[0];
+    row[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const up = row[j];
+      row[j] = Math.min(row[j] + 1, row[j - 1] + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1));
+      diag = up;
+    }
+  }
+  return row[b.length];
+}
+
+function closestName(key: string, names: string[]): string | undefined {
+  const k = normalizeKey(key);
+  const exact = names.find((n) => normalizeKey(n) === k);
+  if (exact) return exact;
+  const ranked = names
+    .map((n) => ({ n, d: editDistance(k, normalizeKey(n)) }))
+    .filter(({ d }) => d <= 2)
+    .sort((a, b) => a.d - b.d);
+  return ranked[0]?.n;
+}
+
+/**
+ * Argument names the schema does not declare. JSON Schema allows extra keys unless the schema says
+ * `additionalProperties: false`, and most MCP servers do not say it. But for a tool call an unknown
+ * key is a model slip the server drops in silence: `"body ": -6558` validated, and the PR would have
+ * opened with no description. A schema that explicitly opens itself (additionalProperties true or a
+ * sub-schema, patternProperties) is taken at its word.
+ */
+function unknownArguments(schema: Record<string, unknown>, args: Record<string, unknown>): string[] {
+  const props = schema.properties;
+  if (!props || typeof props !== "object") return [];
+  const extra = schema.additionalProperties;
+  if (extra === true || (typeof extra === "object" && extra !== null) || schema.patternProperties) {
+    return [];
+  }
+  const names = Object.keys(props);
+  return Object.keys(args)
+    .filter((k) => !names.includes(k))
+    .map((k) => {
+      const near = closestName(k, names);
+      return near
+        ? `unknown argument "${k}" (did you mean "${near}"?)`
+        : `unknown argument "${k}" (accepted: ${names.join(", ")})`;
+    });
+}
+
 /**
  * The error to hand back to the model when `args` do not match the tool's schema, or null when they
  * do — or when there is nothing to check against (no schema, unknown tool, uncompilable schema).
@@ -42,13 +95,22 @@ export function validateMcpArgs(tool: McpTool | undefined, args: Record<string, 
   const validate = validatorFor(tool.inputSchema);
   if (!validate) return null;
 
+  const unknown = unknownArguments(tool.inputSchema, args);
   const result = validate(args);
-  if (result.valid) return null;
+  // Ajv names the root "data"; the model knows it as the arguments. Its "must NOT have additional
+  // properties" is dropped when the unknown names are reported, because ours says WHICH and what to
+  // use instead. Everything is reported at once, so one retry can fix all of it.
+  const schemaProblems = result.valid
+    ? []
+    : result.errorMessage
+        .split(", ")
+        .filter((p) => !(unknown.length > 0 && /must NOT have additional properties/.test(p)))
+        .map((p) => p.replace(/\bdata\//g, "").replace(/\bdata\b/g, "arguments"));
+  const problems = [...unknown, ...schemaProblems];
+  if (problems.length === 0) return null;
 
-  // Ajv names the root "data"; the model knows it as the arguments.
-  const problems = result.errorMessage.replace(/\bdata\//g, "").replace(/\bdata\b/g, "arguments");
   return (
-    `INVALID ARGUMENTS for ${tool.name}: ${problems}.\n` +
+    `INVALID ARGUMENTS for ${tool.name}: ${problems.join(", ")}.\n` +
     `Nothing was sent. Fix the arguments to match the tool's schema and call it again.`
   );
 }

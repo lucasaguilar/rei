@@ -44,6 +44,62 @@ describe("validateMcpArgs", () => {
     expect(validateMcpArgs(CREATE_PR, { ...VALID, body: "## Summary", draft: false })).toBeNull();
   });
 
+  // Seen live, right after the fix above shipped: `"body ": -6558`. The key has a trailing space, so
+  // to the schema it is an extra property, `body` itself is optional, and the call validated — the
+  // server would have dropped the unknown key and opened the PR with no description again.
+  it("rejects an argument name the tool does not have, and suggests the real one", () => {
+    const err = validateMcpArgs(CREATE_PR, { ...VALID, "body ": -6558 });
+    expect(err).toContain('unknown argument "body "');
+    expect(err).toContain('did you mean "body"');
+  });
+
+  it("suggests the real name for a case or separator slip", () => {
+    expect(validateMcpArgs(CREATE_PR, { ...VALID, Body: "x" })).toContain('did you mean "body"');
+    expect(validateMcpArgs(CREATE_PR, { ...VALID, "draft-": false })).toContain('did you mean "draft"');
+  });
+
+  it("lists the accepted names when nothing is close", () => {
+    const err = validateMcpArgs(CREATE_PR, { ...VALID, reviewers: ["a"] });
+    expect(err).toContain('unknown argument "reviewers"');
+    expect(err).toMatch(/owner, repo, title, body, head, base, draft/);
+  });
+
+  it("reports an unknown name and a wrong type together, so one retry fixes both", () => {
+    const err = validateMcpArgs(CREATE_PR, { ...VALID, "title ": "x", body: true });
+    expect(err).toContain('unknown argument "title "');
+    expect(err).toMatch(/body must be string/);
+  });
+
+  it("says it once when the schema itself forbids extra names", () => {
+    const closed: McpTool = {
+      ...CREATE_PR,
+      inputSchema: { ...CREATE_PR.inputSchema, additionalProperties: false },
+    };
+    const err = validateMcpArgs(closed, { ...VALID, "body ": "x" });
+    expect(err).toContain('did you mean "body"');
+    expect(err).not.toMatch(/additional properties/);
+  });
+
+  // A schema that explicitly opens itself to extra keys is taken at its word.
+  for (const [label, extra] of [
+    ["additionalProperties: true", { additionalProperties: true }],
+    ["an additionalProperties schema", { additionalProperties: { type: "string" } }],
+    ["patternProperties", { patternProperties: { "^x-": { type: "string" } } }],
+  ] as const) {
+    it(`allows extra names when the schema declares ${label}`, () => {
+      const open: McpTool = {
+        ...CREATE_PR,
+        inputSchema: { ...CREATE_PR.inputSchema, ...extra },
+      };
+      expect(validateMcpArgs(open, { ...VALID, "x-extra": "y" })).toBeNull();
+    });
+  }
+
+  it("does not invent a closed set for a schema that lists no properties", () => {
+    const loose: McpTool = { name: "x/loose", description: "", inputSchema: { type: "object" } };
+    expect(validateMcpArgs(loose, { anything: 1 })).toBeNull();
+  });
+
   it("does not judge a tool that declares no schema", () => {
     expect(validateMcpArgs({ name: "x/y", description: "" }, { anything: 1 })).toBeNull();
   });
