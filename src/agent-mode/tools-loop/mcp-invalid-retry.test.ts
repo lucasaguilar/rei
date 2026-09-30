@@ -78,13 +78,24 @@ describe("checkMcpCall — escalating the same mistake", () => {
     expect(r.repeatBlocked).toBe(false);
   });
 
-  it("third identical rejection: stops the tool and counts as a blocked repeat", () => {
+  // Seen live: the third rejection of an OPTIONAL pre-check (list_pull_requests, "does a PR already
+  // exist?") said "in your final answer…" and counted as a blocked repeat, so the loop added
+  // "Do NOT call any tool" — the model gave up the whole task and never created the PR.
+  it("third identical rejection: drops this call but lets the task go on", () => {
     const history = new Map<string, number>();
     checkMcpCall(CREATE_PR, bad, history);
     checkMcpCall(CREATE_PR, bad, history);
     const r = checkMcpCall(CREATE_PR, bad, history)!;
     expect(r.message).toMatch(/Stop calling github\/create_pull_request/);
-    expect(r.repeatBlocked).toBe(true);
+    expect(r.message).toMatch(/continue the task without it/i);
+    expect(r.message).not.toMatch(/final answer/i);
+    expect(r.repeatBlocked).toBe(false);
+  });
+
+  it("calling it again after being told to stop counts as a blocked repeat", () => {
+    const history = new Map<string, number>();
+    for (let i = 0; i < 3; i++) checkMcpCall(CREATE_PR, bad, history);
+    expect(checkMcpCall(CREATE_PR, bad, history)!.repeatBlocked).toBe(true);
   });
 
   // The model varied the body text between retries while keeping `bodyType`: identity is the

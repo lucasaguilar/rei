@@ -11,8 +11,11 @@
 import type { McpTool } from "../../tools/mcp/mcp-client.js";
 import { closestName, mcpArgProblems } from "./mcp-args-validation.js";
 
-/** The identical mistake is stopped on this attempt, and counted as a blocked repeat. */
+/** On this attempt the model is told to drop the call and carry on without it. */
 const STOP_AT_ATTEMPT = 3;
+// Only a call made AFTER that stop counts as a blocked repeat, which triggers the loop's own
+// "do not call any tool" nudge and then abandonment. Counting the stop itself killed whole tasks: the
+// failing call was an optional pre-check (list_pull_requests), and the model gave up creating the PR.
 
 function schemaOf(tool: McpTool): { props: Record<string, { type?: unknown }>; required: string[] } {
   const s = tool.inputSchema ?? {};
@@ -85,11 +88,11 @@ export function checkMcpCall(
 
   if (attempt >= STOP_AT_ATTEMPT) {
     return {
-      repeatBlocked: true,
+      repeatBlocked: attempt > STOP_AT_ATTEMPT,
       message:
         `${what}\nThis is attempt ${attempt} with the same problem. Stop calling ${tool.name} this ` +
-        `turn: another retry will fail the same way. In your final answer, tell the user what you ` +
-        `were trying to do and that the call was rejected.`,
+        `turn: another retry will fail the same way. Continue the task without it if you can; if ` +
+        `the task cannot be done without this call, tell the user it was rejected and why.`,
     };
   }
   if (attempt === 2) {

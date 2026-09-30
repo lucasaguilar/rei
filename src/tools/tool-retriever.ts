@@ -35,7 +35,30 @@ const INTENT_KEYWORDS: Array<{ triggers: RegExp; services: string[] }> = [
   { triggers: /\b(hoja|planilla|spreadsheet|sheet|excel)\b/i, services: ["sheet", "spreadsheet"] },
   { triggers: /\b(contacto|contactos|contact)\b/i, services: ["contact"] },
   { triggers: /\b(chat|espacio|space)\b/i, services: ["chat", "space"] },
+  // "PR" never shares a token with `pull_request`, so without this a Spanish "hacé un PR" preloaded
+  // review/comment tools and left out create_pull_request.
+  { triggers: /\b(pr|prs|pull\s*requests?|merge\s*requests?)\b/i, services: ["pull_request", "pull request"] },
 ];
+
+/**
+ * Bilingual action verbs → the word that names that action in a tool NAME. The service boost says
+ * WHICH tools (all of pull_request_*); this says which of them does the thing asked, so "crea el PR"
+ * puts create_pull_request ahead of pull_request_review_write ("open" only as "open a/an/new":
+ * "open pull requests" is a state). Smaller than the service boost, so it
+ * never lifts `create_or_update_file` over the service the user named. Letter-aware boundaries
+ * because `\b` treats the accent in "creá"/"abrí" as a word break.
+ */
+const ACTION_KEYWORDS: Array<{ triggers: RegExp; nameWord: string }> = [
+  {
+    triggers:
+      /(?:^|[^\p{L}])(crea|crear|creá|creame|hace|hacé|hacer|haz|abr[ií]|abrir|open(?=\s+(?:a|an|new)\b)|create|new|nuev[oa]|make)(?![\p{L}])/iu,
+    nameWord: "create",
+  },
+];
+
+function actionWords(query: string): string[] {
+  return ACTION_KEYWORDS.filter((a) => a.triggers.test(query)).map((a) => a.nameWord);
+}
 
 function intentServices(query: string): string[] {
   const set = new Set<string>();
@@ -62,6 +85,7 @@ export function searchMcpTools(query: string, tools: McpTool[], limit: number): 
   if (tools.length === 0) return [];
   const qTokens = new Set(tokenize(query));
   const services = intentServices(query);
+  const actions = actionWords(query);
 
   const scored = tools
     .map((t) => {
@@ -71,7 +95,9 @@ export function searchMcpTools(query: string, tools: McpTool[], limit: number): 
       for (const tok of tTokens) if (qTokens.has(tok)) overlap++;
       // Intent boost dominates token overlap so the right service surfaces first.
       const intentBoost = services.some((s) => hay.includes(s)) ? 10 : 0;
-      return { tool: t, score: intentBoost + overlap };
+      const nameWords = tokenize(t.name);
+      const actionBoost = actions.some((a) => nameWords.includes(a)) ? 5 : 0;
+      return { tool: t, score: intentBoost + actionBoost + overlap };
     })
     .sort((a, b) => b.score - a.score);
 

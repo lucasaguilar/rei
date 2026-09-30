@@ -76,9 +76,16 @@ export async function gateMcpCall(
     emitStatus: (msg: string) => void;
   },
 ): Promise<string | null> {
-  if (!confirmMcpEnabled()) return null;
   const risk = describeMcpRisk(ctx.allMcpTools.find((t) => t.name === qualifiedName), qualifiedName);
   if (!risk) return null;
+  // Every side-effecting call that runs leaves a line saying who let it through. Only refusals used
+  // to be logged, so a call that ran could not be told apart from one the server failed.
+  if (!confirmMcpEnabled()) {
+    ctx.logger.logInfo(`[tools] mcp call run without confirm (REI_CONFIRM_MCP=false): ${qualifiedName}`, {
+      risk,
+    });
+    return null;
+  }
 
   // Nobody to ask is a reason to REFUSE, not to run — same rule as the run_command gates.
   const interactive = !!ctx.elicit;
@@ -88,7 +95,10 @@ export async function gateMcpCall(
     message: `🔌  The MCP tool ${qualifiedName} may ${risk}, with:\n    ${argsPreview(args)}\nRun it?`,
     default: "no",
   });
-  if (value === "yes") return null;
+  if (value === "yes") {
+    ctx.logger.logInfo(`[tools] mcp call approved by the user: ${qualifiedName}`, { risk });
+    return null;
+  }
 
   ctx.logger.logInfo(`[tools] mcp call not run: ${qualifiedName}`, { interactive, risk });
   ctx.emitStatus(

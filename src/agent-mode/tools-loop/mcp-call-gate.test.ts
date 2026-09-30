@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { dispatchToolCalls, type DispatchContext } from "./dispatch-tool-calls.js";
-import { describeMcpRisk } from "./mcp-call-gate.js";
+import { describeMcpRisk, gateMcpCall } from "./mcp-call-gate.js";
 import { createVirtualFileTree } from "./virtual-file-tree.js";
 import type { ToolCall } from "../../providers/model-provider.js";
 import type { McpTool } from "../../tools/mcp/mcp-client.js";
@@ -174,12 +174,13 @@ describe("MCP call gate in dispatchToolCalls", () => {
     expect(toolResultsMap.get("c1")).toMatch(/body must be string/);
   });
 
-  it("counts the third identical invalid call as a blocked repeat, so the loop escalates", async () => {
+  it("counts an invalid call repeated after the stop as a blocked repeat, so the loop escalates", async () => {
     const invalidMcpCalls = new Map<string, number>();
     const bad = () => [call("mcp:gmail/send_message", { to: "x", body: true })];
     const runCtx = { ...ctx, invalidMcpCalls };
-    expect((await dispatchToolCalls(bad(), runCtx)).blockedRepeatCount).toBe(0);
-    expect((await dispatchToolCalls(bad(), runCtx)).blockedRepeatCount).toBe(0);
+    for (let i = 0; i < 3; i++) {
+      expect((await dispatchToolCalls(bad(), runCtx)).blockedRepeatCount).toBe(0);
+    }
     expect((await dispatchToolCalls(bad(), runCtx)).blockedRepeatCount).toBe(1);
     expect(dispatch).not.toHaveBeenCalled();
   });
@@ -192,5 +193,60 @@ describe("MCP call gate in dispatchToolCalls", () => {
       await dispatchToolCalls([call("mcp:gmail/send_message", { to: "x" })], ctx);
       expect(dispatch).toHaveBeenCalledOnce();
     });
+  });
+});
+
+// Seen live: pull_request_review_write ran twice with a ~20 s pause each, and the log could not say
+// whether the user approved it or the server failed — only refusals were recorded. Every
+// side-effecting call that runs has to leave a line saying who let it through.
+describe("gateMcpCall audit trail", () => {
+  const SEND: McpTool = {
+    name: "gmail/send_message",
+    description: "",
+    annotations: { readOnlyHint: false, openWorldHint: true },
+  };
+  const SEARCH: McpTool = { name: "gmail/search", description: "", annotations: { readOnlyHint: true } };
+
+  function run(tool: McpTool, elicitValue?: string) {
+    const logInfo = vi.fn();
+    const elicit: ElicitFn | undefined = elicitValue
+      ? async (e) => ({ id: e.id, value: elicitValue })
+      : undefined;
+    const done = gateMcpCall(tool.name, { to: "x" }, {
+      allMcpTools: [tool],
+      elicit,
+      logger: { logInfo } as never,
+      emitStatus: () => {},
+    });
+    return { done, logInfo };
+  }
+  const messages = (logInfo: ReturnType<typeof vi.fn>) => logInfo.mock.calls.map((c) => c[0]);
+
+  it("logs that the user approved a side-effecting call", async () => {
+    const { done, logInfo } = run(SEND, "yes");
+    expect(await done).toBeNull();
+    expect(logInfo).toHaveBeenCalledWith(
+      "[tools] mcp call approved by the user: gmail/send_message",
+      expect.objectContaining({ risk: expect.any(String) }),
+    );
+  });
+
+  describe("with REI_CONFIRM_MCP=false", () => {
+    beforeEach(() => vi.stubEnv("REI_CONFIRM_MCP", "false"));
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("logs that a side-effecting call ran unconfirmed by operator choice", async () => {
+      const { done, logInfo } = run(SEND);
+      expect(await done).toBeNull();
+      expect(messages(logInfo)).toContain(
+        "[tools] mcp call run without confirm (REI_CONFIRM_MCP=false): gmail/send_message",
+      );
+    });
+  });
+
+  it("adds no audit line for a read-only call", async () => {
+    const { done, logInfo } = run(SEARCH);
+    expect(await done).toBeNull();
+    expect(logInfo).not.toHaveBeenCalled();
   });
 });
