@@ -307,6 +307,19 @@ with the history — ~30s plus one second per 150 tokens, capped at 15 min — b
 history is the slow part and a flat value killed exactly the compactions that were needed) ·
 Laminar telemetry `LMNR_*`.
 
+## WhatsApp Cloud API (server)
+
+The WhatsApp channel (`src/server/whatsapp-webhook.ts`) exposes `GET`/`POST /webhooks/whatsapp`.
+It authenticates with Meta's HMAC signature, not `REI_SERVER_TOKEN`, so the route bypasses the
+bearer check but is gated by its own signature. All three are machine-scoped secrets — set them in
+`render.yaml` with `sync: false`, never in git.
+
+| Var | What | Default |
+|---|---|---|
+| `WHATSAPP_VERIFY_TOKEN` | random string Meta checks on the `GET` verification handshake (`hub.verify_token`) | — (unset = handshake always 403) |
+| `WHATSAPP_APP_SECRET` | the Meta app secret; the `POST` body is HMAC-SHA256'd with it and checked against `X-Hub-Signature-256` | — (unset = every POST is 401) |
+| `WHATSAPP_ALLOWED_NUMBERS` | comma-separated sender allowlist. **Empty = open** — everyone who writes to the number is served | empty (open) |
+
 ## MTPLX — `chat_template_kwargs`
 
 MTPLX forwards `chat_template_kwargs` to the chat template, which is the **only** way to set the
