@@ -319,6 +319,8 @@ bearer check but is gated by its own signature. All three are machine-scoped sec
 | `WHATSAPP_VERIFY_TOKEN` | random string Meta checks on the `GET` verification handshake (`hub.verify_token`) | — (unset = handshake always 403) |
 | `WHATSAPP_APP_SECRET` | the Meta app secret; the `POST` body is HMAC-SHA256'd with it and checked against `X-Hub-Signature-256` | — (unset = every POST is 401) |
 | `WHATSAPP_ALLOWED_NUMBERS` | comma-separated sender allowlist. **Empty = open** — everyone who writes to the number is served | empty (open) |
+| `WHATSAPP_ACCESS_TOKEN` | Meta **permanent** access token — authenticates outbound sends via the Graph API | — (unset = replies are logged but not sent) |
+| `WHATSAPP_PHONE_NUMBER_ID` | the business phone number id (from Meta → WhatsApp → API Setup) — the Graph API endpoint | — (unset = replies are logged but not sent) |
 
 ## MTPLX — `chat_template_kwargs`
 

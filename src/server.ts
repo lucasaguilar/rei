@@ -15,6 +15,7 @@ import {
   handleWhatsAppWebhook,
   isWhatsAppWebhookRequest,
 } from "./server/whatsapp-webhook.js";
+import { createWhatsAppChannel } from "./server/whatsapp-channel.js";
 import { REI_LOGO } from "./cli/rei-logo.js";
 import {
   isWorkspaceAllowed,
@@ -159,19 +160,10 @@ async function startServer() {
 
     // WhatsApp webhook BEFORE the bearer check: Meta authenticates with an HMAC signature, never a
     // bearer token, so it would 401 below. The handler enforces its own signature — this route is
-    // never unauthenticated. (Step 3 wires the real channel; until then a turn is a logged no-op.)
+    // never unauthenticated. The channel (whatsapp-channel.ts) runs the agent turn and replies
+    // via the Graph API.
     if (isWhatsAppWebhookRequest(req.url, req.method)) {
-      await handleWhatsAppWebhook(req, res, {
-        handleInbound: async (msg) => {
-          console.log(
-            `[whatsapp] inbound from ${msg.from} (${msg.type}): ${msg.body.slice(0, 80)}` +
-              ` — channel not wired yet (Step 3)`,
-          );
-        },
-        onStatus: (s) => {
-          console.log(`[whatsapp] status ${s.status} for ${s.recipientId}`);
-        },
-      });
+      await handleWhatsAppWebhook(req, res, createWhatsAppChannel(agent, WORKSPACE_PATH));
       return;
     }
 
