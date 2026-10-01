@@ -26,6 +26,7 @@ services:
       # La key es secreta: sync:false la crea vacía para que la setees por la UI
       # de Render (Environment) sin commitearla a git.
       OPENROUTER_API_KEY:
+        value: ""
         sync: false
       # Laminar (telemetría) apunta a localhost en el .env local; en la nube no
       # existe, así que se deshabilita para no agregar latencia al arranque.
@@ -36,11 +37,13 @@ services:
       # y cargalo en Render → Environment ANTES del primer deploy, o el servicio no levanta.
       # Los clientes lo mandan como `Authorization: Bearer <token>`.
       REI_SERVER_TOKEN:
+        value: ""
         sync: false
       # Con token, el CORS deja de ser `*`: un `*` permitiría que cualquier página que visites
       # replique un request con credenciales adjuntas. Poné acá el origen de tu frontend
       # (https://tu-app.com) o dejalo vacío si solo lo vas a usar desde un IDE o curl.
       REI_SERVER_ORIGIN:
+        value: ""
         sync: false
       # ── WhatsApp Cloud API ──────────────────────────────────────────────────
       # Las 5 son secretas/machine-scoped: sync:false las crea vacías para que las setees
@@ -57,12 +60,17 @@ services:
       # WHATSAPP_PHONE_NUMBER_ID: de Meta → WhatsApp → API Setup → Phone Number ID.
       #   El endpoint de la Graph API para enviar mensajes.
       WHATSAPP_VERIFY_TOKEN:
+        value: ""
         sync: false
       WHATSAPP_APP_SECRET:
+        value: ""
         sync: false
       WHATSAPP_ALLOWED_NUMBERS:
+        value: ""
         sync: false
       WHATSAPP_ACCESS_TOKEN:
+        value: ""
         sync: false
       WHATSAPP_PHONE_NUMBER_ID:
+        value: ""
         sync: false
