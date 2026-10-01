@@ -5,6 +5,7 @@ import type { InputHandlerContext } from "../models/input-handler.types.js";
 import { clamp } from "../helpers/terminal.helpers.js";
 import { handleInputCommand } from "../helpers/input-command.helpers.js";
 import { looksLikeCommand } from "../../chat/commands/command-syntax.js";
+import { parseShellEscape, takeAttachedReceipt } from "../shell/shell-escape.js";
 import { handleInputTurn } from "../helpers/input-turn.helpers.js";
 import { extractSREdits } from "../../agent-mode/response-handler.js";
 import { formatCodeDiff } from "../markdown-renderer.js";
@@ -23,6 +24,13 @@ export class InputHandler {
     if (state.busy) {
       const pending = state.inputBuffer.trim();
       if (!pending) return;
+      // Queued text is handed to the model — the one place a `!cmd` must never end up.
+      if (parseShellEscape(pending) !== null) {
+        actions.pushTranscript(
+          paint("warn", "[REI] Shell commands can't run mid-turn yet — wait for it to finish."),
+        );
+        return;
+      }
       if (looksLikeCommand(pending)) {
         // Commands mutate the session (mode, model, history). Running one against a turn already in
         // flight is a different feature, and a dangerous one — this is text only.
@@ -188,6 +196,16 @@ export class InputHandler {
     // return;
     // }
 
+    // An attached !command rides on this message as evidence; the transcript still shows only
+    // what was typed, with one line saying what went along with it.
+    const evidence = takeAttachedReceipt(state);
+    if (evidence) {
+      await handleInputTurn(`${evidence}\n\n${trimmed}`, ctx, {
+        displayText: trimmed,
+        note: `🧾 sent with this message: ${evidence.split("\n")[1]}`,
+      });
+      return;
+    }
     await handleInputTurn(trimmed, ctx);
   }
 }

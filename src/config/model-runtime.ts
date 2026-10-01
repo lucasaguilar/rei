@@ -63,7 +63,8 @@ const PROVIDER_RUNTIME_CONFIGS: Record<
  * Total context window REI assumes for trimming (input + output).
  *
  * Resolution order:
- *  1. `REI_CONTEXT_WINDOW` / `OLLAMA_NUM_CTX` — explicit, always wins (any provider).
+ *  0. The active model's `contextWindow` in rei.config.json — beats the env, like every per-model value.
+ *  1. `REI_CONTEXT_WINDOW` / `OLLAMA_NUM_CTX` — explicit, any provider.
  *  2. Cloud provider with no explicit value → `<PREFIX>_CONTEXT_WINDOW` override, else a
  *     large per-provider default — so cloud models aren't trimmed prematurely AND the gauge
  *     still shows a sensible %.

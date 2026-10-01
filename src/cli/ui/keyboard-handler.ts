@@ -42,6 +42,11 @@ export class KeyboardHandler {
     }
 
     if (key.ctrl && key.name === "c") {
+      // A `!cmd` is running: Ctrl+C means what it means in a terminal — stop the command.
+      if (state.shellAbort) {
+        state.shellAbort();
+        return;
+      }
       if (state.historySearchMode) {
         actions.clearHistorySearch(true);
         actions.draw();

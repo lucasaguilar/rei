@@ -59,6 +59,9 @@ REI names which one it ran instead of implying they are equal.
   right go out, and the housekeeping models — the one that summarises a session, the one that reads
   an image — follow the local side, so they never reach the API. See
   [Mix them, and pay for less](#mix-them-and-pay-for-less).
+- **You would rather type `git status` than wait for a model to.** `!cmd` runs in your own shell
+  with no inference, and the model sees the output only if you `/attach` it —
+  [you decide what enters its context](#your-shell-and-you-decide-what-the-model-sees).
 - **You want to shape the agent, not accept one.** Roles, skills and prompts are markdown files you
   edit — a reviewer with its own posture and model, a recipe for how your team writes tests. Nothing
   is compiled in.
@@ -91,6 +94,8 @@ provider, takes an API key if you picked a cloud one, or **lists the models your
 already has** if you picked LM Studio, Ollama, oMLX or MTPLX. Running something else that speaks the
 OpenAI API — vLLM, SGLang, llama.cpp's server, LiteLLM, your own gateway — pick **`openai-compat`**
 and give it the URL. It writes `.rei/.env` in the project and drops you into the session.
+
+![REI's first screen: the mode, the context budget and the local model in use](docs/assets/rei-start.png)
 
 That is the whole setup. To change it later: **`rei --config`**. To make a local model actually
 fast — context, sampling, thinking level, per model — that is `rei.config.json`, two sections down.
@@ -182,6 +187,29 @@ only the agent slot for the rest of the session.
 | `agent` | Executes: reads, edits, runs commands, verifies | yes |
 
 Switch with `/mode ask`, `/mode planning`, `/mode agent`.
+
+### Your shell, and you decide what the model sees
+
+Half of what you ask an agent — `git status`, `ls src`, "run the tests" — you could type yourself in
+a second. On a local model each of those is a turn: tens of seconds, and output that stays in the
+context for the rest of the session. So type it yourself. A line starting with `!` runs in your own
+shell, in the workspace, and the model never sees it:
+
+```
+🧠 agent » !npm test
+$ npm test
+  1 failing — src/parser.test.ts
+↳ exit 1 · 2.3s · not sent to the model · /attach to hand it over
+🧠 agent » /attach
+🧾 npm test (exit 1 · 3.1k) goes with your next message · /detach to drop it
+🧠 agent » why does it fail?
+```
+
+Run ten commands to look around; hand over the one that matters. What you attach reaches the model
+as **verified evidence** — REI captured the command, exit code and output itself — so it does not
+re-run your tests "to confirm". Secrets are masked and a long log is spilled, not pasted.
+`Ctrl+C` stops the command, not REI. It exists in the terminal only: the HTTP server has no `!`.
+Details: [shell-escape-spec.md](docs/shell-escape-spec.md).
 
 ---
 
@@ -525,8 +553,10 @@ Everything that shapes REI's behaviour is a markdown file in your project. Drop 
 there next session — no build, no plugin API, no fork.
 
 **Skills** — a markdown recipe the model loads when the task calls for it, from
-`{workspace}/.rei/skills/`. Ships with spec writing, task decomposition, test writing and spec
-verification.
+`{workspace}/.rei/skills/` or, for skills you want in every project, `~/.config/rei/skills/`
+(`$XDG_CONFIG_HOME/rei/skills/`). Either a flat `<name>.md` or the `<name>/SKILL.md` layout that
+Claude Code and installers like gentle-ai write, so their skills load unchanged. Ships with spec
+writing, task decomposition, test writing and spec verification.
 
 **Roles** — a whole posture: which mode it starts in, what it may write, which model it prefers.
 `{workspace}/.rei/roles/*.md`:
