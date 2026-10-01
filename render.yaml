@@ -41,3 +41,27 @@ services:
       # (https://tu-app.com) o dejalo vacío si solo lo vas a usar desde un IDE o curl.
       REI_SERVER_ORIGIN:
         sync: false
+      # ── WhatsApp Cloud API ──────────────────────────────────────────────────
+      # Las 5 son secretas/machine-scoped: sync:false las crea vacías para que las setees
+      # por la UI de Render (Environment) sin commitearlas a git.
+      #
+      # WHATSAPP_VERIFY_TOKEN: un string aleatorio que vos inventás (ej: "rei-wa-2026-x7k").
+      #   Meta lo compara en el GET handshake.
+      # WHATSAPP_APP_SECRET: de Meta → App Settings → Basic → App Secret.
+      #   Firma los POST entrantes (HMAC-SHA256).
+      # WHATSAPP_ALLOWED_NUMBERS: tu número en E.164 (ej: "5491100001234").
+      #   Vacío = abierto (cualquiera puede escribir).
+      # WHATSAPP_ACCESS_TOKEN: de Meta → WhatsApp → API Setup → Permanent Token.
+      #   Autentica los envíos por la Graph API.
+      # WHATSAPP_PHONE_NUMBER_ID: de Meta → WhatsApp → API Setup → Phone Number ID.
+      #   El endpoint de la Graph API para enviar mensajes.
+      WHATSAPP_VERIFY_TOKEN:
+        sync: false
+      WHATSAPP_APP_SECRET:
+        sync: false
+      WHATSAPP_ALLOWED_NUMBERS:
+        sync: false
+      WHATSAPP_ACCESS_TOKEN:
+        sync: false
+      WHATSAPP_PHONE_NUMBER_ID:
+        sync: false
