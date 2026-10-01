@@ -7,7 +7,7 @@ which is read at runtime by sub-agents and must stay short — see that file for
 
 ## What is REI?
 
-REI (Repository-Aware AI) is a personal, local-first CLI coding agent that operates directly on a
+REI is a personal, local-first CLI agent you assemble yourself — here, its coding side operates directly on a
 repository. It reads and reasons about the codebase using only the provided context, proposes and
 **applies** changes, and runs the project's real compiler over them before the turn is allowed to
 finish. (Once per turn by default; per edit under `REI_EDIT_MODE=sandbox` — see agent-loop.md.)
@@ -81,8 +81,16 @@ Defined in `src/contracts/tool-definitions.ts`:
 ## Skills & the spec-driven flow
 
 Skills are reusable Markdown recipes loaded **on demand** — only the catalog (name + description)
-rides in the prompt; the full body is injected when the model invokes `use_skill`. They live in
-`prompts/skills/` (built-in) and `{workspace}/.rei/skills/` (workspace overrides built-in).
+rides in the prompt; the full body is injected when the model invokes `use_skill`. They load from
+`prompts/skills/` (built-in), `$XDG_CONFIG_HOME/rei/skills/` (user-global, default
+`~/.config/rei/skills/`) and `{workspace}/.rei/skills/`, each overriding the previous by name.
+
+- **Two layouts** per directory: flat `<name>.md`, or `<name>/SKILL.md` (Claude Code / gentle-ai),
+  where the directory names the skill when the frontmatter has no `name:`. Entries are resolved with
+  `statSync` so symlinked skills load.
+- **Not under `~/.rei`**: that is the install directory, and `install-rei-cli-local.sh`'s
+  `rsync --delete` would wipe user skills there.
+- **Frontmatter strings** accept quoted values and YAML block scalars (`>` / `|`) — not full YAML.
 
 - **Mode-scoped** via `modes:` frontmatter (default `[agent]`). `skillsForMode()` filters: the native
   agent path exposes agent-mode skills in the tool schema; ask/planning inject the mode's catalog into

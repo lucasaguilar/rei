@@ -2,6 +2,7 @@ import type { ChatMessage } from "../../chat/types.js";
 import type { AgentLogger } from "../../core/logger.js";
 import type { AgentSREdit } from "../../contracts/agent-interaction.types.js";
 import { finalizeOutcome, type ExecutionResult } from "../helpers/patch-helpers.js";
+import { diagnoseLoop } from "../helpers/loop-guard.js";
 
 /**
  * Loop guard, phase 2: what happens AFTER the cut.
@@ -60,6 +61,38 @@ export function buildRepetitionRecovery(canAskUser: boolean): string {
 }
 
 /**
+ * Turns the cut response into something a human can judge later.
+ *
+ * `stream` is the part that answers the question this exists for: the guard accumulates REASONING and
+ * text into one buffer, and thinking is far more repetitive by nature than an answer — a model
+ * re-stating its goal and re-checking constraints looks like a loop under thresholds calibrated on
+ * prose. Knowing which side tripped is the difference between "lower the reasoning effort" and "the
+ * model is stuck".
+ */
+function describeCut(
+  cutContent?: string,
+  cutReasoning?: string,
+): Record<string, unknown> {
+  for (const [stream, text] of [
+    ["reasoning", cutReasoning],
+    ["content", cutContent],
+  ] as const) {
+    if (!text) continue;
+    const d = diagnoseLoop(text);
+    if (d) {
+      return { stream, kind: d.kind, occurrences: d.occurrences, words: d.words, excerpt: d.excerpt };
+    }
+  }
+  // The guard cut on the COMBINED buffer, so neither half alone reaching the threshold is itself a
+  // finding: the repetition straddles the two, or the cut was marginal.
+  return {
+    stream: "unattributed",
+    contentWords: cutContent?.split(/\s+/).length ?? 0,
+    reasoningWords: cutReasoning?.split(/\s+/).length ?? 0,
+  };
+}
+
+/**
  * Handles a model call the loop guard cut for repetition. Called before anything else looks at the
  * response, so the cut output never reaches the history, `firstTurnExplanation`, or the tool
  * dispatcher (its tool calls may be truncated mid-JSON anyway).
@@ -67,6 +100,11 @@ export function buildRepetitionRecovery(canAskUser: boolean): string {
 export async function handleRepetition(params: {
   currentMessages: ChatMessage[];
   repetitionRetries: number;
+  /** What the model had produced when the guard cut it, so the log can name WHAT looped and in
+   *  WHICH stream. A cut that cannot be inspected afterwards cannot be judged: a false positive and
+   *  a real loop read identically. Both optional — an older caller simply logs less. */
+  cutContent?: string;
+  cutReasoning?: string;
   /** Whether an interactive frontend is attached (an `ask_user` would actually reach someone). */
   canAskUser: boolean;
   logger: AgentLogger;
@@ -78,6 +116,8 @@ export async function handleRepetition(params: {
   const {
     currentMessages,
     repetitionRetries,
+    cutContent,
+    cutReasoning,
     canAskUser,
     logger,
     emitStatus,
@@ -86,11 +126,13 @@ export async function handleRepetition(params: {
     appendCreatedSummary,
   } = params;
 
+  const evidence = describeCut(cutContent, cutReasoning);
+
   if (repetitionRetries < MAX_REPETITION_RETRIES) {
     logger.logInfo(
       `[loop-guard] repetition cut (${repetitionRetries + 1}/${MAX_REPETITION_RETRIES}) — ` +
         `dropping the looping output and retrying once`,
-      { canAskUser },
+      { canAskUser, ...evidence },
     );
     // A NOTICE, not a tool: nothing was done, the turn is still going. Consumers that treat a
     // status as "narration ends here" must not discard what legitimately came before the loop.
@@ -105,7 +147,7 @@ export async function handleRepetition(params: {
 
   // Twice in one user-turn. The retry was the test and the model failed it, so stop burning tokens
   // and hand back what was actually gathered (queued edits are work, not noise) plus the levers.
-  logger.logInfo("[loop-guard] repetition again after the retry — giving up on this turn");
+  logger.logInfo("[loop-guard] repetition again after the retry — giving up on this turn", evidence);
   const edits = await virtualEdits();
   return {
     action: "finalize",

@@ -268,6 +268,12 @@ export class ChatRenderer {
       uiLines.push(fixedLine(paint("dim", `📄 ${docName}`)));
     }
 
+    // An attached !command: it will ride on the next message, so it must be in view while that
+    // message is typed — the transcript line saying so may already have scrolled away.
+    if (state.receiptIndicator) {
+      uiLines.push(fixedLine(paint("dim", state.receiptIndicator)));
+    }
+
     // One empty row between the indicators and the prompt. The block had grown to four or five
     // stacked lines (status, context bar, role, artifacts, document) with the input welded to the
     // bottom of the pile, and it read as a wall. Like the indicator lines above, it sits BEFORE the
