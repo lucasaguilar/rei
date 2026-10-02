@@ -65,6 +65,8 @@ export function setupToolSelection(params: {
   mode?: SkillMode;
   /** Expose the `delegate` tool. False inside a sub-agent (depth-1 guard: no nesting). Default true. */
   allowSubAgents?: boolean;
+  /** When set, the ONLY tools offered — applied last, over everything below (MCP, skills, …). */
+  allowedTools?: readonly string[];
 }): ToolSelection {
   const {
     mcpRegistry,
@@ -113,7 +115,8 @@ export function setupToolSelection(params: {
     if (allowSubAgents && subAgentsEnabled()) tools.push(DELEGATE_TOOL);
     if (useToolSearch) tools.push(SEARCH_TOOLS_DEF);
     if (useSkillTool) tools.push(useSkillTool);
-    return tools;
+    const allowed = params.allowedTools;
+    return allowed ? tools.filter((t) => allowed.includes(t.function.name)) : tools;
   };
 
   return { buildTools, activeMcp, allMcpTools, useToolSearch, skills };

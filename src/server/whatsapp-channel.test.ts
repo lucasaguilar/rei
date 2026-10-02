@@ -79,7 +79,8 @@ describe("createWhatsAppChannel", () => {
     // Graph API was called with the reply.
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toContain(PHONE_NUMBER_ID);
-    expect(calls[0].body.to).toBe("5491100001234");
+    // The fixture sender is an Argentine mobile: the reply goes to the listed form, without the 9.
+    expect(calls[0].body.to).toBe("541100001234");
     expect(calls[0].body.text.body).toBe("Hello from REI!");
   });
 
@@ -168,6 +169,26 @@ describe("createWhatsAppChannel", () => {
     await Promise.all([pA, pB]);
   });
 
+  it("replies to an Argentine mobile without the 9 — the format Meta's recipient list holds", async () => {
+    // Inbound `from` (the wa_id) is 549 + area + number; Meta's allowed-recipient list stores the
+    // same phone as 54 + area + number. Sending to the wa_id fails with 131030 "Recipient phone
+    // number not in allowed list" even though Meta's own test messages reach the phone.
+    const { fn, calls } = mockFetch();
+    vi.stubGlobal("fetch", fn);
+    const channel = createWhatsAppChannel(mockAgent("hola"), "/tmp/rei-wa-ar");
+    await channel.handleInbound!(msg({ id: "wamid.ar", from: "5493410000000" }));
+    expect(calls[0].body.to).toBe("543410000000");
+  });
+
+  it("leaves every other number as it arrived", async () => {
+    const { fn, calls } = mockFetch();
+    vi.stubGlobal("fetch", fn);
+    const channel = createWhatsAppChannel(mockAgent("hi"), "/tmp/rei-wa-other");
+    await channel.handleInbound!(msg({ id: "wamid.us", from: "14155550123" }));
+    await channel.handleInbound!(msg({ id: "wamid.ar-landline", from: "543410005678" }));
+    expect(calls.map((c) => c.body.to)).toEqual(["14155550123", "543410005678"]);
+  });
+
   it("chunks responses longer than 4096 chars into multiple Graph API calls", async () => {
     const { fn, calls } = mockFetch();
     vi.stubGlobal("fetch", fn);
@@ -195,6 +216,15 @@ describe("createWhatsAppChannel", () => {
 
     expect(agent.streamTurn).not.toHaveBeenCalled();
     expect(calls).toHaveLength(0);
+  });
+
+  it("runs the turn with read-only tools only — never run_command", async () => {
+    const { fn } = mockFetch();
+    vi.stubGlobal("fetch", fn);
+    const agent = mockAgent("ok");
+    await createWhatsAppChannel(agent, "/tmp/rei-wa-test").handleInbound(msg({ id: "wamid.tools" }));
+    const options = agent.streamTurn.mock.calls[0][2];
+    expect(options.allowedTools).toEqual(["read_files", "grep_code", "list_files"]);
   });
 
   it("forces the session mode to ask", async () => {

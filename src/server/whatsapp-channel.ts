@@ -21,6 +21,14 @@ import { loadSessionById, sessionsDir } from "../chat/session-store.js";
 import type { WhatsAppInbound, WhatsAppStatus, WhatsAppWebhookDeps } from "./whatsapp-webhook.js";
 import { waLog, waError, maskNumber } from "./whatsapp-log.js";
 
+/**
+ * The only tools a WhatsApp turn gets: reading the workspace. Forcing `ask` mode is not enough —
+ * ask includes run_command, and with `node`/`python3` on the allow-list that is arbitrary code
+ * on the server for anyone who can message the number (or for a web page the model reads, via
+ * web_search, which is also left out). No ask_user either: there is nobody to answer it.
+ */
+const WHATSAPP_TOOLS = ["read_files", "grep_code", "list_files"] as const;
+
 /** WhatsApp Graph API text message limit. */
 const MAX_MESSAGE_CHARS = 4096;
 
@@ -101,6 +109,18 @@ function chunkText(text: string, max: number = MAX_MESSAGE_CHARS): string[] {
 }
 
 /**
+ * The number to SEND to, for a sender's wa_id. Argentine mobiles arrive as 549 + area + number,
+ * but Meta's allowed-recipient list holds the same phone as 54 + area + number, so replying to
+ * the wa_id fails with 131030 "Recipient phone number not in allowed list" — while Meta's own
+ * test messages, sent to the listed form, arrive fine. Only the send uses this: sessions and the
+ * allowlist stay keyed by the wa_id exactly as Meta delivered it.
+ */
+export function toGraphRecipient(waId: string): string {
+  const ar = /^549(\d{10})$/.exec(waId);
+  return ar ? `54${ar[1]}` : waId;
+}
+
+/**
  * Sends a text message via the WhatsApp Graph API. Returns the message id on success.
  */
 async function sendText(
@@ -118,7 +138,7 @@ async function sendText(
     },
     body: JSON.stringify({
       messaging_product: "whatsapp",
-      to,
+      to: toGraphRecipient(to),
       type: "text",
       text: { body },
     }),
@@ -253,7 +273,10 @@ async function runTurn(
   let response = "";
   try {
     const session = loadOrCreateSession(workspacePath, from);
-    for await (const chunk of agent.streamTurn(session, prompt, { onStatus: () => {} })) {
+    for await (const chunk of agent.streamTurn(session, prompt, {
+      onStatus: () => {},
+      allowedTools: WHATSAPP_TOOLS,
+    })) {
       if (chunk.startsWith("\x11")) {
         response += chunk.slice(1);
       }

@@ -20,6 +20,10 @@ export type StreamTurnOptions = {
   elicit?: import("../../chat/elicitation.js").ElicitFn;
   /** Hands the running turn whatever the user typed while it worked (the CLI queue). */
   drainUserMessages?: () => string[];
+  /** Restricts the turn to these tool names — offered AND executed; everything else (MCP,
+   *  web_search, run_command…) is neither. For channels with nobody at the keyboard: `ask` alone
+   *  is not read-only, it includes run_command. Unset = the mode's full set. */
+  allowedTools?: readonly string[];
 };
 
 export interface PendingPatchAssessmentItem {

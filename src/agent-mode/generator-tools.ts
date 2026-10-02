@@ -101,6 +101,8 @@ export async function executeAgentTurnWithTools(params: {
   elicit?: ElicitFn;
   /** Sub-agent nesting depth. 0 = orchestrator (can delegate); >0 = worker (no `delegate` tool). */
   depth?: number;
+  /** Only these tools are offered and executed. See StreamTurnOptions.allowedTools. */
+  allowedTools?: readonly string[];
 }): Promise<ExecutionResult> {
   const {
     provider,
@@ -138,6 +140,7 @@ export async function executeAgentTurnWithTools(params: {
     logger,
     mode,
     allowSubAgents: depth === 0,
+    allowedTools: params.allowedTools,
   });
 
   let currentMessages: ChatMessage[] = withNativeToolsDirective(
@@ -376,6 +379,7 @@ export async function executeAgentTurnWithTools(params: {
           workspacePath,
           mode,
           roleWriteGlob,
+          allowedTools: params.allowedTools,
           logger,
           emitStatus,
           elicit,
