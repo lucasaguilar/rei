@@ -20,6 +20,13 @@ fi
 echo "🔄 Copying local codebase..."
 if command -v rsync >/dev/null 2>&1; then
   rsync -av --exclude="node_modules" --exclude=".git" --exclude="dist" --exclude=".rei" --exclude="install-rei-server-local.sh" --exclude="bin/github-mcp-server" ./ "$INSTALL_DIR/"
+  # The copy above never deletes, so a source file that exists only in a PREVIOUSLY installed
+  # branch stays in ~/.rei/src and is compiled against this branch's types — the build then fails
+  # on code this checkout does not have. Mirror the code folders exactly. Scoped to them on purpose:
+  # a --delete over all of ~/.rei would also remove the machine's .env, rei.config.json, mcp-auth.
+  for dir in src prompts templates; do
+    [ -d "./$dir" ] && rsync -a --delete "./$dir/" "$INSTALL_DIR/$dir/"
+  done
 else
   echo "⚠️ rsync not found, falling back to cp (this might copy node_modules and other temporary files)..."
   cp -R ./* "$INSTALL_DIR/"
