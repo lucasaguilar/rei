@@ -18,6 +18,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { normalizeRoutePath } from "./health.js";
+import { waLog, waError, maskNumber, describeBody } from "./whatsapp-log.js";
 
 /** The path the router matches on (after `normalizeRoutePath`). */
 export const WHATSAPP_WEBHOOK_PATH = "/webhooks/whatsapp";
@@ -93,11 +94,19 @@ function handleHandshake(req: IncomingMessage, res: ServerResponse): void {
   const expected = process.env.WHATSAPP_VERIFY_TOKEN ?? "";
 
   if (mode === "subscribe" && expected && token === expected) {
+    waLog("handshake ok");
     // Plain text, not JSON — the #1 documented failure is echoing the challenge as JSON.
     res.writeHead(200, { "Content-Type": "text/plain" });
     res.end(challenge ?? "");
     return;
   }
+  waError(
+    !expected
+      ? "handshake failed: WHATSAPP_VERIFY_TOKEN is not set"
+      : mode !== "subscribe"
+        ? `handshake failed: hub.mode is "${mode ?? ""}", expected "subscribe"`
+        : "handshake failed: the verify token Meta sent does not match WHATSAPP_VERIFY_TOKEN",
+  );
   res.writeHead(403, { "Content-Type": "application/json" });
   res.end(JSON.stringify({ error: { message: "Verification failed" } }));
 }
@@ -114,6 +123,14 @@ async function handlePost(
 
   // No secret configured means the webhook cannot be verified — refuse rather than run open.
   if (!secret || !verifySignature(raw, sent, secret)) {
+    // The silent 401 this replaces is how a wrong secret looks from the phone: nothing at all.
+    waError(
+      !secret
+        ? "POST rejected: WHATSAPP_APP_SECRET is not set"
+        : !sent
+          ? "POST rejected: no X-Hub-Signature-256 header (not a request from Meta?)"
+          : "POST rejected: invalid signature — check WHATSAPP_APP_SECRET (Meta → App Settings → Basic → App Secret)",
+    );
     res.writeHead(401, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: { message: "Invalid signature" } }));
     return;
@@ -161,7 +178,8 @@ async function processPayload(raw: string, deps?: WhatsAppWebhookDeps): Promise<
   try {
     payload = JSON.parse(raw);
   } catch {
-    return; // not JSON — nothing to do
+    waError("POST ignored: body is not JSON");
+    return;
   }
   const entries = Array.isArray(payload?.entry) ? payload.entry : [];
 
@@ -194,8 +212,16 @@ async function processPayload(raw: string, deps?: WhatsAppWebhookDeps): Promise<
           timestamp: m.timestamp ?? "",
           phoneNumberId,
         };
-        if (!msg.id || seenMessageIds.has(msg.id)) continue; // dedupe the retry
-        if (!isAllowed(msg.from)) continue; // allowlist (empty = open)
+        if (!msg.id) continue;
+        if (seenMessageIds.has(msg.id)) {
+          waLog(`✗ ignored ${msg.id}: duplicate (Meta retry)`);
+          continue;
+        }
+        waLog(`← msg ${msg.id} from ${maskNumber(msg.from)} ${msg.type}, ${describeBody(msg.body)}`);
+        if (!isAllowed(msg.from)) {
+          waLog(`✗ ignored ${maskNumber(msg.from)}: not in WHATSAPP_ALLOWED_NUMBERS`);
+          continue;
+        }
         seenMessageIds.add(msg.id);
         if (seenMessageIds.size > SEEN_CAP) seenMessageIds.clear();
         await deps?.handleInbound?.(msg);
