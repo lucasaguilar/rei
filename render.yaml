@@ -19,31 +19,31 @@ services:
     env:
       # Provider en la nube. El .env local usa "lmstudio" (IP de LAN 192.168.x.x)
       # que NO es alcanzable desde Render, por eso se sobreescribe con OpenRouter.
-      - key: MODEL_PROVIDER
+      MODEL_PROVIDER:
         value: openrouter
-      - key: OPENROUTER_MODEL
+      OPENROUTER_MODEL:
         value: qwen/qwen3.6-plus
       # La key es secreta: sync:false la crea vacía para que la setees por la UI
       # de Render (Environment) sin commitearla a git.
-      - key: OPENROUTER_API_KEY
+      OPENROUTER_API_KEY:
         value: ""
         sync: false
       # Laminar (telemetría) apunta a localhost en el .env local; en la nube no
       # existe, así que se deshabilita para no agregar latencia al arranque.
-      - key: REI_TELEMETRY_DISABLED
+      REI_TELEMETRY_DISABLED:
         value: "true"
       # OBLIGATORIO. El Dockerfile abre el server a 0.0.0.0, y con eso server.ts NO ARRANCA sin
       # este token: lo que queda publicado es un agente que escribe archivos y corre comandos, así
       # que la puerta no puede quedar abierta. sync:false lo crea vacío → generá un secreto largo
       # y cargalo en Render → Environment ANTES del primer deploy, o el servicio no levanta.
       # Los clientes lo mandan como `Authorization: Bearer <token>`.
-      - key: REI_SERVER_TOKEN
+      REI_SERVER_TOKEN:
         value: ""
         sync: false
       # Con token, el CORS deja de ser `*`: un `*` permitiría que cualquier página que visites
       # replique un request con credenciales adjuntas. Poné acá el origen de tu frontend
       # (https://tu-app.com) o dejalo vacío si solo lo vas a usar desde un IDE o curl.
-      - key: REI_SERVER_ORIGIN
+      REI_SERVER_ORIGIN:
         value: ""
         sync: false
       # ── WhatsApp Cloud API ──────────────────────────────────────────────────
@@ -59,18 +59,18 @@ services:
       # WHATSAPP_ACCESS_TOKEN: de Meta → WhatsApp → API Setup → Permanent Token.
       #   Autentica los envíos por la Graph API.
       # WHATSAPP_PHONE_NUMBER_ID: de Meta → WhatsApp → API Setup → Phone Number ID.
-      - key: WHATSAPP_VERIFY_TOKEN
+      WHATSAPP_VERIFY_TOKEN:
         value: ""
         sync: false
-      - key: WHATSAPP_APP_SECRET
+      WHATSAPP_APP_SECRET:
         value: ""
         sync: false
-      - key: WHATSAPP_ALLOWED_NUMBERS
+      WHATSAPP_ALLOWED_NUMBERS:
         value: ""
         sync: false
-      - key: WHATSAPP_ACCESS_TOKEN
+      WHATSAPP_ACCESS_TOKEN:
         value: ""
         sync: false
-      - key: WHATSAPP_PHONE_NUMBER_ID
+      WHATSAPP_PHONE_NUMBER_ID:
         value: ""
         sync: false
