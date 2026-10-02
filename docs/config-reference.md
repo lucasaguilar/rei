@@ -321,6 +321,7 @@ bearer check but is gated by its own signature. All three are machine-scoped sec
 | `WHATSAPP_ALLOWED_NUMBERS` | comma-separated sender allowlist. **Empty = open** — everyone who writes to the number is served | empty (open) |
 | `WHATSAPP_ACCESS_TOKEN` | Meta **permanent** access token — authenticates outbound sends via the Graph API | — (unset = replies are logged but not sent) |
 | `WHATSAPP_PHONE_NUMBER_ID` | the business phone number id (from Meta → WhatsApp → API Setup) — the Graph API endpoint | — (unset = replies are logged but not sent) |
+| `REI_WHATSAPP_LOG_BODY` | `true` adds the first 80 chars of each incoming message to the `[whatsapp]` log line. Off by default because hosted logs are kept by the platform; numbers are always masked to their last 4 digits | `false` (length only) |
 
 ## MTPLX — `chat_template_kwargs`
 

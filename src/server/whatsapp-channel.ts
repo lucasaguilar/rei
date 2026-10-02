@@ -19,6 +19,7 @@ import type { Agent } from "../core/agent.js";
 import type { ChatSession, ChatMessage, SessionMode } from "../chat/types.js";
 import { loadSessionById, sessionsDir } from "../chat/session-store.js";
 import type { WhatsAppInbound, WhatsAppStatus, WhatsAppWebhookDeps } from "./whatsapp-webhook.js";
+import { waLog, waError, maskNumber } from "./whatsapp-log.js";
 
 /** WhatsApp Graph API text message limit. */
 const MAX_MESSAGE_CHARS = 4096;
@@ -124,13 +125,13 @@ async function sendText(
   });
   if (!res.ok) {
     const errBody = await res.text().catch(() => "");
-    console.error(
-      `[whatsapp] Graph API ${res.status} sending to ${to}: ${errBody.slice(0, 200)}`,
-    );
+    waError(`Graph API ${res.status} sending to ${maskNumber(to)}: ${errBody.slice(0, 200)}`);
     return null;
   }
   const json = (await res.json()) as { messages?: Array<{ id: string }> };
-  return json.messages?.[0]?.id ?? null;
+  const id = json.messages?.[0]?.id ?? null;
+  waLog(`→ sent ${id ?? "(no id)"} to ${maskNumber(to)}`);
+  return id;
 }
 
 /**
@@ -183,6 +184,7 @@ export function createWhatsAppChannel(
 
     // Non-text: acknowledge but don't run the agent.
     if (msg.type !== "text") {
+      waLog(`✗ ignored ${msg.id}: ${msg.type} message (only text is supported)`);
       const accessToken = process.env.WHATSAPP_ACCESS_TOKEN ?? "";
       const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID ?? "";
       if (accessToken && phoneNumberId) {
@@ -198,6 +200,7 @@ export function createWhatsAppChannel(
 
     // Slash-commands: blocked. A phone user must not drive the agent's mode or run plans.
     if (isSlashCommand(msg.body)) {
+      waLog(`✗ ignored ${msg.id}: slash command (blocked over WhatsApp)`);
       const accessToken = process.env.WHATSAPP_ACCESS_TOKEN ?? "";
       const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID ?? "";
       if (accessToken && phoneNumberId) {
@@ -213,9 +216,7 @@ export function createWhatsAppChannel(
 
     // 24h window: if the message is stale, Meta will reject the reply. Skip the agent.
     if (!withinReplyWindow(msg.timestamp)) {
-      console.log(
-        `[whatsapp] skipping ${from}: message is outside the 24h reply window`,
-      );
+      waLog(`✗ ignored ${msg.id} from ${maskNumber(from)}: outside the 24h reply window`);
       return;
     }
 
@@ -227,9 +228,7 @@ export function createWhatsAppChannel(
   };
 
   const onStatus = (status: WhatsAppStatus): void => {
-    console.log(
-      `[whatsapp] status ${status.status} for ${status.recipientId} (msg ${status.id})`,
-    );
+    waLog(`status ${status.status} for ${maskNumber(status.recipientId)} (msg ${status.id})`);
   };
 
   return { handleInbound, onStatus };
@@ -245,26 +244,37 @@ async function runTurn(
   from: string,
   prompt: string,
 ): Promise<void> {
-  const session = loadOrCreateSession(workspacePath, from);
-
-  // Stream the turn and collect the response text.
-  let response = "";
-  for await (const chunk of agent.streamTurn(session, prompt, { onStatus: () => {} })) {
-    if (chunk.startsWith("\x11")) {
-      response += chunk.slice(1);
-    }
-  }
-
-  // Persist the session (streamTurn already pushed user + assistant messages).
-  persistSession(workspacePath, from, session);
-
-  // Send the reply.
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN ?? "";
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID ?? "";
+  const who = maskNumber(from);
+  const started = Date.now();
+  waLog(`⟳ turn for ${who} started`);
+
+  let response = "";
+  try {
+    const session = loadOrCreateSession(workspacePath, from);
+    for await (const chunk of agent.streamTurn(session, prompt, { onStatus: () => {} })) {
+      if (chunk.startsWith("\x11")) {
+        response += chunk.slice(1);
+      }
+    }
+    // Persist the session (streamTurn already pushed user + assistant messages).
+    persistSession(workspacePath, from, session);
+  } catch (err) {
+    // The 200 already went to Meta, so nobody else will report this: without the log it vanishes,
+    // and without the reply the sender waits for an answer that is never coming.
+    waError(`✗ turn for ${who} failed: ${err instanceof Error ? err.message : String(err)}`);
+    if (accessToken && phoneNumberId) {
+      await sendReply(from, "Sorry, something went wrong on my side — please try again.", accessToken, phoneNumberId);
+    }
+    return;
+  }
+  const seconds = ((Date.now() - started) / 1000).toFixed(1);
+  waLog(`✓ turn for ${who} done in ${seconds}s → reply ${response.trim().length} chars`);
+
+  // Send the reply.
   if (!accessToken || !phoneNumberId) {
-    console.error(
-      "[whatsapp] cannot reply: WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID not set",
-    );
+    waError("cannot reply: WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID not set");
     return;
   }
   if (!response.trim()) {
