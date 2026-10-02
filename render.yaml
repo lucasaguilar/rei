@@ -54,8 +54,9 @@ services:
       #   Meta lo compara en el GET handshake.
       # WHATSAPP_APP_SECRET: de Meta → App Settings → Basic → App Secret.
       #   Firma los POST entrantes (HMAC-SHA256).
-      # WHATSAPP_ALLOWED_NUMBERS: tu número en E.164 (ej: "5491100001234").
-      #   Vacío = abierto (cualquiera puede escribir).
+      # WHATSAPP_ALLOWED_NUMBERS: "*" = atiende a todos (número corporativo público), o una lista
+      #   separada por comas (celulares argentinos CON el 9: "5493410000000").
+      #   Vacío = NO atiende a nadie: abrirlo al público tiene que ser explícito.
       # WHATSAPP_ACCESS_TOKEN: de Meta → WhatsApp → API Setup → Permanent Token.
       #   Autentica los envíos por la Graph API.
       # WHATSAPP_PHONE_NUMBER_ID: de Meta → WhatsApp → API Setup → Phone Number ID.

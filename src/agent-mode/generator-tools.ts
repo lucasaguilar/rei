@@ -103,6 +103,8 @@ export async function executeAgentTurnWithTools(params: {
   depth?: number;
   /** Only these tools are offered and executed. See StreamTurnOptions.allowedTools. */
   allowedTools?: readonly string[];
+  /** Read tools stay inside this directory, never `.rei/`. See StreamTurnOptions.readRoot. */
+  readRoot?: string;
 }): Promise<ExecutionResult> {
   const {
     provider,
@@ -380,6 +382,7 @@ export async function executeAgentTurnWithTools(params: {
           mode,
           roleWriteGlob,
           allowedTools: params.allowedTools,
+          readRoot: params.readRoot,
           logger,
           emitStatus,
           elicit,

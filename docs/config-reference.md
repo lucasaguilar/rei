@@ -318,10 +318,13 @@ bearer check but is gated by its own signature. All three are machine-scoped sec
 |---|---|---|
 | `WHATSAPP_VERIFY_TOKEN` | random string Meta checks on the `GET` verification handshake (`hub.verify_token`) | — (unset = handshake always 403) |
 | `WHATSAPP_APP_SECRET` | the Meta app secret; the `POST` body is HMAC-SHA256'd with it and checked against `X-Hub-Signature-256` | — (unset = every POST is 401) |
-| `WHATSAPP_ALLOWED_NUMBERS` | comma-separated sender allowlist. **Empty = open** — everyone who writes to the number is served | empty (open) |
+| `WHATSAPP_ALLOWED_NUMBERS` | who is served: `*` = everyone (a public, corporate number), or a comma-separated list of senders as Meta delivers them (Argentine mobiles WITH the 9: `5493410000000`). **Empty serves nobody** — a deploy that forgot the variable is not open to the world | empty (nobody) |
 | `WHATSAPP_ACCESS_TOKEN` | Meta **permanent** access token — authenticates outbound sends via the Graph API | — (unset = replies are logged but not sent) |
 | `WHATSAPP_PHONE_NUMBER_ID` | the business phone number id (from Meta → WhatsApp → API Setup) — the Graph API endpoint | — (unset = replies are logged but not sent) |
 | `REI_WHATSAPP_LOG_BODY` | `true` adds the first 80 chars of each incoming message to the `[whatsapp]` log line. Off by default because hosted logs are kept by the platform; numbers are always masked to their last 4 digits | `false` (length only) |
+| `REI_WHATSAPP_KNOWLEDGE_DIR` | directory (relative to the workspace) a WhatsApp turn may read — the catalog/FAQ a support or sales assistant answers from. `read_files`, `list_files` and `grep_code` are confined to it, and `.rei/` (every customer's session) is never readable either way | the workspace |
+| `REI_WHATSAPP_MAX_CONCURRENT` | turns running at once across ALL senders; the rest queue in arrival order. Each turn holds a model call — on a local backend, the GPU | `4` |
+| `REI_WHATSAPP_RATE_PER_MIN` | turns one sender may start per minute. Past it, messages are ignored and the sender is told once per minute — a flood from one number must not become a flood of provider tokens | `10` |
 
 ## MTPLX — `chat_template_kwargs`
 

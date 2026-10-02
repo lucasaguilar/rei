@@ -106,10 +106,6 @@ export class Agent {
    *  calls). The CLI reads it after the stream ends to show REAL token counts instead of the
    *  chars/4 estimate. Reset at each turn start; undefined when the provider doesn't report usage. */
   private lastTurnUsage?: TokenUsage;
-  /** The backend's prompt count for the most recent model call, kept ACROSS turns — unlike
-   *  `lastTurnUsage`, which a new turn clears before compaction gets to run. It is what the
-   *  compaction threshold is measured against, so it has to outlive the turn that produced it. */
-  private lastMeasuredPromptTokens = 0;
   /**
    * The model the last turn actually ran on — reported, not re-derived.
    *
@@ -270,6 +266,7 @@ export class Agent {
           roleWriteGlob: turnRole?.writeGlob,
           elicit: options?.elicit,
           allowedTools: options?.allowedTools,
+          readRoot: options?.readRoot,
         }).finally(() => {
           done = true;
           resolver?.();
@@ -330,7 +327,7 @@ export class Agent {
       }
       // Stash backend-reported usage for this turn — the CLI reads it after the stream ends.
       this.lastTurnUsage = outcome.usage;
-      this.recordMeasuredPromptTokens(outcome.usage);
+      this.recordMeasuredPromptTokens(session, outcome.usage);
 
       // Keep the turn's tool traffic in the history, in the order the model saw it. What the model
       // received this turn then stays a byte-exact PREFIX of what it receives next turn, which is
@@ -485,6 +482,7 @@ export class Agent {
         roleWriteGlob: turnRole?.writeGlob,
         elicit: options?.elicit,
         allowedTools: options?.allowedTools,
+        readRoot: options?.readRoot,
       }).finally(() => {
         done = true;
         resolver?.();
@@ -502,7 +500,7 @@ export class Agent {
 
       const outcome = await turnPromise;
       this.lastTurnUsage = outcome.usage;
-      this.recordMeasuredPromptTokens(outcome.usage);
+      this.recordMeasuredPromptTokens(session, outcome.usage);
       session.messages.push({
         role: "assistant",
         content: cleanResponseForHistory(outcome.response),
@@ -838,10 +836,14 @@ export class Agent {
     return enrichedMessage;
   }
 
-  /** Remembers the backend's own prompt count, which outranks any estimate of the same thing. */
-  private recordMeasuredPromptTokens(usage?: TokenUsage): void {
+  /**
+   * Remembers the backend's own prompt count, which outranks any estimate of the same thing — ON
+   * THE SESSION it measured. On the Agent it was shared by every conversation the Agent serves: one
+   * WhatsApp customer's long history made another's short one look full, and compacted it.
+   */
+  private recordMeasuredPromptTokens(session: ChatSession, usage?: TokenUsage): void {
     const measured = usage?.lastPromptTokens ?? usage?.promptTokens;
-    if (measured && measured > 0) this.lastMeasuredPromptTokens = measured;
+    if (measured && measured > 0) session.measuredPromptTokens = measured;
   }
 
   private async compactSessionIfNeeded(
@@ -850,7 +852,7 @@ export class Agent {
     /** System prompt + tools — the part of the window compaction was not counting. */
     fixedOverheadTokens = 0,
   ): Promise<void> {
-    const measuredPromptTokens = this.lastMeasuredPromptTokens;
+    const measuredPromptTokens = session.measuredPromptTokens ?? 0;
     if (!needsCompaction(session.messages, fixedOverheadTokens, measuredPromptTokens)) {
       return;
     }
@@ -867,7 +869,7 @@ export class Agent {
     // The measurement described the history that was just cut, so it would re-trigger compaction
     // every turn until a fresh reading arrived. The next model call reports one.
     if (!compaction.skipped) {
-      this.lastMeasuredPromptTokens = 0;
+      session.measuredPromptTokens = 0;
       // Auto-compaction used to finish in silence: "compacting memory" is a SPINNER label, erased
       // by the next phase, so the history shrank with nothing left on screen to say so — and
       // `/compact` got run again by hand over a session that had just been compacted. Manual

@@ -9,6 +9,8 @@ export interface PersistedSession {
   createdAt: string;
   updatedAt: string;
   summary?: string;
+  /** See ChatSession.measuredPromptTokens. Optional: files written before it existed lack it. */
+  measuredPromptTokens?: number;
   messages: ChatMessage[];
 }
 

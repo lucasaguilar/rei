@@ -53,6 +53,8 @@ export interface WhatsAppStatus {
   status: string;
   recipientId: string;
   timestamp: string;
+  /** On `failed`: Meta's reason (e.g. 131047, outside the 24h window) — given nowhere else. */
+  errors?: Array<{ code?: number; title?: string; message?: string }>;
 }
 
 /** What the channel (Step 3) provides; injected so this module never imports the agent. */
@@ -118,6 +120,12 @@ async function handlePost(
   deps?: WhatsAppWebhookDeps,
 ): Promise<void> {
   const raw = await readRawBody(req);
+  if (raw === null) {
+    waError(`POST rejected: body too large (over ${MAX_BODY_BYTES} bytes)`);
+    res.writeHead(413, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: { message: "Payload too large" } }));
+    return;
+  }
   const secret = process.env.WHATSAPP_APP_SECRET ?? "";
   const sent = (req.headers["x-hub-signature-256"] as string | undefined) ?? "";
 
@@ -154,12 +162,25 @@ function verifySignature(raw: string, sent: string, secret: string): boolean {
   return timingSafeEqual(a, b);
 }
 
-/** Collects the request body as a string (the signature is over the RAW bytes). */
-function readRawBody(req: IncomingMessage): Promise<string> {
+/**
+ * Meta's webhook payloads are a few KB. The body is read BEFORE the signature can be checked, on a
+ * route anyone can reach, so without a bound a single huge POST holds that much memory.
+ */
+const MAX_BODY_BYTES = 1024 * 1024;
+
+/** Collects the request body as a string (the signature is over the RAW bytes); null when it
+ *  exceeds MAX_BODY_BYTES — the rest is drained, not stored. */
+function readRawBody(req: IncomingMessage): Promise<string | null> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (c: Buffer) => chunks.push(c));
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    let size = 0;
+    let tooLarge = false;
+    req.on("data", (c: Buffer) => {
+      size += c.length;
+      if (size > MAX_BODY_BYTES) tooLarge = true;
+      if (!tooLarge) chunks.push(c);
+    });
+    req.on("end", () => resolve(tooLarge ? null : Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
   });
 }
@@ -188,6 +209,13 @@ async function processPayload(raw: string, deps?: WhatsAppWebhookDeps): Promise<
     for (const change of changes) {
       const value = change?.value ?? {};
       const phoneNumberId = value.metadata?.phone_number_id ?? "";
+      // One Meta app can hold several numbers on one webhook (the test one and the real one): a
+      // message to another number must not be answered from ours.
+      const ours = process.env.WHATSAPP_PHONE_NUMBER_ID?.trim();
+      if (ours && phoneNumberId && phoneNumberId !== ours) {
+        waLog(`✗ ignored event for phone_number_id ${phoneNumberId} (this server answers ${ours})`);
+        continue;
+      }
 
       // Statuses are delivery receipts, not messages — route them out, never to the agent.
       if (Array.isArray(value.statuses)) {
@@ -197,6 +225,7 @@ async function processPayload(raw: string, deps?: WhatsAppWebhookDeps): Promise<
             status: s.status,
             recipientId: s.recipient_id,
             timestamp: s.timestamp,
+            errors: Array.isArray(s.errors) ? s.errors : undefined,
           });
         }
       }
@@ -219,7 +248,11 @@ async function processPayload(raw: string, deps?: WhatsAppWebhookDeps): Promise<
         }
         waLog(`← msg ${msg.id} from ${maskNumber(msg.from)} ${msg.type}, ${describeBody(msg.body)}`);
         if (!isAllowed(msg.from)) {
-          waLog(`✗ ignored ${maskNumber(msg.from)}: not in WHATSAPP_ALLOWED_NUMBERS`);
+          waLog(
+            (process.env.WHATSAPP_ALLOWED_NUMBERS ?? "").trim()
+              ? `✗ ignored ${maskNumber(msg.from)}: not in WHATSAPP_ALLOWED_NUMBERS`
+              : `✗ ignored ${maskNumber(msg.from)}: WHATSAPP_ALLOWED_NUMBERS is empty — set it to * to serve everyone`,
+          );
           continue;
         }
         seenMessageIds.add(msg.id);
@@ -231,15 +264,16 @@ async function processPayload(raw: string, deps?: WhatsAppWebhookDeps): Promise<
 }
 
 /**
- * The sender allowlist. `WHATSAPP_ALLOWED_NUMBERS` is comma-separated; **empty means open** —
- * everyone who writes to the number is served (the locked use case). Non-empty = only listed.
+ * The sender allowlist. `WHATSAPP_ALLOWED_NUMBERS` is `*` (everyone — a public, corporate number)
+ * or a comma-separated list. EMPTY SERVES NOBODY: a deploy that forgot the variable must not end up
+ * open to the world, so serving everyone has to be written down.
  */
 function isAllowed(from: string): boolean {
-  const raw = process.env.WHATSAPP_ALLOWED_NUMBERS ?? "";
+  const raw = (process.env.WHATSAPP_ALLOWED_NUMBERS ?? "").trim();
+  if (raw === "*") return true;
   const list = raw
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  if (list.length === 0) return true;
   return list.includes(from);
 }

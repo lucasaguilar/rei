@@ -225,6 +225,8 @@ describe("createWhatsAppChannel", () => {
     await createWhatsAppChannel(agent, "/tmp/rei-wa-test").handleInbound(msg({ id: "wamid.tools" }));
     const options = agent.streamTurn.mock.calls[0][2];
     expect(options.allowedTools).toEqual(["read_files", "grep_code", "list_files"]);
+    // Confined to the workspace (or REI_WHATSAPP_KNOWLEDGE_DIR) — and .rei/ is never in reach.
+    expect(options.readRoot).toBe("/tmp/rei-wa-test");
   });
 
   it("forces the session mode to ask", async () => {

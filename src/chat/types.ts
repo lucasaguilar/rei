@@ -45,6 +45,10 @@ export function resolveDefaultSessionMode(): SessionMode {
 
 export interface ChatSession {
   messages: ChatMessage[];
+  /** The backend's reported prompt size for this conversation's last call — compaction's floor,
+   *  kept ACROSS turns (unlike the Agent's lastTurnUsage, cleared before compaction runs). Per
+   *  session, not per Agent: one Agent serves many conversations (the WhatsApp channel). */
+  measuredPromptTokens?: number;
   mode: SessionMode;
   createdAt?: string;
   summary?: string;
