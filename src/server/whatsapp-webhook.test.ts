@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createHmac } from "node:crypto";
 import { PassThrough } from "node:stream";
 import {
@@ -16,6 +16,12 @@ import {
 
 const APP_SECRET = "test-app-secret";
 const VERIFY_TOKEN = "test-verify-token";
+
+// These tests are about the webhook contract, not the allowlist: serve everyone, on purpose (`*`).
+// Empty serves nobody — see whatsapp-hardening.test.ts.
+beforeEach(() => {
+  vi.stubEnv("WHATSAPP_ALLOWED_NUMBERS", "*");
+});
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -275,9 +281,9 @@ describe("statuses", () => {
 });
 
 describe("allowlist", () => {
-  it("serves everyone when the allowlist is empty (open)", async () => {
+  it("serves everyone when the allowlist is * (open on purpose)", async () => {
     vi.stubEnv("WHATSAPP_APP_SECRET", APP_SECRET);
-    vi.stubEnv("WHATSAPP_ALLOWED_NUMBERS", "");
+    vi.stubEnv("WHATSAPP_ALLOWED_NUMBERS", "*");
     const handler = vi.fn().mockResolvedValue(undefined);
     const body = JSON.stringify(messagePayload({ id: "wamid.open", from: "5551234567" }));
     const { req, res } = makeReq(

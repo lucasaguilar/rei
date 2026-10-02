@@ -1,4 +1,5 @@
 import type { AgentLogger } from "../../core/logger.js";
+import { scopeReadCall } from "./read-scope.js";
 import { fromWireToolName } from "../../contracts/mcp-tool-names.js";
 import type { ModelProvider } from "../../providers/model-provider.js";
 import type { ToolCall } from "../../providers/model-provider.js";
@@ -39,6 +40,8 @@ export interface DispatchContext {
   roleWriteGlob?: string;
   /** When set, a call to any other tool is refused, not run. See StreamTurnOptions.allowedTools. */
   allowedTools?: readonly string[];
+  /** Read tools stay inside this directory and out of `.rei/`. See read-scope. */
+  readRoot?: string;
   logger: AgentLogger;
   emitStatus: (msg: string) => void;
   /** Asks the user a question mid-turn (ask_user tool). Frontend-provided; defaults to the
@@ -155,6 +158,14 @@ export async function dispatchToolCalls(
         string,
         unknown
       >;
+      // A multi-user channel reads only inside readRoot, never .rei/ (other people's sessions).
+      const scoped = ctx.readRoot
+        ? scopeReadCall(call.function.name, args, workspacePath, ctx.readRoot)
+        : undefined;
+      if (scoped?.refused) {
+        toolResultsMap.set(call.id, scoped.refused);
+        continue;
+      }
 
       switch (call.function.name) {
         // ── read_files ───────────────────────────────────────────────
@@ -368,6 +379,8 @@ export async function dispatchToolCalls(
           toolResultsMap.set(call.id, toolResult);
         }
       }
+      const produced = toolResultsMap.get(call.id);
+      if (scoped && produced !== undefined) toolResultsMap.set(call.id, scoped.finish(produced));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       toolResultsMap.set(call.id, `ERROR: ${msg}`);

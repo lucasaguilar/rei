@@ -20,6 +20,12 @@ import type { ChatSession, ChatMessage, SessionMode } from "../chat/types.js";
 import { loadSessionById, sessionsDir } from "../chat/session-store.js";
 import type { WhatsAppInbound, WhatsAppStatus, WhatsAppWebhookDeps } from "./whatsapp-webhook.js";
 import { waLog, waError, maskNumber } from "./whatsapp-log.js";
+import {
+  createSemaphore,
+  createRateLimiter,
+  maxConcurrentTurns,
+  turnsPerMinute,
+} from "./whatsapp-limits.js";
 
 /**
  * The only tools a WhatsApp turn gets: reading the workspace. Forcing `ask` mode is not enough —
@@ -28,6 +34,16 @@ import { waLog, waError, maskNumber } from "./whatsapp-log.js";
  * web_search, which is also left out). No ask_user either: there is nobody to answer it.
  */
 const WHATSAPP_TOOLS = ["read_files", "grep_code", "list_files"] as const;
+
+/**
+ * What a WhatsApp turn may read: REI_WHATSAPP_KNOWLEDGE_DIR (relative to the workspace) when set —
+ * the catalog/FAQ a support or sales assistant answers from — else the workspace. Either way the
+ * read tools never reach `.rei/`, where every other customer's conversation is stored.
+ */
+function whatsappReadRoot(workspacePath: string): string {
+  const kb = process.env.REI_WHATSAPP_KNOWLEDGE_DIR?.trim();
+  return kb ? path.resolve(workspacePath, kb) : workspacePath;
+}
 
 /** WhatsApp Graph API text message limit. */
 const MAX_MESSAGE_CHARS = 4096;
@@ -59,6 +75,9 @@ function loadOrCreateSession(workspacePath: string, from: string): ChatSession {
       mode: "ask" as SessionMode, // always ask, regardless of what was persisted
       createdAt: existing.createdAt,
       summary: existing.summary,
+      // The backend's last measured prompt size for THIS conversation — compaction's floor. The
+      // session is reloaded from disk on every message, so without this it was always unknown.
+      measuredPromptTokens: existing.measuredPromptTokens,
     };
   }
   return { messages: [], mode: "ask" as SessionMode };
@@ -80,6 +99,7 @@ function persistSession(
     createdAt: session.createdAt ?? now,
     updatedAt: now,
     summary: session.summary,
+    measuredPromptTokens: session.measuredPromptTokens,
     messages: session.messages,
   };
   fs.writeFileSync(
@@ -198,9 +218,29 @@ export function createWhatsAppChannel(
 ): WhatsAppWebhookDeps {
   /** Per-number serialization: one turn at a time per sender. */
   const queues = new Map<string, Promise<void>>();
+  const runLimited = createSemaphore(maxConcurrentTurns());
+  const perMinute = turnsPerMinute();
+  const rateCheck = createRateLimiter(perMinute);
 
   const handleInbound = async (msg: WhatsAppInbound): Promise<void> => {
     const from = msg.from;
+
+    // Before anything that costs: a flood from one number must not become a flood of turns.
+    const rate = rateCheck(from);
+    if (!rate.allowed) {
+      waLog(`✗ ignored ${msg.id} from ${maskNumber(from)}: rate limit (${perMinute}/min)`);
+      const accessToken = process.env.WHATSAPP_ACCESS_TOKEN ?? "";
+      const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID ?? "";
+      if (rate.notify && accessToken && phoneNumberId) {
+        await sendReply(
+          from,
+          "You're sending messages too fast for me to answer — please wait a minute and try again.",
+          accessToken,
+          phoneNumberId,
+        );
+      }
+      return;
+    }
 
     // Non-text: acknowledge but don't run the agent.
     if (msg.type !== "text") {
@@ -242,13 +282,22 @@ export function createWhatsAppChannel(
 
     // Serialize per number: chain onto the previous turn for this sender.
     const prev = queues.get(from) ?? Promise.resolve();
-    const current = prev.then(() => runTurn(agent, workspacePath, from, msg.body));
+    // Per-number order (the chain) inside a cap across all numbers (the semaphore).
+    const current = prev.then(() => runLimited(() => runTurn(agent, workspacePath, from, msg.body)));
     queues.set(from, current.catch(() => {})); // don't let a failure block the next
     await current;
   };
 
   const onStatus = (status: WhatsAppStatus): void => {
-    waLog(`status ${status.status} for ${maskNumber(status.recipientId)} (msg ${status.id})`);
+    const who = maskNumber(status.recipientId);
+    if (status.status === "failed") {
+      const why = (status.errors ?? [])
+        .map((e) => [e.code, e.title ?? e.message].filter(Boolean).join(" "))
+        .join("; ");
+      waError(`✗ delivery failed for ${who} (msg ${status.id}): ${why || "no reason given"}`);
+      return;
+    }
+    waLog(`status ${status.status} for ${who} (msg ${status.id})`);
   };
 
   return { handleInbound, onStatus };
@@ -276,6 +325,7 @@ async function runTurn(
     for await (const chunk of agent.streamTurn(session, prompt, {
       onStatus: () => {},
       allowedTools: WHATSAPP_TOOLS,
+      readRoot: whatsappReadRoot(workspacePath),
     })) {
       if (chunk.startsWith("\x11")) {
         response += chunk.slice(1);
