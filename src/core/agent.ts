@@ -269,6 +269,7 @@ export class Agent {
           userQuery: userInput,
           roleWriteGlob: turnRole?.writeGlob,
           elicit: options?.elicit,
+          allowedTools: options?.allowedTools,
         }).finally(() => {
           done = true;
           resolver?.();
@@ -483,6 +484,7 @@ export class Agent {
         // Narrows what this turn may write — see write-scope.
         roleWriteGlob: turnRole?.writeGlob,
         elicit: options?.elicit,
+        allowedTools: options?.allowedTools,
       }).finally(() => {
         done = true;
         resolver?.();

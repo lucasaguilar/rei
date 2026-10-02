@@ -37,6 +37,8 @@ export interface DispatchContext {
   mode?: string;
   /** An active role's `writeGlob`, which narrows that scope further. */
   roleWriteGlob?: string;
+  /** When set, a call to any other tool is refused, not run. See StreamTurnOptions.allowedTools. */
+  allowedTools?: readonly string[];
   logger: AgentLogger;
   emitStatus: (msg: string) => void;
   /** Asks the user a question mid-turn (ask_user tool). Frontend-provided; defaults to the
@@ -123,6 +125,20 @@ export async function dispatchToolCalls(
 
   for (const call of toolCalls) {
     let toolResult: string;
+
+    // Not offering a tool is not enough: a model can emit a call to one it was never shown (from
+    // its training, or from the prompt). Outside the allow-list it is refused here, before any
+    // handler — this check is what actually keeps run_command off a channel like WhatsApp.
+    if (ctx.allowedTools && !ctx.allowedTools.includes(call.function.name)) {
+      logger.logInfo(`[tools] refused ${call.function.name}: not in this turn's allowedTools`);
+      toolResultsMap.set(
+        call.id,
+        `ERROR: the tool "${call.function.name}" is not available in this channel. ` +
+          `Available: ${ctx.allowedTools.join(", ")}.`,
+      );
+      hasToolFailure = true;
+      continue;
+    }
 
     // `tool.<name>` span for each call. run_command and mcp:* tools are already traced at
     // their executors (executeCommand / McpRegistry.dispatch), so skip them here to avoid
