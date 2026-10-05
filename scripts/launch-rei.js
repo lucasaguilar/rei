@@ -11,6 +11,16 @@ const ROOT = path.join(__dirname, '..');
 
 dotenv.config({ path: path.join(ROOT, '.env'), quiet: true });
 
+// Mirrors PREFIX_ALIASES in src/load-env.ts — this script is shipped standalone and never imports
+// that module. Without it the preflight read only LLM_STUDIO_*, so a project written with the
+// documented LMSTUDIO_* failed with "no LLM_STUDIO_MODEL set" and a LMSTUDIO_BASE_URL on another
+// machine was silently replaced by localhost. The new spelling feeds the old, never overwrites it.
+for (const [key, value] of Object.entries(process.env)) {
+    if (!key.startsWith('LMSTUDIO_') || value === undefined) continue;
+    const legacy = `LLM_STUDIO_${key.slice('LMSTUDIO_'.length)}`;
+    if (process.env[legacy] === undefined) process.env[legacy] = value;
+}
+
 let PROJECTS = [];
 let PROVIDERS = [];
 const CUSTOM = '[ enter custom model... ]';
@@ -145,7 +155,7 @@ function providerBaseUrl(provider, normalized) {
     return provider === 'ollama' ? normalized : `${normalized}/v1`;
 }
 
-/** Probes an OpenAI-compatible /v1/models endpoint. Returns { models, reachable, status }.
+/** Probes an OpenAI-compatible /v1/models endpoint. Returns { models, reachable, status, error? }.
  *  `reachable:false` distinguishes "server down / bad URL" from "auth failed" (status 401/403). */
 /** model id (lowercased) → context length the server reported during the probe, when it exposes one.
  *  Populated by probeModels and read by defaultTuning, so a fresh config starts with the REAL window
@@ -158,13 +168,40 @@ const PROBED_CONTEXT = new Map();
  *  handles 64k. It must NOT exceed what the server actually loaded — the note at Step 7 says so. */
 const DEFAULT_LOCAL_CONTEXT = 65536;
 
+const PROBE_TIMEOUT_MS = 4000;
+
+/** Hints keyed by the socket error Node's fetch puts in `err.cause.code`. */
+const PROBE_ERROR_HINTS = {
+    ECONNREFUSED: 'connection refused — server not running, or wrong port',
+    EHOSTUNREACH: 'host unreachable — on macOS, allow your terminal under System Settings → Privacy & Security → Local Network (curl is exempt, Node is not)',
+    ENETUNREACH: 'network unreachable — check the IP and that both machines share a network',
+    ENOTFOUND: 'unknown hostname — check the spelling, or use the IP',
+    ETIMEDOUT: 'connection timed out — a firewall may be dropping the traffic',
+};
+
+/** Turns a probe failure into the reason the user needs. The probe used to swallow it in a bare
+ *  `catch {}`, so a stopped server, a macOS Local Network block and a slow reply all read as the
+ *  same "Could not reach" — and a user whose curl worked had nothing to go on. */
+function describeProbeError(err) {
+    if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+        return `timed out after ${PROBE_TIMEOUT_MS / 1000}s — the server accepted nothing in time`;
+    }
+    const code = err?.cause?.code ?? err?.code;
+    if (code) {
+        const detail = PROBE_ERROR_HINTS[code] ?? err?.cause?.message ?? err?.message ?? '';
+        return `${code}: ${detail}`;
+    }
+    // "fetch failed" says nothing; the cause ("bad port", "invalid URL") is the useful part.
+    return err?.cause?.message || err?.message || String(err);
+}
+
 async function probeModels(baseUrl, apiKey) {
     const base = normalizeEndpoint(baseUrl);
-    if (!base) return { models: [], reachable: false, status: 0 };
+    if (!base) return { models: [], reachable: false, status: 0, error: 'no endpoint given' };
     try {
         const res = await fetch(`${base}/v1/models`, {
             headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined,
-            signal: AbortSignal.timeout(4000),
+            signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
         });
         if (!res.ok) return { models: [], reachable: true, status: res.status };
         const data = await res.json();
@@ -178,8 +215,8 @@ async function probeModels(baseUrl, apiKey) {
             return m.id;
         }).filter(Boolean);
         return { models, reachable: true, status: 200 };
-    } catch {
-        return { models: [], reachable: false, status: 0 };
+    } catch (err) {
+        return { models: [], reachable: false, status: 0, error: describeProbeError(err) };
     }
 }
 
@@ -396,7 +433,7 @@ async function configureLocalEndpoint(provider, envVars) {
         }
 
         const reason = !r.reachable
-            ? `Could not reach ${url} (server down, wrong host/port, or timeout).`
+            ? `Could not reach ${url} — ${r.error}.`
             : r.status === 401 || r.status === 403
                 ? `Auth failed (HTTP ${r.status}) — the API key looks wrong.`
                 : `Server responded (HTTP ${r.status}) but listed no models.`;
@@ -656,7 +693,7 @@ async function runPreflight() {
         ok: false,
         reason: r.reachable
             ? `${provider} server at ${baseUrl} returned HTTP ${r.status}`
-            : `cannot reach ${provider} server at ${baseUrl}`,
+            : `cannot reach ${provider} server at ${baseUrl} — ${r.error}`,
     };
 }
 
@@ -1263,7 +1300,7 @@ async function start() {
 }
 
 // Pure, side-effect-free helpers exported for unit tests (idempotency / non-destructive merges).
-export { upsertEnvLine, applyEnvVars, mergeReiConfig, normalizeEndpoint, defaultTuning };
+export { upsertEnvLine, applyEnvVars, mergeReiConfig, normalizeEndpoint, defaultTuning, describeProbeError };
 
 // Only auto-run when executed directly (as the wrapper does), not when imported by a test.
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
