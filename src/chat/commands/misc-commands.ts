@@ -37,7 +37,7 @@ export const miscCommands: CommandHandler = {
 
     if (trimmed === "/clear") {
       const newMessages: ChatMessage[] = [];
-      saveSession(workspacePath, newMessages, session.mode, session.summary, session.createdAt);
+      saveSession(workspacePath, { ...session, messages: newMessages });
       clearCurrentPlan(workspacePath);
       return {
         success: true,
@@ -69,7 +69,7 @@ export const miscCommands: CommandHandler = {
             .filter((m) => !(m.role === "assistant" && !m.content.trim()));
         }
 
-        saveSession(workspacePath, messages, newMode, session.summary, session.createdAt);
+        saveSession(workspacePath, { ...session, messages, mode: newMode });
 
         const modeDescriptions: Record<SessionMode, string> = {
           ask: "Mode switched to ASK. I will answer questions based on the repository context without proposing changes.",

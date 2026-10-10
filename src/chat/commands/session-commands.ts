@@ -163,13 +163,7 @@ export const sessionCommands: CommandHandler = {
 
       // Re-saved immediately so the named file is on disk even if this session never takes another
       // turn — the point of naming it is being able to come back to it.
-      saveSession(
-        workspacePath,
-        session.messages,
-        session.mode,
-        session.summary,
-        session.createdAt,
-      );
+      saveSession(workspacePath, session);
 
       return {
         success: true,
@@ -193,7 +187,7 @@ export const sessionCommands: CommandHandler = {
         mode: resolveDefaultSessionMode(),
       };
 
-      saveSession(workspacePath, newSession.messages, newSession.mode);
+      saveSession(workspacePath, newSession);
       clearCurrentPlan(workspacePath);
 
       return {
@@ -221,7 +215,7 @@ export const sessionCommands: CommandHandler = {
         messages: [],
         mode: resolveDefaultSessionMode(),
       };
-      saveSession(workspacePath, newSession.messages, newSession.mode);
+      saveSession(workspacePath, newSession);
       clearCurrentPlan(workspacePath);
 
       return {
@@ -283,13 +277,7 @@ export const sessionCommands: CommandHandler = {
         };
       }
 
-      saveSession(
-        workspacePath,
-        loaded.messages,
-        loaded.mode,
-        loaded.summary,
-        loaded.createdAt,
-      );
+      saveSession(workspacePath, loaded);
       restoreCurrentPlanFromSession(workspacePath, loaded.messages);
 
       return {

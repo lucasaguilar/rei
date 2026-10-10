@@ -219,7 +219,7 @@ export const runPlanCommand: CommandHandler = {
           ? `[REI] Switching to AGENT mode to execute stage ${stageNum}. No target files detected (action-only stage).`
           : `[REI] Switching to AGENT mode to execute the entire plan. No target files detected.`);
 
-      saveSession(workspacePath, session.messages, newMode, session.summary, session.createdAt);
+      saveSession(workspacePath, { ...session, mode: newMode });
 
       return {
         success: true,
@@ -241,7 +241,7 @@ export const runPlanCommand: CommandHandler = {
         ? `[REI] Switching to AGENT mode to execute stage ${stageNum}. Target files: ${files.join(", ")}`
         : `[REI] Switching to AGENT mode to execute the entire plan. Target files: ${files.join(", ")}`);
 
-    saveSession(workspacePath, session.messages, newMode, session.summary, session.createdAt);
+    saveSession(workspacePath, { ...session, mode: newMode });
 
     return {
       success: true,
@@ -344,13 +344,7 @@ export const planFileCommands: CommandHandler = {
           },
         ];
 
-        saveSession(
-          workspacePath,
-          updatedMessages,
-          session.mode,
-          session.summary,
-          session.createdAt,
-        );
+        saveSession(workspacePath, { ...session, messages: updatedMessages });
 
         // Persist it as the cross-session SOURCE fallback too.
         saveCurrentPlanContent(workspacePath, planContent);

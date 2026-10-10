@@ -148,13 +148,7 @@ export const treeCommands: CommandHandler = {
       for (const n of targets) {
         for (const i of groups[n - 1].indices) session.messages[i].pruned = prune;
       }
-      saveSession(
-        workspacePath,
-        session.messages,
-        session.mode,
-        session.summary,
-        session.createdAt,
-      );
+      saveSession(workspacePath, session);
       const verb = prune ? "Pruned" : "Restored";
       const effect = prune
         ? "excluded from the working context"

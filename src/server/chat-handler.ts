@@ -185,13 +185,7 @@ export class ChatHandler {
           );
         }
 
-        saveSession(
-          this.workspacePath,
-          session.messages,
-          session.mode,
-          session.summary,
-          session.createdAt,
-        );
+        saveSession(this.workspacePath, session);
         return fullResponse;
       } else {
         onChunk(cmdResult.response);
@@ -210,13 +204,7 @@ export class ChatHandler {
     // streamTurn already pushes user + assistant messages to session.messages
     // internally (via prepareSessionForTurn and the various return paths).
     // We only need to persist the session here — do NOT push again.
-    saveSession(
-      this.workspacePath,
-      session.messages,
-      session.mode,
-      session.summary,
-      session.createdAt,
-    );
+    saveSession(this.workspacePath, session);
 
     return fullResponse;
   }

@@ -22,7 +22,7 @@ describe("archiveCurrentSession naming", () => {
   });
 
   const seed = () =>
-    saveSession(ws, [{ role: "user", content: "hi" }], "agent", undefined);
+    saveSession(ws, { messages: [{ role: "user", content: "hi" }], mode: "agent", summary: undefined });
 
   // YYYY-MM-DD-HHMMSS
   const PREFIX = /^\d{4}-\d{2}-\d{2}-\d{6}/;
@@ -43,7 +43,7 @@ describe("archiveCurrentSession naming", () => {
 
   it("uses the archive time (now), not the session's stale createdAt", () => {
     // Session created long ago (May), archived now → prefix must reflect NOW, not May.
-    saveSession(ws, [{ role: "user", content: "x" }], "agent", undefined, "2026-05-27T16:38:13.193Z");
+    saveSession(ws, { messages: [{ role: "user", content: "x" }], mode: "agent", summary: undefined, createdAt: "2026-05-27T16:38:13.193Z" });
     const name = archiveCurrentSession(ws)!;
     const yearMonth = name.slice(0, 7);
     const nowYM = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
@@ -78,16 +78,16 @@ describe("multi-session (setActiveSession / newSessionId / mostRecentSessionId)"
 
   it("saveSession writes to the ACTIVE session file, not current.json", () => {
     setActiveSession("feature-x");
-    saveSession(ws, [{ role: "user", content: "hi" }], "agent");
+    saveSession(ws, { messages: [{ role: "user", content: "hi" }], mode: "agent" });
     expect(fs.existsSync(path.join(ws, ".rei/sessions/feature-x.json"))).toBe(true);
     expect(fs.existsSync(path.join(ws, ".rei/sessions/current.json"))).toBe(false);
   });
 
   it("two named sessions are independent files (no collision)", () => {
     setActiveSession("frontend");
-    saveSession(ws, [{ role: "user", content: "front" }], "ask");
+    saveSession(ws, { messages: [{ role: "user", content: "front" }], mode: "ask" });
     setActiveSession("backend");
-    saveSession(ws, [{ role: "user", content: "back" }], "ask");
+    saveSession(ws, { messages: [{ role: "user", content: "back" }], mode: "ask" });
     setActiveSession("frontend");
     expect(loadCurrentSession(ws)?.messages[0].content).toBe("front");
     setActiveSession("backend");
@@ -97,10 +97,10 @@ describe("multi-session (setActiveSession / newSessionId / mostRecentSessionId)"
 
   it("mostRecentSessionId returns the latest by updatedAt (for `rei -c`)", async () => {
     setActiveSession("older");
-    saveSession(ws, [{ role: "user", content: "a" }], "ask");
+    saveSession(ws, { messages: [{ role: "user", content: "a" }], mode: "ask" });
     await new Promise((r) => setTimeout(r, 10));
     setActiveSession("newer");
-    saveSession(ws, [{ role: "user", content: "b" }], "ask");
+    saveSession(ws, { messages: [{ role: "user", content: "b" }], mode: "ask" });
     expect(mostRecentSessionId(ws)).toBe("newer");
   });
 

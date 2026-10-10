@@ -75,13 +75,7 @@ export const compactCommand: CommandHandler = {
         };
       }
 
-      saveSession(
-        workspacePath,
-        compactedMessages,
-        session.mode,
-        session.summary,
-        session.createdAt,
-      );
+      saveSession(workspacePath, { ...session, messages: compactedMessages });
 
       // The model that WROTE it, not the one we asked for: a failed COMPACTOR_MODEL falls back to
       // the provider's, and crediting the summary to a model that 404'd is how this command came

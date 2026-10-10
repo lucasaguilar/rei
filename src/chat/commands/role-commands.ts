@@ -112,7 +112,7 @@ export const roleCommands: CommandHandler = {
         session.rolePreviousMode && session.mode === leaving?.baseMode
           ? session.rolePreviousMode
           : session.mode;
-      saveSession(workspacePath, session.messages, restored, session.summary, session.createdAt);
+      saveSession(workspacePath, { ...session, mode: restored });
       const note = restored !== session.mode ? ` Back to ${restored} mode.` : "";
       return {
         success: true,
@@ -143,7 +143,7 @@ export const roleCommands: CommandHandler = {
     // Choosing a role is a new decision about the model, so it clears one made by hand — otherwise
     // `/role X` could not take you back to X's model once you had ever typed `/model`.
     const droppedManual = session.manualModel;
-    saveSession(workspacePath, session.messages, role.baseMode, session.summary, session.createdAt);
+    saveSession(workspacePath, { ...session, mode: role.baseMode });
     const modelHint = role.preferredModel
       ? ` Runs on ${role.preferredModel}.`
       : "";

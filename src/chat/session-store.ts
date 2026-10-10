@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ChatMessage, SessionMode } from "./types.js";
+import type { ChatMessage, ChatSession, SessionMode } from "./types.js";
 
 export interface PersistedSession {
   version: 1;
@@ -64,23 +64,30 @@ function ensureSessionsDir(workspacePath: string): void {
   fs.mkdirSync(sessionsDir(workspacePath), { recursive: true });
 }
 
-export function saveSession(
-  workspacePath: string,
-  messages: ChatMessage[],
-  mode: SessionMode,
-  summary?: string,
-  existingCreatedAt?: string,
-): void {
+/**
+ * The fields of a session that are persisted. Callers hand over the session itself, not loose
+ * fields, so none can be dropped by omission: saving `messages` + `mode` alone used to lose the
+ * summary and createdAt on every recorded command, and the active persona would have gone the same
+ * way — silently reverting to plain REI on the next load.
+ */
+export type SavableSession = Pick<
+  ChatSession,
+  "messages" | "mode" | "summary" | "createdAt" | "persona" | "measuredPromptTokens"
+>;
+
+export function saveSession(workspacePath: string, session: SavableSession): void {
   ensureSessionsDir(workspacePath);
   const now = new Date().toISOString();
   const data: PersistedSession = {
     version: 1,
     workspace: workspacePath,
-    mode,
-    createdAt: existingCreatedAt ?? now,
+    mode: session.mode,
+    createdAt: session.createdAt ?? now,
     updatedAt: now,
-    summary,
-    messages,
+    summary: session.summary,
+    persona: session.persona,
+    measuredPromptTokens: session.measuredPromptTokens,
+    messages: session.messages,
   };
   fs.writeFileSync(
     currentPath(workspacePath),
