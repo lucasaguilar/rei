@@ -1,12 +1,3 @@
-```
-██████╗ ███████╗██╗
-██╔══██╗██╔════╝██║
-██████╔╝█████╗  ██║
-██╔══██╗██╔══╝  ██║
-██║  ██║███████╗██║
-╚═╝  ╚═╝╚══════╝╚═╝
-```
-
 # REI
 
 [![CI](https://github.com/lucasaguilar/rei/actions/workflows/ci.yml/badge.svg)](https://github.com/lucasaguilar/rei/actions/workflows/ci.yml)
@@ -15,11 +6,24 @@
 
 **A local-first agent you assemble yourself.**
 
-Roles, sub-agents and skills are markdown files you write — and the limits they declare are
-**enforced in code, not suggested in a prompt**. A reviewer that says it may only write
-`*.review.md` is stopped by REI when it tries to touch anything else.
+One agent, tailored to the job: it writes code and checks its own work, reviews like a senior, runs
+your day — and becomes whatever agent you describe in a markdown file. On a model on your own
+machine, or a cloud one.
 
-Runs against a model on your own machine, or a cloud one. Same tool, same commands.
+- 🧠 **Codes** — and runs your project's own compiler or tests before it says "done".
+  [What each check proves](#why-it-verifies).
+- 🔍 **Audits** — a reviewer role in your session, or an isolated sub-agent on a different model.
+- ☀️ **Runs your day** — news, weather, your morning briefing; email and music through the MCP
+  servers you connect.
+- 🧩 **Yours** — personas, roles and skills are files you write, and the limits they declare are
+  **enforced in code, not suggested in a prompt**. [Extend it](#extend-it).
+
+💸 **Local for free, cloud when it counts. No lock-in.**
+
+![REI's first screen: the mode, the context budget and the local model in use](docs/assets/rei-start.png)
+
+A reviewer that says it may only write `*.review.md` is stopped by REI when it tries to touch
+anything else:
 
 ```markdown
 ---
@@ -32,12 +36,8 @@ You are an extremely critical Lead Architect. Find what is wrong,
 missing or risky. You are NOT here to implement or encourage.
 ```
 
-Drop that in `.rei/roles/`. It is a command next session — no build, no plugin API, no fork.
-
-It also checks its own work: REI runs your project's own verify command before a turn is allowed to
-finish, hands the model its own errors, and says plainly when it could not get to green. How strong
-that check is depends on what your project ships — a compiler proves more than a syntax check, and
-REI names which one it ran instead of implying they are equal.
+Drop that in `.rei/roles/` and it is a command next session — no build, no plugin API, no fork. A
+persona goes the same way in `.rei/personas/`, and replaces the coding agent altogether.
 
 ---
 
@@ -65,6 +65,11 @@ REI names which one it ran instead of implying they are equal.
 - **You want to shape the agent, not accept one.** Roles, skills and prompts are markdown files you
   edit — a reviewer with its own posture and model, a recipe for how your team writes tests. Nothing
   is compiled in.
+- **You want an agent for one job — your business, your students, your own day.** A tutor that
+  teaches from your course material, an advisor that answers from your policies, a help desk that
+  knows your product, a concierge that runs your mornings. A persona is that agent: who it is, what it
+  answers from, what it may read and write, which model it runs on — one markdown file, its limits
+  enforced. [Personas](#extend-it).
 
 ## Start in under a minute
 
@@ -94,8 +99,6 @@ provider, takes an API key if you picked a cloud one, or **lists the models your
 already has** if you picked LM Studio, Ollama, oMLX or MTPLX. Running something else that speaks the
 OpenAI API — vLLM, SGLang, llama.cpp's server, LiteLLM, your own gateway — pick **`openai-compat`**
 and give it the URL. It writes `.rei/.env` in the project and drops you into the session.
-
-![REI's first screen: the mode, the context budget and the local model in use](docs/assets/rei-start.png)
 
 That is the whole setup. To change it later: **`rei --config`**. To make a local model actually
 fast — context, sampling, thinking level, per model — that is `rei.config.json`, two sections down.
