@@ -606,10 +606,42 @@ REI can also delegate on its own: `/runplan` gives each stage of a plan to its o
 agent mode the model has a `delegate` tool for self-contained subtasks. `/<role>` is the
 deterministic version — you decide, not the model.
 
-**Together** — roles, sub-agents, skills and MCP servers are how you turn REI into something other
-than a coding agent. It ships with `auditor` (adversarial plan review) and `daily` (a concierge:
-weather, headlines, music — `baseMode: ask`, so it never touches your repository). `/roles new
-<name>` scaffolds another.
+**Personas — a different agent, not a posture.** A role is still REI the coding agent, wearing a
+posture. A persona *replaces* it: its own identity, knowledge and permissions, in
+`{workspace}/.rei/personas/<name>.md`. The same REI can be your coding agent, a daily concierge, or a
+company's sales assistant on WhatsApp.
+
+```mermaid
+flowchart LR
+    M["💬 Message"] --> Q{"Persona active?"}
+    Q -- "no (default)" --> R["🧠 REI — the coding agent<br/>modes · roles · sub-agents"]
+    Q -- "yes" --> P["👤 A persona<br/>daily · sales · support · …"]
+    P -. "defined by" .-> F["📄 .rei/personas/&lt;name&gt;.md"]
+```
+
+```markdown
+---
+name: daily
+description: Daily concierge + the AI morning briefing
+tools: [web_search, weather, read_files, edit_file, "mcp:*"]
+skills: [daily-ai-briefing]
+knowledgeDir: news
+writeGlob: "news/*.html"
+---
+You are a daily concierge: weather, headlines, music, quick lookups. You are NOT a coding assistant.
+```
+
+What it declares is enforced, and it only ever **narrows**: it gets the tools it lists and no
+others, reads only `knowledgeDir`, writes only `writeGlob` (no `writeGlob`, no writes), loads only
+its `skills` — and a channel caps it further (over WhatsApp, read-only). `/persona` lists them,
+`/persona daily` switches, `/persona off` is plain REI again; `rei --persona daily` or
+`REI_PERSONA=daily` start that way. With no persona active, REI is exactly the coding agent above.
+Details: [persona-spec.md](docs/persona-spec.md).
+
+**Together** — roles, sub-agents, personas, skills and MCP servers are how you turn REI into
+something other than a coding agent. It ships with the `auditor` role (adversarial plan review) and
+the `daily` persona (a concierge: weather, headlines, music — no read tools, so it never touches your
+repository). `/roles new <name>` scaffolds a role.
 
 **Project rules** — `{workspace}/.rei/rules.md` is prepended to every coding turn as mandatory
 conventions. REI ships **no** rules about your stack: they belong to the repo, versioned with the
