@@ -1,12 +1,11 @@
 import type { AgentLogger } from "../../core/logger.js";
-import { scopeReadCall } from "./read-scope.js";
+import { runReadTool } from "./read-tool-handlers.js";
 import { fromWireToolName } from "../../contracts/mcp-tool-names.js";
 import type { ModelProvider } from "../../providers/model-provider.js";
 import type { ToolCall } from "../../providers/model-provider.js";
 import type { McpRegistry } from "../../tools/mcp/mcp-registry.js";
 import type { Skill } from "../../skills/skill-loader.js";
 import { startToolSpan } from "../../telemetry/spans.js";
-import { handleReadFiles } from "./read-files-handler.js";
 import {
   handleWebSearch,
   handleWeather,
@@ -16,7 +15,6 @@ import {
   handleSaveToolOutput,
 } from "./builtin-handlers.js";
 import { isWriteAllowed, writeDeniedMessage, writeScopeForMode } from "./write-scope.js";
-import { grepCode, listFiles } from "../../tools/code-search.js";
 import { nonInteractiveElicit, type ElicitFn } from "../../chat/elicitation.js";
 import { handleDelegate } from "./delegate-handler.js";
 import {
@@ -164,54 +162,16 @@ export async function dispatchToolCalls(
         string,
         unknown
       >;
-      // A multi-user channel reads only inside readRoot, never .rei/ (other people's sessions).
-      const scoped = ctx.readRoot
-        ? scopeReadCall(call.function.name, args, workspacePath, ctx.readRoot)
-        : undefined;
-      if (scoped?.refused) {
-        toolResultsMap.set(call.id, scoped.refused);
+      // read_files / grep_code / list_files, inside the turn's read scope — see read-tool-handlers.
+      const readResult = await runReadTool(call.function.name, args, {
+        workspacePath, logger, emitStatus, toRel, currentContent, virtualFiles, readRoot: ctx.readRoot,
+      });
+      if (readResult !== undefined) {
+        toolResultsMap.set(call.id, readResult);
         continue;
       }
 
       switch (call.function.name) {
-        // ── read_files ───────────────────────────────────────────────
-        case "read_files": {
-          const rf = await handleReadFiles(
-            (args.paths as string[]) ?? [],
-            { workspacePath, logger, emitStatus, toRel, currentContent, virtualFiles },
-            { offset: args.offset as number | undefined, limit: args.limit as number | undefined },
-          );
-          toolResult = rf.text;
-          // No re-read guard: read_files always serves the file. If the model asks for it, it gets it.
-          toolResultsMap.set(call.id, toolResult);
-          break;
-        }
-
-        // ── grep_code (repo search) ──────────────────────────────────
-        case "grep_code": {
-          emitStatus(`🔎  [REI] grep_code: ${(args.pattern as string) ?? ""}`);
-          toolResult = await grepCode(workspacePath, {
-            pattern: (args.pattern as string) ?? "",
-            path: args.path as string | undefined,
-            glob: args.glob as string | undefined,
-            maxResults: args.max_results as number | undefined,
-          });
-          toolResultsMap.set(call.id, toolResult);
-          break;
-        }
-
-        // ── list_files (glob) ────────────────────────────────────────
-        case "list_files": {
-          emitStatus(`📁  [REI] list_files: ${(args.glob as string) ?? "*"}`);
-          toolResult = await listFiles(workspacePath, {
-            glob: args.glob as string | undefined,
-            path: args.path as string | undefined,
-            maxResults: args.max_results as number | undefined,
-          });
-          toolResultsMap.set(call.id, toolResult);
-          break;
-        }
-
         // ── search_tools (meta-tool) ─────────────────────────────────
         case "search_tools": {
           toolResult = handleSearchTools((args.query as string) ?? "", {
@@ -406,8 +366,6 @@ export async function dispatchToolCalls(
           toolResultsMap.set(call.id, toolResult);
         }
       }
-      const produced = toolResultsMap.get(call.id);
-      if (scoped && produced !== undefined) toolResultsMap.set(call.id, scoped.finish(produced));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       toolResultsMap.set(call.id, `ERROR: ${msg}`);
