@@ -11,6 +11,8 @@ export interface PersistedSession {
   summary?: string;
   /** See ChatSession.measuredPromptTokens. Optional: files written before it existed lack it. */
   measuredPromptTokens?: number;
+  /** See ChatSession.persona. Written by the CLI from phase 4 of docs/persona-spec.md. */
+  persona?: string;
   messages: ChatMessage[];
 }
 

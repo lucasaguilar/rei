@@ -45,6 +45,9 @@ export function resolveDefaultSessionMode(): SessionMode {
 
 export interface ChatSession {
   messages: ChatMessage[];
+  /** Active persona (docs/persona-spec.md): REPLACES REI's coding identity for this session's turns —
+   *  prompt, tools, reading scope, model. Mutually exclusive with activeRole. */
+  persona?: string;
   /** The backend's reported prompt size for this conversation's last call — compaction's floor,
    *  kept ACROSS turns (unlike the Agent's lastTurnUsage, cleared before compaction runs). Per
    *  session, not per Agent: one Agent serves many conversations (the WhatsApp channel). */

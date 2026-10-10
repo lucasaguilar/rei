@@ -55,6 +55,17 @@ export interface ToolSelection {
  * sent in full. Skills ride as a `use_skill` catalog (name+description only). Returns `buildTools`
  * plus the mutable `activeMcp` set so the loop's search_tools handler can grow it by reference.
  */
+/**
+ * Every tool name a turn in `mode` can be offered on the CLI/server surface — what a persona's
+ * `tools` is narrowed AGAINST (docs/persona-spec.md). The same sources buildTools draws from.
+ */
+export function surfaceToolNames(mode: SkillMode, mcpRegistry?: McpRegistry): string[] {
+  const mcp = mcpRegistry ? mcpToolsToDefinitions(mcpRegistry.getAvailableTools()) : [];
+  return [...toolsForMode(mode), WEB_SEARCH_TOOL, WEATHER_TOOL, ASK_USER_TOOL, ...mcp].map(
+    (t) => t.function.name,
+  );
+}
+
 export function setupToolSelection(params: {
   mcpRegistry?: McpRegistry;
   messagesForModel: ChatMessage[];
