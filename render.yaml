@@ -9,7 +9,8 @@
 services:
   - type: web # expone un puerto (el server OpenAI-compatible), no es un worker
     name: rei
-    branch: feat/AGENT-WHATSAPP # hasta que se mergee a main
+    # Sin `branch:` Render despliega la rama por defecto del repo (main). Para probar una rama de
+    # feature antes de mergearla, agregá `branch: <rama>` en tu copia — no en la que se publica.
     runtime: docker # usa el Dockerfile de la raíz
     plan: starter # $7/mes, 512MB, no duerme. Cambiar a "free" si querés el plan sin costo (duerme tras ~15 min sin tráfico).
     # /healthz responde 200 SIN autenticación, que es la razón de que exista: el health check de
