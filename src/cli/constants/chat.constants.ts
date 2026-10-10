@@ -202,6 +202,8 @@ export const COMMANDS: Array<{
   { command: "/role", description: "activate a role posture (e.g. /role auditor); /role off to clear" },
   { command: "/roles", description: "list roles and both ways to invoke each (in-session or isolated)" },
   { command: "/roles new <name>", description: "scaffold a new role in .rei/roles/<name>.md" },
+  { command: "/persona", description: "list personas — who REI can be instead of a coding agent" },
+  { command: "/persona <name|off>", description: "become that persona for this session, or back to plain REI" },
   { command: "/mcp", description: "list MCP servers; /mcp on|off <name> to toggle one live (or all)" },
   { command: "/session", description: "show basic session info (use /session info for full details)" },
   { command: "/session info", description: "show full session info with token usage and repo summary" },
