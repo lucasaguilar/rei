@@ -104,6 +104,18 @@ export const roleCommands: CommandHandler = {
     const m = command.match(ROLE_RE);
     const arg = m![1].toLowerCase();
 
+    // A persona replaces REI's identity and the agent ignores roles under it: setting one now would
+    // be reported as active and do nothing. Say so instead. (`/role off` still clears a role.)
+    if (session.persona && !["off", "clear", "none"].includes(arg)) {
+      return {
+        success: false,
+        recordInSession: false,
+        response:
+          `[REI] The persona '${session.persona}' is active, and a persona replaces REI's identity — ` +
+          `roles do not apply under it. Use /persona off first, then /role ${arg}.`,
+      };
+    }
+
     if (arg === "off" || arg === "clear" || arg === "none") {
       // Restore only if you are STILL in the mode the role put you in. An explicit /mode while a
       // role was active is a decision, and silently undoing it is worse than not restoring at all.
