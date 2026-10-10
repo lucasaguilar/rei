@@ -78,6 +78,8 @@ export function setupToolSelection(params: {
   allowSubAgents?: boolean;
   /** When set, the ONLY tools offered — applied last, over everything below (MCP, skills, …). */
   allowedTools?: readonly string[];
+  /** When set, the ONLY skills in the use_skill catalog, whatever their own `modes:` say. */
+  skillNames?: readonly string[];
 }): ToolSelection {
   const {
     mcpRegistry,
@@ -118,11 +120,17 @@ export function setupToolSelection(params: {
   // Skills: reusable task recipes loaded on demand. Only the catalog (name + description) rides in
   // the `use_skill` tool; the full body is injected only when the model invokes it. Scoped to the
   // active mode (ask/planning/agent each surface a different skill set).
-  const skills = skillsForMode(loadSkills(workspacePath), mode);
+  // A persona names its skills: the session's mode no more applies to them than to its tools.
+  const skills = params.skillNames
+    ? loadSkills(workspacePath).filter((s) => params.skillNames!.includes(s.name))
+    : skillsForMode(loadSkills(workspacePath), mode);
   const useSkillTool = buildUseSkillTool(skills);
 
   // The built-in capability set for this mode (agent → full incl. edits; ask/planning → read-only).
-  const baseTools = toolsForMode(mode);
+  // With an allow-list the full set is the base instead: the list says exactly what the turn may use
+  // (a persona declares its tools; the mode is the coding agent's profile, not the persona's), and
+  // writes are still gated where they execute (write-scope). A channel's list is read-only anyway.
+  const baseTools = allowed ? toolsForMode("agent") : toolsForMode(mode);
 
   // The tools array is rebuilt each turn so newly-searched tools become callable.
   const buildTools = (): ToolDefinition[] => {
