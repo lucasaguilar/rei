@@ -18,6 +18,8 @@ export interface PersonaPromptContext {
   workspacePath: string;
   /** A public channel's rules (e.g. WhatsApp's guardrails); absent in the CLI. */
   channelPolicy?: string;
+  /** The skills use_skill can load this turn (already resolved). */
+  skillNames?: readonly string[];
   now?: Date;
 }
 
@@ -31,6 +33,14 @@ export function buildPersonaSystemMessage(persona: Persona, ctx: PersonaPromptCo
   const knowledge = knowledgeSection(persona, ctx);
   if (knowledge) sections.push(knowledge);
   sections.push(toolsSection(ctx.tools));
+  const writing = writingSection(persona, ctx.tools);
+  if (writing) sections.push(writing);
+  if (ctx.skillNames?.length && ctx.tools.includes("use_skill")) {
+    sections.push(
+      `## Skills\nRecipes you can load with use_skill: ${ctx.skillNames.join(", ")}. When a request ` +
+        `matches one, load it first and follow it.`,
+    );
+  }
   sections.push(replyRules(persona));
   sections.push(buildCurrentDateLine(ctx.now));
   return `${sections.join("\n\n")}\n`;
@@ -59,6 +69,15 @@ function toolsSection(tools: readonly string[]): string {
     `## Tools\nYou can use: ${tools.join(", ")}. You have no other tools — never claim a result you ` +
     `did not get from one of them. When you decide to use a tool, call it in the same response ` +
     `instead of announcing that you will.`
+  );
+}
+
+function writingSection(persona: Persona, tools: readonly string[]): string | null {
+  if (!persona.writeGlob) return null;
+  if (!tools.some((t) => t === "create_file" || t === "edit_file" || t === "rewrite_file")) return null;
+  return (
+    `## Writing\nYou may create or edit only files matching ${persona.writeGlob}. A write anywhere ` +
+    `else is refused — do not attempt it, and never claim a file was saved unless the tool said so.`
   );
 }
 

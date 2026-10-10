@@ -168,3 +168,72 @@ describe("a session with a persona", () => {
     expect(out).toMatch(/ghost.*not found/);
   });
 });
+
+describe("a persona that writes and uses skills (phase 4b)", () => {
+  const createFile = (file: string) =>
+    ({
+      content: "",
+      finishReason: "tool_calls",
+      toolCalls: [
+        { id: `c-${file}`, type: "function", function: { name: "create_file", arguments: JSON.stringify({ file, content: "<p>hi</p>" }) } },
+      ],
+    }) as ChatCompletionWithTools;
+
+  beforeEach(() => {
+    const dir = path.join(ws, ".rei", "personas");
+    fs.writeFileSync(
+      path.join(dir, "briefer.md"),
+      [
+        "---",
+        "name: briefer",
+        "description: d",
+        "tools: [read_files, create_file, edit_file, web_search]",
+        "skills: [briefing]",
+        'writeGlob: "news/*.html"',
+        "---",
+        "",
+        "You write the morning briefing.",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(dir, "nowrite.md"),
+      "---\nname: nowrite\ndescription: d\ntools: [read_files, create_file]\n---\n\nYou cannot write.\n",
+    );
+    fs.mkdirSync(path.join(ws, ".rei", "skills"), { recursive: true });
+    // No `modes:` → agent-only for the coding agent; a persona that names it gets it in any mode.
+    fs.writeFileSync(path.join(ws, ".rei", "skills", "briefing.md"), "---\nname: briefing\ndescription: the briefing recipe\n---\n\nSteps.\n");
+    fs.writeFileSync(path.join(ws, ".rei", "skills", "other.md"), "---\nname: other\ndescription: another recipe\n---\n\nOther steps.\n");
+    fs.mkdirSync(path.join(ws, "news"));
+  });
+
+  it("writes inside its writeGlob even in ask mode — the mode does not limit a persona", async () => {
+    const p = new Recording();
+    p.queue.push(createFile("news/today.html"));
+    await turn(session({ persona: "briefer", mode: "ask" }), "make today's briefing", p);
+    expect(p.seen[0].tools).toContain("create_file");
+    expect(fs.existsSync(path.join(ws, "news", "today.html"))).toBe(true);
+  });
+
+  it("is refused outside its writeGlob", async () => {
+    const p = new Recording();
+    p.queue.push(createFile("src/evil.ts"));
+    await turn(session({ persona: "briefer", mode: "agent" }), "go", p);
+    expect(fs.existsSync(path.join(ws, "src", "evil.ts"))).toBe(false);
+  });
+
+  it("without a writeGlob cannot write at all, even with create_file in its tools", async () => {
+    const p = new Recording();
+    p.queue.push(createFile("news/today.html"));
+    await turn(session({ persona: "nowrite", mode: "agent" }), "go", p);
+    expect(p.seen[0].tools).not.toContain("create_file");
+    expect(fs.existsSync(path.join(ws, "news", "today.html"))).toBe(false);
+  });
+
+  it("gets use_skill with only its own skills, and is told about them", async () => {
+    const p = new Recording();
+    await turn(session({ persona: "briefer", mode: "ask" }), "hola", p);
+    expect(p.seen[0].tools).toContain("use_skill");
+    // Exactly its own skill in the catalog line — "other" exists in the workspace but is not its.
+    expect(systemOf(p.seen[0])).toMatch(/Recipes you can load with use_skill: briefing\./);
+  });
+});

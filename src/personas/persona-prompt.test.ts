@@ -108,4 +108,20 @@ describe("buildPersonaSystemMessage", () => {
     expect(order.every((i) => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
   });
+
+  it("names where it may write, when it may", () => {
+    const prompt = build(sales({ writeGlob: "quotes/*.md" }), ["read_files", "create_file"]);
+    expect(prompt).toMatch(/only[^\n]*quotes\/\*\.md/i);
+    expect(build(sales(), ["read_files"])).not.toMatch(/## Writing/);
+  });
+
+  it("lists its skills when it can load them", () => {
+    const prompt = buildPersonaSystemMessage(sales({ skills: ["quote-template"] }), {
+      tools: ["use_skill"],
+      workspacePath: WS,
+      skillNames: ["quote-template"],
+      now: NOW,
+    });
+    expect(prompt).toMatch(/## Skills[\s\S]*quote-template/);
+  });
 });

@@ -189,7 +189,9 @@ export class Agent {
       ? resolvePersonaTurn({
           name: session.persona,
           workspacePath: this.workspacePath,
-          surfaceTools: surfaceToolNames(session.mode as SkillMode, this.mcpRegistry),
+          // The mode is the coding agent's profile, not the persona's: it gets every tool REI has,
+          // narrowed by what it declares (and by a channel's own list).
+          surfaceTools: surfaceToolNames("agent", this.mcpRegistry),
           channelAllowedTools: options?.allowedTools,
           channelReadRoot: options?.readRoot,
         })
@@ -287,7 +289,8 @@ export class Agent {
           onChunk,
           drainUserMessages: options?.drainUserMessages,
           userQuery: userInput,
-          roleWriteGlob: turnRole?.writeGlob,
+          roleWriteGlob: turnRole?.writeGlob ?? persona?.writeGlob,
+          skillNames: persona?.skillNames,
           elicit: options?.elicit,
           allowedTools: persona ? persona.allowedTools : options?.allowedTools,
           readRoot: persona ? persona.readRoot : options?.readRoot,
@@ -503,7 +506,8 @@ export class Agent {
         userQuery: userInput,
         mode: session.mode as SkillMode,
         // Narrows what this turn may write — see write-scope.
-        roleWriteGlob: turnRole?.writeGlob,
+        roleWriteGlob: turnRole?.writeGlob ?? persona?.writeGlob,
+        skillNames: persona?.skillNames,
         elicit: options?.elicit,
         allowedTools: persona ? persona.allowedTools : options?.allowedTools,
         readRoot: persona ? persona.readRoot : options?.readRoot,
