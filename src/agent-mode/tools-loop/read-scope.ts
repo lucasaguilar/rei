@@ -24,7 +24,7 @@ export interface ScopedReadCall {
 
 /** Real path of `p`, or of its nearest existing ancestor plus the rest — a file that does not
  *  exist yet must still be judged by where it WOULD be. */
-function realish(p: string): string {
+export function realish(p: string): string {
   try {
     return fs.realpathSync(p);
   } catch {
@@ -33,7 +33,7 @@ function realish(p: string): string {
   }
 }
 
-function within(child: string, parent: string): boolean {
+export function within(child: string, parent: string): boolean {
   return child === parent || child.startsWith(parent + path.sep);
 }
 
