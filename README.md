@@ -16,28 +16,14 @@ machine, or a cloud one.
 - ☀️ **Runs your day** — news, weather, your morning briefing; email and music through the MCP
   servers you connect.
 - 🧩 **Yours** — personas, roles and skills are files you write, and the limits they declare are
-  **enforced in code, not suggested in a prompt**. [Extend it](#extend-it).
+  **enforced in code, not suggested in a prompt**: a reviewer allowed to write only `*.review.md`
+  is stopped the moment it touches anything else. [Extend it](#extend-it).
 
 💸 **Local for free, cloud when it counts. No lock-in.**
 
 ![REI's first screen: the mode, the context budget and the local model in use](docs/assets/rei-start.png)
 
-A reviewer that says it may only write `*.review.md` is stopped by REI when it tries to touch
-anything else:
-
-```markdown
----
-name: auditor
-baseMode: planning          # read-only profile
-writeGlob: "*.review.md"    # the only files it may write. Enforced.
-preferredModel: some-other-model
----
-You are an extremely critical Lead Architect. Find what is wrong,
-missing or risky. You are NOT here to implement or encourage.
-```
-
-Drop that in `.rei/roles/` and it is a command next session — no build, no plugin API, no fork. A
-persona goes the same way in `.rei/personas/`, and replaces the coding agent altogether.
+Drop a markdown file in `.rei/` and it is there next session — no build, no plugin API, no fork.
 
 ---
 
