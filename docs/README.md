@@ -54,6 +54,7 @@ nothing here is implemented, and nothing here is a promise that it will be.
 
 | Document | The idea |
 |---|---|
+| [persona-spec.md](persona-spec.md) | Personas: REI as a sales/support/helpdesk assistant in the CLI, the server and WhatsApp — identity, knowledge base, hard limits, channel policy |
 | [intent-router-spec.md](intent-router-spec.md) | Switch mode automatically from the phrasing of a request |
 | [config-doctor-spec.md](config-doctor-spec.md) · [config-doctor-proposal.md](config-doctor-proposal.md) | A `/doctor` that audits the configuration and suggests a model that fits the machine |
 | [context-drift-spec.md](context-drift-spec.md) | Prune an off-topic detour from the working context instead of carrying it all session |
