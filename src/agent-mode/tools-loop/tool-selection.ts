@@ -89,7 +89,15 @@ export function setupToolSelection(params: {
     allowSubAgents = true,
   } = params;
 
-  const allMcpTools = mcpRegistry ? mcpRegistry.getAvailableTools() : [];
+  // With an allow-list (a persona, a channel) the MCP set is narrowed at the SOURCE, before the
+  // tool-search decision: preloads are not spent on tools that would be filtered out afterwards, a
+  // persona allowing 10 MCP tools gets all 10 instead of search mode, and search_tools can only ever
+  // find allowed ones — it cannot widen what the turn may use.
+  const allowed = params.allowedTools;
+  const registryTools = mcpRegistry ? mcpRegistry.getAvailableTools() : [];
+  const allMcpTools = allowed
+    ? registryTools.filter((t) => allowed.includes(`mcp:${t.name}`))
+    : registryTools;
   const query = userQuery ?? lastUserText(messagesForModel);
   const useToolSearch =
     allMcpTools.length > MAX_UNFILTERED && process.env.REI_TOOL_RAG !== "false";
@@ -126,8 +134,12 @@ export function setupToolSelection(params: {
     if (allowSubAgents && subAgentsEnabled()) tools.push(DELEGATE_TOOL);
     if (useToolSearch) tools.push(SEARCH_TOOLS_DEF);
     if (useSkillTool) tools.push(useSkillTool);
-    const allowed = params.allowedTools;
-    return allowed ? tools.filter((t) => allowed.includes(t.function.name)) : tools;
+    // search_tools rides along when search mode is on: allMcpTools is already narrowed above.
+    return allowed
+      ? tools.filter(
+          (t) => allowed.includes(t.function.name) || (useToolSearch && t === SEARCH_TOOLS_DEF),
+        )
+      : tools;
   };
 
   return { buildTools, activeMcp, allMcpTools, useToolSearch, skills };

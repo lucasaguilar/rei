@@ -136,7 +136,13 @@ export async function dispatchToolCalls(
     // Not offering a tool is not enough: a model can emit a call to one it was never shown (from
     // its training, or from the prompt). Outside the allow-list it is refused here, before any
     // handler — this check is what actually keeps run_command off a channel like WhatsApp.
-    if (ctx.allowedTools && !ctx.allowedTools.includes(call.function.name)) {
+    // search_tools is the exception: it only searches allMcpTools, which setupToolSelection already
+    // narrowed to the allow-list — it can load allowed tools, never others.
+    if (
+      ctx.allowedTools &&
+      !ctx.allowedTools.includes(call.function.name) &&
+      call.function.name !== "search_tools"
+    ) {
       logger.logInfo(`[tools] refused ${call.function.name}: not in this turn's allowedTools`);
       toolResultsMap.set(
         call.id,
