@@ -163,7 +163,11 @@ describe("channel limits", () => {
     phoneNumberId: "1000000000000001",
   });
   const graphOk = () => {
-    const fn = vi.fn(async () => new Response(JSON.stringify({ messages: [{ id: "out" }] }), { status: 200 }));
+    // Typed like fetch, so `mock.calls[n][1]` (the request init) is visible to the type checker.
+    const fn = vi.fn(
+      async (_url: string, _init?: RequestInit) =>
+        new Response(JSON.stringify({ messages: [{ id: "out" }] }), { status: 200 }),
+    );
     vi.stubGlobal("fetch", fn);
     return fn;
   };
