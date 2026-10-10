@@ -104,6 +104,18 @@ export const roleCommands: CommandHandler = {
     const m = command.match(ROLE_RE);
     const arg = m![1].toLowerCase();
 
+    // A persona replaces REI's identity and the agent ignores roles under it: setting one now would
+    // be reported as active and do nothing. Say so instead. (`/role off` still clears a role.)
+    if (session.persona && !["off", "clear", "none"].includes(arg)) {
+      return {
+        success: false,
+        recordInSession: false,
+        response:
+          `[REI] The persona '${session.persona}' is active, and a persona replaces REI's identity — ` +
+          `roles do not apply under it. Use /persona off first, then /role ${arg}.`,
+      };
+    }
+
     if (arg === "off" || arg === "clear" || arg === "none") {
       // Restore only if you are STILL in the mode the role put you in. An explicit /mode while a
       // role was active is a decision, and silently undoing it is worse than not restoring at all.
@@ -112,7 +124,7 @@ export const roleCommands: CommandHandler = {
         session.rolePreviousMode && session.mode === leaving?.baseMode
           ? session.rolePreviousMode
           : session.mode;
-      saveSession(workspacePath, session.messages, restored, session.summary, session.createdAt);
+      saveSession(workspacePath, { ...session, mode: restored });
       const note = restored !== session.mode ? ` Back to ${restored} mode.` : "";
       return {
         success: true,
@@ -143,7 +155,7 @@ export const roleCommands: CommandHandler = {
     // Choosing a role is a new decision about the model, so it clears one made by hand — otherwise
     // `/role X` could not take you back to X's model once you had ever typed `/model`.
     const droppedManual = session.manualModel;
-    saveSession(workspacePath, session.messages, role.baseMode, session.summary, session.createdAt);
+    saveSession(workspacePath, { ...session, mode: role.baseMode });
     const modelHint = role.preferredModel
       ? ` Runs on ${role.preferredModel}.`
       : "";

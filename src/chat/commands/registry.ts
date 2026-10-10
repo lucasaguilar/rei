@@ -9,6 +9,7 @@ import { runPlanCommand, planFileCommands } from "./plan-commands.js";
 import { providerCommands } from "./provider-commands.js";
 import { treeCommands } from "./tree-commands.js";
 import { roleCommands } from "./role-commands.js";
+import { personaCommands } from "./persona-commands.js";
 import { mcpCommands } from "./mcp-commands.js";
 import { thinkCommands } from "./think-commands.js";
 import { sddCommands } from "./sdd-commands.js";
@@ -37,6 +38,7 @@ const COMMAND_HANDLERS = [
   providerCommands,
   treeCommands,
   roleCommands,
+  personaCommands,
   mcpCommands,
   thinkCommands,
   sddCommands,

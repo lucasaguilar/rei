@@ -161,7 +161,7 @@ export const sddCommands: CommandHandler = {
         `Also save it with create_file to .rei/specs/${specName}.md — that exact path — so it survives ` +
         `this session and REI knows which spec is active.`;
 
-      saveSession(workspacePath, session.messages, planning, session.summary, session.createdAt);
+      saveSession(workspacePath, { ...session, mode: planning });
       return {
         success: true,
         response: `[REI] Switching to PLANNING mode to write the spec → .rei/specs/${specName}.md (now the active spec).`,
@@ -205,7 +205,7 @@ export const sddCommands: CommandHandler = {
       `Save the plan with create_file to .rei/plans/${planName}.md — that exact path, so /runplan ` +
       `picks it up. Do NOT edit source files — this step produces the plan, not the change.`;
 
-    saveSession(workspacePath, session.messages, planning, session.summary, session.createdAt);
+    saveSession(workspacePath, { ...session, mode: planning });
     return {
       success: true,
       response:

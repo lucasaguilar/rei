@@ -72,7 +72,7 @@ export async function tryDelegateStages(
   // The report stage runs in the session, with the stage summaries already on screen above it.
   if (!failed && pendingReport) {
     const agentMode = "agent" as SessionMode;
-    saveSession(workspacePath, session.messages, agentMode, session.summary, session.createdAt);
+    saveSession(workspacePath, { ...session, mode: agentMode });
     return {
       success: true,
       response,

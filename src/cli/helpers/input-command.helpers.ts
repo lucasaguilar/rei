@@ -142,7 +142,7 @@ export async function handleInputCommand(
       // The history just grew, so the sticky gauge must too — it is only republished at the end of
       // a real turn, and would otherwise keep the pre-command figure until the next message.
       addContextReading(state, trimmed, result.response);
-      saveSession(ctx.workspacePath, session.messages, session.mode);
+      saveSession(ctx.workspacePath, session);
     }
 
     if (result.recreateAgent) {

@@ -1,6 +1,7 @@
 import type { ChatSession, SessionMode } from "./types.js";
 import { resolveModelForMode } from "../providers/provider-factory.js";
 import { loadRole } from "../skills/role-loader.js";
+import { loadPersona } from "../personas/persona-loader.js";
 
 /**
  * Whether a hand-picked `/model` choice still applies.
@@ -45,12 +46,15 @@ export function activeManualModel(
  * (the status bar naming a model the turn was not using), so it lives here now.
  */
 export function resolveSessionModel(
-  session: Pick<ChatSession, "manualModel" | "manualModelScope" | "mode" | "activeRole">,
+  session: Pick<ChatSession, "manualModel" | "manualModelScope" | "mode" | "activeRole" | "persona">,
   workspacePath: string,
 ): string | undefined {
-  const role = session.activeRole ? loadRole(session.activeRole, workspacePath) : null;
+  // A persona replaces the coding identity, roles included — its model sits where a role's would.
+  const persona = session.persona ? loadPersona(session.persona, workspacePath) : null;
+  const role = session.activeRole && !session.persona ? loadRole(session.activeRole, workspacePath) : null;
   return (
     activeManualModel(session, session.mode) ||
+    (persona?.ok ? persona.persona.preferredModel : undefined) ||
     role?.preferredModel ||
     resolveModelForMode(session.mode)
   );

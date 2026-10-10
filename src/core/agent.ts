@@ -45,6 +45,8 @@ import { formatBatchPatchResult } from "./helpers/format-batch-patch-result.js";
 import { type SkillMode } from "../skills/skill-loader.js";
 import { resolveSessionModel } from "../chat/manual-model.js";
 import { loadRole } from "../skills/role-loader.js";
+import { resolvePersonaTurn, type PersonaTurn } from "../personas/persona-turn.js";
+import { surfaceToolNames } from "../agent-mode/tools-loop/tool-selection.js";
 import {
   ensureRepoMapIndexed,
   initWatcher,
@@ -180,7 +182,31 @@ export class Agent {
     // opinion from. Resolved here, before the tuning, because the two must agree: picking the
     // model without picking its rei.config.json entry runs it on the other model's sampling,
     // context window and thinking level.
-    const turnRole = session.activeRole
+    // A persona REPLACES the coding identity — prompt, tools, reading scope, model (phase 3 of
+    // docs/persona-spec.md). One that cannot load fails the turn rather than answer as plain REI:
+    // on a public channel that would be the coding prompt, with the coding tools.
+    const personaTurn = session.persona
+      ? resolvePersonaTurn({
+          name: session.persona,
+          workspacePath: this.workspacePath,
+          // The mode is the coding agent's profile, not the persona's: it gets every tool REI has,
+          // narrowed by what it declares (and by a channel's own list).
+          surfaceTools: surfaceToolNames("agent", this.mcpRegistry),
+          channelAllowedTools: options?.allowedTools,
+          channelReadRoot: options?.readRoot,
+        })
+      : undefined;
+    if (personaTurn && !personaTurn.ok) {
+      this.logger.logInfo("[persona] turn refused", { error: personaTurn.error });
+      yield `\x11⚠️  ${personaTurn.error}`;
+      return;
+    }
+    const persona = personaTurn?.turn;
+    if (persona?.dropped.length) {
+      this.logger.logInfo("[persona] tools not offered on this surface", { dropped: persona.dropped });
+    }
+    // A persona and a role do not stack: with a persona active the role is ignored.
+    const turnRole = session.activeRole && !persona
       ? loadRole(session.activeRole, this.workspacePath)
       : null;
     // Most recent explicit choice first: `/model` (this session) beats the role's preference,
@@ -193,7 +219,7 @@ export class Agent {
     setActiveModelTuning(resolveModelTuning(turnModel, this.workspacePath));
     // Enriches the turn and PUSHES it onto the session — the pushed message is what gets sent,
     // so there is no enriched copy to hand around separately any more.
-    await this.prepareSessionForTurn(session, userInput, options?.onStatus);
+    await this.prepareSessionForTurn(session, userInput, options?.onStatus, persona);
     await this.compactSessionIfNeeded(
       session,
       options?.onStatus,
@@ -263,10 +289,11 @@ export class Agent {
           onChunk,
           drainUserMessages: options?.drainUserMessages,
           userQuery: userInput,
-          roleWriteGlob: turnRole?.writeGlob,
+          roleWriteGlob: turnRole?.writeGlob ?? persona?.writeGlob,
+          skillNames: persona?.skillNames,
           elicit: options?.elicit,
-          allowedTools: options?.allowedTools,
-          readRoot: options?.readRoot,
+          allowedTools: persona ? persona.allowedTools : options?.allowedTools,
+          readRoot: persona ? persona.readRoot : options?.readRoot,
         }).finally(() => {
           done = true;
           resolver?.();
@@ -479,10 +506,11 @@ export class Agent {
         userQuery: userInput,
         mode: session.mode as SkillMode,
         // Narrows what this turn may write — see write-scope.
-        roleWriteGlob: turnRole?.writeGlob,
+        roleWriteGlob: turnRole?.writeGlob ?? persona?.writeGlob,
+        skillNames: persona?.skillNames,
         elicit: options?.elicit,
-        allowedTools: options?.allowedTools,
-        readRoot: options?.readRoot,
+        allowedTools: persona ? persona.allowedTools : options?.allowedTools,
+        readRoot: persona ? persona.readRoot : options?.readRoot,
       }).finally(() => {
         done = true;
         resolver?.();
@@ -665,19 +693,32 @@ export class Agent {
       }
     }
 
-    if (session.messages.length > 0 && session.messages[0].role === "system") {
-      session.messages[0].content = systemContent;
-    } else {
-      session.messages.unshift({ role: "system", content: systemContent });
-    }
+    this.setSystemMessage(session, systemContent);
+  }
 
+  /** The session's system message, replaced in place (or added first) — never duplicated. */
+  private setSystemMessage(session: ChatSession, content: string): void {
+    if (session.messages.length > 0 && session.messages[0].role === "system") {
+      session.messages[0].content = content;
+    } else {
+      session.messages.unshift({ role: "system", content });
+    }
   }
 
   private async prepareSessionForTurn(
     session: ChatSession,
     userInput: string,
     onStatus?: StreamTurnOptions["onStatus"],
+    persona?: PersonaTurn,
   ): Promise<string> {
+    if (persona) {
+      // A persona turn carries none of the coding context — no repo map, no RAG, no "Workspace:" /
+      // "Repository summary" framing. On a public channel that framing names the server's layout.
+      this.setSystemMessage(session, persona.systemPrompt);
+      this.logger.logUserPrompt({ mode: session.mode, prompt: userInput });
+      session.messages.push({ role: "user", content: userInput, turnId: this.currentTurnId });
+      return userInput;
+    }
     // Hardware check runs concurrently with context building (non-blocking)
     // TEMPORARY: disabled for debugging — re-enable after testing
     // if (isOllamaProvider(session.mode)) {

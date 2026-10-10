@@ -22,6 +22,7 @@ One-shot output goes to stdout and nothing else, so it pipes.
 
 Session:
   -s, --session <name>           Open (or create) a named session
+      --persona <name>           Run as that persona (e.g. daily) instead of the coding agent
   -c, --continue                 Resume the most recently updated session
       --force                    Steal the lock if another terminal holds it
       --workspace <path>         Project directory (default: the current one)

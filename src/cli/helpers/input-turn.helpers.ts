@@ -357,13 +357,7 @@ export async function handleInputTurn(
     state.thinkingTail = undefined;
     actions.stopSpinner();
 
-    saveSession(
-      ctx.workspacePath,
-      session.messages,
-      session.mode,
-      session.summary,
-      session.createdAt,
-    );
+    saveSession(ctx.workspacePath, session);
 
     actions.draw();
   }

@@ -55,6 +55,17 @@ export interface ToolSelection {
  * sent in full. Skills ride as a `use_skill` catalog (name+description only). Returns `buildTools`
  * plus the mutable `activeMcp` set so the loop's search_tools handler can grow it by reference.
  */
+/**
+ * Every tool name a turn in `mode` can be offered on the CLI/server surface — what a persona's
+ * `tools` is narrowed AGAINST (docs/persona-spec.md). The same sources buildTools draws from.
+ */
+export function surfaceToolNames(mode: SkillMode, mcpRegistry?: McpRegistry): string[] {
+  const mcp = mcpRegistry ? mcpToolsToDefinitions(mcpRegistry.getAvailableTools()) : [];
+  return [...toolsForMode(mode), WEB_SEARCH_TOOL, WEATHER_TOOL, ASK_USER_TOOL, ...mcp].map(
+    (t) => t.function.name,
+  );
+}
+
 export function setupToolSelection(params: {
   mcpRegistry?: McpRegistry;
   messagesForModel: ChatMessage[];
@@ -67,6 +78,8 @@ export function setupToolSelection(params: {
   allowSubAgents?: boolean;
   /** When set, the ONLY tools offered — applied last, over everything below (MCP, skills, …). */
   allowedTools?: readonly string[];
+  /** When set, the ONLY skills in the use_skill catalog, whatever their own `modes:` say. */
+  skillNames?: readonly string[];
 }): ToolSelection {
   const {
     mcpRegistry,
@@ -78,7 +91,15 @@ export function setupToolSelection(params: {
     allowSubAgents = true,
   } = params;
 
-  const allMcpTools = mcpRegistry ? mcpRegistry.getAvailableTools() : [];
+  // With an allow-list (a persona, a channel) the MCP set is narrowed at the SOURCE, before the
+  // tool-search decision: preloads are not spent on tools that would be filtered out afterwards, a
+  // persona allowing 10 MCP tools gets all 10 instead of search mode, and search_tools can only ever
+  // find allowed ones — it cannot widen what the turn may use.
+  const allowed = params.allowedTools;
+  const registryTools = mcpRegistry ? mcpRegistry.getAvailableTools() : [];
+  const allMcpTools = allowed
+    ? registryTools.filter((t) => allowed.includes(`mcp:${t.name}`))
+    : registryTools;
   const query = userQuery ?? lastUserText(messagesForModel);
   const useToolSearch =
     allMcpTools.length > MAX_UNFILTERED && process.env.REI_TOOL_RAG !== "false";
@@ -99,11 +120,17 @@ export function setupToolSelection(params: {
   // Skills: reusable task recipes loaded on demand. Only the catalog (name + description) rides in
   // the `use_skill` tool; the full body is injected only when the model invokes it. Scoped to the
   // active mode (ask/planning/agent each surface a different skill set).
-  const skills = skillsForMode(loadSkills(workspacePath), mode);
+  // A persona names its skills: the session's mode no more applies to them than to its tools.
+  const skills = params.skillNames
+    ? loadSkills(workspacePath).filter((s) => params.skillNames!.includes(s.name))
+    : skillsForMode(loadSkills(workspacePath), mode);
   const useSkillTool = buildUseSkillTool(skills);
 
   // The built-in capability set for this mode (agent → full incl. edits; ask/planning → read-only).
-  const baseTools = toolsForMode(mode);
+  // With an allow-list the full set is the base instead: the list says exactly what the turn may use
+  // (a persona declares its tools; the mode is the coding agent's profile, not the persona's), and
+  // writes are still gated where they execute (write-scope). A channel's list is read-only anyway.
+  const baseTools = allowed ? toolsForMode("agent") : toolsForMode(mode);
 
   // The tools array is rebuilt each turn so newly-searched tools become callable.
   const buildTools = (): ToolDefinition[] => {
@@ -115,8 +142,12 @@ export function setupToolSelection(params: {
     if (allowSubAgents && subAgentsEnabled()) tools.push(DELEGATE_TOOL);
     if (useToolSearch) tools.push(SEARCH_TOOLS_DEF);
     if (useSkillTool) tools.push(useSkillTool);
-    const allowed = params.allowedTools;
-    return allowed ? tools.filter((t) => allowed.includes(t.function.name)) : tools;
+    // search_tools rides along when search mode is on: allMcpTools is already narrowed above.
+    return allowed
+      ? tools.filter(
+          (t) => allowed.includes(t.function.name) || (useToolSearch && t === SEARCH_TOOLS_DEF),
+        )
+      : tools;
   };
 
   return { buildTools, activeMcp, allMcpTools, useToolSearch, skills };

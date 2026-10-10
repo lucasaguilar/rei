@@ -65,13 +65,7 @@ export const specCommands: CommandHandler = {
           { role: "assistant" as const, content: specContent },
         ];
 
-        saveSession(
-          workspacePath,
-          updatedMessages,
-          session.mode,
-          session.summary,
-          session.createdAt,
-        );
+        saveSession(workspacePath, { ...session, messages: updatedMessages });
 
         return {
           success: true,

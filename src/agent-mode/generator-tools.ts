@@ -105,6 +105,8 @@ export async function executeAgentTurnWithTools(params: {
   allowedTools?: readonly string[];
   /** Read tools stay inside this directory, never `.rei/`. See StreamTurnOptions.readRoot. */
   readRoot?: string;
+  /** The only skills use_skill may load (a persona's), whatever their modes. */
+  skillNames?: readonly string[];
 }): Promise<ExecutionResult> {
   const {
     provider,
@@ -143,6 +145,7 @@ export async function executeAgentTurnWithTools(params: {
     mode,
     allowSubAgents: depth === 0,
     allowedTools: params.allowedTools,
+    skillNames: params.skillNames,
   });
 
   let currentMessages: ChatMessage[] = withNativeToolsDirective(

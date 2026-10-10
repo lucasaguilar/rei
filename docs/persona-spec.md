@@ -58,6 +58,8 @@ name: sales
 description: Commercial assistant for Acme Co.
 tools: [read_files, grep_code, list_files]   # narrows what the surface allows; never widens
 knowledgeDir: kb/sales                      # the ONLY directory it reads (relative to the workspace)
+skills: [quote-template]                     # the ONLY skills it may load (optional)
+writeGlob: "quotes/*.md"                     # the ONLY files it may write (optional; none without it)
 preferredModel: qwen/qwen3.6-plus            # optional
 language: auto                               # auto = the user's language; or a fixed code (es, en…)
 maxReplyChars: 1200                          # optional
@@ -81,6 +83,8 @@ the catalog in your knowledge base …
 | `language` | no | `auto` or a language code | default `auto` |
 | `maxReplyChars` | no | asked of the model as a length target; hard-capped by channels | positive integer |
 | `handoff` | no | how to reach a human | default: "I can't help with that here." |
+| `skills` | no | skills it may load with `use_skill` — only these appear in the catalog | a list of names; one that does not exist is dropped and logged. Default: none (no `use_skill`) |
+| `writeGlob` | no | the only files it may create or edit | must name a directory (`news/*.html`, not `*.html` — a bare pattern matches that name anywhere, `.rei/` included); not under `.rei/`, not outside the workspace. Default: none — **a persona without it cannot write**, whatever its `tools` say |
 
 The **body** is the persona's identity, tone, scope and out-of-scope list. It replaces REI's identity.
 
@@ -169,8 +173,23 @@ readRoot      = persona.knowledgeDir (or the workspace)   — `.rei/` always ref
 
 | Surface | Surface set |
 |---|---|
-| CLI / one-shot / server | everything the session offers today: the mode's tools (`ask`: read-only + run_command; `agent`: + edits) **plus** `web_search`, `weather`, `ask_user` and the connected MCP tools |
+| CLI / one-shot / server | every tool REI has — edits included — **plus** `web_search`, `weather`, `ask_user` and the connected MCP tools. **The session's mode does not limit a persona**: it declares its own tools (below) |
 | WhatsApp | `read_files`, `grep_code`, `list_files` |
+
+**Why the mode does not apply.** A mode (`ask` / `planning` / `agent`) is the coding agent's permission
+profile. A persona replaces that agent and declares exactly what it may use, so filtering it again by
+the mode only adds a trap: `daily` could not update its briefing file in `ask` and could in `agent`,
+for no reason the person could see. What keeps a persona from doing too much is what it declares —
+`tools`, `knowledgeDir`, `writeGlob` — enforced by `allowedTools`, `readRoot` and the write scope.
+Channels still cap it (WhatsApp stays read-only).
+
+**Writing.** Write tools (`create_file`, `edit_file`, `rewrite_file`) are offered only with a
+`writeGlob`, and every write is checked against it when it executes — the same gate roles use
+(`write-scope.ts`). Listing `edit_file` in `tools` without a `writeGlob` drops it.
+
+**Skills.** `use_skill` is offered only with `skills`, and its catalog holds only those — a persona
+cannot load a recipe it was not given. A skill's own `modes:` does not apply under a persona, for the
+same reason the session's mode does not.
 
 **MCP tools by pattern.** Their names are `mcp:<server>/<tool>`, so `tools` accepts `mcp:*` (every
 connected server) and `mcp:<server>/*` (one server), besides exact names. A pattern only matches what
@@ -214,6 +233,8 @@ Added around any persona the WhatsApp channel runs.
 |---|---|---|
 | Which tools exist | `allowedTools` — the dispatcher refuses others | narrow, never widen |
 | What can be read | `readRoot` + `.rei/` always refused | narrow to its `knowledgeDir` |
+| What can be written | the write scope: only `writeGlob`, checked on every write | nothing without `writeGlob`; only those files with it |
+| Which skills can load | the `use_skill` catalog | only the ones it lists |
 | Who is served, rate, concurrency | channel settings | nothing |
 | Identity, tone, topics, hand-off | the prompt | define them |
 
@@ -235,10 +256,44 @@ last row is soft: prompt-level, best effort, and documented as such.
 4. **CLI** — `REI_PERSONA`, `--persona`, `/persona`, `/persona off`, `/persona <name>`, with the
    precedence above; a 👤 indicator above the prompt like 🎭 for roles; `/role` refuses while a persona
    is active. **`daily` migrates here** (role → persona, role deleted) and is the first one tried.
+4b. **Skills and writes** — `skills` and `writeGlob` in the loader; `allowedTools` may offer tools
+   outside the session's mode, and the skill catalog can be narrowed by name; a persona turn takes the
+   full surface, write tools only with `writeGlob` (the write scope enforcing it), `use_skill` only with
+   `skills`. Tests: a persona without `writeGlob` cannot write in any mode; with it, writes inside pass
+   and outside are refused; only listed skills load.
 5. **WhatsApp** — `REI_WHATSAPP_PERSONA` with the `general` fallback, the channel policy, `toWhatsAppText`
    + `maxReplyChars`; startup log names the persona.
 6. **Server** — `REI_SERVER_PERSONA`.
 7. **Examples** — `prompts/personas/{general,sales,support}.md` and a small fictitious `kb/`.
+
+## Where this is going: access policy (not built)
+
+Today each channel's ceiling is a constant: WhatsApp is read-only for everyone who writes. That is right
+for a public sales number and wrong for the next request — "I want MY agent over WhatsApp, with
+everything it can do", from a manager whose number is known. The answer is not a wider constant; it is
+a ceiling that depends on WHO is writing, set by the operator:
+
+```yaml
+# .rei/access.yaml — a sketch, not a format
+whatsapp:
+  default:      { persona: sales,   ceiling: read-only }
+  "<a number>": { persona: manager, ceiling: [read_files, "mcp:sheets/*"], write: "reports/*" }
+```
+
+The principle stays the one the code already enforces: **ceiling = channel × principal**, and the
+persona only narrows inside it. The hook is already in place — `resolvePersonaTurn` takes
+`channelAllowedTools` and `channelReadRoot` from its caller; a policy changes where those come from (the
+sender's entry instead of a channel constant), not how a turn is built.
+
+What that case will need, and nothing built so far should contradict:
+- **Confirmation over the channel.** Sensitive actions (send an email, delete a file) must ask the
+  person in the chat. Today the destructive-command gate answers "no" when nobody can be asked.
+- **Stronger identity for wide ceilings.** A sender id from the platform is good for "who is this
+  customer"; for "may run everything" it deserves more — a PIN for sensitive actions, or confirmation
+  on a second channel.
+- **An audit trail per principal**: who asked for what, and what ran.
+- **Tenants kept apart**: one workspace per organization, with its own personas, skills, knowledge
+  and credentials — which `.rei/personas/` and the read scope already assume.
 
 ## Later
 

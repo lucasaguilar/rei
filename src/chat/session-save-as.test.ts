@@ -28,7 +28,7 @@ describe("renameActiveSession", () => {
   beforeEach(() => {
     ws = fs.mkdtempSync(path.join(os.tmpdir(), "rei-saveas-"));
     setActiveSession("2026-09-18-120000");
-    saveSession(ws, messages, "agent");
+    saveSession(ws, { messages: messages, mode: "agent" });
   });
 
   afterEach(() => {
@@ -48,7 +48,7 @@ describe("renameActiveSession", () => {
     expect(fs.existsSync(path.join(ws, ".rei/sessions/2026-09-18-120000.json"))).toBe(false);
 
     // A later turn lands in the named file, not the old one.
-    saveSession(ws, [...messages, { role: "user", content: "seguimos" }], "agent");
+    saveSession(ws, { messages: [...messages, { role: "user", content: "seguimos" }], mode: "agent" });
     expect(loadCurrentSession(ws)?.messages).toHaveLength(3);
     expect(listSessions(ws).map((s) => s.id)).toEqual(["fix-the-context-bug"]);
   });

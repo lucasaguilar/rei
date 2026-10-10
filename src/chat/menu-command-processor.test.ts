@@ -71,13 +71,7 @@ describe("menu-command-processor session commands", () => {
       ],
     };
 
-    saveSession(
-      tmpWorkspace,
-      session.messages,
-      session.mode,
-      session.summary,
-      session.createdAt,
-    );
+    saveSession(tmpWorkspace, session);
 
     const result = await processMenuCommand(
       "/session new",
@@ -109,7 +103,7 @@ describe("menu-command-processor session commands", () => {
       ],
     };
 
-    saveSession(tmpWorkspace, session.messages, session.mode, session.summary, session.createdAt);
+    saveSession(tmpWorkspace, session);
 
     const result = await processMenuCommand("/session new agregar-login-social", session, tmpWorkspace, provider);
 
@@ -146,7 +140,7 @@ describe("menu-command-processor session commands", () => {
     // messages into this instance's own file and left `ayer.json` frozen — every turn that followed
     // was written somewhere the user never asked for.
     expect(getActiveSessionId()).toBe("ayer");
-    saveSession(tmpWorkspace, [...result.newSession!.messages, { role: "user", content: "y hoy" }], "agent");
+    saveSession(tmpWorkspace, { messages: [...result.newSession!.messages, { role: "user", content: "y hoy" }], mode: "agent" });
     const reread = JSON.parse(fsSync.readFileSync(path.join(dir, "ayer.json"), "utf8"));
     expect(reread.messages).toHaveLength(2);
   });
@@ -183,7 +177,7 @@ describe("menu-command-processor session commands", () => {
       messages: [{ role: "user", content: "do something" }],
     };
 
-    saveSession(tmpWorkspace, session.messages, session.mode, session.summary, session.createdAt);
+    saveSession(tmpWorkspace, session);
 
     const result = await processMenuCommand("/session save-as nombre-lindo", session, tmpWorkspace, provider);
 
@@ -205,7 +199,7 @@ describe("menu-command-processor session commands", () => {
       messages: [{ role: "user", content: "do something" }],
     };
 
-    saveSession(tmpWorkspace, session.messages, session.mode, session.summary, session.createdAt);
+    saveSession(tmpWorkspace, session);
 
     const result = await processMenuCommand("/session archive fix-bug-123", session, tmpWorkspace, provider);
 
@@ -225,7 +219,7 @@ describe("menu-command-processor session commands", () => {
       messages: [{ role: "user", content: "msg1" }],
     };
 
-    saveSession(tmpWorkspace, session.messages, session.mode, session.summary, session.createdAt);
+    saveSession(tmpWorkspace, session);
     await processMenuCommand("/session new my-feature", session, tmpWorkspace, provider);
 
     // Create a new session and archive with the same name
@@ -233,7 +227,7 @@ describe("menu-command-processor session commands", () => {
       mode: "ask",
       messages: [{ role: "user", content: "msg2" }],
     };
-    saveSession(tmpWorkspace, session2.messages, session2.mode);
+    saveSession(tmpWorkspace, { messages: session2.messages, mode: session2.mode });
     const result2 = await processMenuCommand("/session new my-feature", session2, tmpWorkspace, provider);
 
     expect(result2.success).toBe(true);
@@ -430,7 +424,7 @@ Modify [app.ts](file:///Users/dev/www/rei/app.ts)
     expect(loadCurrentPlanContent(tmpWorkspace)).toBeNull();
 
     // 2. Loading a session restores the active plan from its last planning message
-    saveSession(tmpWorkspace, session.messages, session.mode, session.summary, "2026-05-26T20:59:58Z");
+    saveSession(tmpWorkspace, session);
     const activeSessions = listSessions(tmpWorkspace);
     if (activeSessions.length > 0) {
       const sessionId = activeSessions[0].id;
