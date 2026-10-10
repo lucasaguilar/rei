@@ -240,6 +240,35 @@ last row is soft: prompt-level, best effort, and documented as such.
 6. **Server** — `REI_SERVER_PERSONA`.
 7. **Examples** — `prompts/personas/{general,sales,support}.md` and a small fictitious `kb/`.
 
+## Where this is going: access policy (not built)
+
+Today each channel's ceiling is a constant: WhatsApp is read-only for everyone who writes. That is right
+for a public sales number and wrong for the next request — "I want MY agent over WhatsApp, with
+everything it can do", from a manager whose number is known. The answer is not a wider constant; it is
+a ceiling that depends on WHO is writing, set by the operator:
+
+```yaml
+# .rei/access.yaml — a sketch, not a format
+whatsapp:
+  default:      { persona: sales,   ceiling: read-only }
+  "<a number>": { persona: manager, ceiling: [read_files, "mcp:sheets/*"], write: "reports/*" }
+```
+
+The principle stays the one the code already enforces: **ceiling = channel × principal**, and the
+persona only narrows inside it. The hook is already in place — `resolvePersonaTurn` takes
+`channelAllowedTools` and `channelReadRoot` from its caller; a policy changes where those come from (the
+sender's entry instead of a channel constant), not how a turn is built.
+
+What that case will need, and nothing built so far should contradict:
+- **Confirmation over the channel.** Sensitive actions (send an email, delete a file) must ask the
+  person in the chat. Today the destructive-command gate answers "no" when nobody can be asked.
+- **Stronger identity for wide ceilings.** A sender id from the platform is good for "who is this
+  customer"; for "may run everything" it deserves more — a PIN for sensitive actions, or confirmation
+  on a second channel.
+- **An audit trail per principal**: who asked for what, and what ran.
+- **Tenants kept apart**: one workspace per organization, with its own personas, skills, knowledge
+  and credentials — which `.rei/personas/` and the read scope already assume.
+
 ## Later
 
 - **REI itself as a persona.** `shared/base.md` + `shared/personality.md` become `prompts/personas/rei.md`,
