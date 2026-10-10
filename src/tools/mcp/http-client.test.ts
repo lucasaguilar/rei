@@ -164,6 +164,19 @@ describe("HttpMcpClient", () => {
 
       expect(tools[0].description).toBe("ping");
     });
+
+    // The MCP safety gate reads these; dropping them here silently turns every server's own
+    // "this tool deletes/sends" declaration into an ungated call.
+    it("keeps the server's behaviour annotations", async () => {
+      mockState.listToolsResult = {
+        tools: [{ name: "send", annotations: { readOnlyHint: false, destructiveHint: true } }],
+      };
+
+      const client = await HttpMcpClient.create("svc", "http://localhost/mcp");
+      const tools: McpTool[] = await client.listTools();
+
+      expect(tools[0].annotations).toEqual({ readOnlyHint: false, destructiveHint: true });
+    });
   });
 
   describe("callTool()", () => {

@@ -134,9 +134,9 @@ deleted; `nativeToolsActive` simplified + `REI_NATIVE_ASK` removed; `buildSystem
 `formatMcpToolsForPrompt`. **Net −3140 lines, tsc clean, 495 tests green.** Native function-calling is
 now the ONLY engine across ask/planning/agent. gemini/hf need live validation (no keys locally).
 
-Minor leftovers (optional dead-export sweep, non-blocking): `modelFeedbackToolNames` and some
-`action-executor`/`response-handler` extractor exports are now production-dead but still used by the
-CLI layer / tests — trim in a later pass.
+Leftovers swept on 2026-09-29: the XML dispatcher (`action-executor.ts`, whose MCP calls
+and commands bypassed every confirm gate), its `<call_tool>`/`<execute_command>` extractors and
+`git-changes-tool.ts` were deleted.
 
 ### Gemini live-validation fixes (2026-07-01)
 First live Gemini test surfaced compat-layer strictness. Google's OpenAI-compat endpoint 400s on

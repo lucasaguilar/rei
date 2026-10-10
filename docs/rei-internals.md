@@ -95,10 +95,9 @@ rides in the prompt; the full body is injected when the model invokes `use_skill
 - **Mode-scoped** via `modes:` frontmatter (default `[agent]`). `skillsForMode()` filters: the native
   agent path exposes agent-mode skills in the tool schema; ask/planning inject the mode's catalog into
   the prompt (`buildSkillCatalogText`) and the model invokes via `<call_tool name="use_skill">`.
-- A model often calls a skill by its own name (`<call_tool name="write-spec">`) instead of via
-  `use_skill` — `action-executor.ts` tolerates this (loads any tool name matching a mode-scoped skill,
-  after built-ins/MCP), and `agent.ts` adds the mode's skill names to `feedbackTools` so the recipe is
-  fed back. **Dispatch and re-feed are two separate gates — a skill call needs both.**
+- A skill is loaded only through `use_skill` (`meta-handlers.ts`). The XML path used to also accept
+  a call by the skill's own name; that path is gone, and on the native path such a call comes back as
+  `Unknown tool`, which tells the model to retry through `use_skill`.
 
 **Spec-driven loop** (planning skills): `write-spec` (Goal / In scope / **Out of scope** / Acceptance
 criteria — the scope-creep guard) → `micro-task-decomposition` (smallest atomic stages, each with

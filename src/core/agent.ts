@@ -41,7 +41,7 @@ import {
   cleanResponseForHistory,
 } from "./helpers/turn-message.helpers.js";
 import type { StreamTurnOptions } from "./models/agent.types.js";
-import { formatBatchPatchResult } from "./helpers/action-executor.js";
+import { formatBatchPatchResult } from "./helpers/format-batch-patch-result.js";
 import { type SkillMode } from "../skills/skill-loader.js";
 import { resolveSessionModel } from "../chat/manual-model.js";
 import { loadRole } from "../skills/role-loader.js";

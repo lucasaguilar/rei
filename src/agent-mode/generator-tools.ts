@@ -182,6 +182,7 @@ export async function executeAgentTurnWithTools(params: {
   // progress — the classic find/grep loop). Cleared after a turn that edits, so a legit post-edit
   // re-verification (`npx tsc --noEmit`) can run again.
   const commandHistory = new Map<string, number>();
+  const invalidMcpCalls = new Map<string, number>();
   // Streak of consecutive all-blocked-repeat turns; escalation policy lives in blocked-repeat-guard.
   let consecutiveBlockedTurns = 0;
   const MAX_BLOCKED_TURNS = 2;
@@ -397,13 +398,15 @@ export async function executeAgentTurnWithTools(params: {
           resolveTarget,
           createdFiles,
           commandHistory,
+          invalidMcpCalls,
         },
       );
 
       // A turn that queued edits changed (or will change) disk state — drop the run_command
       // history so a follow-up re-verification of the SAME command (e.g. `npx tsc --noEmit`)
-      // isn't mistaken for a no-progress loop.
-      if (editTasks.length > 0) commandHistory.clear();
+      // isn't mistaken for a no-progress loop. create_file writes straight to disk instead of
+      // queueing, so it counts too: missing it refused a legit second `rm` of a re-created file.
+      if (editTasks.length > 0 || createdFiles.length > createdBefore) commandHistory.clear();
 
       // Apply this turn's queued edits onto the CURRENT virtual tree (cumulative, per file & in order),
       // then validate the WHOLE tree — catches cross-file breakage while letting interdependent files be
