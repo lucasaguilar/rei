@@ -10,6 +10,17 @@ export function getAgentEditFormat(): AgentEditFormat {
 
 
 /**
+ * Current date — the model has a training cutoff and otherwise hallucinates "today", breaking
+ * date-relative tasks (e.g. "today's emails", "last week"). Shared by the coding prompt and the
+ * persona prompt, so both state it the same way.
+ */
+export function buildCurrentDateLine(now: Date = new Date()): string {
+  const isoDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const weekday = now.toLocaleDateString("en-US", { weekday: "long" });
+  return `Current date: ${weekday}, ${isoDate} (user's local time). Use this for any date-relative request; do not guess the date.`;
+}
+
+/**
  * REI ships NO rules about your stack.
  *
  * There used to be an `ANGULAR_RULES` constant here, injected into every turn of any workspace
@@ -27,12 +38,7 @@ export function buildSystemMessage(
   workspacePath?: string,
   roleBody?: string,
 ): string {
-  // Current date — the model has a training cutoff and otherwise hallucinates
-  // "today", breaking date-relative tasks (e.g. "today's emails", "last week").
-  const now = new Date();
-  const isoDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-  const weekday = now.toLocaleDateString("en-US", { weekday: "long" });
-  const currentDateLine = `Current date: ${weekday}, ${isoDate} (user's local time). Use this for any date-relative request; do not guess the date.`;
+  const currentDateLine = buildCurrentDateLine();
 
   const sections: string[] = [
     loadPrompt("shared/base"),
