@@ -11,6 +11,11 @@ import { Agent } from "./core/agent.js";
 import { ChatHandler } from "./server/chat-handler.js";
 import { HEALTH_BODY, HEALTH_PATH, isHealthProbe, normalizeRoutePath } from "./server/health.js";
 import { evaluateBrowserRequest } from "./server/browser-guard.js";
+import {
+  handleWhatsAppWebhook,
+  isWhatsAppWebhookRequest,
+} from "./server/whatsapp-webhook.js";
+import { createWhatsAppChannel } from "./server/whatsapp-channel.js";
 import { REI_LOGO } from "./cli/rei-logo.js";
 import {
   isWorkspaceAllowed,
@@ -122,7 +127,14 @@ async function startServer() {
       // whether or not a token is set, because the no-token case is exactly the exposed one.
       allowedOrigin: process.env.REI_SERVER_ORIGIN || "",
     });
-    if (browserRejection && !isHealthProbe(req.url, req.method)) {
+    // The WhatsApp webhook is exempt like health: Meta's POST carries no Origin, and on a public
+    // host the Host check would be the only thing standing between Meta and the route. Its own
+    // HMAC signature (checked in the handler) is the real gate.
+    if (
+      browserRejection &&
+      !isHealthProbe(req.url, req.method) &&
+      !isWhatsAppWebhookRequest(req.url, req.method)
+    ) {
       res.writeHead(browserRejection.status, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
@@ -143,6 +155,15 @@ async function startServer() {
     if (isHealthProbe(req.url, req.method)) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(HEALTH_BODY);
+      return;
+    }
+
+    // WhatsApp webhook BEFORE the bearer check: Meta authenticates with an HMAC signature, never a
+    // bearer token, so it would 401 below. The handler enforces its own signature — this route is
+    // never unauthenticated. The channel (whatsapp-channel.ts) runs the agent turn and replies
+    // via the Graph API.
+    if (isWhatsAppWebhookRequest(req.url, req.method)) {
+      await handleWhatsAppWebhook(req, res, createWhatsAppChannel(agent, WORKSPACE_PATH));
       return;
     }
 

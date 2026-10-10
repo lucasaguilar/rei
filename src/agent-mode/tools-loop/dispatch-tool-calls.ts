@@ -1,11 +1,11 @@
 import type { AgentLogger } from "../../core/logger.js";
+import { runReadTool } from "./read-tool-handlers.js";
 import { fromWireToolName } from "../../contracts/mcp-tool-names.js";
 import type { ModelProvider } from "../../providers/model-provider.js";
 import type { ToolCall } from "../../providers/model-provider.js";
 import type { McpRegistry } from "../../tools/mcp/mcp-registry.js";
 import type { Skill } from "../../skills/skill-loader.js";
 import { startToolSpan } from "../../telemetry/spans.js";
-import { handleReadFiles } from "./read-files-handler.js";
 import {
   handleWebSearch,
   handleWeather,
@@ -15,7 +15,6 @@ import {
   handleSaveToolOutput,
 } from "./builtin-handlers.js";
 import { isWriteAllowed, writeDeniedMessage, writeScopeForMode } from "./write-scope.js";
-import { grepCode, listFiles } from "../../tools/code-search.js";
 import { nonInteractiveElicit, type ElicitFn } from "../../chat/elicitation.js";
 import { handleDelegate } from "./delegate-handler.js";
 import {
@@ -39,6 +38,10 @@ export interface DispatchContext {
   mode?: string;
   /** An active role's `writeGlob`, which narrows that scope further. */
   roleWriteGlob?: string;
+  /** When set, a call to any other tool is refused, not run. See StreamTurnOptions.allowedTools. */
+  allowedTools?: readonly string[];
+  /** Read tools stay inside this directory and out of `.rei/`. See read-scope. */
+  readRoot?: string;
   logger: AgentLogger;
   emitStatus: (msg: string) => void;
   /** Asks the user a question mid-turn (ask_user tool). Frontend-provided; defaults to the
@@ -130,6 +133,20 @@ export async function dispatchToolCalls(
   for (const call of toolCalls) {
     let toolResult: string;
 
+    // Not offering a tool is not enough: a model can emit a call to one it was never shown (from
+    // its training, or from the prompt). Outside the allow-list it is refused here, before any
+    // handler — this check is what actually keeps run_command off a channel like WhatsApp.
+    if (ctx.allowedTools && !ctx.allowedTools.includes(call.function.name)) {
+      logger.logInfo(`[tools] refused ${call.function.name}: not in this turn's allowedTools`);
+      toolResultsMap.set(
+        call.id,
+        `ERROR: the tool "${call.function.name}" is not available in this channel. ` +
+          `Available: ${ctx.allowedTools.join(", ")}.`,
+      );
+      hasToolFailure = true;
+      continue;
+    }
+
     // `tool.<name>` span for each call. run_command and mcp:* tools are already traced at
     // their executors (executeCommand / McpRegistry.dispatch), so skip them here to avoid
     // double-wrapping; the inline built-ins have no shared executor and are traced here.
@@ -145,46 +162,16 @@ export async function dispatchToolCalls(
         string,
         unknown
       >;
+      // read_files / grep_code / list_files, inside the turn's read scope — see read-tool-handlers.
+      const readResult = await runReadTool(call.function.name, args, {
+        workspacePath, logger, emitStatus, toRel, currentContent, virtualFiles, readRoot: ctx.readRoot,
+      });
+      if (readResult !== undefined) {
+        toolResultsMap.set(call.id, readResult);
+        continue;
+      }
 
       switch (call.function.name) {
-        // ── read_files ───────────────────────────────────────────────
-        case "read_files": {
-          const rf = await handleReadFiles(
-            (args.paths as string[]) ?? [],
-            { workspacePath, logger, emitStatus, toRel, currentContent, virtualFiles },
-            { offset: args.offset as number | undefined, limit: args.limit as number | undefined },
-          );
-          toolResult = rf.text;
-          // No re-read guard: read_files always serves the file. If the model asks for it, it gets it.
-          toolResultsMap.set(call.id, toolResult);
-          break;
-        }
-
-        // ── grep_code (repo search) ──────────────────────────────────
-        case "grep_code": {
-          emitStatus(`🔎  [REI] grep_code: ${(args.pattern as string) ?? ""}`);
-          toolResult = await grepCode(workspacePath, {
-            pattern: (args.pattern as string) ?? "",
-            path: args.path as string | undefined,
-            glob: args.glob as string | undefined,
-            maxResults: args.max_results as number | undefined,
-          });
-          toolResultsMap.set(call.id, toolResult);
-          break;
-        }
-
-        // ── list_files (glob) ────────────────────────────────────────
-        case "list_files": {
-          emitStatus(`📁  [REI] list_files: ${(args.glob as string) ?? "*"}`);
-          toolResult = await listFiles(workspacePath, {
-            glob: args.glob as string | undefined,
-            path: args.path as string | undefined,
-            maxResults: args.max_results as number | undefined,
-          });
-          toolResultsMap.set(call.id, toolResult);
-          break;
-        }
-
         // ── search_tools (meta-tool) ─────────────────────────────────
         case "search_tools": {
           toolResult = handleSearchTools((args.query as string) ?? "", {

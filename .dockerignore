@@ -21,7 +21,9 @@ docs
 # dist/skills/skill-loader.js and dist/skills/role-loader.js read the markdown
 # prompts/skills/roles from <root>/prompts at runtime.
 tools
-scripts
+# `postbuild` runs scripts/write-build-info.js inside the builder; without it `npm run build` fails.
+scripts/*
+!scripts/write-build-info.js
 bin
 *.test.ts
 *.spec.ts
