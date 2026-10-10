@@ -22,6 +22,10 @@ export interface Persona {
   tools?: string[];
   /** Absolute directory it may read; undefined = the workspace. Never under `.rei/`. */
   knowledgeDir?: string;
+  /** The only skills `use_skill` may load; undefined = no `use_skill` at all. */
+  skills?: string[];
+  /** The only files it may write (workspace-relative glob naming a directory); undefined = no writes. */
+  writeGlob?: string;
   preferredModel?: string;
   /** `auto` (the user's language) or a language code. */
   language: string;
@@ -121,15 +125,27 @@ function parsePersona(
   if (!description) return fail("`description` is required.");
   if (!body) return fail("the body (who the assistant is) is empty.");
 
-  let tools: string[] | undefined;
-  const toolsRaw = meta.match(/^\s*tools:\s*(.+)$/m)?.[1].trim();
-  if (toolsRaw !== undefined) {
-    const list = toolsRaw.match(/^\[(.*)\]$/);
-    if (!list) return fail("`tools` must be a list, e.g. [read_files, grep_code, \"mcp:*\"].");
-    tools = list[1]
+  // `key: [a, "b"]` → ["a", "b"]; null when the key is present but not a list.
+  const listField = (k: string): string[] | null | undefined => {
+    const raw = meta.match(new RegExp(`^\\s*${k}:\\s*(.+)$`, "m"))?.[1].trim();
+    if (raw === undefined) return undefined;
+    const list = raw.match(/^\[(.*)\]$/);
+    if (!list) return null;
+    return list[1]
       .split(",")
       .map((t) => t.trim().replace(/^["']|["']$/g, ""))
       .filter(Boolean);
+  };
+
+  const tools = listField("tools");
+  if (tools === null) return fail("`tools` must be a list, e.g. [read_files, grep_code, \"mcp:*\"].");
+  const skills = listField("skills");
+  if (skills === null) return fail("`skills` must be a list, e.g. [daily-ai-briefing].");
+
+  const writeGlob = field("writeGlob");
+  if (writeGlob) {
+    const why = writeGlobProblem(writeGlob, workspacePath);
+    if (why) return fail(`\`writeGlob: ${writeGlob}\` ${why}`);
   }
 
   let knowledgeDir: string | undefined;
@@ -165,6 +181,8 @@ function parsePersona(
       description,
       tools,
       knowledgeDir,
+      skills,
+      writeGlob,
       preferredModel: field("preferredModel"),
       language,
       maxReplyChars,
@@ -173,6 +191,27 @@ function parsePersona(
       source,
     },
   };
+}
+
+/**
+ * Why a writeGlob cannot be used, or null. The write scope matches a glob against a path's BASENAME as
+ * well as the full path (so `*.review.md` finds a role's file wherever it lands) — which means a bare
+ * `*.json` would also match `.rei/sessions/<customer>.json`. A persona's glob must therefore name a
+ * directory, and that directory must be inside the workspace and outside `.rei/`.
+ */
+function writeGlobProblem(glob: string, workspacePath: string): string | null {
+  if (path.isAbsolute(glob)) return "must be relative to the workspace.";
+  if (!glob.includes("/")) {
+    return "must name a directory (e.g. news/*.html): a bare pattern matches that name anywhere, .rei/ included.";
+  }
+  const wildcard = glob.search(/[*?[]/);
+  const fixed = wildcard === -1 ? glob : glob.slice(0, wildcard);
+  const dir = realish(path.resolve(workspacePath, fixed.slice(0, fixed.lastIndexOf("/") + 1) || "."));
+  if (!within(dir, realish(workspacePath))) return "is outside the workspace.";
+  if (within(dir, realish(path.join(workspacePath, ".rei")))) {
+    return "is inside .rei/, which holds every conversation — never writable by a persona.";
+  }
+  return null;
 }
 
 /**

@@ -141,6 +141,39 @@ describe("loadPersona — refusals", () => {
   });
 });
 
+describe("loadPersona — skills and writeGlob (phase 4b)", () => {
+  const error = (name: string) => {
+    const r = load(name);
+    return r.ok ? "" : r.error;
+  };
+
+  it("reads both, and leaves them unset by default — no skills, no writes", () => {
+    write(builtinDir, "brief", persona('name: brief\ndescription: d\nskills: [daily-ai-briefing, "web-digest"]\nwriteGlob: "news/*.html"'));
+    write(builtinDir, "plain", persona("name: plain\ndescription: d"));
+    const r = load("brief");
+    expect(r.ok && r.persona).toMatchObject({ skills: ["daily-ai-briefing", "web-digest"], writeGlob: "news/*.html" });
+    const p = load("plain");
+    expect(p.ok && p.persona.skills).toBeUndefined();
+    expect(p.ok && p.persona.writeGlob).toBeUndefined();
+  });
+
+  it("requires skills to be a list", () => {
+    write(builtinDir, "s", persona("name: s\ndescription: d\nskills: daily-ai-briefing"));
+    expect(error("s")).toMatch(/skills.*list/);
+  });
+
+  it("requires writeGlob to name a directory — a bare pattern matches that name anywhere, .rei/ included", () => {
+    write(builtinDir, "g", persona('name: g\ndescription: d\nwriteGlob: "*.json"'));
+    expect(error("g")).toMatch(/writeGlob.*directory/);
+  });
+
+  it("refuses a writeGlob under .rei/, outside the workspace, or absolute", () => {
+    const bad = [".rei/sessions/*.json", "../out/*.md", "/etc/*.conf", "news/../../out/*"];
+    bad.forEach((g, i) => write(builtinDir, `w${i}`, persona(`name: w${i}\ndescription: d\nwriteGlob: "${g}"`)));
+    bad.forEach((_, i) => expect(error(`w${i}`)).toMatch(/writeGlob/));
+  });
+});
+
 describe("listPersonas", () => {
   it("lists every persona, the workspace's winning, and shows broken ones with their error", () => {
     write(builtinDir, "sales", persona("name: sales\ndescription: shipped"));
