@@ -1,3 +1,5 @@
+import { chooseStartupPersona } from "../personas/persona-startup.js";
+import { loadPersona } from "../personas/persona-loader.js";
 import { Agent } from "../core/agent.js";
 import type { ChatSession, SessionMode } from "../chat/types.js";
 
@@ -23,6 +25,8 @@ export interface OneShotOptions {
   metrics?: boolean;
   /** Mirror thinking, statuses and narration to stderr instead of dropping them. */
   verbose?: boolean;
+  /** --persona: who REI is for this one answer. */
+  persona?: string;
 }
 
 const THINKING = "\x10";
@@ -36,6 +40,22 @@ export async function runOneShot(
   options: OneShotOptions = {},
 ): Promise<void> {
   const session: ChatSession = { messages: [], mode };
+  // A one-shot is a new session: --persona, else REI_PERSONA. Unlike the interactive CLI there is
+  // nobody to read a warning and fix it, so an invalid persona is an error, not plain REI.
+  const chosen = chooseStartupPersona({
+    flag: options.persona,
+    envDefault: process.env.REI_PERSONA,
+    resumed: false,
+  });
+  if (chosen.name) {
+    const loaded = loadPersona(chosen.name, workspacePath);
+    if (!loaded.ok) {
+      process.stderr.write(`${loaded.error}\n`);
+      process.exitCode = 1;
+      return;
+    }
+    session.persona = loaded.persona.name;
+  }
   const trace = (s: string): void => {
     if (options.verbose) process.stderr.write(s);
   };

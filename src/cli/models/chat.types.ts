@@ -64,6 +64,8 @@ export interface ChatRendererState {
   /** `🧾 npm test (exit 1 · 3.1k)` while a !command's output is attached to the next message. */
   receiptIndicator?: string;
   activeRole?: string;
+  /** Active persona (docs/persona-spec.md) — the 👤 line above the prompt. */
+  persona?: string;
   manualModel?: string;
 }
 
@@ -121,6 +123,7 @@ export interface ChatUIState {
   sessionMode: string; // SessionMode — kept in sync each draw so key handling knows the prompt width
   activeDocument?: string; // synced from session each draw (see run-chat draw())
   activeRole?: string; // idem — a role changes mode, write scope AND model, so it must be visible
+  persona?: string; // idem — a persona replaces REI's identity, the biggest change of all
   manualModel?: string; // set by /model: the role is active but not running on ITS model
 }
 

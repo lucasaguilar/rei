@@ -62,13 +62,17 @@ function scanReiArtifacts(workspacePath: string): string[] {
 export function sessionIndicators(session: {
   activeDocument?: string;
   activeRole?: string;
+  persona?: string;
   manualModel?: string;
   manualModelScope?: "agent" | "base";
   mode?: SessionMode;
-}): { activeDocument?: string; activeRole?: string; manualModel?: string } {
+}): { activeDocument?: string; activeRole?: string; manualModel?: string; persona?: string } {
   return {
     activeDocument: session.activeDocument,
-    activeRole: session.activeRole,
+    persona: session.persona,
+    // A persona replaces REI's identity and the turn ignores roles under it — a 🎭 next to the 👤
+    // would claim a posture that is not being applied.
+    activeRole: session.persona ? undefined : session.activeRole,
     // Scoped, like the turn: a choice made for the agent slot must not light up "model overridden"
     // while you are in ask — the badge would name a model the turn is not going to use.
     manualModel: activeManualModel(session, session.mode ?? "ask"),

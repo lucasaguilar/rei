@@ -197,6 +197,7 @@ carrying them will start taking effect.)
 | Var | What | Default |
 |---|---|---|
 | `REI_DEFAULT_MODE` | mode a FRESH session starts in (`ask` \| `planning` \| `agent`) | `agent` |
+| `REI_PERSONA` | persona a NEW CLI or one-shot session starts as (e.g. `daily`). A resumed session keeps its own; `--persona` and `/persona` override it. Invalid: the CLI warns and starts as plain REI, a one-shot exits with an error. See persona-spec.md | none (plain REI) |
 
 
 | Var | What | Default |

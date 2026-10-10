@@ -236,6 +236,12 @@ export class ChatRenderer {
         : null;
     if (contextBar) uiLines.push(fixedLine(contextBar));
 
+    // Who REI is right now, when it is not itself. Above everything else in the block: it changes how
+    // every answer reads, so it is the first thing to see.
+    if (state.persona) {
+      uiLines.push(fixedLine(paint("dim", `👤 ${state.persona}`)));
+    }
+
     // Active-role indicator. A role silently adopts its own baseMode, write scope and model, so
     // the prompt shows you are in `plan` while nothing says WHY — and a forgotten role is a session
     // quietly running under someone else's rules. Same slot as the document line below.

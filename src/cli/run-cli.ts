@@ -79,6 +79,7 @@ export async function runCli(args: string[]): Promise<void> {
       await runOneShot(agent, workspacePath, ONE_SHOT[command], task, {
         metrics: parsed.metrics,
         verbose: parsed.verbose,
+        persona: parsed.persona,
       });
       return;
     }
@@ -89,6 +90,7 @@ export async function runCli(args: string[]): Promise<void> {
         name: parsed.sessionName,
         continue: parsed.continueSession,
         force: parsed.forceSession,
+        persona: parsed.persona,
       });
       return;
     }
@@ -101,7 +103,7 @@ export async function runCli(args: string[]): Promise<void> {
   }
 }
 
-function parseCliArgs(args: string[]): {
+export function parseCliArgs(args: string[]): {
   workspaceInput?: string;
   command?: string;
   commandArgs: string[];
@@ -113,6 +115,8 @@ function parseCliArgs(args: string[]): {
   continueSession: boolean;
   forceSession: boolean;
   help: boolean;
+  /** --persona <name>: run as that persona this time (docs/persona-spec.md). */
+  persona?: string;
 } {
   const positional: string[] = [];
   let workspaceInput: string | undefined;
@@ -124,6 +128,7 @@ function parseCliArgs(args: string[]): {
   let continueSession = false;
   let forceSession = false;
   let help = false;
+  let persona: string | undefined;
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -167,6 +172,27 @@ function parseCliArgs(args: string[]): {
         process.exit(1);
       }
       sessionName = value;
+      continue;
+    }
+
+    // --persona <name>: who REI is for this run — beats the saved session's and REI_PERSONA.
+    if (arg === "--persona") {
+      const value = args[i + 1];
+      if (!value || value.startsWith("-")) {
+        console.error("Missing value for --persona");
+        process.exit(1);
+      }
+      persona = value;
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--persona=")) {
+      const value = arg.slice("--persona=".length).trim();
+      if (!value) {
+        console.error("Missing value for --persona");
+        process.exit(1);
+      }
+      persona = value;
       continue;
     }
 
@@ -223,6 +249,7 @@ function parseCliArgs(args: string[]): {
     continueSession,
     forceSession,
     help,
+    persona,
   };
 }
 

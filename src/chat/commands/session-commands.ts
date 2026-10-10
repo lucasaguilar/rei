@@ -291,6 +291,7 @@ export const sessionCommands: CommandHandler = {
           mode: loaded.mode,
           createdAt: loaded.createdAt,
           summary: loaded.summary,
+          persona: loaded.persona,
         },
       };
     }

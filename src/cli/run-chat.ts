@@ -2,7 +2,6 @@ import * as readline from "readline";
 import * as path from "path";
 import type { Agent } from "../core/agent.js";
 import type { TurnStatus } from "../core/models/agent.types.js";
-import { resolveDefaultSessionMode, type ChatSession } from "../chat/types.js";
 
 import { getWelcomeMessage } from "./constants/chat.constants.js";
 import { refreshActiveArtifacts, renderStartupGauge, stickyIndicators } from "./helpers/startup-gauge.helper.js";
@@ -15,6 +14,7 @@ import { clamp } from "./helpers/terminal.helpers.js";
 import { buildRenderState } from "./helpers/render-state.helper.js";
 import { paint } from "./theme/palette.js";
 import { rulesMigrationNotice } from "./helpers/rules-notice.helper.js";
+import { buildStartupSession } from "./helpers/startup-session.helper.js";
 import { RULES_TEMPLATES_ROOT } from "../chat/commands/rules-commands.js";
 import {
   buildPaletteSources,
@@ -48,20 +48,13 @@ export async function runChat(
   agent: Agent,
   workspacePath = process.cwd(),
   autoIndex = true,
-  sessionOpts?: { name?: string; continue?: boolean; force?: boolean },
+  sessionOpts?: { name?: string; continue?: boolean; force?: boolean; persona?: string },
 ): Promise<void> {
   const existing = resolveStartupSession(workspacePath, sessionOpts);
   const sessionId = getActiveSessionId();
   // Refuse to open a session already live in another terminal (avoids last-write-wins corruption).
   if (!acquireOrWarn(workspacePath, sessionId, sessionOpts?.force)) return;
-  const session: ChatSession = existing
-    ? {
-        messages: existing.messages,
-        mode: existing.mode,
-        createdAt: existing.createdAt,
-        summary: existing.summary,
-      }
-    : { messages: [], mode: resolveDefaultSessionMode() };
+  const { session, personaWarning } = buildStartupSession(existing, workspacePath, sessionOpts?.persona);
   // Rebuilt after every turn (submitCurrentUserInput): a turn can CREATE files (OCR sidecar writes
   // ocr/*.ocr.md) that must be @-referenceable this session. `let` so getPalette reads the freshest scan.
   let palette = buildPaletteSources(workspacePath);
@@ -344,6 +337,7 @@ export async function runChat(
   // does — see rulesMigrationNotice.
   const rulesNotice = rulesMigrationNotice(workspacePath, RULES_TEMPLATES_ROOT);
   if (rulesNotice) pushTranscript(paint("muted", rulesNotice));
+  if (personaWarning) pushTranscript(paint("warn", `⚠️  ${personaWarning}`));
 
   // Show the context gauge on startup too (not only after the first turn), so the user sees
   // how full the assumed window already is from the resumed session / system prompt + the
