@@ -5,7 +5,7 @@ import * as os from "node:os";
 import { fileURLToPath } from "node:url";
 import pty from "node-pty";
 import { missingBuild, reiLaunch, workspaceFromArgv } from "./lib/launch.js";
-import { DEFAULT_PHOSPHOR, PHOSPHORS } from "./renderer/phosphors.js";
+import { loadSettings, saveSettings } from "./lib/settings.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
@@ -52,7 +52,19 @@ async function createWindow() {
     return;
   }
   const workspace = await chooseWorkspace();
-  const phosphor = DEFAULT_PHOSPHOR;
+  const settingsFile = path.join(app.getPath("userData"), "monitor.json");
+  let settings = loadSettings(settingsFile);
+  // REI's own theme is fixed for the life of the pty; the phosphor chosen now is the one it starts in.
+  const phosphor = settings.phosphor;
+
+  ipcMain.handle("settings:get", () => settings);
+  ipcMain.on("settings:set", (_e, patch) => {
+    settings = saveSettings(settingsFile, {
+      ...settings,
+      ...patch,
+      knobs: { ...settings.knobs, ...patch.knobs },
+    });
+  });
 
   win = new BrowserWindow({
     width: 1120,
@@ -60,7 +72,10 @@ async function createWindow() {
     minWidth: 640,
     minHeight: 420,
     title: `REI — ${path.basename(workspace)}`,
-    backgroundColor: PHOSPHORS[phosphor].screen,
+    backgroundColor: "#1b1916",
+    // The bezel is the window: no title bar, the traffic lights sit on the plastic.
+    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
+    trafficLightPosition: { x: 14, y: 9 },
     show: !process.env.REI_DESKTOP_SNAPSHOT,
     webPreferences: {
       preload: path.join(here, "preload.cjs"),
