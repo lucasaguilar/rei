@@ -11,6 +11,8 @@
  * nobody sees — the same rule REI's themes follow.
  */
 
+import { knobDefaults } from "./knobs.js";
+
 const VERTEX = `#version 300 es
 in vec2 aPos;
 out vec2 vUv;
@@ -59,6 +61,7 @@ uniform float uScanlines;
 uniform float uBloom;
 uniform float uVignette;
 uniform float uFlicker;
+uniform float uBrightness;
 uniform vec3 uGlow;         // the colour the bezel edge catches from the tube
 
 vec2 curve(vec2 uv) {
@@ -103,6 +106,7 @@ void main() {
   color *= mix(1.0, pow(clamp(v.x * v.y * 15.0, 0.0, 1.0), 0.25), uVignette);
 
   color *= 1.0 - uFlicker * (0.5 + 0.5 * sin(uTime * 60.0));
+  color *= uBrightness;
 
   outColor = vec4(color, 1.0);
 }`;
@@ -145,14 +149,8 @@ function texture(gl) {
 
 const hexToRgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
 
-export const DEFAULT_KNOBS = {
-  curvature: 0.18,
-  scanlines: 0.28,
-  bloom: 0.45,
-  vignette: 0.35,
-  flicker: 0.012,
-  persistence: 0.82,
-};
+/** Fixed by the tube, not offered as knobs: they read as defects when turned up. */
+const TUBE = { vignette: 0.35, flicker: 0.012 };
 
 export class Crt {
   /**
@@ -164,7 +162,7 @@ export class Crt {
     this.canvas = canvas;
     this.source = source;
     this.termRect = termRect;
-    this.knobs = { ...DEFAULT_KNOBS };
+    this.knobs = { ...TUBE, ...knobDefaults() };
     this.tint = null;
     this.screen = [0, 0, 0];
     this.glow = [1, 0.69, 0];
@@ -273,6 +271,7 @@ export class Crt {
     gl.uniform1f(u.uBloom, this.knobs.bloom);
     gl.uniform1f(u.uVignette, this.knobs.vignette);
     gl.uniform1f(u.uFlicker, this.knobs.flicker);
+    gl.uniform1f(u.uBrightness, this.knobs.brightness);
     gl.uniform3f(u.uGlow, ...this.glow);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
