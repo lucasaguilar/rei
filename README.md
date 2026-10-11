@@ -25,6 +25,13 @@ machine, or a cloud one.
 
 Drop a markdown file in `.rei/` and it is there next session — no build, no plugin API, no fork.
 
+**Or on an 80s monitor.** `REI_THEME=amber` — or `green`, or `/theme amber` mid-session — turns
+REI into a Hercules screen: one phosphor, a few intensities, black glass. In a terminal that
+allows it, the whole window goes with it, and comes back as it was when REI exits.
+[How themes work](#the-rest-of-the-speed).
+
+![REI in the amber theme: the logo, the mode and the prompt in one phosphor on black](docs/assets/rei-amber.png)
+
 ---
 
 ## Who it's for
@@ -419,9 +426,17 @@ Once the model entry is right, these are what a local session actually spends it
 - **`REI_VERBOSE`** — full command output and full diffs. Off by default: twenty lines per command
   was the noise, and `git diff` shows the hunks whenever they are actually wanted.
 
-- **`REI_THEME`** — `default` or `matrix`. `/theme` switches mid-session. It repaints REI's chrome
-  (status line, thinking block, context bar, prompt) and nothing else: diff hunks and syntax
-  highlighting keep their colours in every theme, because that colour is information.
+- **`REI_THEME`** — `default`, `matrix`, `amber` or `green`. `/theme` switches mid-session. It
+  repaints REI's chrome (status line, thinking block, context bar, prompt, the logo) and nothing
+  else: diff hunks and syntax highlighting keep their colours in every theme, because that colour
+  is information. `amber` and `green` are the 80s Hercules monitors — one phosphor, a few
+  intensities — in exact 24-bit colour when the terminal supports it (`COLORTERM=truecolor`,
+  iTerm2, Ghostty, WezTerm, Windows Terminal), and the nearest of 256 colours otherwise. Warnings
+  and errors stay yellow and red in every theme. In the interactive terminal they also set the
+  window's own text, background and cursor (OSC 10/11/12) while REI runs, and put the profile's
+  back on exit — `REI_TERMINAL_COLORS=off` skips that. `/theme crt` adds what only the terminal
+  can draw — scanlines, glow, curved glass: it installs a shader for Ghostty and says what to
+  switch on in Windows Terminal.
 
 → [Every variable](docs/config-reference.md) · [How commands are run](docs/command-execution.md)
 

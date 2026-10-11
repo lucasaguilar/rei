@@ -16,6 +16,10 @@ import {
 import { saveSession } from "../../chat/session-store.js";
 import * as fs from "fs";
 import { LiveStatusEvent } from "../../chat/commands/command-handler.js";
+import { paint } from "../theme/palette.js";
+import { syncTerminalScreen } from "../theme/terminal-screen.js";
+import { crtSetup } from "../theme/crt-setup.js";
+import * as os from "os";
 
 /**
  * The label shown above an auto-executed turn. Every autoExecute prompt opens with its own tag —
@@ -42,6 +46,24 @@ export async function handleInputCommand(
     return true;
   }
 
+  // /theme crt: CLI-only, like /paste-image — it writes into the user's terminal config dir, which
+  // no command arriving over a channel should be able to do.
+  if (/^\/theme\s+crt$/i.test(trimmed)) {
+    actions.pushTranscript(displayUserLabel(trimmed));
+    actions.pushTranscript(
+      crtSetup({
+        env: process.env,
+        home: os.homedir(),
+        fs: {
+          mkdir: (dir) => fs.mkdirSync(dir, { recursive: true }),
+          writeFile: (file, data) => fs.writeFileSync(file, data),
+        },
+      }),
+    );
+    actions.draw();
+    return true;
+  }
+
   // /paste-image [text]: grab an image from the clipboard (macOS) into a temp file,
   // then run a normal turn referencing it so the vision sidecar describes it.
   if (trimmed === "/paste-image" || trimmed.startsWith("/paste-image ")) {
@@ -49,7 +71,7 @@ export async function handleInputCommand(
     const grab = await grabClipboardImage();
     if (!grab.ok || !grab.filePath) {
       actions.pushTranscript(
-        `\x1b[33m⚠️  ${grab.error ?? "Could not read image from clipboard."}\x1b[0m`,
+        paint("warn", `⚠️  ${grab.error ?? "Could not read image from clipboard."}`),
       );
       actions.draw();
       return true;
@@ -102,7 +124,7 @@ export async function handleInputCommand(
       case "done":
         state.activeStatus = undefined;
         state.activeStatusText = undefined;
-        actions.pushTranscript(`\x1b[32m${event.text}\x1b[0m`);
+        actions.pushTranscript(paint("success", event.text));
         break;
     }
     actions.draw();
@@ -116,13 +138,15 @@ export async function handleInputCommand(
     {
       mcpRegistry: agent.mcpRegistry,
       onStatus: (message: string) => {
-        actions.pushTranscript(`\x1b[2m${message}\x1b[0m`);
+        actions.pushTranscript(paint("dim", message));
         actions.draw();
       },
       onLiveStatus,
       elicit: ctx.elicit,
     },
   );
+  // /theme may have moved on or off a phosphor; the terminal's own colours follow it.
+  syncTerminalScreen();
 
   if (result.success) {
     // Echo the command (like a normal turn's "You:") so the response has a visible prompt —

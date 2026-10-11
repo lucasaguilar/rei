@@ -3,6 +3,7 @@ import * as path from "node:path";
 import type { CommandHandler, CommandContext, CommandResult } from "./command-handler.js";
 import { splitFileAndRest } from "./document-commands.js";
 import { scanWorkspace } from "../../workspace/workspace-scanner.js";
+import { paint } from "../../cli/theme/palette.js";
 
 /**
  * Active-document commands. A document (its OCR/text artifact) can be "active" so `/ask-document`
@@ -17,7 +18,8 @@ import { scanWorkspace } from "../../workspace/workspace-scanner.js";
 const DOCS_RE = /^\/docs\s*$/;
 const DOC_RE = /^\/doc(?:\s+([\s\S]+))?$/;
 
-const REI = "\x1b[1;97;45m REI \x1b[0m";
+// A function, not a constant: /theme can change the badge's colour mid-session.
+const REI = (): string => paint("badge", " REI ");
 
 /** Text documents in the workspace worth listing (OCR output lives in ocr/*.ocr.md). */
 function listTextDocs(workspacePath: string): string[] {
@@ -65,7 +67,7 @@ export const activeDocumentCommands: CommandHandler = {
         success: true,
         recordInSession: false,
         response:
-          `${REI} ${header}\n\n${lines.join("\n")}\n\n` +
+          `${REI()} ${header}\n\n${lines.join("\n")}\n\n` +
           `(/doc use <file> to activate · /doc clear to deactivate)`,
       };
     }
@@ -78,7 +80,7 @@ export const activeDocumentCommands: CommandHandler = {
         success: true,
         recordInSession: false,
         response: session.activeDocument
-          ? `${REI} 📄 Active document: ${session.activeDocument}`
+          ? `${REI()} 📄 Active document: ${session.activeDocument}`
           : `[REI] No active document. Use /doc use <file>, or drop a PDF in to OCR it.`,
       };
     }
@@ -91,7 +93,7 @@ export const activeDocumentCommands: CommandHandler = {
         success: true,
         recordInSession: false,
         response: prev
-          ? `${REI} Document deactivated (${prev}). Back to normal chat.`
+          ? `${REI()} Document deactivated (${prev}). Back to normal chat.`
           : `[REI] There was no active document.`,
       };
     }
@@ -101,7 +103,7 @@ export const activeDocumentCommands: CommandHandler = {
     const { file } = splitFileAndRest(rawFile, workspacePath);
     const stored = activate(session, file, workspacePath);
     return stored
-      ? { success: true, recordInSession: false, response: `${REI} 📄 Active document: ${stored}` }
+      ? { success: true, recordInSession: false, response: `${REI()} 📄 Active document: ${stored}` }
       : { success: false, recordInSession: false, response: `[REI] File not found: ${file}` };
   },
 };

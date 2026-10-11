@@ -1,12 +1,12 @@
 import { TurnStatus } from "../../core/models/agent.types.js";
 import { SessionMode } from "../../chat/types.js";
-import { REI_LOGO } from "../rei-logo.js";
+import { renderLogo } from "../theme/logo.js";
 import { visibleLength } from "../helpers/terminal.helpers.js";
 import { wrapInput } from "../ui/input-wrap.js";
 import { code, paint, RESET } from "../theme/palette.js";
 
 export const getWelcomeMessage = (mode: SessionMode): string => {
-  return `${REI_LOGO}
+  return `${renderLogo()}
 REI — A local-first agent you assemble yourself
 
 Mode: ${mode}
@@ -186,7 +186,7 @@ export const COMMANDS: Array<{
   { command: "/trace", description: "SDD check — cross the active spec's criteria against the plan's Satisfies: lines, both ways" },
   { command: "/verbose [on|off]", description: "show or hide full command output and diffs" },
   { command: "/reasoning [on|off]", description: "the model's thinking as a live paragraph, or just count it (on by default)" },
-  { command: "/theme [name]", description: "repaint REI's chrome (default | matrix)" },
+  { command: "/theme [name]", description: "repaint REI's chrome (default | matrix | amber | green)" },
   { command: "/rules [install <stack>]", description: "this repo's coding rules, and what they cost per turn" },
   { command: "/savespec <name>", description: "save the write-spec spec to disk as .rei/specs/<name>.md" },
   { command: "/think [level]", description: "set the reasoning level for this session (none|minimal|low|medium|high|xhigh)" },

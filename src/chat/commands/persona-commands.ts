@@ -1,6 +1,7 @@
 import type { CommandHandler, CommandResult } from "./command-handler.js";
 import { listPersonas, loadPersona } from "../../personas/persona-loader.js";
 import { saveSession } from "../session-store.js";
+import { code, RESET } from "../../cli/theme/palette.js";
 
 /**
  * `/persona` lists them, `/persona <name>` makes REI that persona for this session, `/persona off`
@@ -24,7 +25,7 @@ export const personaCommands: CommandHandler = {
           response: "[REI] No personas found in .rei/personas/ or the built-in ones.",
         };
       }
-      const NAME = "\x1b[1;36m", ON = "\x1b[1;32m", DIM = "\x1b[2m", WARN = "\x1b[33m", OFF = "\x1b[0m";
+      const NAME = code("user"), ON = code("strong") + code("success"), DIM = code("dim"), WARN = code("warn"), OFF = RESET;
       const lines = personas.map((p) => {
         const active = p.name === session.persona;
         const name = `${active ? ON : NAME}${p.name}${OFF}`;

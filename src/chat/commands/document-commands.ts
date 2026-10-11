@@ -14,6 +14,7 @@ import {
 } from "../../config/model-tuning.js";
 import { resolveModelForMode } from "../../providers/provider-factory.js";
 import { normalizeProviderName } from "../../providers/provider-names.js";
+import { paint } from "../../cli/theme/palette.js";
 
 /** Renders an ask-document result: answer + per-claim citations (✅ verified / ≈ fuzzy / ⚠️ unverified). */
 function formatAskResult(r: AskResult): string {
@@ -38,7 +39,7 @@ function formatAskResult(r: AskResult): string {
     lines.push("", "(No answer found in the retrieved text.)");
   }
   // Same magenta "REI" badge as a normal answer so it reads as REI's response, not plain output.
-  return `\x1b[1;97;45m REI \x1b[0m ${lines.join("\n")}`;
+  return `${paint("badge", " REI ")} ${lines.join("\n")}`;
 }
 
 const READ_RE = /^\/(?:read-document|readdoc)\s+([\s\S]+)$/;
@@ -123,7 +124,7 @@ export const documentCommands: CommandHandler = {
           : "document";
         return {
           success: true,
-          response: `\x1b[1;97;45m REI \x1b[0m ${path.basename(filePath)} — ${where}:\n\n${slice.text}`,
+          response: `${paint("badge", " REI ")} ${path.basename(filePath)} — ${where}:\n\n${slice.text}`,
           recordInSession: true,
         };
       } catch (err) {

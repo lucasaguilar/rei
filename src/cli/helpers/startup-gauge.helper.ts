@@ -12,6 +12,7 @@ import * as path from "node:path";
 import { loadRole } from "../../skills/role-loader.js";
 import { getActive } from "../../chat/active-artifacts.js";
 import { resolveSessionModel } from "../../chat/manual-model.js";
+import { paint } from "../theme/palette.js";
 
 /**
  * Pre-resolves the active model's tuning and renders the startup context gauge. The per-turn path
@@ -176,8 +177,8 @@ export function sessionSizeWarning(session: ChatSession): string | null {
   const threshold = Math.round(getContextWindow() * 0.75);
   if (estimatedTokens <= threshold) return null;
   return (
-    `\x1b[33m⚠️  [REI] Warning: The accumulated session exceeds ${threshold.toLocaleString()} tokens ` +
+    paint("warn", `⚠️  [REI] Warning: The accumulated session exceeds ${threshold.toLocaleString()} tokens ` +
     `(approximately ${estimatedTokens.toLocaleString()} tokens). ` +
-    `If you notice slowdowns or context-related errors, consider using /session new.\x1b[0m`
+    `If you notice slowdowns or context-related errors, consider using /session new.`)
   );
 }

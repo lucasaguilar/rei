@@ -57,6 +57,7 @@ import {
   CREATED_FILES_MARKER,
 } from "../agent-mode/helpers/patch-helpers.js";
 import { formatCodeDiff } from "../cli/markdown-renderer.js";
+import { code, paint, RESET } from "../cli/theme/palette.js";
 import {
   calculateContextBudget,
   estimateToolsTokens,
@@ -334,7 +335,7 @@ export class Agent {
           this.logger.logInfo("[overflow] backend refused the request — compacting and retrying", {
             error: err instanceof Error ? err.message : String(err),
           });
-          yield `\n\x1b[33m⚠️  [REI] The backend refused the request as too large — compacting and retrying.\x1b[0m\n`;
+          yield `\n${paint("warn", "⚠️  [REI] The backend refused the request as too large — compacting and retrying.")}\n`;
 
           session.messages = (await compactSession({
             messages: session.messages,
@@ -394,7 +395,7 @@ export class Agent {
         // exhausted its self-correction retries — warn the user instead of
         // implying the changes compile.
         if (outcome.verified === false) {
-          yield `\n\x1b[33m⚠️  [REI] Applied, but the combined changes do NOT pass the project type-check. Review before relying on them.\x1b[0m\n`;
+          yield `\n${paint("warn", "⚠️  [REI] Applied, but the combined changes do NOT pass the project type-check. Review before relying on them.")}\n`;
         } else if (
           outcome.verifyRan === false &&
           outcome.validProposedPatches.length > 0
@@ -402,7 +403,7 @@ export class Agent {
           // The third state, which used to render as an ordinary success: REI has no check for this
           // project type, so nothing here was verified by anything but the model's own claim. Saying
           // so is the entire promise — a silent pass is the failure mode this product exists against.
-          yield `\n\x1b[33m⚠️  [REI] Applied, but NOT verified: no verify command is known for this project type. Nothing checked these changes. Set REI_SANDBOX_VERIFY_COMMAND to give REI a real check.\x1b[0m\n`;
+          yield `\n${paint("warn", "⚠️  [REI] Applied, but NOT verified: no verify command is known for this project type. Nothing checked these changes. Set REI_SANDBOX_VERIFY_COMMAND to give REI a real check.")}\n`;
         }
         yield msg.trimStart();
         // Show diff for each applied patch so the user can see exactly what changed.
@@ -411,7 +412,7 @@ export class Agent {
             (r) => r.file === edit.file && r.applied,
           );
           if (applied) {
-            yield `\n\x1b[1mFile:\x1b[0m ${edit.file}\n\`\`\`diff\n${formatCodeDiff(edit.search, edit.replace)}\n\`\`\``;
+            yield `\n${paint("strong", "File:")} ${edit.file}\n\`\`\`diff\n${formatCodeDiff(edit.search, edit.replace)}\n\`\`\``;
           }
         }
 
@@ -777,10 +778,10 @@ export class Agent {
       // far more actionable than LM Studio's cryptic 400 context-overflow error.
       if (numCtx > 0 && toolsTokens > numCtx * 0.4) {
         this.pendingHardwareWarnings.push(
-          `\n\x1b[33m⚠️  [REI] The connected MCP tools occupy ~${toolsTokens} tokens ` +
+          `\n${code("warn")}⚠️  [REI] The connected MCP tools occupy ~${toolsTokens} tokens ` +
             `(${Math.round((toolsTokens / numCtx) * 100)}% of the ${numCtx}-token window). ` +
             `This can overflow the model's context. Reduce the enabled MCP tools ` +
-            `(e.g. enable only the services you need) or load the model with a larger context.\x1b[0m\n`,
+            `(e.g. enable only the services you need) or load the model with a larger context.${RESET}\n`,
         );
       }
     }

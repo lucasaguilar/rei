@@ -4,6 +4,7 @@ import type { Agent } from "../core/agent.js";
 import type { TurnStatus } from "../core/models/agent.types.js";
 
 import { getWelcomeMessage } from "./constants/chat.constants.js";
+import { restoreTerminalScreen, syncTerminalScreen } from "./theme/terminal-screen.js";
 import { refreshActiveArtifacts, renderStartupGauge, stickyIndicators } from "./helpers/startup-gauge.helper.js";
 import {
   ChatRendererState,
@@ -310,6 +311,9 @@ export async function runChat(
   process.stdout.on("resize", onResize);
   process.stdin.on("close", () => exitResolve());
 
+  // Before the first line is printed, so the welcome logo already sits on the phosphor's glass.
+  syncTerminalScreen();
+
   if (existing) {
     const nonSystem = existing.messages.filter((m) => m.role !== "system");
     const turnCount = Math.floor(nonSystem.length / 2);
@@ -387,6 +391,7 @@ export async function runChat(
 
   // Erase the ghost prompt line(s) the renderer left behind, then exit.
   ChatRenderer.clearUI();
+  restoreTerminalScreen(); // the 'exit' hook would too; doing it here keeps the order explicit
   process.stdout.write("\x1b[?25h"); // Show cursor
   process.exit(0);
 }

@@ -1,3 +1,5 @@
+import { colorDepth, isPhosphor, PHOSPHOR_PALETTES } from "./phosphor.js";
+
 /**
  * Named colour roles for REI's chrome — the block that is always on screen.
  *
@@ -38,9 +40,17 @@ export type Role =
   /** Something is wrong, or about to be. */
   | "danger"
   /** Something worked. */
-  | "success";
+  | "success"
+  /** The live one-line tool activity during a turn ("reading src/…"). Not an alarm. */
+  | "status"
+  /** The █ letters of the welcome logo. */
+  | "logoBlock"
+  /** The ╔═╗ shadow behind them — painted apart, the two-tone is what makes it read as the mark. */
+  | "logoShadow";
 
 export type Palette = Record<Role, string>;
+
+export { colorDepth, type ColorDepth } from "./phosphor.js";
 
 export const RESET = "\x1b[0m";
 
@@ -64,6 +74,10 @@ const DEFAULT_PALETTE: Palette = {
   warn: "\x1b[33m",
   danger: "\x1b[31m",
   success: "\x1b[32m",
+  status: "\x1b[33m",
+  // The terminal's own foreground: the logo looks exactly as it always has.
+  logoBlock: "\x1b[39m",
+  logoShadow: "\x1b[39m",
 };
 
 /**
@@ -88,11 +102,20 @@ const MATRIX_PALETTE: Palette = {
   warn: "\x1b[1;33m",
   danger: "\x1b[1;31m",
   success: "\x1b[92m",
+  status: "\x1b[32m",
+  logoBlock: "\x1b[1;92m",
+  logoShadow: "\x1b[32m",
 };
 
+/**
+ * `amber` and `green` are listed at 256 colours — the depth every terminal can show. `palette()`
+ * hands out the truecolor build instead when the terminal supports it.
+ */
 export const THEMES = {
   default: DEFAULT_PALETTE,
   matrix: MATRIX_PALETTE,
+  amber: PHOSPHOR_PALETTES.amber["256"],
+  green: PHOSPHOR_PALETTES.green["256"],
 } as const;
 
 export type ThemeName = keyof typeof THEMES;
@@ -117,7 +140,8 @@ export function activeThemeName(): ThemeName {
 }
 
 export function palette(): Palette {
-  return THEMES[activeThemeName()];
+  const name = activeThemeName();
+  return isPhosphor(name) ? PHOSPHOR_PALETTES[name][colorDepth()] : THEMES[name];
 }
 
 /** The escape for a role. Use when a string must be assembled by hand (nested styling). */

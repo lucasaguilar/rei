@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import {
   activeThemeName,
   code,
+  colorDepth,
   isThemeName,
   paint,
   palette,
@@ -13,10 +14,13 @@ import {
 } from "./palette.js";
 
 const savedEnv = process.env.REI_THEME;
+const savedColorTerm = process.env.COLORTERM;
 afterEach(() => {
   setTheme(undefined);
   if (savedEnv === undefined) delete process.env.REI_THEME;
   else process.env.REI_THEME = savedEnv;
+  if (savedColorTerm === undefined) delete process.env.COLORTERM;
+  else process.env.COLORTERM = savedColorTerm;
 });
 
 /**
@@ -81,8 +85,79 @@ describe("choosing a theme", () => {
   });
 
   it("recognises exactly the themes it ships", () => {
-    expect(THEME_NAMES).toEqual(["default", "matrix"]);
+    expect(THEME_NAMES).toEqual(["default", "matrix", "amber", "green"]);
     expect(isThemeName("matrix")).toBe(true);
     expect(isThemeName("dracula")).toBe(false);
+  });
+});
+
+/**
+ * amber and green are the Hercules monitors: one phosphor, a few intensities. Their whole point is
+ * the exact hue, which the 16 ANSI colours cannot promise — `33m` is whatever yellow the user's
+ * terminal profile says it is.
+ */
+describe("phosphor themes", () => {
+  const PHOSPHORS = ["amber", "green"] as const;
+  const ALARMS: Role[] = ["warn", "danger"];
+
+  it("ask for the exact hue when the terminal can show it", () => {
+    process.env.COLORTERM = "truecolor";
+    setTheme("amber");
+    expect(code("accent")).toContain("38;2;255;");
+    setTheme("green");
+    expect(code("accent")).toContain("38;2;");
+  });
+
+  it("fall back to the 256-colour cube instead of guessing truecolor", () => {
+    // A terminal without truecolor does not degrade a 24-bit escape gracefully: some print the
+    // digits, some pick an unrelated colour. 256 colours is universally safe and 214 IS amber.
+    delete process.env.COLORTERM;
+    setTheme("amber");
+    expect(code("accent")).toContain("38;5;");
+    expect(code("accent")).not.toContain("38;2;");
+  });
+
+  it("paint every role but the alarms in the phosphor itself", () => {
+    for (const depth of ["truecolor", undefined]) {
+      if (depth) process.env.COLORTERM = depth;
+      else delete process.env.COLORTERM;
+      for (const name of PHOSPHORS) {
+        setTheme(name);
+        for (const role of Object.keys(THEMES.default) as Role[]) {
+          if (ALARMS.includes(role)) continue;
+          expect(code(role), `${name}.${role}`).toMatch(/[34]8;[25];/);
+        }
+      }
+    }
+  });
+
+  it("keep every alarm distinguishable from everything the theme paints", () => {
+    // Amber and yellow are neighbours: a warning that is only "yellow" disappears on an amber screen.
+    // `default` is exempt: it keeps the look REI always had, where tool status shares the warn yellow.
+    for (const name of THEME_NAMES.filter((n) => n !== "default")) {
+      setTheme(name);
+      const p = palette();
+      for (const alarm of ALARMS) {
+        for (const role of Object.keys(p) as Role[]) {
+          if (role === alarm) continue;
+          expect(p[role], `${name}: ${alarm} vs ${role}`).not.toBe(p[alarm]);
+        }
+      }
+    }
+    expect(THEMES.amber.warn).not.toBe("\x1b[33m");
+  });
+});
+
+describe("colorDepth", () => {
+  it("trusts the terminals that announce or are known for truecolor", () => {
+    expect(colorDepth({ COLORTERM: "truecolor" })).toBe("truecolor");
+    expect(colorDepth({ COLORTERM: "24bit" })).toBe("truecolor");
+    expect(colorDepth({ WT_SESSION: "x" })).toBe("truecolor");
+    expect(colorDepth({ TERM_PROGRAM: "iTerm.app" })).toBe("truecolor");
+  });
+
+  it("assumes 256 colours otherwise", () => {
+    expect(colorDepth({})).toBe("256");
+    expect(colorDepth({ TERM_PROGRAM: "Apple_Terminal" })).toBe("256");
   });
 });
