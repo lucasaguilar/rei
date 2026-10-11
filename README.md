@@ -32,6 +32,9 @@ allows it, the whole window goes with it, and comes back as it was when REI exit
 
 ![REI in the amber theme: the logo, the mode and the prompt in one phosphor on black](docs/assets/rei-amber.png)
 
+**Want the whole monitor?** 🖥️ **REI Desktop** *(experimental)* runs the same REI on a curved
+phosphor tube, with knobs on the bezel. [Try it](#rei-desktop-experimental).
+
 ---
 
 ## Who it's for
@@ -760,7 +763,9 @@ host's environment — what you are publishing is an agent that writes files and
 a platform health check cannot send the token. The blueprint points at a cloud provider, not at
 your local models: it is the deployment path, not the point of REI.
 
-**Desktop (experimental)** — the same `rei chat`, in its own window, on a CRT:
+### REI Desktop (experimental)
+
+The same `rei chat`, in its own window, on a CRT:
 
 ![REI Desktop: REI's first screen on a curved amber tube, with brightness, curve, scanline, glow and trail knobs and an A/G/V phosphor switch on the bezel](docs/assets/rei-desktop.png)
 
