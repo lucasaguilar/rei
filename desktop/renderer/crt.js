@@ -5,7 +5,7 @@
  *
  *   1. phosphor — tints the picture to the phosphor's hue and lets lit cells fade instead of
  *      vanishing (persistence), like a real tube does when text scrolls or changes;
- *   2. glass    — curvature, scanlines, bloom, vignette, flicker.
+ *   2. glass    — curvature, scanlines, bloom, vignette, flicker, and the power-on/off sweep.
  *
  * Alarm red survives the tint: on an amber screen a red error that turned amber would be an error
  * nobody sees — the same rule REI's themes follow.
@@ -62,6 +62,7 @@ uniform float uBloom;
 uniform float uVignette;
 uniform float uFlicker;
 uniform float uBrightness;
+uniform float uPower;       // 0 = off, 1 = on; the sweep plays in between
 uniform vec3 uGlow;         // the colour the bezel edge catches from the tube
 
 vec2 curve(vec2 uv) {
@@ -107,6 +108,16 @@ void main() {
 
   color *= 1.0 - uFlicker * (0.5 + 0.5 * sin(uTime * 60.0));
   color *= uBrightness;
+
+  // Power: the beam opens a bright horizontal line first, then the picture; it closes the same way
+  // in reverse. Below 1.0 only — a running tube pays nothing for it.
+  if (uPower < 1.0) {
+    float wide = smoothstep(0.0, 0.3, uPower);
+    float tall = smoothstep(0.25, 1.0, uPower);
+    vec2 d = abs(uv - 0.5) * 2.0;
+    float lit = step(d.x, max(wide, 0.003)) * step(d.y, max(tall, 0.006));
+    color = (color + uGlow * (1.0 - tall) * 3.0) * lit;
+  }
 
   outColor = vec4(color, 1.0);
 }`;
@@ -163,6 +174,7 @@ export class Crt {
     this.source = source;
     this.termRect = termRect;
     this.knobs = { ...TUBE, ...knobDefaults() };
+    this.power = 1;
     this.tint = null;
     this.screen = [0, 0, 0];
     this.glow = [1, 0.69, 0];
@@ -272,10 +284,26 @@ export class Crt {
     gl.uniform1f(u.uVignette, this.knobs.vignette);
     gl.uniform1f(u.uFlicker, this.knobs.flicker);
     gl.uniform1f(u.uBrightness, this.knobs.brightness);
+    gl.uniform1f(u.uPower, this.power);
     gl.uniform3f(u.uGlow, ...this.glow);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
     this.flip = write;
+  }
+
+  /** Animates the beam to `target` (1 = on, 0 = off). Resolves when the sweep is done. */
+  sweep(target, ms) {
+    const from = this.power;
+    const t0 = performance.now();
+    return new Promise((resolve) => {
+      const step = (now) => {
+        const k = Math.min(1, (now - t0) / ms);
+        this.power = from + (target - from) * k;
+        if (k < 1) requestAnimationFrame(step);
+        else resolve();
+      };
+      requestAnimationFrame(step);
+    });
   }
 
   start() {
