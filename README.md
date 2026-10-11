@@ -3,8 +3,11 @@
 [![CI](https://github.com/lucasaguilar/rei/actions/workflows/ci.yml/badge.svg)](https://github.com/lucasaguilar/rei/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](package.json)
+[![Website](https://img.shields.io/badge/web-rei--ai.dev-ffb000.svg)](https://rei-ai.dev)
 
 **A local-first agent you assemble yourself.**
+
+🌐 **[rei-ai.dev](https://rei-ai.dev)** — the website: what REI is, in a minute, on an amber screen.
 
 One agent, tailored to the job: it writes code and checks its own work, reviews like a senior, runs
 your day — and becomes whatever agent you describe in a markdown file. On a model on your own
