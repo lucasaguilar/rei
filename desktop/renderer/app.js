@@ -5,9 +5,11 @@ import { Unicode11Addon } from "../node_modules/@xterm/addon-unicode11/lib/addon
 import { DEFAULT_PHOSPHOR, isPhosphor, PHOSPHORS, xtermTheme } from "./phosphors.js";
 import { Crt } from "./crt.js";
 import { mountBezel, toast } from "./bezel.js";
+import { playBoot } from "./boot.js";
 
 const settings = await window.rei.getSettings();
-const requested = new URLSearchParams(location.search).get("phosphor");
+const query = new URLSearchParams(location.search);
+const requested = query.get("phosphor");
 // The phosphor REI was started in: its chrome colours are that theme's until the next launch.
 const launchedIn = isPhosphor(requested) ? requested : DEFAULT_PHOSPHOR;
 let phosphor = settings.phosphor;
@@ -54,6 +56,7 @@ try {
     () => terminalEl.getBoundingClientRect(),
   );
   crt.setKnobs(settings.knobs);
+  crt.power = 0;
   crt.start();
   // The terminal stays in the page — it still takes focus, the mouse and the selection — but the
   // tube is what is seen.
@@ -92,10 +95,15 @@ mountBezel(document.getElementById("panel"), settings, {
 // Clicking the panel must not leave the keyboard pointing at a knob.
 document.getElementById("panel").addEventListener("pointerup", () => setTimeout(() => term.focus(), 0));
 
-document.getElementById("led").classList.add("on");
+const led = document.getElementById("led");
 
 window.rei.onData((data) => term.write(data));
-window.rei.onExit(() => window.close());
+window.rei.onExit(async () => {
+  // /exit: the beam collapses to a line, then nothing, and the LED goes out with it.
+  led.classList.remove("on");
+  await crt?.sweep(0, 450);
+  window.close();
+});
 term.onData((data) => window.rei.write(data));
 
 new ResizeObserver(() => {
@@ -103,4 +111,11 @@ new ResizeObserver(() => {
   window.rei.resize(term.cols, term.rows);
 }).observe(terminalEl);
 
+led.classList.add("on");
+await crt?.sweep(1, 650);
+await playBoot(term, {
+  workspace: query.get("workspace") ?? "",
+  phosphor: launchedIn,
+  version: query.get("version") ?? "",
+});
 window.rei.start({ cols: term.cols, rows: term.rows });

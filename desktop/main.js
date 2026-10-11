@@ -108,7 +108,9 @@ async function createWindow() {
   ipcMain.on("pty:write", (_e, data) => shell?.write(data));
   ipcMain.on("pty:resize", (_e, { cols, rows }) => shell?.resize(cols, rows));
 
-  await win.loadFile(path.join(here, "renderer", "index.html"), { query: { phosphor } });
+  await win.loadFile(path.join(here, "renderer", "index.html"), {
+    query: { phosphor, workspace, version: app.getVersion() },
+  });
 
   // REI_DESKTOP_SNAPSHOT=<file.png>: draw, save one frame, quit — how a change to the screen is
   // checked without someone watching the window.
