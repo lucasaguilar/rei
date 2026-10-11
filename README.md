@@ -1,13 +1,25 @@
-# REI
+<p align="center">
+  <a href="https://rei-ai.dev"><img src="docs/assets/rei-banner.png" alt="REI — a local-first agent you assemble yourself. Codes and checks its own work." width="100%"></a>
+</p>
 
-[![CI](https://github.com/lucasaguilar/rei/actions/workflows/ci.yml/badge.svg)](https://github.com/lucasaguilar/rei/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](package.json)
-[![Website](https://img.shields.io/badge/web-rei--ai.dev-ffb000.svg)](https://rei-ai.dev)
+<p align="center">
+  <a href="https://github.com/lucasaguilar/rei/actions/workflows/ci.yml"><img src="https://github.com/lucasaguilar/rei/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="package.json"><img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg" alt="Node ≥ 20"></a>
+  <a href="https://rei-ai.dev"><img src="https://img.shields.io/badge/web-rei--ai.dev-ffb000.svg" alt="Website: rei-ai.dev"></a>
+</p>
 
-**A local-first agent you assemble yourself.**
+<p align="center">
+  <a href="https://rei-ai.dev"><b>Website</b></a> ·
+  <a href="#start-in-under-a-minute"><b>Install</b></a> ·
+  <a href="docs/README.md"><b>Docs</b></a> ·
+  <a href="#rei-desktop-experimental"><b>Desktop</b></a> <sub>(experimental)</sub> ·
+  <a href="CONTRIBUTING.md"><b>Contributing</b></a>
+</p>
 
-🌐 **[rei-ai.dev](https://rei-ai.dev)** — the website: what REI is, in a minute, on an amber screen.
+```bash
+curl -fsSL https://raw.githubusercontent.com/lucasaguilar/rei/main/install.sh | bash   # then: cd ~/my-project && rei
+```
 
 One agent, tailored to the job: it writes code and checks its own work, reviews like a senior, runs
 your day — and becomes whatever agent you describe in a markdown file. On a model on your own
