@@ -12,6 +12,28 @@ const repoRoot = path.resolve(here, "..");
 
 let win;
 let shell;
+let shellListeners = [];
+
+/**
+ * Kills REI and resolves once the pty has really gone. Quitting while node-pty's native reader is
+ * still alive aborts Electron (an uncaught Napi::Error), so the app waits — up to a second, after
+ * which a stuck child is not worth hanging the window for.
+ */
+function stopShell() {
+  const running = shell;
+  if (!running) return Promise.resolve();
+  shell = undefined;
+  return new Promise((resolve) => {
+    const done = () => {
+      for (const l of shellListeners) l.dispose();
+      shellListeners = [];
+      resolve();
+    };
+    running.onExit(done);
+    setTimeout(done, 1000);
+    running.kill();
+  });
+}
 
 async function chooseWorkspace() {
   const fromArgs = workspaceFromArgv(process.argv.slice(1));
@@ -60,11 +82,13 @@ async function createWindow() {
       cwd: launch.cwd,
       env: launch.env,
     });
-    shell.onData((data) => win?.webContents.send("pty:data", data));
-    shell.onExit(({ exitCode }) => {
-      shell = undefined;
-      win?.webContents.send("pty:exit", exitCode);
-    });
+    shellListeners = [
+      shell.onData((data) => win?.webContents.send("pty:data", data)),
+      shell.onExit(({ exitCode }) => {
+        shell = undefined;
+        win?.webContents.send("pty:exit", exitCode);
+      }),
+    ];
   });
   ipcMain.on("pty:write", (_e, data) => shell?.write(data));
   ipcMain.on("pty:resize", (_e, { cols, rows }) => shell?.resize(cols, rows));
@@ -75,10 +99,11 @@ async function createWindow() {
   // checked without someone watching the window.
   const snapshot = process.env.REI_DESKTOP_SNAPSHOT;
   if (snapshot) {
+    win.webContents.on("console-message", (e) => console.log(`[renderer] ${e.message}`));
     setTimeout(async () => {
       const image = await win.webContents.capturePage();
       fs.writeFileSync(snapshot, image.toPNG());
-      shell?.kill();
+      await stopShell();
       app.exit(0); // not quit(): nothing should get a chance to keep a snapshot run alive
     }, Number(process.env.REI_DESKTOP_SNAPSHOT_DELAY ?? 6000));
   }
@@ -86,8 +111,8 @@ async function createWindow() {
 
 app.whenReady().then(createWindow);
 
-app.on("window-all-closed", () => {
+app.on("window-all-closed", async () => {
   // Closing the window is closing REI: the pty must not outlive it as an orphan agent.
-  shell?.kill();
+  await stopShell();
   app.quit();
 });
