@@ -19,6 +19,13 @@ type Options = { env: NodeJS.ProcessEnv; home: string; fs: Fs };
  * comment or a key is a worse outcome than one line to paste.
  */
 export function crtSetup({ env, home, fs }: Options): string {
+  if (env.TERM_PROGRAM === "rei-desktop") {
+    return (
+      `[REI] REI Desktop already draws the tube — scanlines, glow, curved glass, phosphor trails.\n` +
+      `  Tune them with the knobs under the screen; A / G / V switches the phosphor.`
+    );
+  }
+
   if (env.TERM_PROGRAM === "ghostty") {
     const configDir = env.XDG_CONFIG_HOME || path.join(home, ".config");
     const dir = path.join(configDir, "ghostty", "shaders");

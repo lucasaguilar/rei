@@ -46,6 +46,15 @@ describe("/theme crt", () => {
     expect(written.size).toBe(0);
   });
 
+  it("knows REI Desktop draws its own tube, and points at its knobs", () => {
+    const { fs, written } = fakeFs();
+    const msg = crtSetup({ env: { TERM_PROGRAM: "rei-desktop" }, home: "/home/u", fs });
+    expect(msg).toContain("REI Desktop");
+    expect(msg).toContain("knobs");
+    expect(msg).not.toContain("cannot");
+    expect(written.size).toBe(0);
+  });
+
   it("says where it is possible when this terminal cannot do it", () => {
     const { fs, written } = fakeFs();
     const msg = crtSetup({ env: { TERM_PROGRAM: "Apple_Terminal" }, home: "/home/u", fs });
