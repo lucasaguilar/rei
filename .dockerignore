@@ -27,3 +27,4 @@ scripts/*
 bin
 *.test.ts
 *.spec.ts
+desktop

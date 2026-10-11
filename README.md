@@ -35,6 +35,9 @@ allows it, the whole window goes with it, and comes back as it was when REI exit
 
 ![REI in the amber theme: the logo, the mode and the prompt in one phosphor on black](docs/assets/rei-amber.png)
 
+**Want the whole monitor?** 🖥️ **REI Desktop** *(experimental)* runs the same REI on a curved
+phosphor tube, with knobs on the bezel. [Try it](#rei-desktop-experimental).
+
 ---
 
 ## Who it's for
@@ -762,6 +765,24 @@ host's environment — what you are publishing is an agent that writes files and
 `/healthz` is the one unauthenticated route (it answers `{"status":"ok"}` and nothing else), because
 a platform health check cannot send the token. The blueprint points at a cloud provider, not at
 your local models: it is the deployment path, not the point of REI.
+
+### REI Desktop (experimental)
+
+The same `rei chat`, in its own window, on a CRT:
+
+![REI Desktop: REI's first screen on a curved amber tube, with brightness, curve, scanline, glow and trail knobs and an A/G/V phosphor switch on the bezel](docs/assets/rei-desktop.png)
+
+```bash
+npm run build                      # the desktop runs this checkout's REI
+cd desktop && npm install
+npm start -- ~/my-project          # no argument: a folder picker
+```
+
+It is the real CLI in a terminal (xterm.js over a pty), drawn through a WebGL tube: phosphor that
+fades instead of vanishing, scanlines, glow, curved glass, and the tube powering on and off. The
+knobs on the bezel turn all of that, and the switch picks amber, green or REI's own colours; the
+monitor remembers both. It is a prototype: it needs this repository built and `node` on the PATH,
+it has only been tried on macOS, and there is no installer yet.
 
 ---
 
