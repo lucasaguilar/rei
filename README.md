@@ -760,6 +760,22 @@ host's environment — what you are publishing is an agent that writes files and
 a platform health check cannot send the token. The blueprint points at a cloud provider, not at
 your local models: it is the deployment path, not the point of REI.
 
+**Desktop (experimental)** — the same `rei chat`, in its own window, on a CRT:
+
+![REI Desktop: REI's first screen on a curved amber tube, with brightness, curve, scanline, glow and trail knobs and an A/G/V phosphor switch on the bezel](docs/assets/rei-desktop.png)
+
+```bash
+npm run build                      # the desktop runs this checkout's REI
+cd desktop && npm install
+npm start -- ~/my-project          # no argument: a folder picker
+```
+
+It is the real CLI in a terminal (xterm.js over a pty), drawn through a WebGL tube: phosphor that
+fades instead of vanishing, scanlines, glow, curved glass, and the tube powering on and off. The
+knobs on the bezel turn all of that, and the switch picks amber, green or REI's own colours; the
+monitor remembers both. It is a prototype: it needs this repository built and `node` on the PATH,
+it has only been tried on macOS, and there is no installer yet.
+
 ---
 
 ## Advanced, and off by default
