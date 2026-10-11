@@ -80,17 +80,21 @@ void main() {
 
   vec3 color = texture(uImage, uv).rgb;
 
-  vec2 px = 1.6 / uRes;
+  // Bloom: a weighted blur over two rings. Few taps far apart draw sharp copies of the text (an
+  // echo, not a glow); a dense, falling-off kernel draws a halo.
   vec3 glow = vec3(0.0);
-  glow += texture(uImage, uv + vec2( px.x, 0.0)).rgb;
-  glow += texture(uImage, uv + vec2(-px.x, 0.0)).rgb;
-  glow += texture(uImage, uv + vec2(0.0,  px.y)).rgb;
-  glow += texture(uImage, uv + vec2(0.0, -px.y)).rgb;
-  glow += texture(uImage, uv + vec2( px.x,  px.y) * 2.5).rgb;
-  glow += texture(uImage, uv + vec2(-px.x,  px.y) * 2.5).rgb;
-  glow += texture(uImage, uv + vec2( px.x, -px.y) * 2.5).rgb;
-  glow += texture(uImage, uv + vec2(-px.x, -px.y) * 2.5).rgb;
-  color += (glow / 8.0) * uBloom;
+  float total = 0.0;
+  for (int ring = 1; ring <= 2; ring++) {
+    float radius = float(ring) * 1.8;
+    float weight = ring == 1 ? 1.0 : 0.5;
+    for (int i = 0; i < 12; i++) {
+      float a = float(i) * 0.5235988; // 30 degrees
+      vec2 offset = vec2(cos(a), sin(a)) * radius / uRes;
+      glow += texture(uImage, uv + offset).rgb * weight;
+      total += weight;
+    }
+  }
+  color += (glow / total) * uBloom;
 
   float scan = 0.5 + 0.5 * sin(gl_FragCoord.y * 3.14159265 * 0.5);
   color *= 1.0 - uScanlines * scan;
