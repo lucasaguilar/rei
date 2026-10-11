@@ -16,6 +16,7 @@ import {
 import { saveSession } from "../../chat/session-store.js";
 import * as fs from "fs";
 import { LiveStatusEvent } from "../../chat/commands/command-handler.js";
+import { paint } from "../theme/palette.js";
 
 /**
  * The label shown above an auto-executed turn. Every autoExecute prompt opens with its own tag —
@@ -49,7 +50,7 @@ export async function handleInputCommand(
     const grab = await grabClipboardImage();
     if (!grab.ok || !grab.filePath) {
       actions.pushTranscript(
-        `\x1b[33m⚠️  ${grab.error ?? "Could not read image from clipboard."}\x1b[0m`,
+        paint("warn", `⚠️  ${grab.error ?? "Could not read image from clipboard."}`),
       );
       actions.draw();
       return true;
@@ -102,7 +103,7 @@ export async function handleInputCommand(
       case "done":
         state.activeStatus = undefined;
         state.activeStatusText = undefined;
-        actions.pushTranscript(`\x1b[32m${event.text}\x1b[0m`);
+        actions.pushTranscript(paint("success", event.text));
         break;
     }
     actions.draw();
@@ -116,7 +117,7 @@ export async function handleInputCommand(
     {
       mcpRegistry: agent.mcpRegistry,
       onStatus: (message: string) => {
-        actions.pushTranscript(`\x1b[2m${message}\x1b[0m`);
+        actions.pushTranscript(paint("dim", message));
         actions.draw();
       },
       onLiveStatus,

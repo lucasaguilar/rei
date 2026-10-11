@@ -32,10 +32,17 @@ describe("/theme", () => {
     expect(response).toContain("dark terminal");
   });
 
+  it("says the phosphor themes are dark themes too", async () => {
+    for (const name of ["amber", "green"]) {
+      const { response } = await run(`/theme ${name}`);
+      expect(response, name).toContain("dark terminal");
+    }
+  });
+
   it("refuses a theme that does not exist, and says what does", async () => {
     const result = await run("/theme dracula");
     expect(result.success).toBe(false);
-    expect(result.response).toContain("default, matrix");
+    expect(result.response).toContain("default, matrix, amber, green");
     expect(activeThemeName()).toBe("default");
   });
 });

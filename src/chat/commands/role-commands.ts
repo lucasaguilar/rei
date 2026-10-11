@@ -3,6 +3,7 @@ import { loadRole, listRoles } from "../../skills/role-loader.js";
 import { saveSession } from "../session-store.js";
 import { RESERVED_COMMAND_NAMES } from "./role-agent-commands.js";
 import { scaffoldRole } from "../../skills/role-scaffold.js";
+import { code, RESET } from "../../cli/theme/palette.js";
 
 /**
  * `/role <name>` activates a data-driven role (posture), `/role off` clears it, `/roles` lists them.
@@ -82,12 +83,12 @@ export const roleCommands: CommandHandler = {
       // The name is the thing you type, so it is the thing that has to be findable in the list:
       // bold cyan for the name, dim for the prose around it. The active one is bold green — you
       // read "which am I in" far more often than you read the descriptions.
-      const NAME = "\x1b[1;36m", ON = "\x1b[1;32m", DIM = "\x1b[2m", OFF = "\x1b[0m";
+      const NAME = code("user"), ON = code("strong") + code("success"), DIM = code("dim"), OFF = RESET;
       const lines = roles.map((r) => {
         const isActive = r.name === session.activeRole;
         const name = `${isActive ? ON : NAME}${r.name}${OFF}`;
         const invoke = RESERVED_COMMAND_NAMES.has(r.name.toLowerCase())
-          ? `      \x1b[33m⚠ '${r.name}' is also a built-in command, so /${r.name} runs that instead — rename the role to invoke it isolated.${OFF}`
+          ? `      ${code("warn")}⚠ '${r.name}' is also a built-in command, so /${r.name} runs that instead — rename the role to invoke it isolated.${OFF}`
           : `      ${DIM}/role${OFF} ${name} ${DIM}(here) · ${OFF}${NAME}/${r.name}${OFF} ${DIM}<task> (isolated${r.preferredModel ? `, ${r.preferredModel}` : ""})${OFF}`;
         return `  ${isActive ? `${ON}▶${OFF}` : " "} ${name} ${DIM}— ${r.description}${OFF}\n${invoke}`;
       });

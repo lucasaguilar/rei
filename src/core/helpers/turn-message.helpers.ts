@@ -3,6 +3,7 @@ import type {
   RagNodeSnippet,
 } from "../../context/context-builder.js";
 import { preserveThinkingEnabled } from "../../config/model-runtime.js";
+import { paint } from "../../cli/theme/palette.js";
 
 const FILE_TREE_HEADER = "### PROJECT FILE TREE";
 /**
@@ -206,11 +207,11 @@ export function buildStageCompletionMessage(stageNum: number, totalStages: numbe
   const isLast = totalStages > 0 && stageNum >= totalStages;
   if (isLast) {
     return ansi
-      ? `\n\n\x1b[32m✅ Stage ${stageNum} completed. Plan complete! All ${totalStages} stages done.\x1b[0m\n`
+      ? `\n\n${paint("success", `✅ Stage ${stageNum} completed. Plan complete! All ${totalStages} stages done.`)}\n`
       : `\n\n✅ Stage ${stageNum} completed. Plan complete! All ${totalStages} stages done.`;
   }
   return ansi
-    ? `\n\n\x1b[32m✅ Stage ${stageNum} completed. Run \x1b[1m/runplan stage ${stageNum + 1}\x1b[0m\x1b[32m to continue.\x1b[0m\n`
+    ? `\n\n${paint("success", `✅ Stage ${stageNum} completed. Run `)}${paint("strong", `/runplan stage ${stageNum + 1}`)}${paint("success", " to continue.")}\n`
     : `\n\n✅ Stage ${stageNum} completed. Run /runplan stage ${stageNum + 1} to continue.`;
 }
 

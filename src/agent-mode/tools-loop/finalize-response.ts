@@ -1,6 +1,7 @@
 import type { ChatMessage } from "../../chat/types.js";
 import type { ModelProvider } from "../../providers/model-provider.js";
 import { looksLikeAttemptedToolCall } from "./tool-call-detection.js";
+import { code, paint } from "../../cli/theme/palette.js";
 
 /**
  * Builds the final user-facing response when the model finishes (no more tool calls). Extracted
@@ -84,7 +85,7 @@ export async function buildFinalResponse(params: {
     formatCorrections > 0 || looksLikeAttemptedToolCall(content);
   if (appliedNothing && impliedEdits) {
     finalResponse =
-      `\x1b[1m\x1b[33m⚠️  NO FILE WAS CHANGED.\x1b[0m The model described an edit but never ` +
+      `${code("strong")}${paint("warn", "⚠️  NO FILE WAS CHANGED.")} The model described an edit but never ` +
       `emitted an \`edit_file\`/\`create_file\` tool call, so nothing was applied to disk. ` +
       `Re-run the step or rephrase the request.\n\n` +
       finalResponse;

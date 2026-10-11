@@ -34,6 +34,7 @@ import {
 import { evaluateNoProduce, produceThresholds, PRODUCE_NOW_MESSAGE } from "./tools-loop/no-produce-guard.js";
 import { withNativeToolsDirective } from "./native-tools-directive.js";
 import type { SkillMode } from "../skills/skill-loader.js";
+import { paint } from "../cli/theme/palette.js";
 
 // Re-exported for back-compat (it moved into tools-loop/apply-edit-batch during the Phase 2 refactor).
 export { setEditResults };
@@ -133,7 +134,7 @@ export async function executeAgentTurnWithTools(params: {
 
   // Emits a one-line live status for a tool action (shown immediately by the CLI).
   const emitStatus = (msg: string, kind: "tool" | "notice" = "tool") =>
-    onChunk?.({ type: "status", content: `\n\x1b[33m${msg}\x1b[0m\n`, kind });
+    onChunk?.({ type: "status", content: `\n${paint("status", msg)}\n`, kind });
 
   // Tool selection lives in setupToolSelection. `activeMcp` returned MUTABLE (search_tools grows it).
   const { buildTools, activeMcp, allMcpTools, useToolSearch, skills } = setupToolSelection({

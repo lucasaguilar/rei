@@ -17,7 +17,7 @@ import {
 const THEME_RE = /^\/theme(?:\s+(\S+))?$/i;
 
 /** Themes that assume a dark terminal — worth saying out loud rather than letting it read as a bug. */
-const DARK_ONLY = new Set(["matrix"]);
+const DARK_ONLY = new Set(["matrix", "amber", "green"]);
 
 export const themeCommands: CommandHandler = {
   match: (c) => THEME_RE.test(c.trim()),

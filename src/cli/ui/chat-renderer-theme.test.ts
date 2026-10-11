@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { ChatRenderer } from "./chat-renderer.js";
-import { setTheme, THEMES, RESET } from "../theme/palette.js";
+import { code, setTheme, THEMES, THEME_NAMES, RESET } from "../theme/palette.js";
 import type { ChatRendererState } from "../models/chat.types.js";
 
 afterEach(() => setTheme(undefined));
@@ -59,10 +59,20 @@ describe("the chrome under each theme", () => {
     expect(out).toContain(THEMES.matrix.thinking);
   });
 
-  it("closes every colour it opens, in both themes", () => {
+  it("repaints the same frame in amber phosphor", () => {
+    setTheme("amber");
+    const out = frame();
+    // code(), not THEMES.amber: the build depends on whether this terminal reports truecolor.
+    expect(out).toContain(code("accent"));
+    expect(out).toContain(code("promptAgent"));
+    // Nothing left over from the default palette's 16 colours.
+    expect(out).not.toContain(THEMES.default.promptAgent);
+  });
+
+  it("closes every colour it opens, in every theme", () => {
     // Counted rather than eyeballed: one unclosed escape in a block that is redrawn ten times a
     // second leaves the terminal painted, and it survives REI exiting.
-    for (const theme of ["default", "matrix"] as const) {
+    for (const theme of THEME_NAMES) {
       setTheme(theme);
       const out = frame();
       // Colour escapes only — cursor moves and line clears are not styling.

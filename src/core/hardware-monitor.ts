@@ -1,4 +1,5 @@
 import * as os from "os";
+import { paint } from "../cli/theme/palette.js";
 
 export interface OllamaModelStatus {
   name: string;
@@ -47,13 +48,13 @@ export async function checkHardware(params: {
   // ── System RAM check ────────────────────────────────────────────────────
   if (ramFreeMb < CRITICAL_RAM_THRESHOLD_MB) {
     warnings.push(
-      `\x1b[31m⚠️  [HW] Critical: only ${ramFreeMb}MB RAM free. ` +
-      `REI may crash or produce very slow responses.\x1b[0m`,
+      paint("danger", `⚠️  [HW] Critical: only ${ramFreeMb}MB RAM free. ` +
+      `REI may crash or produce very slow responses.`),
     );
   } else if (ramFreeMb < LOW_RAM_THRESHOLD_MB) {
     warnings.push(
-      `\x1b[33m⚠️  [HW] Low RAM: ${ramFreeMb}MB free of ${ramTotalMb}MB. ` +
-      `Consider closing other apps.\x1b[0m`,
+      paint("warn", `⚠️  [HW] Low RAM: ${ramFreeMb}MB free of ${ramTotalMb}MB. ` +
+      `Consider closing other apps.`),
     );
   }
 
@@ -104,10 +105,10 @@ export async function checkHardware(params: {
           const ramMb = Math.round(loaded.ramBytes / MB);
           const vramMb = Math.round(loaded.vramBytes / MB);
           warnings.push(
-            `\x1b[33m⚠️  [HW] Model "${loaded.name}" is split: ` +
+            paint("warn", `⚠️  [HW] Model "${loaded.name}" is split: ` +
             `${vramMb}MB in VRAM + ${ramMb}MB in RAM. ` +
             `Inference will be slow. ` +
-            `Try a smaller model or increase OLLAMA_NUM_GPU_LAYERS.\x1b[0m`,
+            `Try a smaller model or increase OLLAMA_NUM_GPU_LAYERS.`),
           );
         }
       }
