@@ -25,6 +25,13 @@ machine, or a cloud one.
 
 Drop a markdown file in `.rei/` and it is there next session — no build, no plugin API, no fork.
 
+**Or on an 80s monitor.** `REI_THEME=amber` — or `green`, or `/theme amber` mid-session — turns
+REI into a Hercules screen: one phosphor, a few intensities, black glass. In a terminal that
+allows it, the whole window goes with it, and comes back as it was when REI exits.
+[How themes work](#the-rest-of-the-speed).
+
+![REI in the amber theme: the logo, the mode and the prompt in one phosphor on black](docs/assets/rei-amber.png)
+
 ---
 
 ## Who it's for
