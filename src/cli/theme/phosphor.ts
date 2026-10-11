@@ -23,6 +23,8 @@ type Phosphor = {
   faint: Tone;
   /** Warnings, kept out of the hue. On amber a plain yellow would blend in, so it is underlined. */
   warn: string;
+  /** The glass: not pure black — a lit tube is faintly tinted by its own phosphor. */
+  screen: [number, number, number];
 };
 
 export const PHOSPHORS = {
@@ -32,6 +34,7 @@ export const PHOSPHORS = {
     dim: { rgb: [184, 120, 0], xterm: 136 },
     faint: { rgb: [143, 98, 19], xterm: 94 },
     warn: "1;4;33",
+    screen: [10, 6, 0],
   },
   green: {
     bright: { rgb: [125, 255, 151], xterm: 120 },
@@ -39,6 +42,7 @@ export const PHOSPHORS = {
     dim: { rgb: [31, 158, 60], xterm: 35 },
     faint: { rgb: [26, 107, 46], xterm: 28 },
     warn: "1;33",
+    screen: [1, 8, 2],
   },
 } satisfies Record<string, Phosphor>;
 

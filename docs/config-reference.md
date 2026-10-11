@@ -223,6 +223,7 @@ carrying them will start taking effect.)
 | `REI_THINKING_LINES` | rows that paragraph may use (1–12, and never more than a sixth of the terminal) | `4` |
 | `REI_LOOP_GUARD` | `off` disables the repetition guard that cuts a runaway generation. On by default; a cut is followed by ONE clean retry (the looping text is dropped, never re-fed) before REI gives up on the turn. Turn it off if it ever stops a legitimately repetitive answer (a long plan with parallel sections is the shape at risk) | `on` |
 | `REI_THEME` | colours for REI's chrome: `default`, `matrix`, `amber` or `green` (the Hercules phosphors: 24-bit colour when `COLORTERM`/the terminal supports it, 256 colours otherwise). `/theme` switches mid-session. Diffs, syntax highlighting, warnings and errors are never themed | `default` |
+| `REI_TERMINAL_COLORS` | `off` stops `amber`/`green` from setting the terminal window's own text, background and cursor colours (OSC 10/11/12) while REI runs. They are restored on exit either way; turn this off for a terminal that mishandles the sequences | `on` |
 | `REI_HYPERLINKS` | `on`/`off` to force or disable clickable file links in tables | auto-detected |
 
 ## Execution / tools (agnostic)

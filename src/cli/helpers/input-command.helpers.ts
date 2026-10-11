@@ -17,6 +17,9 @@ import { saveSession } from "../../chat/session-store.js";
 import * as fs from "fs";
 import { LiveStatusEvent } from "../../chat/commands/command-handler.js";
 import { paint } from "../theme/palette.js";
+import { syncTerminalScreen } from "../theme/terminal-screen.js";
+import { crtSetup } from "../theme/crt-setup.js";
+import * as os from "os";
 
 /**
  * The label shown above an auto-executed turn. Every autoExecute prompt opens with its own tag —
@@ -40,6 +43,24 @@ export async function handleInputCommand(
     process.stdout.write("\x1b[2K"); // erase prompt line in place
     process.stdout.write("\nGoodbye!\n");
     state.running = false;
+    return true;
+  }
+
+  // /theme crt: CLI-only, like /paste-image — it writes into the user's terminal config dir, which
+  // no command arriving over a channel should be able to do.
+  if (/^\/theme\s+crt$/i.test(trimmed)) {
+    actions.pushTranscript(displayUserLabel(trimmed));
+    actions.pushTranscript(
+      crtSetup({
+        env: process.env,
+        home: os.homedir(),
+        fs: {
+          mkdir: (dir) => fs.mkdirSync(dir, { recursive: true }),
+          writeFile: (file, data) => fs.writeFileSync(file, data),
+        },
+      }),
+    );
+    actions.draw();
     return true;
   }
 
@@ -124,6 +145,8 @@ export async function handleInputCommand(
       elicit: ctx.elicit,
     },
   );
+  // /theme may have moved on or off a phosphor; the terminal's own colours follow it.
+  syncTerminalScreen();
 
   if (result.success) {
     // Echo the command (like a normal turn's "You:") so the response has a visible prompt —

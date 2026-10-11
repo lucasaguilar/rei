@@ -36,6 +36,7 @@ export const themeCommands: CommandHandler = {
           `[REI] Theme: ${activeThemeName()}\n` +
           `  Available: ${list}\n` +
           `  /theme <name>  ·  REI_THEME=<name> to start in it\n` +
+          `  /theme crt — scanlines and glow, in the terminals that can draw them\n` +
           `  Diffs and syntax highlighting are never themed — that colour is information.`,
       };
     }

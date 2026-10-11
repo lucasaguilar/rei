@@ -20,6 +20,7 @@ describe("/theme", () => {
     const { response } = await run("/theme");
     expect(response).toContain("default (active)");
     expect(response).toContain("matrix");
+    expect(response).toContain("/theme crt");
   });
 
   it("switches, and the switch is what the rest of the UI reads", async () => {

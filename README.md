@@ -425,7 +425,11 @@ Once the model entry is right, these are what a local session actually spends it
   is information. `amber` and `green` are the 80s Hercules monitors — one phosphor, a few
   intensities — in exact 24-bit colour when the terminal supports it (`COLORTERM=truecolor`,
   iTerm2, Ghostty, WezTerm, Windows Terminal), and the nearest of 256 colours otherwise. Warnings
-  and errors stay yellow and red in every theme.
+  and errors stay yellow and red in every theme. In the interactive terminal they also set the
+  window's own text, background and cursor (OSC 10/11/12) while REI runs, and put the profile's
+  back on exit — `REI_TERMINAL_COLORS=off` skips that. `/theme crt` adds what only the terminal
+  can draw — scanlines, glow, curved glass: it installs a shader for Ghostty and says what to
+  switch on in Windows Terminal.
 
 → [Every variable](docs/config-reference.md) · [How commands are run](docs/command-execution.md)
 
