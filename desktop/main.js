@@ -85,6 +85,12 @@ async function createWindow() {
     },
   });
 
+  // The window is REI's screen and nothing else. Left alone, a link would turn it into a browser:
+  // xterm.js opens one with window.open (a new Electron window, showing any site) and a navigation
+  // would replace the renderer. Neither is allowed; links leave through `link:open` instead.
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  win.webContents.on("will-navigate", (event) => event.preventDefault());
+
   // The renderer asks once it has measured the terminal, so REI's first frame is drawn at the
   // real size instead of 80x24 and then reflowed.
   ipcMain.handle("pty:start", (_e, { cols, rows }) => {
