@@ -46,7 +46,7 @@ describe("classifyLink — what a click in the terminal may do", () => {
   });
 
   it("shows a file inside the workspace, never one outside it", () => {
-    expect(classifyLink(url(WS, "src/a.ts"), WS)).toEqual({ kind: "file", path: path.join(WS, "src/a.ts") });
+    expect(classifyLink(url(WS, "src/a.ts"), WS)).toMatchObject({ kind: "file", path: path.join(WS, "src/a.ts") });
     expect(classifyLink("file:///etc/passwd", WS)).toEqual({ kind: "refused" });
   });
 
@@ -55,7 +55,7 @@ describe("classifyLink — what a click in the terminal may do", () => {
   });
 
   it("marks a web page inside the workspace, so it can open in the browser instead of Finder", () => {
-    expect(classifyLink(url(WS, "news/index.html"), WS)).toEqual({
+    expect(classifyLink(url(WS, "news/index.html"), WS)).toMatchObject({
       kind: "file",
       path: path.join(WS, "news/index.html"),
       page: true,
@@ -76,13 +76,24 @@ describe("classifyLink — what a click in the terminal may do", () => {
 
   it("judges a symlinked .html by what it points to: a .command behind it is not a web page", () => {
     // macOS opens a symlink as its target, so page.html → run.command would run the script.
-    expect(classifyLink(url(WS, "page.html"), WS)).toEqual({ kind: "file", path: path.join(WS, "run.command") });
+    const link = classifyLink(url(WS, "page.html"), WS);
+    expect(link).toMatchObject({ kind: "file", path: path.join(WS, "run.command") });
+    expect(link).not.toHaveProperty("page");
   });
 
   it("accepts a workspace given through a symlink", () => {
     const alias = path.join(base, "alias");
     fs.symlinkSync(WS, alias);
-    expect(classifyLink(url(WS, "src/a.ts"), alias)).toEqual({ kind: "file", path: path.join(WS, "src/a.ts") });
+    expect(classifyLink(url(WS, "src/a.ts"), alias)).toMatchObject({ kind: "file", path: path.join(WS, "src/a.ts") });
+  });
+
+  it("names a file by its place in the workspace, even one reached through a symlink", () => {
+    // The dialog asks about this name; measured against the unresolved workspace it read ../../private/…
+    const alias = path.join(base, "alias-for-name");
+    fs.symlinkSync(WS, alias);
+    expect(classifyLink(url(alias, "src/a.ts"), alias)).toMatchObject({ name: path.join("src", "a.ts") });
+    expect(classifyLink(url(WS, "news/index.html"), WS)).toMatchObject({ name: path.join("news", "index.html") });
+    expect(classifyLink(url(WS), WS)).toMatchObject({ name: "project" }); // the workspace itself
   });
 
   it("refuses every other scheme and anything that is not a URL", () => {

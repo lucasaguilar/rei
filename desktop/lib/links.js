@@ -40,7 +40,10 @@ export function classifyLink(raw, workspace) {
     }
     // root + separator, not a bare prefix: /project-evil starts with /project too.
     if (file === root || file.startsWith(root + path.sep)) {
-      return /\.html?$/i.test(file) ? { kind: "file", path: file, page: true } : { kind: "file", path: file };
+      // Named against the resolved root too: against the one as given, a workspace reached through a
+      // symlink would make the dialog ask about ../../private/….
+      const name = path.relative(root, file) || path.basename(file);
+      return /\.html?$/i.test(file) ? { kind: "file", path: file, name, page: true } : { kind: "file", path: file, name };
     }
   }
 

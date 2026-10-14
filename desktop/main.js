@@ -121,7 +121,7 @@ async function createWindow() {
     const link = classifyLink(String(raw), workspace);
     if (link.kind === "refused") return false;
     const web = link.kind === "web";
-    const name = web ? link.host : path.relative(workspace, link.path) || path.basename(link.path);
+    const name = web ? link.host : link.name;
     const manager = process.platform === "darwin" ? "Finder" : "the file manager";
     const { response } = await dialog.showMessageBox(win, {
       type: "question",
