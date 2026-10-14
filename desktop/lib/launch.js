@@ -22,6 +22,10 @@ export function reiLaunch({ repoRoot, workspace, phosphor, env }) {
       TERM: "xterm-256color",
       COLORTERM: "truecolor",
       TERM_PROGRAM: "rei-desktop",
+      // The window opens links (after asking), but REI cannot know that: neither its own check nor
+      // the markdown renderer's recognises "rei-desktop". Said explicitly, once for each of them.
+      REI_HYPERLINKS: "on",
+      FORCE_HYPERLINK: "1",
     },
   };
 }
