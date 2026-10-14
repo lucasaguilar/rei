@@ -1,10 +1,11 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell as desktopShell } from "electron";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import { fileURLToPath } from "node:url";
 import pty from "node-pty";
 import { missingBuild, reiLaunch, workspaceFromArgv } from "./lib/launch.js";
+import { classifyLink } from "./lib/links.js";
 import { loadSettings, saveSettings } from "./lib/settings.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -113,6 +114,29 @@ async function createWindow() {
   });
   ipcMain.on("pty:write", (_e, data) => shell?.write(data));
   ipcMain.on("pty:resize", (_e, { cols, rows }) => shell?.resize(cols, rows));
+
+  // A click on a link in the terminal. The renderer only reports it; whether anything happens is
+  // decided here, and the user decides last — the link's text came from a model.
+  ipcMain.handle("link:open", async (_e, raw) => {
+    const link = classifyLink(String(raw), workspace);
+    if (link.kind === "refused") return false;
+    const web = link.kind === "web";
+    const manager = process.platform === "darwin" ? "Finder" : "the file manager";
+    const { response } = await dialog.showMessageBox(win, {
+      type: "question",
+      buttons: [web ? "Open" : "Show", "Cancel"],
+      defaultId: 0,
+      cancelId: 1,
+      message: web
+        ? `Open ${link.host} in your browser?`
+        : `Show ${path.relative(workspace, link.path) || path.basename(link.path)} in ${manager}?`,
+      detail: web ? link.url : link.path, // the whole address: the visible text can say anything
+    });
+    if (response !== 0) return false;
+    if (web) await desktopShell.openExternal(link.url);
+    else desktopShell.showItemInFolder(link.path);
+    return true;
+  });
 
   await win.loadFile(path.join(here, "renderer", "index.html"), {
     query: { phosphor, workspace, version: app.getVersion() },

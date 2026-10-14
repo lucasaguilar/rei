@@ -2,6 +2,7 @@ import { Terminal } from "../node_modules/@xterm/xterm/lib/xterm.mjs";
 import { FitAddon } from "../node_modules/@xterm/addon-fit/lib/addon-fit.mjs";
 import { WebglAddon } from "../node_modules/@xterm/addon-webgl/lib/addon-webgl.mjs";
 import { Unicode11Addon } from "../node_modules/@xterm/addon-unicode11/lib/addon-unicode11.mjs";
+import { WebLinksAddon } from "../node_modules/@xterm/addon-web-links/lib/addon-web-links.mjs";
 import { DEFAULT_PHOSPHOR, isPhosphor, PHOSPHORS, xtermTheme } from "./phosphors.js";
 import { Crt } from "./crt.js";
 import { mountBezel, toast } from "./bezel.js";
@@ -14,6 +15,12 @@ const requested = query.get("phosphor");
 const launchedIn = isPhosphor(requested) ? requested : DEFAULT_PHOSPHOR;
 let phosphor = settings.phosphor;
 
+// Every link in the terminal ends here, whichever way it was found. The renderer does not open
+// anything: main asks the user, then hands the address to the browser (or the file manager).
+function openLink(_event, uri) {
+  window.rei.openLink(uri).finally(() => term.focus());
+}
+
 const term = new Terminal({
   fontFamily: 'Menlo, "SF Mono", "Cascadia Mono", Consolas, monospace',
   fontSize: 15,
@@ -22,11 +29,16 @@ const term = new Terminal({
   scrollback: 5000,
   theme: xtermTheme(phosphor),
   allowProposedApi: true, // the unicode API below is still "proposed" in xterm.js
+  // Links REI marks explicitly (OSC 8): a markdown [title](url), a file path. file:// has to be let
+  // through here; main is what refuses anything outside the workspace.
+  linkHandler: { activate: openLink, allowNonHttpProtocols: true },
 });
 // REI's chrome is full of emoji (🧠 ⏳ 💻). Unicode 6 widths give them one cell, the font draws
 // two, and the next character lands on top of them.
 term.loadAddon(new Unicode11Addon());
 term.unicode.activeVersion = "11";
+// And bare http(s) addresses in plain text, the way a terminal makes them clickable.
+term.loadAddon(new WebLinksAddon(openLink));
 const fit = new FitAddon();
 term.loadAddon(fit);
 term.open(document.getElementById("terminal"));

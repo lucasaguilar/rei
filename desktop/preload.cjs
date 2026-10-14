@@ -9,4 +9,5 @@ contextBridge.exposeInMainWorld("rei", {
   onExit: (fn) => ipcRenderer.on("pty:exit", (_e, code) => fn(code)),
   getSettings: () => ipcRenderer.invoke("settings:get"),
   saveSettings: (patch) => ipcRenderer.send("settings:set", patch),
+  openLink: (url) => ipcRenderer.invoke("link:open", url),
 });
