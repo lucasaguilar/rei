@@ -21,6 +21,16 @@ describe("classifyLink — what a click in the terminal may do", () => {
     expect(classifyLink("file:///etc/passwd", WS)).toEqual({ kind: "refused" });
   });
 
+  it("marks a web page inside the workspace, so it can open in the browser instead of Finder", () => {
+    expect(classifyLink("file:///home/me/project/news/index.html", WS)).toEqual({
+      kind: "file",
+      path: "/home/me/project/news/index.html",
+      page: true,
+    });
+    expect(classifyLink("file:///home/me/project/a.HTM", WS)).toMatchObject({ page: true });
+    expect(classifyLink("file:///home/me/project/run.command", WS)).not.toHaveProperty("page");
+  });
+
   it("is not fooled by .. or by a sibling folder that shares the prefix", () => {
     expect(classifyLink("file:///home/me/project/../secrets.txt", WS)).toEqual({ kind: "refused" });
     expect(classifyLink("file:///home/me/project-evil/a.ts", WS)).toEqual({ kind: "refused" });

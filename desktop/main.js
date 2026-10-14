@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell as desktopShell } from "elec
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import pty from "node-pty";
 import { missingBuild, reiLaunch, workspaceFromArgv } from "./lib/launch.js";
 import { classifyLink } from "./lib/links.js";
@@ -121,19 +121,19 @@ async function createWindow() {
     const link = classifyLink(String(raw), workspace);
     if (link.kind === "refused") return false;
     const web = link.kind === "web";
+    const name = web ? link.host : path.relative(workspace, link.path) || path.basename(link.path);
     const manager = process.platform === "darwin" ? "Finder" : "the file manager";
     const { response } = await dialog.showMessageBox(win, {
       type: "question",
-      buttons: [web ? "Open" : "Show", "Cancel"],
+      buttons: [web || link.page ? "Open" : "Show", "Cancel"],
       defaultId: 0,
       cancelId: 1,
-      message: web
-        ? `Open ${link.host} in your browser?`
-        : `Show ${path.relative(workspace, link.path) || path.basename(link.path)} in ${manager}?`,
+      message: web || link.page ? `Open ${name} in your browser?` : `Show ${name} in ${manager}?`,
       detail: web ? link.url : link.path, // the whole address: the visible text can say anything
     });
     if (response !== 0) return false;
     if (web) await desktopShell.openExternal(link.url);
+    else if (link.page) await desktopShell.openExternal(pathToFileURL(link.path).href);
     else desktopShell.showItemInFolder(link.path);
     return true;
   });
