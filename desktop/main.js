@@ -15,6 +15,9 @@ const repoRoot = path.resolve(here, "..");
 
 let win;
 let shell;
+
+/** The editor a click opens, asked each time: one installed while the app runs shows up. */
+const currentEditor = () => pickEditor(detectEditors((p) => app.getApplicationNameForProtocol(p)));
 let shellListeners = [];
 
 /**
@@ -122,8 +125,7 @@ async function createWindow() {
   ipcMain.handle("link:open", async (_e, raw) => {
     const link = classifyLink(String(raw), workspace);
     if (link.kind === "refused") return false;
-    // Asked on every click, not once at launch: an editor installed meanwhile shows up.
-    const editor = pickEditor(detectEditors((p) => app.getApplicationNameForProtocol(p)));
+    const editor = currentEditor();
     const manager = process.platform === "darwin" ? "Finder" : "the file manager";
     const prompt = linkPrompt(link, { editor, manager });
     const { response } = await dialog.showMessageBox(win, {
@@ -143,6 +145,19 @@ async function createWindow() {
       desktopShell.showItemInFolder(link.path);
     }
     return Boolean(action);
+  });
+
+  // The panel's "open project" button. No dialog, unlike a link: the user pressed the app's own
+  // button, and the folder is the one they opened — nothing here came from the model.
+  ipcMain.handle("editor:current", () => {
+    const editor = currentEditor();
+    return editor ? { id: editor.id, name: editor.name } : null;
+  });
+  ipcMain.handle("project:open", async () => {
+    const editor = currentEditor();
+    if (!editor) return false;
+    await desktopShell.openExternal(editorUrl(editor, workspace));
+    return true;
   });
 
   await win.loadFile(path.join(here, "renderer", "index.html"), {

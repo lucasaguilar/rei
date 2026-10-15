@@ -78,6 +78,20 @@ export function mountBezel(panel, { phosphor, knobs }, on) {
   }
 }
 
+/**
+ * "Open in VS Code": the whole project in the user's editor. Drawn only when one is installed — a
+ * button that can do nothing would be the only dead control on the panel.
+ */
+export function mountProjectButton(panel, editor, onOpen) {
+  if (!editor) return;
+  const b = document.createElement("button");
+  b.type = "button";
+  b.textContent = `Open in ${editor.name}`;
+  b.title = `Open this project in ${editor.name}`;
+  b.addEventListener("click", onOpen);
+  panel.querySelector(".project").append(b);
+}
+
 /** A line of text on the bezel that fades — for the one thing worth saying out loud. */
 export function toast(el, text) {
   el.textContent = text;

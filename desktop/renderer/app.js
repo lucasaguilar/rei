@@ -5,7 +5,7 @@ import { Unicode11Addon } from "../node_modules/@xterm/addon-unicode11/lib/addon
 import { WebLinksAddon } from "../node_modules/@xterm/addon-web-links/lib/addon-web-links.mjs";
 import { DEFAULT_PHOSPHOR, isPhosphor, PHOSPHORS, xtermTheme } from "./phosphors.js";
 import { Crt } from "./crt.js";
-import { mountBezel, toast } from "./bezel.js";
+import { mountBezel, mountProjectButton, toast } from "./bezel.js";
 import { playBoot } from "./boot.js";
 
 const settings = await window.rei.getSettings();
@@ -104,6 +104,7 @@ mountBezel(document.getElementById("panel"), settings, {
     term.focus();
   },
 });
+mountProjectButton(document.getElementById("panel"), await window.rei.editor(), () => window.rei.openProject());
 // Clicking the panel must not leave the keyboard pointing at a knob.
 document.getElementById("panel").addEventListener("pointerup", () => setTimeout(() => term.focus(), 0));
 
