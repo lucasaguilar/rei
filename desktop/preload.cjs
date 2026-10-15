@@ -10,4 +10,6 @@ contextBridge.exposeInMainWorld("rei", {
   getSettings: () => ipcRenderer.invoke("settings:get"),
   saveSettings: (patch) => ipcRenderer.send("settings:set", patch),
   openLink: (url) => ipcRenderer.invoke("link:open", url),
+  editor: () => ipcRenderer.invoke("editor:current"),
+  openProject: () => ipcRenderer.invoke("project:open"),
 });
