@@ -41,7 +41,10 @@ import {
   cleanResponseForHistory,
 } from "./helpers/turn-message.helpers.js";
 import type { StreamTurnOptions } from "./models/agent.types.js";
-import { formatBatchPatchResult } from "./helpers/format-batch-patch-result.js";
+import {
+  formatAppliedEditDiff,
+  formatBatchPatchResult,
+} from "./helpers/format-batch-patch-result.js";
 import { type SkillMode } from "../skills/skill-loader.js";
 import { resolveSessionModel } from "../chat/manual-model.js";
 import { loadRole } from "../skills/role-loader.js";
@@ -56,7 +59,6 @@ import {
   stripAllActionTags,
   CREATED_FILES_MARKER,
 } from "../agent-mode/helpers/patch-helpers.js";
-import { formatCodeDiff } from "../cli/markdown-renderer.js";
 import { code, paint, RESET } from "../cli/theme/palette.js";
 import {
   calculateContextBudget,
@@ -412,7 +414,7 @@ export class Agent {
             (r) => r.file === edit.file && r.applied,
           );
           if (applied) {
-            yield `\n${paint("strong", "File:")} ${edit.file}\n\`\`\`diff\n${formatCodeDiff(edit.search, edit.replace)}\n\`\`\``;
+            yield formatAppliedEditDiff(edit.file, edit.search, edit.replace);
           }
         }
 

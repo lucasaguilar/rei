@@ -124,7 +124,7 @@ export async function runChat(
     const normalized = value.replace(/\r\n/g, "\n");
     for (const line of normalized.split("\n")) {
       if (writeToStdout) {
-        process.stdout.write(line + "\n");
+        ChatRenderer.writeStream(line + "\n");
       }
       transcript.push(line);
     }
@@ -136,7 +136,7 @@ export async function runChat(
   // streamText: writes a string straight to process.stdout.
   const streamText = (value: string): void => {
     ChatRenderer.clearUI();
-    process.stdout.write(value);
+    ChatRenderer.writeStream(value);
   };
 
   const getPalette = () => getActivePalette(state, palette.mentionEntries, palette.roleEntries);
@@ -300,7 +300,7 @@ export async function runChat(
 
       // Reprint the entire transcript to the screen at the new terminal width
       for (const line of transcript) {
-        process.stdout.write(line + "\n");
+        ChatRenderer.writeStream(line + "\n");
       }
 
       draw();

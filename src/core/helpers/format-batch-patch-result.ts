@@ -1,4 +1,6 @@
 import type { BatchPatchApplyResult } from "../../tools/patch-applier.js";
+import { formatCodeDiff } from "../../cli/markdown-renderer.js";
+import { paint } from "../../cli/theme/palette.js";
 
 /**
  * Formats the feedback report from applying a batch of Search-and-Replace edits to the filesystem.
@@ -15,6 +17,16 @@ export function formatBatchPatchResult(result: BatchPatchApplyResult): string {
     )
     .join("");
 
-  return header + details;
+  // Ends its own line, so whatever follows (a diff, the answer) starts on a fresh one.
+  return header + details + "\n";
 }
 
+/**
+ * The diff shown for one applied edit, under a "File:" label the server's chat handler keys on.
+ * No ```diff fence: the CLI prints this live, not through the markdown renderer, so the fence
+ * reached the screen as literal backticks — and the server wraps it in a fence of its own.
+ * One blank line before it and a line end after it: the fence lines used to space it by accident.
+ */
+export function formatAppliedEditDiff(file: string, search: string, replace: string): string {
+  return `\n${paint("strong", "File:")} ${file}\n${formatCodeDiff(search, replace)}\n`;
+}
