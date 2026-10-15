@@ -6,6 +6,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import pty from "node-pty";
 import { missingBuild, reiLaunch, workspaceFromArgv } from "./lib/launch.js";
 import { classifyLink } from "./lib/links.js";
+import { linkPrompt } from "./lib/link-prompt.js";
+import { detectEditors, editorUrl, pickEditor } from "./lib/editors.js";
 import { loadSettings, saveSettings } from "./lib/settings.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -120,22 +122,27 @@ async function createWindow() {
   ipcMain.handle("link:open", async (_e, raw) => {
     const link = classifyLink(String(raw), workspace);
     if (link.kind === "refused") return false;
-    const web = link.kind === "web";
-    const name = web ? link.host : link.name;
+    // Asked on every click, not once at launch: an editor installed meanwhile shows up.
+    const editor = pickEditor(detectEditors((p) => app.getApplicationNameForProtocol(p)));
     const manager = process.platform === "darwin" ? "Finder" : "the file manager";
+    const prompt = linkPrompt(link, { editor, manager });
     const { response } = await dialog.showMessageBox(win, {
       type: "question",
-      buttons: [web || link.page ? "Open" : "Show", "Cancel"],
-      defaultId: 0,
-      cancelId: 1,
-      message: web || link.page ? `Open ${name} in your browser?` : `Show ${name} in ${manager}?`,
-      detail: web ? link.url : link.path, // the whole address: the visible text can say anything
+      buttons: prompt.choices.map((c) => c.label),
+      defaultId: prompt.defaultId,
+      cancelId: prompt.cancelId,
+      message: prompt.message,
+      detail: prompt.detail,
     });
-    if (response !== 0) return false;
-    if (web) await desktopShell.openExternal(link.url);
-    else if (link.page) await desktopShell.openExternal(pathToFileURL(link.path).href);
-    else desktopShell.showItemInFolder(link.path);
-    return true;
+    const action = prompt.choices[response]?.action;
+    if (action === "browser") {
+      await desktopShell.openExternal(link.kind === "web" ? link.url : pathToFileURL(link.path).href);
+    } else if (action === "editor") {
+      await desktopShell.openExternal(editorUrl(editor, link.path));
+    } else if (action === "reveal") {
+      desktopShell.showItemInFolder(link.path);
+    }
+    return Boolean(action);
   });
 
   await win.loadFile(path.join(here, "renderer", "index.html"), {
