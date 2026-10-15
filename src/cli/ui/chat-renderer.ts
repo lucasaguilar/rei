@@ -32,17 +32,33 @@ export class ChatRenderer {
   private static lastDrawnLines: string[] = [];
   /** Rows the terminal cursor was parked ABOVE the bottom of the last draw (multi-line input). */
   private static lastCursorRowsFromBottom = 0;
+  /** Visible length of the conversation's current, unfinished line (0 = the cursor is at a line start). */
+  private static streamColumn = 0;
+  /** Column to put the cursor back on, one row up, once the block drawn below a half line is erased. */
+  private static resumeColumn = 0;
 
   public static resetDrawnState(): void {
     this.lastDrawnLinesCount = 0;
     this.lastDrawnCols = 0;
     this.lastDrawnLines = [];
+    this.streamColumn = 0;
+    this.resumeColumn = 0;
   }
 
   // Dentro de tu ChatRenderer o helper de limpieza:
   public static hardResetTerminal() {
     // \x1bc limpia la pantalla, \x1b[3J limpia el scrollback buffer de la terminal
     process.stdout.write("\x1bc\x1b[3J");
+  }
+
+  /** Conversation output: every write that lands ABOVE the drawn block goes through here. */
+  public static writeStream(value: string): void {
+    process.stdout.write(value);
+    const lineStart = Math.max(value.lastIndexOf("\n"), value.lastIndexOf("\r"));
+    this.streamColumn =
+      lineStart >= 0
+        ? visibleLength(value.slice(lineStart + 1))
+        : this.streamColumn + visibleLength(value);
   }
 
   public static clearUI(newCols?: number): void {
@@ -77,6 +93,11 @@ export class ChatRenderer {
       process.stdout.write("\x1b[2K"); // Clear the entire line
     }
     process.stdout.write("\x1b[1G"); // Move to column 1
+    if (this.resumeColumn > 0) {
+      // Back to the end of the half line the block was drawn under, so the next write continues it.
+      process.stdout.write(`\x1b[1A\x1b[${this.resumeColumn + 1}G`);
+      this.resumeColumn = 0;
+    }
     process.stdout.write("\x1b[?25h"); // Show cursor
 
     this.lastDrawnLinesCount = 0;
@@ -297,6 +318,12 @@ export class ChatRenderer {
     }
 
     process.stdout.write("\x1b[?25l"); // hide cursor while drawing
+    // Output that stopped mid-line ("- src/sum.ts: applied", then the spinner re-armed) must not
+    // share its row with the block: the status row is padded to the full width, so after the text
+    // it wrapped onto a row clearUI never counted, and "applied⠼ thinking · 0s" stayed on screen.
+    const midLine = this.streamColumn % (process.stdout.columns || 80);
+    if (midLine > 0) process.stdout.write("\r\n");
+    this.resumeColumn = midLine;
     process.stdout.write(uiLines.join("\r\n"));
     this.lastDrawnLinesCount = uiLines.length; // clearUI erases exactly this many rows next draw
     this.lastDrawnLines = uiLines;
