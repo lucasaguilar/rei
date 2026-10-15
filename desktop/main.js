@@ -1,10 +1,11 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell as desktopShell } from "electron";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import pty from "node-pty";
 import { missingBuild, reiLaunch, workspaceFromArgv } from "./lib/launch.js";
+import { classifyLink } from "./lib/links.js";
 import { loadSettings, saveSettings } from "./lib/settings.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -85,6 +86,12 @@ async function createWindow() {
     },
   });
 
+  // The window is REI's screen and nothing else. Left alone, a link would turn it into a browser:
+  // xterm.js opens one with window.open (a new Electron window, showing any site) and a navigation
+  // would replace the renderer. Neither is allowed; links leave through `link:open` instead.
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  win.webContents.on("will-navigate", (event) => event.preventDefault());
+
   // The renderer asks once it has measured the terminal, so REI's first frame is drawn at the
   // real size instead of 80x24 and then reflowed.
   ipcMain.handle("pty:start", (_e, { cols, rows }) => {
@@ -107,6 +114,29 @@ async function createWindow() {
   });
   ipcMain.on("pty:write", (_e, data) => shell?.write(data));
   ipcMain.on("pty:resize", (_e, { cols, rows }) => shell?.resize(cols, rows));
+
+  // A click on a link in the terminal. The renderer only reports it; whether anything happens is
+  // decided here, and the user decides last — the link's text came from a model.
+  ipcMain.handle("link:open", async (_e, raw) => {
+    const link = classifyLink(String(raw), workspace);
+    if (link.kind === "refused") return false;
+    const web = link.kind === "web";
+    const name = web ? link.host : link.name;
+    const manager = process.platform === "darwin" ? "Finder" : "the file manager";
+    const { response } = await dialog.showMessageBox(win, {
+      type: "question",
+      buttons: [web || link.page ? "Open" : "Show", "Cancel"],
+      defaultId: 0,
+      cancelId: 1,
+      message: web || link.page ? `Open ${name} in your browser?` : `Show ${name} in ${manager}?`,
+      detail: web ? link.url : link.path, // the whole address: the visible text can say anything
+    });
+    if (response !== 0) return false;
+    if (web) await desktopShell.openExternal(link.url);
+    else if (link.page) await desktopShell.openExternal(pathToFileURL(link.path).href);
+    else desktopShell.showItemInFolder(link.path);
+    return true;
+  });
 
   await win.loadFile(path.join(here, "renderer", "index.html"), {
     query: { phosphor, workspace, version: app.getVersion() },

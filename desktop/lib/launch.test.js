@@ -33,6 +33,12 @@ describe("reiLaunch", () => {
     expect(env.TERM_PROGRAM).toBe("rei-desktop");
   });
 
+  it("tells REI it can draw clickable links — file paths and markdown links alike", () => {
+    const { env } = launch("amber");
+    expect(env.REI_HYPERLINKS).toBe("on"); // REI's own file-path links
+    expect(env.FORCE_HYPERLINK).toBe("1"); // the markdown renderer's [title](url) links
+  });
+
   it("honours REI_NODE for a node that is not on PATH", () => {
     const l = reiLaunch({ repoRoot: "/r", workspace: "/w", phosphor: "amber", env: { REI_NODE: "/opt/node/bin/node" } });
     expect(l.command).toBe("/opt/node/bin/node");
