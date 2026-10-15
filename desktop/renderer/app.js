@@ -104,9 +104,20 @@ mountBezel(document.getElementById("panel"), settings, {
     term.focus();
   },
 });
-mountProjectButton(document.getElementById("panel"), await window.rei.editor(), () => window.rei.openProject());
+mountProjectButton(document.getElementById("panel"), await window.rei.editor(), {
+  open: () => window.rei.openProject(),
+  choose: (id) => {
+    window.rei.saveSettings({ editor: id });
+    term.focus();
+  },
+});
 // Clicking the panel must not leave the keyboard pointing at a knob.
-document.getElementById("panel").addEventListener("pointerup", () => setTimeout(() => term.focus(), 0));
+// Except the selector: its list opens on press, and taking the focus away on release closed it
+// before anything could be picked. It hands the keyboard back once a choice is made.
+document.getElementById("panel").addEventListener("pointerup", (e) => {
+  if (e.target.closest("select")) return;
+  setTimeout(() => term.focus(), 0);
+});
 
 const led = document.getElementById("led");
 

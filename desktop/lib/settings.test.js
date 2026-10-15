@@ -48,4 +48,18 @@ describe("settings", () => {
   it("survives a corrupt file instead of refusing to open", () => {
     expect(loadSettings("/s.json", memoryFs("{not json")).phosphor).toBe("amber");
   });
+
+  it("remembers which editor the panel opens with", () => {
+    const fs = memoryFs();
+    saveSettings("/s.json", { phosphor: "amber", knobs: {}, editor: "zed" }, fs);
+    expect(loadSettings("/s.json", fs).editor).toBe("zed");
+  });
+
+  it("has no editor choice until one is made, and drops one that is not an editor id", () => {
+    expect(loadSettings("/s.json", memoryFs()).editor).toBeUndefined();
+    for (const editor of ["../../evil", 42, "", "VS Code"]) {
+      const fs = memoryFs(JSON.stringify({ editor }));
+      expect(loadSettings("/s.json", fs).editor, String(editor)).toBeUndefined();
+    }
+  });
 });

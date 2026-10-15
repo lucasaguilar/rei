@@ -30,7 +30,15 @@ export function detectEditors(nameForProtocol) {
   return EDITORS.filter((editor) => Boolean(nameForProtocol(`${editor.scheme}://`)));
 }
 
-/** The editor a click opens: the user's choice while it is installed, else the first one found. */
-export function pickEditor(installed, preferredId) {
-  return installed.find((e) => e.id === preferredId) ?? installed[0] ?? null;
+/**
+ * What the panel's selector lists: the installed editors, then the file manager. The file manager
+ * is always there, so the desktop works the same with any editor — or none — installed.
+ */
+export function openTargets(installed, managerName) {
+  return [...installed, { id: "finder", name: managerName, manager: true }];
+}
+
+/** The target a click opens: the user's choice while it is still offered, else the first one. */
+export function pickTarget(targets, preferredId) {
+  return targets.find((t) => t.id === preferredId) ?? targets[0];
 }

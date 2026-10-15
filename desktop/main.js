@@ -7,7 +7,7 @@ import pty from "node-pty";
 import { missingBuild, reiLaunch, workspaceFromArgv } from "./lib/launch.js";
 import { classifyLink } from "./lib/links.js";
 import { linkPrompt } from "./lib/link-prompt.js";
-import { detectEditors, editorUrl, pickEditor } from "./lib/editors.js";
+import { detectEditors, editorUrl, openTargets, pickTarget } from "./lib/editors.js";
 import { loadSettings, saveSettings } from "./lib/settings.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -16,8 +16,10 @@ const repoRoot = path.resolve(here, "..");
 let win;
 let shell;
 
-/** The editor a click opens, asked each time: one installed while the app runs shows up. */
-const currentEditor = () => pickEditor(detectEditors((p) => app.getApplicationNameForProtocol(p)));
+const MANAGER = process.platform === "darwin" ? "Finder" : "File manager";
+
+/** What a file or the project can be opened with, asked each time: an editor installed meanwhile shows up. */
+const targets = () => openTargets(detectEditors((p) => app.getApplicationNameForProtocol(p)), MANAGER);
 let shellListeners = [];
 
 /**
@@ -64,6 +66,7 @@ async function createWindow() {
   const phosphor = settings.phosphor;
 
   ipcMain.handle("settings:get", () => settings);
+  const currentTarget = () => pickTarget(targets(), settings.editor);
   ipcMain.on("settings:set", (_e, patch) => {
     settings = saveSettings(settingsFile, {
       ...settings,
@@ -125,9 +128,10 @@ async function createWindow() {
   ipcMain.handle("link:open", async (_e, raw) => {
     const link = classifyLink(String(raw), workspace);
     if (link.kind === "refused") return false;
-    const editor = currentEditor();
-    const manager = process.platform === "darwin" ? "Finder" : "the file manager";
-    const prompt = linkPrompt(link, { editor, manager });
+    const target = currentTarget();
+    // The file manager chosen as the target: the dialog is the plain "Show in Finder" one.
+    const editor = target.manager ? null : target;
+    const prompt = linkPrompt(link, { editor, manager: MANAGER });
     const { response } = await dialog.showMessageBox(win, {
       type: "question",
       buttons: prompt.choices.map((c) => c.label),
@@ -149,14 +153,15 @@ async function createWindow() {
 
   // The panel's "open project" button. No dialog, unlike a link: the user pressed the app's own
   // button, and the folder is the one they opened — nothing here came from the model.
-  ipcMain.handle("editor:current", () => {
-    const editor = currentEditor();
-    return editor ? { id: editor.id, name: editor.name } : null;
-  });
+  ipcMain.handle("editor:current", () => ({
+    targets: targets().map(({ id, name }) => ({ id, name })),
+    selected: currentTarget().id,
+  }));
   ipcMain.handle("project:open", async () => {
-    const editor = currentEditor();
-    if (!editor) return false;
-    await desktopShell.openExternal(editorUrl(editor, workspace));
+    const target = currentTarget();
+    // openPath on a folder shows it; it is the workspace the user opened, never a model's path.
+    if (target.manager) await desktopShell.openPath(workspace);
+    else await desktopShell.openExternal(editorUrl(target, workspace));
     return true;
   });
 

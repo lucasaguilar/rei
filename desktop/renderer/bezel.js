@@ -79,17 +79,38 @@ export function mountBezel(panel, { phosphor, knobs }, on) {
 }
 
 /**
- * "Open in VS Code": the whole project in the user's editor. Drawn only when one is installed — a
- * button that can do nothing would be the only dead control on the panel.
+ * "Open in VS Code" and the selector beside it: the whole project in the target the user picks —
+ * any installed editor, or the file manager, which is always there. The choice also decides what
+ * a file link offers. The selector is drawn only when there is something to choose between.
  */
-export function mountProjectButton(panel, editor, onOpen) {
-  if (!editor) return;
+export function mountProjectButton(panel, { targets, selected }, on) {
+  const box = panel.querySelector(".project");
+  const choosing = targets.length > 1;
   const b = document.createElement("button");
   b.type = "button";
-  b.textContent = `Open in ${editor.name}`;
-  b.title = `Open this project in ${editor.name}`;
-  b.addEventListener("click", onOpen);
-  panel.querySelector(".project").append(b);
+  // With a selector beside it the button reads "Open in" and the selector names the target, so
+  // the pair reads as one sentence instead of saying the name twice.
+  const label = (id) => {
+    const name = targets.find((t) => t.id === id).name;
+    b.textContent = choosing ? "Open in" : `Open in ${name}`;
+    b.title = `Open this project in ${name}`;
+  };
+  label(selected);
+  b.addEventListener("click", on.open);
+  box.append(b);
+  if (!choosing) return;
+
+  const wrap = document.createElement("label");
+  wrap.className = "pick";
+  const pick = document.createElement("select");
+  pick.setAttribute("aria-label", "Open with");
+  for (const t of targets) pick.append(new Option(t.name, t.id, false, t.id === selected));
+  pick.addEventListener("change", () => {
+    label(pick.value);
+    on.choose(pick.value);
+  });
+  wrap.append(pick);
+  box.append(wrap);
 }
 
 /** A line of text on the bezel that fades — for the one thing worth saying out loud. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectEditors, editorUrl, EDITORS, pickEditor } from "./editors.js";
+import { detectEditors, editorUrl, EDITORS, openTargets, pickTarget } from "./editors.js";
 
 const byId = (id) => EDITORS.find((e) => e.id === id);
 
@@ -31,19 +31,28 @@ describe("detectEditors — only what is installed is offered", () => {
   });
 });
 
-describe("pickEditor — which one a click opens", () => {
-  const installed = [byId("vscode"), byId("zed")];
-
-  it("honours the user's choice while it is installed", () => {
-    expect(pickEditor(installed, "zed")).toBe(byId("zed"));
+describe("openTargets — what the panel's selector lists", () => {
+  it("lists the installed editors, then the file manager, which every machine has", () => {
+    const targets = openTargets([byId("vscode"), byId("zed")], "Finder");
+    expect(targets.map((t) => t.id)).toEqual(["vscode", "zed", "finder"]);
+    expect(targets.at(-1)).toMatchObject({ name: "Finder", manager: true });
   });
 
-  it("falls back to the first installed one when there is no choice, or it was uninstalled", () => {
-    expect(pickEditor(installed, undefined)).toBe(byId("vscode"));
-    expect(pickEditor(installed, "cursor")).toBe(byId("vscode"));
+  it("still offers the file manager on a machine with no editor at all", () => {
+    expect(openTargets([], "Finder").map((t) => t.id)).toEqual(["finder"]);
+  });
+});
+
+describe("pickTarget — which one a click opens", () => {
+  const targets = openTargets([byId("vscode"), byId("zed")], "Finder");
+
+  it("honours the user's choice while it is installed — the file manager included", () => {
+    expect(pickTarget(targets, "zed").id).toBe("zed");
+    expect(pickTarget(targets, "finder").id).toBe("finder");
   });
 
-  it("returns null when there is nothing to open with", () => {
-    expect(pickEditor([], "vscode")).toBeNull();
+  it("falls back to the first one when there is no choice, or it was uninstalled", () => {
+    expect(pickTarget(targets, undefined).id).toBe("vscode");
+    expect(pickTarget(targets, "cursor").id).toBe("vscode");
   });
 });

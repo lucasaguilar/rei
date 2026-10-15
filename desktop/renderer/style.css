@@ -84,7 +84,7 @@ body { font: 600 10px/1 -apple-system, "Helvetica Neue", Arial, sans-serif; colo
 }
 .knob-dial:focus-visible { outline: 1px solid var(--phos); outline-offset: 4px; }
 
-.phosphor-switch {
+.phosphor-switch, .project {
   display: flex; padding: 3px; gap: 3px; border-radius: 8px;
   background: #0e0d0b; box-shadow: inset 0 1px 3px rgba(0, 0, 0, .9);
 }
@@ -95,8 +95,15 @@ body { font: 600 10px/1 -apple-system, "Helvetica Neue", Arial, sans-serif; colo
   background: linear-gradient(180deg, #2c2925, #1d1b18);
   box-shadow: 0 1px 0 rgba(255, 255, 255, .06) inset, 0 1px 2px rgba(0, 0, 0, .6);
 }
-.project:empty { display: none; }
 .project button { text-transform: uppercase; }
+.project .pick { position: relative; display: flex; }
+.project .pick::after { content: "▾"; position: absolute; right: 8px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--print); }
+.project select {
+  font: inherit; color: var(--print); letter-spacing: .1em; text-transform: uppercase;
+  padding: 6px 22px 6px 8px; border: 0; border-radius: 6px; cursor: pointer; appearance: none;
+  background: linear-gradient(180deg, #2c2925, #1d1b18);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .06) inset, 0 1px 2px rgba(0, 0, 0, .6);
+}
 .phosphor-switch button i { width: 6px; height: 6px; border-radius: 50%; background: #2d2a25; }
 .phosphor-switch button[aria-pressed="true"] { color: #e8dfcf; background: linear-gradient(180deg, #1a1815, #24211d); box-shadow: inset 0 1px 3px rgba(0, 0, 0, .8); }
 .phosphor-switch button[aria-pressed="true"] i { background: var(--dot); box-shadow: 0 0 6px var(--dot), 0 0 2px var(--dot); }
