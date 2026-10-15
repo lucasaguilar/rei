@@ -23,6 +23,7 @@ import { resolveModelForMode } from "../../providers/provider-factory.js";
 import type { SessionMode } from "../../chat/types.js";
 import { displayUserLabel } from "./chat.helpers.js";
 import { appendThinkingTail } from "../constants/chat.constants.js";
+import { wrapWords } from "./word-wrap.js";
 
 /**
  * Strips ANSI codes OUTSIDE fenced code blocks, but PRESERVES them inside ``` fences.
@@ -331,7 +332,10 @@ export async function handleInputTurn(
       }
       // Distinct badge so the user instantly spots REI's actual answer (vs thinking/status/
       // diffs). White-bold on magenta background — visually unmistakable.
-      actions.pushTranscript(`${paint("badge", " REI ")} ${rendered}`);
+      // Broken at spaces to the terminal's width: left to the terminal, words split at the edge.
+      // The full width, not one less: tables are laid out to exactly `columns` and must not be cut.
+      const width = process.stdout.columns || 80;
+      actions.pushTranscript(wrapWords(`${paint("badge", " REI ")} ${rendered}`, width));
     }
 
     // Display formatted S&R diffs (ANSI diff, already styled by formatCodeDiff)
