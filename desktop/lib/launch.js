@@ -2,16 +2,33 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { PHOSPHORS } from "../renderer/phosphors.js";
 
+/** REI_DESKTOP_DEV=1: run this checkout instead of the installed `rei` — for working on REI itself. */
+export const usesCheckout = (env) => env.REI_DESKTOP_DEV === "1";
+
 /**
- * How the desktop starts REI: the repo's own `bin/rei.js chat`, under the SYSTEM node.
+ * How the desktop starts REI: the same `rei` command the terminal runs, through the user's login
+ * shell. Calling `bin/rei.js chat` directly skipped everything the wrapper does — the machine's
+ * ~/.rei/.env (API keys, base URLs), the setup wizard on an unconfigured project, the preflight —
+ * and, opened from the Dock, it had no PATH to find nvm's node. `-i` because that PATH (nvm,
+ * ~/.local/bin) is usually set in .zshrc, which a non-interactive login shell never reads.
+ * `configure` is `rei --config`: the wizard, on demand.
  *
- * Not Electron's bundled Node (ELECTRON_RUN_AS_NODE): REI depends on native modules (sharp)
- * compiled for the node that installed them, and they refuse to load under another ABI.
+ * In checkout mode, it runs under the SYSTEM node, not Electron's bundled one
+ * (ELECTRON_RUN_AS_NODE): REI depends on native modules (sharp) compiled for the node that
+ * installed them, and they refuse to load under another ABI.
  */
-export function reiLaunch({ repoRoot, workspace, phosphor, env }) {
+export function reiLaunch({ repoRoot, workspace, phosphor, env, configure = false }) {
+  const [command, args] = usesCheckout(env)
+    ? [
+        env.REI_NODE || "node",
+        configure
+          ? [path.join(repoRoot, "scripts", "launch-rei.js")]
+          : [path.join(repoRoot, "bin", "rei.js"), "chat"],
+      ]
+    : [env.SHELL || "/bin/zsh", ["-l", "-i", "-c", configure ? "exec rei --config" : "exec rei"]];
   return {
-    command: env.REI_NODE || "node",
-    args: [path.join(repoRoot, "bin", "rei.js"), "chat"],
+    command,
+    args,
     cwd: workspace,
     env: {
       ...env,
@@ -30,7 +47,7 @@ export function reiLaunch({ repoRoot, workspace, phosphor, env }) {
   };
 }
 
-/** bin/rei.js imports dist/ — a clone that was never built would die with a stack trace. */
+/** In checkout mode — bin/rei.js imports dist/ — a clone that was never built would die with a stack trace. */
 export function missingBuild(repoRoot) {
   return !fs.existsSync(path.join(repoRoot, "dist", "main.js"));
 }

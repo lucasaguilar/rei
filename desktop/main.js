@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import pty from "node-pty";
-import { missingBuild, reiLaunch, workspaceFromArgv } from "./lib/launch.js";
+import { missingBuild, reiLaunch, usesCheckout, workspaceFromArgv } from "./lib/launch.js";
 import { classifyLink } from "./lib/links.js";
 import { linkPrompt } from "./lib/link-prompt.js";
 import { detectEditors, editorUrl, openTargets, pickTarget } from "./lib/editors.js";
@@ -54,7 +54,7 @@ async function chooseWorkspace() {
 }
 
 async function createWindow() {
-  if (missingBuild(repoRoot)) {
+  if (usesCheckout(process.env) && missingBuild(repoRoot)) {
     dialog.showErrorBox("REI is not built", `Run \`npm run build\` in ${repoRoot} first.`);
     app.quit();
     return;
