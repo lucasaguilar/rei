@@ -348,7 +348,8 @@ the rest onto it. Get this wrong and the model reasons for minutes before runnin
 
 The map's `none` is special: on a backend that forwards `chat_template_kwargs` (oMLX, MTPLX), REI
 turns it into `enable_thinking: false`, which actually switches reasoning off. Keep `"none": "none"`
-so it reaches that bridge.
+so it reaches that bridge. LM Studio has no such bridge: there, `none` switches nothing off, and
+the way to a model that does not think is [below](#lmstudio-no-thinking).
 
 ### On Apple Silicon
 
@@ -421,7 +422,32 @@ customFields:
 ```
 
 It wraps the installed weights under a new name and adds the selector, set once when the model
-loads. Restart LM Studio to pick it up.
+loads. It shows up in `lms ls` within seconds; if it does not, restart LM Studio.
+
+<a id="lmstudio-no-thinking"></a>**Turning thinking off on LM Studio takes a second wrapper.** The
+selector above has no "off": Qwen3.8's template accepts only `low · medium · xhigh` for
+`reasoning_effort`, and switches reasoning off through a different variable, `enable_thinking`. A
+wrapper that sets it to `false` is the same weights under another name, one that never thinks:
+
+```yaml
+model: <owner>/<name>-nothink
+base:
+  - key: <owner>/<the model you already have>
+customFields:
+  - key: enableThinking
+    type: boolean
+    defaultValue: false
+    effects:
+      - type: setJinjaVariable
+        variable: enable_thinking
+```
+
+Measured on the same weights with the same request (`reasoning_effort: "none"`, which is what REI
+sends): the original wrapper still reasoned for 150–280 characters per answer, the `-nothink` one
+for zero, and answered right. `chat_template_kwargs` and a `/no_think` in the prompt changed
+nothing. Thinking is fixed when the model loads, not per request, so you pick it by model id: point
+the mode that should not think at the `-nothink` one (`LLM_STUDIO_MODEL_ASK`, say) and keep the
+thinking one for the others.
 
 ### The rest of the speed
 
