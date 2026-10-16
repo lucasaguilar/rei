@@ -5,15 +5,26 @@ import { PHOSPHORS } from "../renderer/phosphors.js";
 import { PHOSPHORS as CLI_PHOSPHORS } from "../../src/cli/theme/phosphor.js";
 
 describe("reiLaunch", () => {
-  const launch = (phosphor) =>
-    reiLaunch({ repoRoot: "/repo", workspace: "/work", phosphor, env: { PATH: "/bin", HOME: "/h" } });
+  const launch = (phosphor, env = {}) =>
+    reiLaunch({ repoRoot: "/repo", workspace: "/work", phosphor, env: { PATH: "/bin", HOME: "/h", SHELL: "/bin/zsh", ...env } });
 
-  it("runs the repo's own CLI, in chat mode, inside the workspace", () => {
+  it("runs the `rei` command through the user's login shell, inside the workspace", () => {
     const l = launch("amber");
-    expect(l.command).toBe("node");
-    expect(l.args).toEqual([path.join("/repo", "bin", "rei.js"), "chat"]);
+    expect(l.command).toBe("/bin/zsh");
+    expect(l.args).toEqual(["-l", "-i", "-c", "exec rei"]);
     expect(l.cwd).toBe("/work");
     expect(l.env.REI_WORKSPACE_PATH).toBe("/work");
+  });
+
+  it("asks for the setup wizard with --config", () => {
+    const l = reiLaunch({ repoRoot: "/repo", workspace: "/work", phosphor: "amber", env: { SHELL: "/bin/bash" }, configure: true });
+    expect(l.command).toBe("/bin/bash");
+    expect(l.args).toEqual(["-l", "-i", "-c", "exec rei --config"]);
+  });
+
+  it("falls back to zsh when the app was started without SHELL", () => {
+    const l = reiLaunch({ repoRoot: "/r", workspace: "/w", phosphor: "amber", env: {} });
+    expect(l.command).toBe("/bin/zsh");
   });
 
   it("keeps the user's environment — PATH, HOME, their keys", () => {
@@ -39,9 +50,23 @@ describe("reiLaunch", () => {
     expect(env.FORCE_HYPERLINK).toBe("1"); // the markdown renderer's [title](url) links
   });
 
-  it("honours REI_NODE for a node that is not on PATH", () => {
-    const l = reiLaunch({ repoRoot: "/r", workspace: "/w", phosphor: "amber", env: { REI_NODE: "/opt/node/bin/node" } });
-    expect(l.command).toBe("/opt/node/bin/node");
+  describe("with REI_DESKTOP_DEV=1", () => {
+    it("runs this checkout's CLI, in chat mode, instead of the installed one", () => {
+      const l = launch("amber", { REI_DESKTOP_DEV: "1" });
+      expect(l.command).toBe("node");
+      expect(l.args).toEqual([path.join("/repo", "bin", "rei.js"), "chat"]);
+      expect(l.cwd).toBe("/work");
+    });
+
+    it("runs this checkout's wizard for --config", () => {
+      const l = reiLaunch({ repoRoot: "/repo", workspace: "/work", phosphor: "amber", env: { REI_DESKTOP_DEV: "1" }, configure: true });
+      expect(l.args).toEqual([path.join("/repo", "scripts", "launch-rei.js")]);
+    });
+
+    it("honours REI_NODE for a node that is not on PATH", () => {
+      const l = launch("amber", { REI_DESKTOP_DEV: "1", REI_NODE: "/opt/node/bin/node" });
+      expect(l.command).toBe("/opt/node/bin/node");
+    });
   });
 });
 
