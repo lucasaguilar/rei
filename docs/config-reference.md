@@ -225,6 +225,7 @@ carrying them will start taking effect.)
 | `REI_THEME` | colours for REI's chrome: `default`, `matrix`, `amber` or `green` (the Hercules phosphors: 24-bit colour when `COLORTERM`/the terminal supports it, 256 colours otherwise). `/theme` switches mid-session. Diffs, syntax highlighting, warnings and errors are never themed | `default` |
 | `REI_TERMINAL_COLORS` | `off` stops `amber`/`green` from setting the terminal window's own text, background and cursor colours (OSC 10/11/12) while REI runs. They are restored on exit either way; turn this off for a terminal that mishandles the sequences | `on` |
 | `REI_HYPERLINKS` | `on`/`off` to force or disable clickable file links in tables | auto-detected |
+| `REI_MERMAID_LINKS` | the "open diagram" line under each ```` ```mermaid ```` block: `local` writes an HTML viewer to the temp dir, drawn by the mermaid copy REI ships (offline, the diagram never leaves the machine); `live` links mermaid.live instead (the diagram rides in the URL fragment, so it lands in browser history); `off` shows no line | `local` |
 
 ## Execution / tools (agnostic)
 

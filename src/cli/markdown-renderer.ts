@@ -1,6 +1,7 @@
 import { diffLines } from 'diff';
 import { code, paint, RESET } from "./theme/palette.js";
 import { linkPathsInTable, linkPathsInText, shortenPath } from "./file-links.js";
+import { fillMermaidLinks, tagMermaidBlocks } from "./mermaid-links.js";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
 import Table from "cli-table3";
@@ -318,11 +319,13 @@ function ensureInit(): void {
  */
 export function renderMarkdown(text: string): string {
   ensureInit();
-  const rendered = marked(text);
+  const { markdown, codes } = tagMermaidBlocks(text);
+  const rendered = marked(markdown);
   if (typeof rendered !== "string") {
     return text;
   }
   // Link file paths LAST, over the laid-out text: OSC 8 escapes occupy no columns, so wrapping is
   // already settled and nothing shifts. Tables have linked their own paths and are skipped.
-  return linkPathsInText(rendered.trimEnd());
+  // Diagram links go in after that, so the viewer's file path is not linked a second time.
+  return fillMermaidLinks(linkPathsInText(rendered.trimEnd()), codes);
 }
