@@ -112,7 +112,7 @@ async function sendReply(
 }
 
 /**
- * Sends a reply and records it in the replica — only when it was delivered: the dashboard shows
+ * Sends a reply and records it in the replica — only when it was delivered: the replica shows
  * what the customer received, and a failed send is already logged by sendText.
  */
 async function replyAndRecord(
@@ -140,7 +140,7 @@ function withinReplyWindow(timestamp: string): boolean {
  *
  * @param agent - the REI agent instance (shared with the OpenAI-compatible handler).
  * @param workspacePath - the workspace the agent operates in.
- * @param replica - mirrors the exchange into rei-backend-api; a no-op without REI_BACKEND_URL.
+ * @param replica - mirrors the exchange into the conversation store; a no-op without REI_BACKEND_URL.
  */
 export function createWhatsAppChannel(
   agent: Agent,

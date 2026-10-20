@@ -4,9 +4,9 @@ import type { BackendApi, BackendConversation } from "./backend-api.js";
 import type { WhatsAppInbound } from "./whatsapp-webhook.js";
 
 /**
- * The replica mirrors each WhatsApp exchange into rei-backend-api for the dashboard. It is
- * best-effort by design: the local session is the agent's source of truth, so a backend failure
- * must cost a row in the dashboard, never the customer's answer.
+ * The replica mirrors each WhatsApp exchange into the external conversation store. It is
+ * best-effort by design: the local session is the agent's source of truth, so a store failure
+ * must cost a row in the replica, never the customer's answer.
  */
 
 const FROM = "5491100001234";
@@ -142,7 +142,7 @@ describe("createWhatsAppReplica", () => {
     expect(errors.join("\n")).not.toContain(FROM);
   });
 
-  it("after a failure it forgets the contact, so a contact deleted in the dashboard heals", async () => {
+  it("after a failure it forgets the contact, so a contact deleted in the store heals", async () => {
     const api = fakeApi();
     const replica = createWhatsAppReplica(api);
     await replica.recordInbound(msg({ id: "wamid.1" }));

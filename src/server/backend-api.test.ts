@@ -2,9 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import { createBackendApi } from "./backend-api.js";
 
 /**
- * The thin HTTP client for rei-backend-api — the NestJS service that replicates WhatsApp
- * conversations into Supabase for the dashboard. These tests pin the wire contract the backend
- * actually implements (src/{contacts,conversations}/*.controller.ts there), not an idealized one.
+ * The thin HTTP client for the external conversation store that public-channel conversations are
+ * replicated to. These tests pin the wire contract documented in backend-api.ts.
  */
 
 const ENV = { REI_BACKEND_URL: "https://backend.test/", REI_BACKEND_API_KEY: "test-key" };
@@ -47,7 +46,7 @@ describe("createBackendApi", () => {
     expect(calls[0].body).toEqual({ wa_id: "5491100001234", phone: "+5491100001234", name: "Ana" });
   });
 
-  it("findOpenConversation reads Nest's empty 200 body as 'no open conversation'", async () => {
+  it("findOpenConversation reads an empty 200 body as 'no open conversation'", async () => {
     const { fn, calls } = mockFetch(new Response("", { status: 200 }));
     const api = createBackendApi(ENV, fn)!;
 

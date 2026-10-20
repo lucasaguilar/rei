@@ -45,7 +45,7 @@ export interface WhatsAppInbound {
   timestamp: string;
   /** The business number this arrived at — a safety check that it is ours. */
   phoneNumberId: string;
-  /** The sender's WhatsApp profile name, when Meta sends one — for the dashboard's contact. Personal
+  /** The sender's WhatsApp profile name, when Meta sends one — for the replicated contact. Personal
    *  data: never logged. */
   profileName?: string;
 }

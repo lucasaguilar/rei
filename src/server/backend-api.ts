@@ -1,10 +1,16 @@
 /**
- * @fileoverview Thin HTTP client for rei-backend-api — the NestJS service (Render + Supabase)
- * that replicates WhatsApp conversations for the dashboard. REI never talks to Supabase directly:
- * only the backend holds the service_role key.
+ * @fileoverview Thin HTTP client for an external conversation store: any service that implements
+ * the contract below, so a human team can follow public-channel conversations and take one over.
+ * REI only knows this contract, never the store's database.
  *
  * The local session JSON stays the agent's source of context; this client only REPLICATES what
  * happened, plus reads the conversation status (an operator may have taken it over).
+ *
+ * Contract (all requests carry `Authorization: Bearer $REI_BACKEND_API_KEY`):
+ *   POST /contacts                            { wa_id, phone, name? }  → { id, wa_id }  find-or-create
+ *   GET  /conversations/by-contact/:contactId                          → { id, contact_id, status } | empty
+ *   POST /conversations                       { contact_id }           → { id, contact_id, status }
+ *   POST /conversations/:id/messages          { role, content, wa_message_id?, wa_timestamp? }
  *
  * @module rei/server/backend-api
  */
@@ -12,7 +18,7 @@
 /** A request that hangs must not hold a WhatsApp turn hostage. */
 const REQUEST_TIMEOUT_MS = 10_000;
 
-/** `assistant` = REI answers; `human` = an operator took it over. Was `bot` before backend PR #9. */
+/** `assistant` = REI answers; `human` = an operator took it over; `closed` = finished. */
 export type ConversationStatus = "assistant" | "human" | "closed";
 
 export interface BackendContact {
@@ -69,7 +75,8 @@ export function createBackendApi(
     // Method, path and status only: this lands in hosted logs, and a response body may echo
     // the customer's message back.
     if (!res.ok) throw new Error(`backend ${method} ${path} → ${res.status}`);
-    // Nest serializes a `null` return as an empty 200, not as `null` JSON.
+    // "None" may come back as an empty 200 rather than `null` JSON (frameworks that serialize a
+    // null return that way do), so both read as null.
     const text = await res.text();
     return text ? JSON.parse(text) : null;
   };

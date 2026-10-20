@@ -1,9 +1,9 @@
 /**
- * @fileoverview Mirrors each WhatsApp exchange into rei-backend-api, so the dashboard sees the
- * contact, the conversation and every message.
+ * @fileoverview Mirrors each WhatsApp exchange into the external conversation store (backend-api.ts),
+ * so the people following conversations see the contact, the conversation and every message.
  *
  * Best-effort by design: the local session (`wa-<number>.json`) is the agent's source of truth, so
- * a backend failure costs a row in the dashboard, never the customer's answer. Nothing here throws.
+ * a store failure costs a row in the replica, never the customer's answer. Nothing here throws.
  *
  * The backend conversation is NOT the REI session: when an operator closes one, the next message
  * opens a new conversation in the backend while REI keeps the customer's context (plan decision 10).
@@ -60,7 +60,7 @@ export function createWhatsAppReplica(api: BackendApi | null): WhatsAppReplica {
         });
         return conversation.status;
       } catch (err) {
-        // A contact deleted in the dashboard would fail forever from the cache; re-resolve it.
+        // A contact deleted in the store would fail forever from the cache; re-resolve it.
         contactIds.delete(msg.from);
         conversationIds.delete(msg.from);
         waError(`✗ replica: inbound ${msg.id} from ${maskNumber(msg.from)} not stored: ${describe(err)}`);
