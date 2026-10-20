@@ -202,6 +202,24 @@ describe("POST signature", () => {
     expect(msg.type).toBe("text");
     expect(msg.phoneNumberId).toBe("1000000000000001");
   });
+
+  it("carries the sender's WhatsApp profile name, matched by wa_id", async () => {
+    vi.stubEnv("WHATSAPP_APP_SECRET", APP_SECRET);
+    const handler = vi.fn().mockResolvedValue(undefined);
+    const payload = messagePayload({ id: "wamid.name" });
+    payload.entry[0].changes[0].value.contacts = [
+      { wa_id: "5491100009999", profile: { name: "Someone else" } },
+      { wa_id: "5491100001234", profile: { name: "Ana" } },
+    ] as any;
+    const body = JSON.stringify(payload);
+    const { req, res } = makeReq("/webhooks/whatsapp", "POST", body, {
+      "x-hub-signature-256": sign(body),
+    });
+
+    await handleWhatsAppWebhook(req as any, res as any, { handleInbound: handler });
+
+    expect(handler.mock.calls[0][0].profileName).toBe("Ana");
+  });
 });
 
 describe("dedupe", () => {

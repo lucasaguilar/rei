@@ -45,6 +45,9 @@ export interface WhatsAppInbound {
   timestamp: string;
   /** The business number this arrived at — a safety check that it is ours. */
   phoneNumberId: string;
+  /** The sender's WhatsApp profile name, when Meta sends one — for the replicated contact. Personal
+   *  data: never logged. */
+  profileName?: string;
 }
 
 /** A delivery-status event (`sent`/`delivered`/`read`/`failed`) — never reaches the agent. */
@@ -232,7 +235,10 @@ async function processPayload(raw: string, deps?: WhatsAppWebhookDeps): Promise<
 
       // Messages are arrays (Meta may batch) — iterate every element, never assume [0].
       if (!Array.isArray(value.messages)) continue;
+      const contacts: any[] = Array.isArray(value.contacts) ? value.contacts : [];
       for (const m of value.messages) {
+        // By wa_id, not position: a batch can carry several senders.
+        const name = contacts.find((c) => c?.wa_id === m.from)?.profile?.name;
         const msg: WhatsAppInbound = {
           from: m.from,
           id: m.id,
@@ -240,6 +246,7 @@ async function processPayload(raw: string, deps?: WhatsAppWebhookDeps): Promise<
           type: m.type ?? "text",
           timestamp: m.timestamp ?? "",
           phoneNumberId,
+          ...(typeof name === "string" && name ? { profileName: name } : {}),
         };
         if (!msg.id) continue;
         if (seenMessageIds.has(msg.id)) {

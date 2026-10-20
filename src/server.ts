@@ -100,6 +100,9 @@ async function startServer() {
   const provider = createModelProvider();
   const agent = new Agent(provider, WORKSPACE_PATH);
   const chatHandler = new ChatHandler(agent, WORKSPACE_PATH);
+  // Once per process, never per request: the per-number queue, the concurrency cap and the rate
+  // limiter live in this object, and a fresh one per webhook enforced none of them.
+  const whatsappChannel = createWhatsAppChannel(agent, WORKSPACE_PATH);
 
   // Connect configured MCP servers so their tools are available to every turn.
   // Best-effort: per-server failures are swallowed by the registry.
@@ -163,7 +166,7 @@ async function startServer() {
     // never unauthenticated. The channel (whatsapp-channel.ts) runs the agent turn and replies
     // via the Graph API.
     if (isWhatsAppWebhookRequest(req.url, req.method)) {
-      await handleWhatsAppWebhook(req, res, createWhatsAppChannel(agent, WORKSPACE_PATH));
+      await handleWhatsAppWebhook(req, res, whatsappChannel);
       return;
     }
 
