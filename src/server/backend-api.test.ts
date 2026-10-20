@@ -41,6 +41,12 @@ describe("createBackendApi", () => {
     expect(calls[0].body).toEqual({ wa_id: "5491100001234", phone: "+5491100001234" });
   });
 
+  it("ensureContact sends the WhatsApp profile name when there is one", async () => {
+    const { fn, calls } = mockFetch(json({ id: "c-1" }));
+    await createBackendApi(ENV, fn)!.ensureContact("5491100001234", "Ana");
+    expect(calls[0].body).toEqual({ wa_id: "5491100001234", phone: "+5491100001234", name: "Ana" });
+  });
+
   it("findOpenConversation reads Nest's empty 200 body as 'no open conversation'", async () => {
     const { fn, calls } = mockFetch(new Response("", { status: 200 }));
     const api = createBackendApi(ENV, fn)!;
@@ -74,6 +80,17 @@ describe("createBackendApi", () => {
 
     expect(calls[0].url).toBe("https://backend.test/conversations/conv-1/messages");
     expect(calls[0].body).toEqual({ role: "user", content: "hola", wa_message_id: "wamid.1" });
+  });
+
+  it("addMessage carries Meta's timestamp as sent — epoch seconds, untouched", async () => {
+    const { fn, calls } = mockFetch(json({ id: "m-1" }));
+    await createBackendApi(ENV, fn)!.addMessage("conv-1", {
+      role: "user",
+      content: "hola",
+      wa_message_id: "wamid.1",
+      wa_timestamp: "1790375830",
+    });
+    expect(calls[0].body.wa_timestamp).toBe("1790375830");
   });
 
   it("throws on a non-2xx with the status, and never echoes the API key", async () => {

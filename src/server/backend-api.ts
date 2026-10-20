@@ -30,11 +30,15 @@ export interface BackendMessageInput {
   role: "user" | "assistant";
   content: string;
   wa_message_id?: string;
+  /** Meta's epoch-seconds string, as delivered. Only inbound messages have one: the 24h window
+   *  counts from the customer's last message, not from when the backend stored it. */
+  wa_timestamp?: string;
 }
 
 export interface BackendApi {
-  /** findOrCreate on the backend: idempotent, so no GET-then-POST round trip is needed. */
-  ensureContact(waId: string): Promise<BackendContact>;
+  /** findOrCreate on the backend: idempotent, so no GET-then-POST round trip is needed. A `name`
+   *  also updates an existing contact's. */
+  ensureContact(waId: string, name?: string): Promise<BackendContact>;
   /** The newest `bot`/`human` conversation of the contact, or null when none is open. */
   findOpenConversation(contactId: string): Promise<BackendConversation | null>;
   createConversation(contactId: string): Promise<BackendConversation>;
@@ -73,8 +77,9 @@ export function createBackendApi(
   const id = encodeURIComponent;
 
   return {
-    async ensureContact(waId) {
-      return (await request("POST", "/contacts", { wa_id: waId, phone: `+${waId}` })) as BackendContact;
+    async ensureContact(waId, name) {
+      const body = { wa_id: waId, phone: `+${waId}`, ...(name ? { name } : {}) };
+      return (await request("POST", "/contacts", body)) as BackendContact;
     },
     async findOpenConversation(contactId) {
       return (await request("GET", `/conversations/by-contact/${id(contactId)}`)) as BackendConversation | null;
