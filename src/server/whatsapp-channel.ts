@@ -16,6 +16,8 @@ import type { WhatsAppInbound, WhatsAppStatus, WhatsAppWebhookDeps } from "./wha
 import { waLog, waError, maskNumber } from "./whatsapp-log.js";
 import { createRateLimiter, turnsPerMinute } from "./whatsapp-limits.js";
 import { createPublicChannel, isSlashCommand, type PublicChannel } from "./public-channel.js";
+import { createWhatsAppReplica, type WhatsAppReplica } from "./whatsapp-replica.js";
+import { createBackendApi } from "./backend-api.js";
 
 /** WhatsApp Graph API text message limit. */
 const MAX_MESSAGE_CHARS = 4096;
@@ -92,18 +94,36 @@ async function sendText(
 }
 
 /**
- * Sends a (possibly long) reply, chunking at the Graph API limit.
+ * Sends a (possibly long) reply, chunking at the Graph API limit. Returns the first chunk's Graph
+ * id — the one the replica stores — or null when it was not delivered.
  */
 async function sendReply(
   to: string,
   text: string,
   accessToken: string,
   phoneNumberId: string,
-): Promise<void> {
-  const chunks = chunkText(text);
-  for (const chunk of chunks) {
-    await sendText(to, chunk, accessToken, phoneNumberId);
+): Promise<string | null> {
+  let firstId: string | null | undefined;
+  for (const chunk of chunkText(text)) {
+    const id = await sendText(to, chunk, accessToken, phoneNumberId);
+    if (firstId === undefined) firstId = id;
   }
+  return firstId ?? null;
+}
+
+/**
+ * Sends a reply and records it in the replica — only when it was delivered: the dashboard shows
+ * what the customer received, and a failed send is already logged by sendText.
+ */
+async function replyAndRecord(
+  replica: WhatsAppReplica,
+  to: string,
+  text: string,
+  accessToken: string,
+  phoneNumberId: string,
+): Promise<void> {
+  const id = await sendReply(to, text, accessToken, phoneNumberId);
+  if (id) await replica.recordReply(to, text, id);
 }
 
 /**
@@ -120,10 +140,12 @@ function withinReplyWindow(timestamp: string): boolean {
  *
  * @param agent - the REI agent instance (shared with the OpenAI-compatible handler).
  * @param workspacePath - the workspace the agent operates in.
+ * @param replica - mirrors the exchange into rei-backend-api; a no-op without REI_BACKEND_URL.
  */
 export function createWhatsAppChannel(
   agent: Agent,
   workspacePath: string,
+  replica: WhatsAppReplica = createWhatsAppReplica(createBackendApi()),
 ): WhatsAppWebhookDeps {
   const channel = createPublicChannel(agent, workspacePath, "wa");
   const perMinute = turnsPerMinute();
@@ -149,13 +171,31 @@ export function createWhatsAppChannel(
       return;
     }
 
+    // Everything past the rate limit runs in the number's queue: two first messages recorded at
+    // once would each open a backend conversation, and an operator's takeover must be read when
+    // this message's turn is due — not when it arrived, behind another turn.
+    await channel.enqueue(from, () => handleAccepted(msg));
+  };
+
+  const handleAccepted = async (msg: WhatsAppInbound): Promise<void> => {
+    const from = msg.from;
+    // Before the filters: an image or a stale message still moved Meta's window, and the operator
+    // must see it.
+    const status = await replica.recordInbound(msg, msg.profileName);
+
+    if (status === "human") {
+      waLog(`✗ not answering ${msg.id} from ${maskNumber(from)}: an operator has this conversation`);
+      return;
+    }
+
     // Non-text: acknowledge but don't run the agent.
     if (msg.type !== "text") {
       waLog(`✗ ignored ${msg.id}: ${msg.type} message (only text is supported)`);
       const accessToken = process.env.WHATSAPP_ACCESS_TOKEN ?? "";
       const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID ?? "";
       if (accessToken && phoneNumberId) {
-        await sendReply(
+        await replyAndRecord(
+          replica,
           from,
           "I can only process text messages for now. Please send a text message.",
           accessToken,
@@ -171,7 +211,8 @@ export function createWhatsAppChannel(
       const accessToken = process.env.WHATSAPP_ACCESS_TOKEN ?? "";
       const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID ?? "";
       if (accessToken && phoneNumberId) {
-        await sendReply(
+        await replyAndRecord(
+          replica,
           from,
           "Slash commands are not available over WhatsApp. Just type your question.",
           accessToken,
@@ -187,7 +228,7 @@ export function createWhatsAppChannel(
       return;
     }
 
-    await channel.enqueue(from, () => runTurn(channel, from, msg.body));
+    await runTurn(channel, replica, from, msg.body);
   };
 
   const onStatus = (status: WhatsAppStatus): void => {
@@ -209,7 +250,12 @@ export function createWhatsAppChannel(
  * Runs one agent turn for a WhatsApp message on the number's session, and sends the reply via the
  * Graph API.
  */
-async function runTurn(channel: PublicChannel, from: string, prompt: string): Promise<void> {
+async function runTurn(
+  channel: PublicChannel,
+  replica: WhatsAppReplica,
+  from: string,
+  prompt: string,
+): Promise<void> {
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN ?? "";
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID ?? "";
   const who = maskNumber(from);
@@ -224,7 +270,13 @@ async function runTurn(channel: PublicChannel, from: string, prompt: string): Pr
     // and without the reply the sender waits for an answer that is never coming.
     waError(`✗ turn for ${who} failed: ${err instanceof Error ? err.message : String(err)}`);
     if (accessToken && phoneNumberId) {
-      await sendReply(from, "Sorry, something went wrong on my side — please try again.", accessToken, phoneNumberId);
+      await replyAndRecord(
+        replica,
+        from,
+        "Sorry, something went wrong on my side — please try again.",
+        accessToken,
+        phoneNumberId,
+      );
     }
     return;
   }
@@ -236,9 +288,5 @@ async function runTurn(channel: PublicChannel, from: string, prompt: string): Pr
     waError("cannot reply: WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID not set");
     return;
   }
-  if (!response.trim()) {
-    await sendReply(from, "(no response)", accessToken, phoneNumberId);
-    return;
-  }
-  await sendReply(from, response.trim(), accessToken, phoneNumberId);
+  await replyAndRecord(replica, from, response.trim() || "(no response)", accessToken, phoneNumberId);
 }
