@@ -12,7 +12,7 @@
  */
 import type { BackendApi, ConversationStatus } from "./backend-api.js";
 import type { WhatsAppInbound } from "./whatsapp-webhook.js";
-import { waError, maskNumber } from "./whatsapp-log.js";
+import { waError, maskNumber, maskMessageId } from "./whatsapp-log.js";
 
 export interface WhatsAppReplica {
   /**
@@ -35,20 +35,17 @@ export function createWhatsAppReplica(api: BackendApi | null): WhatsAppReplica {
     return { recordInbound: async () => null, recordReply: async () => {} };
   }
 
-  // The contact id never changes for a number, so it is cached. The conversation is not: its
-  // status is how an operator's takeover reaches REI, and it must be read on every message.
-  const contactIds = new Map<string, string>();
+  // Nothing about the contact or the conversation is cached: a contact can be deleted in the store
+  // at any time (a cached id then fails the next message on a foreign key), and the status is how
+  // an operator's takeover reaches REI. ensureContact is a find-or-create, so asking every time
+  // costs one request and never duplicates.
   // Where recordReply writes: the conversation the number's last inbound went to.
   const conversationIds = new Map<string, string>();
 
   return {
     async recordInbound(msg, profileName) {
       try {
-        let contactId = contactIds.get(msg.from);
-        if (!contactId) {
-          contactId = (await api.ensureContact(msg.from, profileName)).id;
-          contactIds.set(msg.from, contactId);
-        }
+        const contactId = (await api.ensureContact(msg.from, profileName)).id;
         const conversation =
           (await api.findOpenConversation(contactId)) ?? (await api.createConversation(contactId));
         conversationIds.set(msg.from, conversation.id);
@@ -60,10 +57,9 @@ export function createWhatsAppReplica(api: BackendApi | null): WhatsAppReplica {
         });
         return conversation.status;
       } catch (err) {
-        // A contact deleted in the store would fail forever from the cache; re-resolve it.
-        contactIds.delete(msg.from);
+        // The reply must not land in a conversation this message never reached.
         conversationIds.delete(msg.from);
-        waError(`✗ replica: inbound ${msg.id} from ${maskNumber(msg.from)} not stored: ${describe(err)}`);
+        waError(`✗ replica: inbound ${maskMessageId(msg.id)} from ${maskNumber(msg.from)} not stored: ${describe(err)}`);
         return null;
       }
     },

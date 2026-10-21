@@ -13,7 +13,7 @@
  */
 import type { Agent } from "../core/agent.js";
 import type { WhatsAppInbound, WhatsAppStatus, WhatsAppWebhookDeps } from "./whatsapp-webhook.js";
-import { waLog, waError, maskNumber } from "./whatsapp-log.js";
+import { waLog, waError, maskNumber, maskMessageId } from "./whatsapp-log.js";
 import { createRateLimiter, turnsPerMinute } from "./whatsapp-limits.js";
 import { createPublicChannel, isSlashCommand, type PublicChannel } from "./public-channel.js";
 import { createWhatsAppReplica, type WhatsAppReplica } from "./whatsapp-replica.js";
@@ -89,7 +89,7 @@ async function sendText(
   }
   const json = (await res.json()) as { messages?: Array<{ id: string }> };
   const id = json.messages?.[0]?.id ?? null;
-  waLog(`→ sent ${id ?? "(no id)"} to ${maskNumber(to)}`);
+  waLog(`→ sent ${maskMessageId(id)} to ${maskNumber(to)}`);
   return id;
 }
 
@@ -157,7 +157,7 @@ export function createWhatsAppChannel(
     // Before anything that costs: a flood from one number must not become a flood of turns.
     const rate = rateCheck(from);
     if (!rate.allowed) {
-      waLog(`✗ ignored ${msg.id} from ${maskNumber(from)}: rate limit (${perMinute}/min)`);
+      waLog(`✗ ignored ${maskMessageId(msg.id)} from ${maskNumber(from)}: rate limit (${perMinute}/min)`);
       const accessToken = process.env.WHATSAPP_ACCESS_TOKEN ?? "";
       const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID ?? "";
       if (rate.notify && accessToken && phoneNumberId) {
@@ -184,13 +184,13 @@ export function createWhatsAppChannel(
     const status = await replica.recordInbound(msg, msg.profileName);
 
     if (status === "human") {
-      waLog(`✗ not answering ${msg.id} from ${maskNumber(from)}: an operator has this conversation`);
+      waLog(`✗ not answering ${maskMessageId(msg.id)} from ${maskNumber(from)}: an operator has this conversation`);
       return;
     }
 
     // Non-text: acknowledge but don't run the agent.
     if (msg.type !== "text") {
-      waLog(`✗ ignored ${msg.id}: ${msg.type} message (only text is supported)`);
+      waLog(`✗ ignored ${maskMessageId(msg.id)}: ${msg.type} message (only text is supported)`);
       const accessToken = process.env.WHATSAPP_ACCESS_TOKEN ?? "";
       const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID ?? "";
       if (accessToken && phoneNumberId) {
@@ -207,7 +207,7 @@ export function createWhatsAppChannel(
 
     // Slash-commands: blocked. A phone user must not drive the agent's mode or run plans.
     if (isSlashCommand(msg.body)) {
-      waLog(`✗ ignored ${msg.id}: slash command (blocked over WhatsApp)`);
+      waLog(`✗ ignored ${maskMessageId(msg.id)}: slash command (blocked over WhatsApp)`);
       const accessToken = process.env.WHATSAPP_ACCESS_TOKEN ?? "";
       const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID ?? "";
       if (accessToken && phoneNumberId) {
@@ -224,7 +224,7 @@ export function createWhatsAppChannel(
 
     // 24h window: if the message is stale, Meta will reject the reply. Skip the agent.
     if (!withinReplyWindow(msg.timestamp)) {
-      waLog(`✗ ignored ${msg.id} from ${maskNumber(from)}: outside the 24h reply window`);
+      waLog(`✗ ignored ${maskMessageId(msg.id)} from ${maskNumber(from)}: outside the 24h reply window`);
       return;
     }
 
@@ -237,10 +237,10 @@ export function createWhatsAppChannel(
       const why = (status.errors ?? [])
         .map((e) => [e.code, e.title ?? e.message].filter(Boolean).join(" "))
         .join("; ");
-      waError(`✗ delivery failed for ${who} (msg ${status.id}): ${why || "no reason given"}`);
+      waError(`✗ delivery failed for ${who} (msg ${maskMessageId(status.id)}): ${why || "no reason given"}`);
       return;
     }
-    waLog(`status ${status.status} for ${who} (msg ${status.id})`);
+    waLog(`status ${status.status} for ${who} (msg ${maskMessageId(status.id)})`);
   };
 
   return { handleInbound, onStatus };

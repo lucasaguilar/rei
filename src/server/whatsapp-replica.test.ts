@@ -73,16 +73,16 @@ describe("createWhatsAppReplica", () => {
     expect(api.ensureContact).toHaveBeenCalledWith(FROM, "Ana");
   });
 
-  it("caches the contact, but asks for the conversation on EVERY message", async () => {
-    // The status is how an operator's takeover reaches REI: caching it would let the bot keep
-    // answering a conversation a human already took.
+  it("resolves the contact AND the conversation on every message — nothing is cached", async () => {
+    // The status is how an operator's takeover reaches REI, and a contact can be deleted in the
+    // store at any time: a cached copy of either goes stale without REI knowing.
     const api = fakeApi({ id: "conv-1", contact_id: "c-1", status: "assistant" });
     const replica = createWhatsAppReplica(api);
 
     await replica.recordInbound(msg({ id: "wamid.1" }));
     await replica.recordInbound(msg({ id: "wamid.2" }));
 
-    expect(api.ensureContact).toHaveBeenCalledTimes(1);
+    expect(api.ensureContact).toHaveBeenCalledTimes(2);
     expect(api.findOpenConversation).toHaveBeenCalledTimes(2);
     expect(api.createConversation).not.toHaveBeenCalled();
   });
@@ -142,16 +142,21 @@ describe("createWhatsAppReplica", () => {
     expect(errors.join("\n")).not.toContain(FROM);
   });
 
-  it("after a failure it forgets the contact, so a contact deleted in the store heals", async () => {
+  it("a contact deleted in the store between two messages costs no message", async () => {
+    // Regression: the contact id used to be cached per number. Deleting the contact in the store
+    // left REI holding a dead id, so the next message failed (POST /conversations → 500, foreign
+    // key) and was lost before the cache healed.
     const api = fakeApi();
+    api.ensureContact
+      .mockResolvedValueOnce({ id: "c-1", wa_id: FROM })
+      .mockResolvedValueOnce({ id: "c-2", wa_id: FROM }); // recreated after the delete
     const replica = createWhatsAppReplica(api);
+
     await replica.recordInbound(msg({ id: "wamid.1" }));
-    api.findOpenConversation.mockRejectedValueOnce(new Error("backend GET … → 500"));
-    await replica.recordInbound(msg({ id: "wamid.2" }));
+    const status = await replica.recordInbound(msg({ id: "wamid.2" }));
 
-    await replica.recordInbound(msg({ id: "wamid.3" }));
-
-    expect(api.ensureContact).toHaveBeenCalledTimes(2);
+    expect(status).toBe("assistant");
+    expect(api.createConversation).toHaveBeenLastCalledWith("c-2");
   });
 
   it("a failed reply leaves the customer unaffected and is logged", async () => {

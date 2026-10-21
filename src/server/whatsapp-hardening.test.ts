@@ -209,6 +209,6 @@ describe("channel limits", () => {
     expect(streamTurn).toHaveBeenCalledTimes(3);
     const notices = fetchFn.mock.calls.filter((c) => /too fast/i.test(String(c[1]?.body)));
     expect(notices).toHaveLength(1);
-    expect(logged()).toMatch(/ignored wamid\.r3 from …0099: rate limit \(3\/min\)/);
+    expect(logged()).toMatch(/ignored wamid…r3 from …0099: rate limit \(3\/min\)/);
   });
 });
