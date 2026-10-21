@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createHmac } from "node:crypto";
 import { PassThrough } from "node:stream";
-import { maskNumber, describeBody } from "./whatsapp-log.js";
+import { maskNumber, maskMessageId, describeBody } from "./whatsapp-log.js";
 import { handleWhatsAppWebhook } from "./whatsapp-webhook.js";
 import { createWhatsAppChannel } from "./whatsapp-channel.js";
 import type { WhatsAppInbound } from "./whatsapp-webhook.js";
@@ -63,9 +63,41 @@ function payload(id: string, from: string, body = "hola") {
   });
 }
 
-describe("maskNumber / describeBody", () => {
+/**
+ * A message id shaped like Meta's: `wamid.` + base64 of a record that starts with the SENDER'S
+ * PHONE NUMBER, followed by the message's own random id. Built from the fictitious test number, so
+ * the fixture holds no real data — but decodes the same way a real one does.
+ */
+const PHONE = "5491100001234";
+const REAL_SHAPED_WAMID = `wamid.${Buffer.concat([
+  Buffer.from([0x1c, 0x18, 0x0d]),
+  Buffer.from(PHONE),
+  Buffer.from([0x15, 0x02, 0x00, 0x12, 0x18, 0x16]),
+  Buffer.from("3EB0A1B2C3D4E5F6A7B8C9"),
+  Buffer.from([0x00]),
+]).toString("base64")}`;
+
+describe("maskNumber / maskMessageId / describeBody", () => {
   it("keeps only the last 4 digits of a phone number", () => {
     expect(maskNumber("5491100001234")).toBe("…1234");
+  });
+
+  it("the fixture really carries the phone number, as Meta's ids do", () => {
+    // Guards the test below: if the fixture stopped encoding the number, it would prove nothing.
+    const decoded = Buffer.from(REAL_SHAPED_WAMID.slice("wamid.".length), "base64").toString("latin1");
+    expect(decoded).toContain(PHONE);
+  });
+
+  it("keeps only the tail of a message id — the part after the sender's number", () => {
+    const masked = maskMessageId(REAL_SHAPED_WAMID);
+    expect(masked).toBe(`wamid…${REAL_SHAPED_WAMID.slice(-8)}`);
+    expect(Buffer.from(masked.slice("wamid…".length), "base64").toString("latin1")).not.toMatch(/\d{4}/);
+  });
+
+  it("keeps short ids readable and marks a missing one", () => {
+    expect(maskMessageId("wamid.LOG1")).toBe("wamid…LOG1");
+    expect(maskMessageId(null)).toBe("(no id)");
+    expect(maskMessageId("")).toBe("(no id)");
   });
 
   it("logs a message's length, and its text only when REI_WHATSAPP_LOG_BODY=true", () => {
@@ -117,10 +149,28 @@ describe("webhook log", () => {
     await send("wamid.LOG2", "5491100000001"); // not allowlisted
 
     const out = logged();
-    expect(out).toMatch(/← msg wamid\.LOG1.*…1234.*text, 4 chars/);
-    expect(out).toMatch(/ignored wamid\.LOG1: duplicate/);
+    expect(out).toMatch(/← msg wamid…LOG1.*…1234.*text, 4 chars/);
+    expect(out).toMatch(/ignored wamid…LOG1: duplicate/);
     expect(out).toMatch(/ignored …0001: not in WHATSAPP_ALLOWED_NUMBERS/);
     expect(out).not.toContain("5491100001234"); // full numbers never reach the log
+  });
+
+  it("never logs a whole message id: Meta's ids carry the sender's number in base64", async () => {
+    // Regression: every log line printed msg.id in full, so the …1234 mask next to it protected
+    // nothing — the number was one base64 decode away, in the same line.
+    vi.stubEnv("WHATSAPP_APP_SECRET", SECRET);
+    vi.stubEnv("WHATSAPP_ALLOWED_NUMBERS", PHONE);
+    const send = async () => {
+      const body = payload(REAL_SHAPED_WAMID, PHONE);
+      const { req, res } = request("POST", "/webhooks/whatsapp", body, { "x-hub-signature-256": sign(body) });
+      await handleWhatsAppWebhook(req, res, { handleInbound: async () => {} });
+    };
+    await send();
+    await send(); // Meta retry: logged as a duplicate, by id
+
+    expect(lines.length).toBeGreaterThan(0);
+    expect(logged()).not.toContain(REAL_SHAPED_WAMID);
+    expect(logged()).toContain(maskMessageId(REAL_SHAPED_WAMID));
   });
 });
 
@@ -156,7 +206,27 @@ describe("channel log", () => {
     const out = logged();
     expect(out).toMatch(/turn for …1234 started/);
     expect(out).toMatch(/turn for …1234 done in [\d.]+s → reply 5 chars/);
-    expect(out).toMatch(/→ sent wamid\.OUT to …1234/);
+    expect(out).toMatch(/→ sent wamid…OUT to …1234/);
+  });
+
+  it("never logs a whole id on the channel side either — inbound, outbound or status", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ messages: [{ id: REAL_SHAPED_WAMID }] }), { status: 200 })),
+    );
+    const agent = {
+      streamTurn: async function* () {
+        yield "\x11Hola!";
+      },
+    } as never;
+    const ch = createWhatsAppChannel(agent, "/tmp");
+    await ch.handleInbound(msg({ id: REAL_SHAPED_WAMID }));
+    await ch.handleInbound(msg({ id: REAL_SHAPED_WAMID, type: "image", body: "" }));
+    ch.onStatus!({ id: REAL_SHAPED_WAMID, status: "delivered", recipientId: PHONE, timestamp: "1" });
+    ch.onStatus!({ id: REAL_SHAPED_WAMID, status: "failed", recipientId: PHONE, timestamp: "1" });
+
+    expect(logged()).not.toContain(REAL_SHAPED_WAMID);
+    expect(logged()).not.toContain(PHONE);
   });
 
   it("logs a failed turn, and tells the sender instead of leaving them waiting", async () => {
@@ -180,7 +250,7 @@ describe("channel log", () => {
     await ch.handleInbound(msg({ id: "wamid.I", type: "image", body: "" }));
     await ch.handleInbound(msg({ id: "wamid.S", body: "/mode agent" }));
     const out = logged();
-    expect(out).toMatch(/ignored wamid\.I: image message/);
-    expect(out).toMatch(/ignored wamid\.S: slash command/);
+    expect(out).toMatch(/ignored wamid…I: image message/);
+    expect(out).toMatch(/ignored wamid…S: slash command/);
   });
 });

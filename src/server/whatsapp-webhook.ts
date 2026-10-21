@@ -18,7 +18,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { normalizeRoutePath } from "./health.js";
-import { waLog, waError, maskNumber, describeBody } from "./whatsapp-log.js";
+import { waLog, waError, maskNumber, maskMessageId, describeBody } from "./whatsapp-log.js";
 
 /** The path the router matches on (after `normalizeRoutePath`). */
 export const WHATSAPP_WEBHOOK_PATH = "/webhooks/whatsapp";
@@ -250,10 +250,10 @@ async function processPayload(raw: string, deps?: WhatsAppWebhookDeps): Promise<
         };
         if (!msg.id) continue;
         if (seenMessageIds.has(msg.id)) {
-          waLog(`✗ ignored ${msg.id}: duplicate (Meta retry)`);
+          waLog(`✗ ignored ${maskMessageId(msg.id)}: duplicate (Meta retry)`);
           continue;
         }
-        waLog(`← msg ${msg.id} from ${maskNumber(msg.from)} ${msg.type}, ${describeBody(msg.body)}`);
+        waLog(`← msg ${maskMessageId(msg.id)} from ${maskNumber(msg.from)} ${msg.type}, ${describeBody(msg.body)}`);
         if (!isAllowed(msg.from)) {
           waLog(
             (process.env.WHATSAPP_ALLOWED_NUMBERS ?? "").trim()

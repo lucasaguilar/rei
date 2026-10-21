@@ -23,6 +23,19 @@ export function maskNumber(n: string): string {
   return `…${(n ?? "").slice(-4)}`;
 }
 
+const MESSAGE_ID_TAIL = 8;
+
+/**
+ * `wamid.HBgN…QzU0NDcA` → `wamid…QzU0NDcA`. A Meta message id is base64 of a record that STARTS
+ * with the sender's full phone number, so logging it whole undid maskNumber in the same line. The
+ * tail is the message's own random id: enough to follow one message through the log, nothing more.
+ */
+export function maskMessageId(id: string | null | undefined): string {
+  if (!id) return "(no id)";
+  const body = id.startsWith("wamid.") ? id.slice("wamid.".length) : id;
+  return `wamid…${body.slice(-MESSAGE_ID_TAIL)}`;
+}
+
 const BODY_PREVIEW_CHARS = 80;
 
 /** `12 chars`, or `12 chars: "…"` when message text logging is switched on. */
