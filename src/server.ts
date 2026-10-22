@@ -17,7 +17,7 @@ import {
 } from "./server/whatsapp-webhook.js";
 import { createWhatsAppChannel } from "./server/whatsapp-channel.js";
 import { createWebChannelFor } from "./server/web-channel.js";
-import { handleWebChannelRequest, isWebChannelRequest } from "./server/web-http.js";
+import { describeWebChannel, handleWebChannelRequest, isWebChannelRequest } from "./server/web-http.js";
 import { REI_LOGO } from "./cli/rei-logo.js";
 import {
   isWorkspaceAllowed,
@@ -302,6 +302,8 @@ async function startServer() {
         ? `Browser origins allowed: ${process.env.REI_SERVER_ORIGIN}`
         : `Browser origins: none (a page cannot call this server — set REI_SERVER_ORIGIN to allow one)`,
     );
+    const webChannelLine = describeWebChannel();
+    if (webChannelLine) console.log(webChannelLine);
     console.log(`Workspace: ${WORKSPACE_PATH}`);
     console.log(`Endpoint: http://${HOST}:${PORT}/chat/completions`);
     console.log(`Health:   http://${HOST}:${PORT}${HEALTH_PATH} (no auth — for platform probes)`);

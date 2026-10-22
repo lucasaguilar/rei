@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as http from "node:http";
 import type { AddressInfo } from "node:net";
-import { handleWebChannelRequest, isWebChannelRequest } from "./web-http.js";
+import { describeWebChannel, handleWebChannelRequest, isWebChannelRequest } from "./web-http.js";
 import type { WebChannel, WebMessage } from "./web-channel.js";
 
 /**
@@ -55,6 +55,22 @@ describe("isWebChannelRequest", () => {
     expect(isWebChannelRequest("/channels/web/message", ENV)).toBe(true);
     expect(isWebChannelRequest("/v1/channels/web/message?x=1", ENV)).toBe(true);
     expect(isWebChannelRequest("/chat/completions", ENV)).toBe(false);
+  });
+});
+
+describe("describeWebChannel", () => {
+  // The startup banner said "a page cannot call this server" while the widget route was open — true
+  // of the owner's endpoint only, and misleading the first time the widget is tried.
+  it("names the route and its origins when the channel is on, and nothing when it is off", () => {
+    expect(describeWebChannel({})).toBeNull();
+    const line = describeWebChannel(ENV)!;
+    expect(line).toContain("/channels/web/message");
+    expect(line).toContain(ORIGIN);
+    expect(line).not.toContain(SITE_KEY);
+  });
+
+  it("warns when no origin is allowed, since every browser request would then be refused", () => {
+    expect(describeWebChannel({ REI_WEB_SITE_KEY: SITE_KEY })).toMatch(/REI_WEB_ALLOWED_ORIGINS/);
   });
 });
 
