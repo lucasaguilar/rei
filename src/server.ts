@@ -16,6 +16,8 @@ import {
   isWhatsAppWebhookRequest,
 } from "./server/whatsapp-webhook.js";
 import { createWhatsAppChannel } from "./server/whatsapp-channel.js";
+import { createWebChannelFor } from "./server/web-channel.js";
+import { handleWebChannelRequest, isWebChannelRequest } from "./server/web-http.js";
 import { REI_LOGO } from "./cli/rei-logo.js";
 import {
   isWorkspaceAllowed,
@@ -103,6 +105,7 @@ async function startServer() {
   // Once per process, never per request: the per-number queue, the concurrency cap and the rate
   // limiter live in this object, and a fresh one per webhook enforced none of them.
   const whatsappChannel = createWhatsAppChannel(agent, WORKSPACE_PATH);
+  const webChannel = createWebChannelFor(agent, WORKSPACE_PATH);
 
   // Connect configured MCP servers so their tools are available to every turn.
   // Best-effort: per-server failures are swallowed by the registry.
@@ -132,11 +135,13 @@ async function startServer() {
     });
     // The WhatsApp webhook is exempt like health: Meta's POST carries no Origin, and on a public
     // host the Host check would be the only thing standing between Meta and the route. Its own
-    // HMAC signature (checked in the handler) is the real gate.
+    // HMAC signature (checked in the handler) is the real gate. The web widget is exempt too: it IS
+    // a browser on another origin, checked against the site's own origins in its handler.
     if (
       browserRejection &&
       !isHealthProbe(req.url, req.method) &&
-      !isWhatsAppWebhookRequest(req.url, req.method)
+      !isWhatsAppWebhookRequest(req.url, req.method) &&
+      !isWebChannelRequest(req.url)
     ) {
       res.writeHead(browserRejection.status, { "Content-Type": "application/json" });
       res.end(
@@ -144,6 +149,14 @@ async function startServer() {
           error: { message: browserRejection.message, type: "invalid_request_error" },
         }),
       );
+      return;
+    }
+
+    // The widget's route, preflight included, before the server's own CORS answer and the bearer
+    // check: a page in a visitor's browser cannot hold the owner's token. Its gates (site key,
+    // origins, session id, rate limits) live in web-http.ts.
+    if (isWebChannelRequest(req.url)) {
+      await handleWebChannelRequest(req, res, webChannel);
       return;
     }
 
