@@ -7,10 +7,13 @@
  * happened, plus reads the conversation status (an operator may have taken it over).
  *
  * Contract (all requests carry `Authorization: Bearer $REI_BACKEND_API_KEY`):
- *   POST /contacts                            { wa_id, phone, name? }  → { id, wa_id }  find-or-create
- *   GET  /conversations/by-contact/:contactId                          → { id, contact_id, status } | empty
- *   POST /conversations                       { contact_id }           → { id, contact_id, status }
+ *   POST /contacts                            { wa_id, phone?, name? }  → { id, wa_id }  find-or-create
+ *   GET  /conversations/by-contact/:contactId                           → { id, contact_id, status } | empty
+ *   POST /conversations                       { contact_id, channel }   → { id, contact_id, status }
  *   POST /conversations/:id/messages          { role, content, wa_message_id?, wa_timestamp? }
+ *
+ * `wa_id` is the store's contact key for every channel: the WhatsApp number, or `web_<session>` for
+ * a web visitor (who has no phone). The store decides when a conversation ends, per channel.
  *
  * @module rei/server/backend-api
  */
@@ -20,6 +23,9 @@ const REQUEST_TIMEOUT_MS = 10_000;
 
 /** `assistant` = REI answers; `human` = an operator took it over; `closed` = finished. */
 export type ConversationStatus = "assistant" | "human" | "closed";
+
+/** The public channel a contact and a conversation belong to. */
+export type ConversationChannel = "whatsapp" | "web";
 
 export interface BackendContact {
   id: string;
@@ -43,11 +49,11 @@ export interface BackendMessageInput {
 
 export interface BackendApi {
   /** findOrCreate on the backend: idempotent, so no GET-then-POST round trip is needed. A `name`
-   *  also updates an existing contact's. */
-  ensureContact(waId: string, name?: string): Promise<BackendContact>;
+   *  also updates an existing contact's. Only a WhatsApp key is a phone number. */
+  ensureContact(key: string, name?: string, channel?: ConversationChannel): Promise<BackendContact>;
   /** The newest `bot`/`human` conversation of the contact, or null when none is open. */
   findOpenConversation(contactId: string): Promise<BackendConversation | null>;
-  createConversation(contactId: string): Promise<BackendConversation>;
+  createConversation(contactId: string, channel?: ConversationChannel): Promise<BackendConversation>;
   addMessage(conversationId: string, message: BackendMessageInput): Promise<void>;
 }
 
@@ -84,15 +90,19 @@ export function createBackendApi(
   const id = encodeURIComponent;
 
   return {
-    async ensureContact(waId, name) {
-      const body = { wa_id: waId, phone: `+${waId}`, ...(name ? { name } : {}) };
+    async ensureContact(key, name, channel = "whatsapp") {
+      const body = {
+        wa_id: key,
+        ...(channel === "whatsapp" ? { phone: `+${key}` } : {}),
+        ...(name ? { name } : {}),
+      };
       return (await request("POST", "/contacts", body)) as BackendContact;
     },
     async findOpenConversation(contactId) {
       return (await request("GET", `/conversations/by-contact/${id(contactId)}`)) as BackendConversation | null;
     },
-    async createConversation(contactId) {
-      return (await request("POST", "/conversations", { contact_id: contactId })) as BackendConversation;
+    async createConversation(contactId, channel = "whatsapp") {
+      return (await request("POST", "/conversations", { contact_id: contactId, channel })) as BackendConversation;
     },
     async addMessage(conversationId, message) {
       await request("POST", `/conversations/${id(conversationId)}/messages`, message);
