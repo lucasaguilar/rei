@@ -330,6 +330,22 @@ bearer check but is gated by its own signature. All three are machine-scoped sec
 | `REI_WHATSAPP_MAX_CONCURRENT` | turns running at once across ALL senders; the rest queue in arrival order. Each turn holds a model call — on a local backend, the GPU | `4` |
 | `REI_WHATSAPP_RATE_PER_MIN` | turns one sender may start per minute. Past it, messages are ignored and the sender is told once per minute — a flood from one number must not become a flood of provider tokens | `10` |
 
+## Web widget channel (server)
+
+The site's chat widget talks to REI directly: `POST /channels/web/message` with
+`{ session_id, content, name? }` → `{ reply, status }`. Same core and policy as WhatsApp (one session
+per visitor, `ask` mode, read-only tools confined to `REI_WHATSAPP_KNOWLEDGE_DIR`), replicated to
+`REI_BACKEND_URL` when set. The route is public by nature — a page in a visitor's browser cannot hold a
+secret — so it is gated by a public site key, the site's origins, a validated session id and rate limits.
+
+| Variable | What it does | Default |
+|---|---|---|
+| `REI_WEB_SITE_KEY` | the site's **public** key (it names the site; it is not a password). The widget sends it as `Authorization: Bearer <key>` or `X-Rei-Site-Key`. **Unset = the route does not exist** | — (channel off) |
+| `REI_WEB_ALLOWED_ORIGINS` | comma-separated origins allowed to embed the widget (`https://shop.example,https://www.shop.example`). A browser request from any other origin is 403; requests without an `Origin` (curl, servers) still need the site key | empty (no browser origin) |
+| `REI_WEB_RATE_PER_MIN` | messages one visitor session may send per minute; past it, `429` with a "too fast" reply | `10` |
+| `REI_WEB_RATE_PER_MIN_IP` | messages per minute per client address, across sessions — a script can mint a session id per message, not an address | `30` |
+| `REI_TRUST_PROXY` | `true` behind a reverse proxy (Render): rate limits use the last `X-Forwarded-For` entry, the address the proxy saw. Leave unset when clients connect directly, or anyone could pick their own address | unset |
+
 ## MTPLX — `chat_template_kwargs`
 
 MTPLX forwards `chat_template_kwargs` to the chat template, which is the **only** way to set the
