@@ -57,8 +57,8 @@ describe("createWhatsAppReplica", () => {
     const status = await createWhatsAppReplica(api).recordInbound(msg());
 
     expect(status).toBe("assistant");
-    expect(api.ensureContact).toHaveBeenCalledWith(FROM, undefined);
-    expect(api.createConversation).toHaveBeenCalledWith("c-1");
+    expect(api.ensureContact).toHaveBeenCalledWith(FROM, undefined, "whatsapp");
+    expect(api.createConversation).toHaveBeenCalledWith("c-1", "whatsapp");
     expect(api.addMessage).toHaveBeenCalledWith("conv-new", {
       role: "user",
       content: "hola",
@@ -70,7 +70,7 @@ describe("createWhatsAppReplica", () => {
   it("passes the WhatsApp profile name to the contact", async () => {
     const api = fakeApi();
     await createWhatsAppReplica(api).recordInbound(msg(), "Ana");
-    expect(api.ensureContact).toHaveBeenCalledWith(FROM, "Ana");
+    expect(api.ensureContact).toHaveBeenCalledWith(FROM, "Ana", "whatsapp");
   });
 
   it("resolves the contact AND the conversation on every message — nothing is cached", async () => {
@@ -156,7 +156,7 @@ describe("createWhatsAppReplica", () => {
     const status = await replica.recordInbound(msg({ id: "wamid.2" }));
 
     expect(status).toBe("assistant");
-    expect(api.createConversation).toHaveBeenLastCalledWith("c-2");
+    expect(api.createConversation).toHaveBeenLastCalledWith("c-2", "whatsapp");
   });
 
   it("a failed reply leaves the customer unaffected and is logged", async () => {

@@ -46,6 +46,12 @@ describe("createBackendApi", () => {
     expect(calls[0].body).toEqual({ wa_id: "5491100001234", phone: "+5491100001234", name: "Ana" });
   });
 
+  it("ensureContact for a web visitor sends no phone — a session key is not a number", async () => {
+    const { fn, calls } = mockFetch(json({ id: "c-9", wa_id: "web_s-1" }));
+    await createBackendApi(ENV, fn)!.ensureContact("web_s-1", undefined, "web");
+    expect(calls[0].body).toEqual({ wa_id: "web_s-1" });
+  });
+
   it("findOpenConversation reads an empty 200 body as 'no open conversation'", async () => {
     const { fn, calls } = mockFetch(new Response("", { status: 200 }));
     const api = createBackendApi(ENV, fn)!;
@@ -62,13 +68,19 @@ describe("createBackendApi", () => {
     expect(await api.findOpenConversation("c-1")).toMatchObject({ id: "conv-1", status: "human" });
   });
 
-  it("createConversation posts the contact id", async () => {
+  it("createConversation posts the contact id and the channel, whatsapp by default", async () => {
     const { fn, calls } = mockFetch(json({ id: "conv-2", contact_id: "c-1", status: "assistant" }));
     const api = createBackendApi(ENV, fn)!;
 
     expect((await api.createConversation("c-1")).id).toBe("conv-2");
     expect(calls[0].url).toBe("https://backend.test/conversations");
-    expect(calls[0].body).toEqual({ contact_id: "c-1" });
+    expect(calls[0].body).toEqual({ contact_id: "c-1", channel: "whatsapp" });
+  });
+
+  it("createConversation labels a web conversation as web", async () => {
+    const { fn, calls } = mockFetch(json({ id: "conv-3", contact_id: "c-9", status: "assistant" }));
+    await createBackendApi(ENV, fn)!.createConversation("c-9", "web");
+    expect(calls[0].body).toEqual({ contact_id: "c-9", channel: "web" });
   });
 
   it("addMessage posts role, content and the Meta message id", async () => {
