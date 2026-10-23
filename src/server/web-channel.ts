@@ -30,7 +30,11 @@ export interface WebResult {
 }
 
 export interface WebChannel {
-  handleMessage(msg: WebMessage): Promise<WebResult>;
+  /**
+   * Answers one message. `onText` gets the reply's pieces as the model writes them (the streaming
+   * transport); the result is the whole exchange either way, once it is recorded.
+   */
+  handleMessage(msg: WebMessage, onText?: (text: string) => void): Promise<WebResult>;
 }
 
 export interface WebLimits {
@@ -64,7 +68,20 @@ export function maskSession(sessionId: string): string {
   return `web…${sessionId.slice(-4)}`;
 }
 
+export const TURN_FAILED_REPLY = "Sorry, something went wrong on my side — please try again.";
+
 const contactKey = (sessionId: string) => `web_${sessionId}`;
+
+/** The streamed text matches the trimmed reply: a model often opens with blank lines. */
+function skipLeadingBlank(onText: (text: string) => void): (text: string) => void {
+  let started = false;
+  return (text) => {
+    const piece = started ? text : text.trimStart();
+    if (!piece) return;
+    started = true;
+    onText(piece);
+  };
+}
 
 /** Wires the channel the server runs: its own sessions (`web-<session_id>.json`) and the replica. */
 export function createWebChannelFor(agent: Agent, workspacePath: string): WebChannel {
@@ -89,7 +106,10 @@ export function createWebChannel(
     return { status: 200, body: { reply, status: "assistant" } };
   };
 
-  const handleAccepted = async ({ sessionId, content, name }: WebMessage): Promise<WebResult> => {
+  const handleAccepted = async (
+    { sessionId, content, name }: WebMessage,
+    onText?: (text: string) => void,
+  ): Promise<WebResult> => {
     const who = maskSession(sessionId);
     const status = await replica.recordInbound({ key: contactKey(sessionId), content, name });
 
@@ -107,12 +127,12 @@ export function createWebChannel(
     const started = Date.now();
     let reply: string;
     try {
-      reply = (await channel.turn(sessionId, content)).trim() || "(no response)";
+      reply = (await channel.turn(sessionId, content, onText && skipLeadingBlank(onText))).trim() || "(no response)";
     } catch (err) {
       webError(`✗ turn for ${who} failed: ${err instanceof Error ? err.message : String(err)}`);
       return {
         status: 502,
-        body: { reply: "Sorry, something went wrong on my side — please try again.", status: "error" },
+        body: { reply: TURN_FAILED_REPLY, status: "error" },
       };
     }
     webLog(`✓ turn for ${who} done in ${((Date.now() - started) / 1000).toFixed(1)}s → reply ${reply.length} chars`);
@@ -120,7 +140,7 @@ export function createWebChannel(
   };
 
   return {
-    async handleMessage(msg) {
+    async handleMessage(msg, onText) {
       // Before anything that costs: a turn, a replica row, provider tokens.
       if (!perIp(msg.ip).allowed || !perSession(msg.sessionId).allowed) {
         webLog(`✗ ignored message from ${maskSession(msg.sessionId)}: rate limit`);
@@ -137,7 +157,7 @@ export function createWebChannel(
       // messages from one browser answer in order, and a takeover is read when this one is due.
       let result: WebResult | undefined;
       await channel.enqueue(msg.sessionId, async () => {
-        result = await handleAccepted(msg);
+        result = await handleAccepted(msg, onText);
       });
       return result!;
     },

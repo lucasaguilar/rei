@@ -53,8 +53,11 @@ export interface PublicChannel {
    * The whole exchange goes in — turn AND reply — so a customer's answers leave in order.
    */
   enqueue(key: string, task: () => Promise<void>): Promise<void>;
-  /** One agent turn on the customer's session, persisted. Returns the reply text; throws on failure. */
-  turn(key: string, prompt: string): Promise<string>;
+  /**
+   * One agent turn on the customer's session, persisted. Returns the reply text; throws on failure.
+   * `onText` gets each piece of the reply as the model writes it, for a transport that streams.
+   */
+  turn(key: string, prompt: string, onText?: (text: string) => void): Promise<string>;
 }
 
 /**
@@ -113,7 +116,7 @@ export function createPublicChannel(
       await current;
     },
 
-    async turn(key, prompt) {
+    async turn(key, prompt, onText) {
       const session = loadOrCreateSession(key);
       let response = "";
       for await (const chunk of agent.streamTurn(session, prompt, {
@@ -121,7 +124,9 @@ export function createPublicChannel(
         allowedTools: PUBLIC_TOOLS,
         readRoot: publicReadRoot(workspacePath),
       })) {
-        if (chunk.startsWith("\x11")) response += chunk.slice(1);
+        if (!chunk.startsWith("\x11")) continue;
+        response += chunk.slice(1);
+        onText?.(chunk.slice(1));
       }
       // streamTurn already pushed user + assistant messages.
       persistSession(key, session);
