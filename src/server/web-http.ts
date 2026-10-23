@@ -44,6 +44,15 @@ export function isWebChannelRequest(url: string | undefined, env: Env = process.
   return path === WEB_CHANNEL_PATH || path.startsWith(`${WEB_CHANNEL_PATH}/`);
 }
 
+/** The startup banner's line for the channel, or null when it is off. Never prints the key. */
+export function describeWebChannel(env: Env = process.env): string | null {
+  if (!env.REI_WEB_SITE_KEY?.trim()) return null;
+  const origins = allowedOrigins(env);
+  return origins.length > 0
+    ? `Web widget: POST ${MESSAGE_PATH} (origins: ${origins.join(", ")})`
+    : `Web widget: POST ${MESSAGE_PATH} — no browser origin allowed yet; set REI_WEB_ALLOWED_ORIGINS`;
+}
+
 function allowedOrigins(env: Env): string[] {
   return (env.REI_WEB_ALLOWED_ORIGINS ?? "")
     .split(",")
