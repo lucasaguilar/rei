@@ -56,6 +56,23 @@ describe("createPublicChannel", () => {
     expect(await createPublicChannel(agent, ws, "web").turn("abc", "hola")).toBe("¡Hola!");
   });
 
+  it("hands each piece of the reply to onText as it arrives — never the thinking", async () => {
+    const agent = {
+      streamTurn: async function* (session: ChatSession, prompt: string) {
+        session.messages.push({ role: "user", content: prompt }, { role: "assistant", content: "¡Hola! ¿Qué tal?" });
+        yield "\x10thinking that must not leak";
+        yield "\x11¡Hola!";
+        yield "\x11 ¿Qué tal?";
+      },
+    } as any;
+    const pieces: string[] = [];
+
+    const reply = await createPublicChannel(agent, ws, "web").turn("abc", "hola", (t) => pieces.push(t));
+
+    expect(pieces).toEqual(["¡Hola!", " ¿Qué tal?"]);
+    expect(reply).toBe("¡Hola! ¿Qué tal?");
+  });
+
   it("resumes the customer's own history on the next message", async () => {
     const { agent, turns } = mockAgent();
     const channel = createPublicChannel(agent, ws, "web");
