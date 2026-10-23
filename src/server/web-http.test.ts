@@ -138,8 +138,29 @@ describe("handleWebChannelRequest", () => {
     expect(received[0].ip).toBe("127.0.0.1");
   });
 
-  it("has no streaming route yet, so the widget falls back to /message", async () => {
-    const res = await fetch(`${base}/channels/web/stream`, {
+  it("streams over /channels/web/stream, behind the same gates as /message", async () => {
+    const stream = (headers: Record<string, string>, body: unknown = { session_id: SESSION, content: "hola" }) =>
+      fetch(`${base}/channels/web/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: ORIGIN, ...headers },
+        body: JSON.stringify(body),
+      });
+
+    expect((await stream({ Authorization: "Bearer nope" })).status).toBe(401);
+    expect((await stream({ Authorization: `Bearer ${SITE_KEY}`, Origin: "https://evil.example" })).status).toBe(403);
+    expect((await stream({ Authorization: `Bearer ${SITE_KEY}` }, { session_id: "../x", content: "hola" })).status).toBe(400);
+    expect(received).toHaveLength(0);
+
+    const res = await stream({ Authorization: `Bearer ${SITE_KEY}` });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toMatch(/^text\/event-stream/);
+    expect(res.headers.get("access-control-allow-origin")).toBe(ORIGIN);
+    expect(await res.text()).toContain('data: {"chunk":"¡Hola!"}');
+    expect(received).toHaveLength(1);
+  });
+
+  it("answers any other path with 404", async () => {
+    const res = await fetch(`${base}/channels/web/other`, {
       method: "POST",
       headers: { Origin: ORIGIN, Authorization: `Bearer ${SITE_KEY}` },
       body: "{}",

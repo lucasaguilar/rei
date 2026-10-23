@@ -15,7 +15,8 @@
  * What a visitor can then do is fixed by the public-channel core: ask-only, read-only tools.
  *
  * Protocol: the one the widget already speaks. `POST /channels/web/message` with
- * `{ session_id, content, name? }` → `{ reply, status }`. The site key travels as
+ * `{ session_id, content, name? }` → `{ reply, status }`, and `POST /channels/web/stream` with the
+ * same body → the reply as Server-Sent Events (web-sse.ts). The site key travels as
  * `Authorization: Bearer <key>` (the widget's existing header) or `X-Rei-Site-Key`.
  *
  * @module rei/server/web-http
@@ -24,11 +25,13 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { normalizeRoutePath } from "./health.js";
 import { webError, type WebChannel } from "./web-channel.js";
+import { streamWebReply } from "./web-sse.js";
 
 type Env = Record<string, string | undefined>;
 
 export const WEB_CHANNEL_PATH = "/channels/web";
 const MESSAGE_PATH = `${WEB_CHANNEL_PATH}/message`;
+const STREAM_PATH = `${WEB_CHANNEL_PATH}/stream`;
 
 /** A chat message is a few KB at most; the body is read before anything else is checked. */
 const MAX_BODY_BYTES = 64 * 1024;
@@ -49,8 +52,8 @@ export function describeWebChannel(env: Env = process.env): string | null {
   if (!env.REI_WEB_SITE_KEY?.trim()) return null;
   const origins = allowedOrigins(env);
   return origins.length > 0
-    ? `Web widget: POST ${MESSAGE_PATH} (origins: ${origins.join(", ")})`
-    : `Web widget: POST ${MESSAGE_PATH} — no browser origin allowed yet; set REI_WEB_ALLOWED_ORIGINS`;
+    ? `Web widget: POST ${MESSAGE_PATH}, ${STREAM_PATH} (origins: ${origins.join(", ")})`
+    : `Web widget: POST ${MESSAGE_PATH}, ${STREAM_PATH} — no browser origin allowed yet; set REI_WEB_ALLOWED_ORIGINS`;
 }
 
 function allowedOrigins(env: Env): string[] {
@@ -132,8 +135,9 @@ export async function handleWebChannelRequest(
     return;
   }
 
-  if (normalizeRoutePath(req.url) !== MESSAGE_PATH || req.method !== "POST") {
-    refuse(res, 404, `Not Found. Use POST ${MESSAGE_PATH}.`);
+  const route = normalizeRoutePath(req.url);
+  if ((route !== MESSAGE_PATH && route !== STREAM_PATH) || req.method !== "POST") {
+    refuse(res, 404, `Not Found. Use POST ${MESSAGE_PATH} or ${STREAM_PATH}.`);
     return;
   }
 
@@ -171,13 +175,13 @@ export async function handleWebChannelRequest(
     return;
   }
 
+  const msg = { sessionId, content, ...(name ? { name } : {}), ip: clientIp(req, env) };
+  if (route === STREAM_PATH) {
+    await streamWebReply(res, channel, msg);
+    return;
+  }
   try {
-    const result = await channel.handleMessage({
-      sessionId,
-      content,
-      ...(name ? { name } : {}),
-      ip: clientIp(req, env),
-    });
+    const result = await channel.handleMessage(msg);
     send(res, result.status, result.body);
   } catch (err) {
     webError(`✗ request failed: ${err instanceof Error ? err.message : String(err)}`);
