@@ -333,7 +333,10 @@ bearer check but is gated by its own signature. All three are machine-scoped sec
 ## Web widget channel (server)
 
 The site's chat widget talks to REI directly: `POST /channels/web/message` with
-`{ session_id, content, name? }` → `{ reply, status }`. Same core and policy as WhatsApp (one session
+`{ session_id, content, name? }` → `{ reply, status }`, or `POST /channels/web/stream` with the same
+body → the reply as Server-Sent Events (`{ conversation_id, status }`, then `{ chunk }`…, then
+`[DONE]`). On the stream, a rate limit or a failed turn arrives as text with status 200: the widget
+resends a failed stream over `/message`, which would run the turn twice. Same core and policy as WhatsApp (one session
 per visitor, `ask` mode, read-only tools confined to `REI_WHATSAPP_KNOWLEDGE_DIR`), replicated to
 `REI_BACKEND_URL` when set. The route is public by nature — a page in a visitor's browser cannot hold a
 secret — so it is gated by a public site key, the site's origins, a validated session id and rate limits.
