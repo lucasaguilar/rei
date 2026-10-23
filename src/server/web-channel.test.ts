@@ -12,13 +12,16 @@ import type { ConversationStatus } from "./backend-api.js";
 
 const SESSION = "3f2b9c1e-0000-4000-8000-000000000001";
 
-function fakeChannel(reply = "¡Hola!") {
+/** `reply` may come in pieces, the way a model writes it; the turn returns them joined. */
+function fakeChannel(reply: string | string[] = "¡Hola!") {
   const turns: Array<{ key: string; prompt: string }> = [];
+  const pieces = Array.isArray(reply) ? reply : [reply];
   const channel: PublicChannel = {
     enqueue: async (_key, task) => task(),
-    turn: vi.fn(async (key: string, prompt: string) => {
+    turn: vi.fn(async (key: string, prompt: string, onText?: (text: string) => void) => {
       turns.push({ key, prompt });
-      return reply;
+      for (const p of pieces) onText?.(p);
+      return pieces.join("");
     }),
   };
   return { channel, turns };
@@ -63,6 +66,18 @@ describe("createWebChannel", () => {
     expect(turns).toEqual([{ key: SESSION, prompt: "hola" }]);
     expect(inbound).toEqual([{ key: `web_${SESSION}`, content: "hola", name: "Ana" }]);
     expect(replies).toEqual([{ key: `web_${SESSION}`, text: "¡Hola! ¿En qué te ayudo?" }]);
+  });
+
+  it("streams the reply's pieces to onText, without the blank lines a model may open with", async () => {
+    const { channel } = fakeChannel(["\n\n", "  ¡Ho", "la! ", "¿Qué tal?"]);
+    const { replica, replies } = fakeReplica();
+    const pieces: string[] = [];
+
+    const result = await createWebChannel(channel, replica).handleMessage(message(), (t) => pieces.push(t));
+
+    expect(pieces).toEqual(["¡Ho", "la! ", "¿Qué tal?"]);
+    expect(result.body.reply).toBe("¡Hola! ¿Qué tal?");
+    expect(replies).toEqual([{ key: `web_${SESSION}`, text: "¡Hola! ¿Qué tal?" }]);
   });
 
   it("stays silent when an operator has the conversation, but the message was recorded", async () => {
