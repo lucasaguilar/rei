@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { fromWireToolName } from "../contracts/mcp-tool-names.js";
 import { realish, within } from "../agent-mode/tools-loop/read-scope.js";
+import { reasoningEffortValues } from "../config/model-runtime.js";
 
 /**
  * Personas — who REI is, per surface. See docs/persona-spec.md.
@@ -30,6 +31,8 @@ export interface Persona {
   /** `auto` (the user's language) or a language code. */
   language: string;
   maxReplyChars?: number;
+  /** How much the model thinks on this persona's turns (`none`…`xhigh`); undefined = the model's. */
+  reasoningEffort?: string;
   handoff: string;
   /** Identity, tone, scope — replaces REI's identity in the system prompt. */
   body: string;
@@ -174,6 +177,11 @@ function parsePersona(
     maxReplyChars = Number(mrc);
   }
 
+  const re = field("reasoningEffort")?.toLowerCase();
+  if (re !== undefined && !reasoningEffortValues().includes(re)) {
+    return fail(`\`reasoningEffort: ${re}\` must be one of ${reasoningEffortValues().join(", ")}.`);
+  }
+
   return {
     ok: true,
     persona: {
@@ -186,6 +194,7 @@ function parsePersona(
       preferredModel: field("preferredModel"),
       language,
       maxReplyChars,
+      reasoningEffort: re,
       handoff: field("handoff") ?? DEFAULT_HANDOFF,
       body,
       source,
