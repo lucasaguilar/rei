@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import { buildCurrentDateLine } from "../prompts/prompt-builder.js";
 import type { Persona } from "./persona-loader.js";
+import type { KnowledgeFile } from "./persona-knowledge.js";
 
 /**
  * The system prompt of a persona turn (docs/persona-spec.md, phase 2). Used INSTEAD of
@@ -18,6 +19,8 @@ export interface PersonaPromptContext {
   workspacePath: string;
   /** A public channel's rules (e.g. WhatsApp's guardrails); absent in the CLI. */
   channelPolicy?: string;
+  /** The whole knowledge base, when it fits in the prompt (persona-knowledge.ts). */
+  knowledge?: readonly KnowledgeFile[];
   /** The skills use_skill can load this turn (already resolved). */
   skillNames?: readonly string[];
   now?: Date;
@@ -47,6 +50,14 @@ export function buildPersonaSystemMessage(persona: Persona, ctx: PersonaPromptCo
 }
 
 function knowledgeSection(persona: Persona, ctx: PersonaPromptContext): string | null {
+  if (ctx.knowledge?.length) {
+    const files = ctx.knowledge.map((f) => `<file path="${f.path}">\n${f.content.trim()}\n</file>`);
+    return (
+      `## Knowledge base\n` +
+      `This is everything you know about the business. Answer from it, and only from it: what it ` +
+      `does not say, you do not know.\n\n${files.join("\n\n")}`
+    );
+  }
   const readers = READ_TOOLS.filter((t) => ctx.tools.includes(t));
   if (readers.length === 0) return null;
   // Workspace-relative on purpose: an absolute path names the host's directory layout, and a

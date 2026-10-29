@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { createWhatsAppChannel } from "./whatsapp-channel.js";
 import type { WhatsAppInbound, WhatsAppStatus } from "./whatsapp-webhook.js";
 import type { ChatSession } from "../chat/types.js";
@@ -192,9 +195,14 @@ describe("createWhatsAppChannel", () => {
   it("chunks responses longer than 4096 chars into multiple Graph API calls", async () => {
     const { fn, calls } = mockFetch();
     vi.stubGlobal("fetch", fn);
+    // Only a persona without maxReplyChars can reply past 4096 (`general` holds it to 700).
+    const ws = fs.mkdtempSync(path.join(os.tmpdir(), "rei-wa-long-"));
+    fs.mkdirSync(path.join(ws, ".rei", "personas"), { recursive: true });
+    fs.writeFileSync(path.join(ws, ".rei", "personas", "long.md"), "---\nname: long\ndescription: d\n---\n\nYou.\n");
+    vi.stubEnv("REI_PUBLIC_PERSONA", "long");
     const longText = "x".repeat(5000);
     const agent = mockAgent(longText);
-    const channel = createWhatsAppChannel(agent, "/tmp/ws");
+    const channel = createWhatsAppChannel(agent, ws);
 
     await channel.handleInbound!(msg({ id: "wamid.long" }));
 
@@ -202,6 +210,7 @@ describe("createWhatsAppChannel", () => {
     expect(calls).toHaveLength(2);
     expect(calls[0].body.text.body).toHaveLength(4096);
     expect(calls[1].body.text.body).toHaveLength(904);
+    fs.rmSync(ws, { recursive: true, force: true });
   });
 
   it("skips the agent when the 24h window has expired", async () => {

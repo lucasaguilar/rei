@@ -131,6 +131,10 @@ describe("loadPersona — refusals", () => {
     expect(error("b")).toMatch(/maxReplyChars/);
     expect(error("c")).toMatch(/language/);
     expect(error("e")).toMatch(/tools.*list/);
+    write(builtinDir, "f", persona("name: f\ndescription: d\nreasoningEffort: lots"));
+    expect(error("f")).toMatch(/reasoningEffort.*none.*high/);
+    write(builtinDir, "g", persona("name: g\ndescription: d\nreasoningEffort: None"));
+    expect(load("g")).toMatchObject({ ok: true, persona: { reasoningEffort: "none" } });
   });
 
   it("refuses a knowledgeDir outside the workspace or inside .rei/", () => {

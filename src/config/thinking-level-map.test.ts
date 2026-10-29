@@ -63,6 +63,21 @@ describe("precedence: /think > per-model > env > thinking:off", () => {
     expect(resolveReasoningEffort("agent")).toBe("low");
   });
 
+  it("a persona's reasoningEffort beats the model's — the job decides, not the weights", () => {
+    // A sales reply needs no thinking; the same model in the CLI's ask may well want it.
+    process.env.REI_REASONING_EFFORT_AGENT = "high";
+    setActiveModelTuning({ id: "m", reasoningEffort: "xhigh" });
+    expect(resolveReasoningEffort("agent", "none")).toBe("none");
+  });
+
+  it("/think beats the persona, and the model's map still translates the persona's level", () => {
+    setThinkingOverride("low");
+    expect(resolveReasoningEffort("agent", "none")).toBe("low");
+    setThinkingOverride(undefined);
+    setActiveModelTuning({ id: "m", thinkingLevelMap: QWEN38 });
+    expect(resolveReasoningEffort("agent", "none")).toBeUndefined();
+  });
+
   it("falls through to the env when the model declares none", () => {
     process.env.REI_REASONING_EFFORT_AGENT = "medium";
     setActiveModelTuning({ id: "m" });

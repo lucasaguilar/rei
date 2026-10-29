@@ -197,6 +197,7 @@ export class Agent {
           surfaceTools: surfaceToolNames("agent", this.mcpRegistry),
           channelAllowedTools: options?.allowedTools,
           channelReadRoot: options?.readRoot,
+          channelPolicy: options?.channelPolicy,
         })
       : undefined;
     if (personaTurn && !personaTurn.ok) {
@@ -287,7 +288,7 @@ export class Agent {
           // model and with NO write restriction at all, while `/roles` and the status bar both
           // reported the role's. The two branches must stay in step; a meta-test now checks that.
           modelOverride: turnModel,
-          reasoningEffort: resolveReasoningEffort("agent"),
+          reasoningEffort: resolveReasoningEffort("agent", persona?.persona.reasoningEffort),
           mcpRegistry: this.mcpRegistry,
           onChunk,
           drainUserMessages: options?.drainUserMessages,
@@ -503,7 +504,7 @@ export class Agent {
         logger: this.logger,
         // The role's preferredModel when one is active — resolved above, together with its tuning.
         modelOverride: turnModel,
-        reasoningEffort: resolveReasoningEffort(session.mode),
+        reasoningEffort: resolveReasoningEffort(session.mode, persona?.persona.reasoningEffort),
         mcpRegistry: this.mcpRegistry,
         onChunk,
         userQuery: userInput,

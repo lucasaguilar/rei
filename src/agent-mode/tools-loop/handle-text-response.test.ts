@@ -68,6 +68,24 @@ describe("handleTextResponse", () => {
     expect(outcome.action).toBe("finalize");
   });
 
+  it("asks again when the model ends with no reply at all (it spent the turn thinking)", async () => {
+    // Seen live with a persona whose knowledge is inline: one call, no tools, reasoning only, then
+    // `stop` — the customer got "(no response)".
+    const outcome = await handleTextResponse(baseParams({ content: "  \n" }));
+    expect(outcome.action).toBe("continue");
+    if (outcome.action === "continue") {
+      expect(outcome.formatCorrections).toBe(1);
+      expect(outcome.messages.at(-1)).toMatchObject({ role: "user", content: expect.stringMatching(/empty/i) });
+    }
+  });
+
+  it("accepts an empty reply after edits, and stops asking once the budget is spent", async () => {
+    const edits = async () => [{ file: "a.ts", search: "a", replace: "b" }] as never;
+    validateProposedPatches.mockResolvedValue({ success: true, verifyRan: true });
+    expect((await handleTextResponse(baseParams({ content: "", virtualEdits: edits }))).action).toBe("finalize");
+    expect((await handleTextResponse(baseParams({ content: "", formatCorrections: 2 }))).action).toBe("finalize");
+  });
+
   it("bounces failing final-verify back for self-correction and continues", async () => {
     validateProposedPatches.mockResolvedValueOnce({ success: false, verifyRan: true, feedback: "TS2304" });
     const outcome = await handleTextResponse(

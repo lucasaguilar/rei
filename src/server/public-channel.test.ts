@@ -42,7 +42,7 @@ const sessionFile = (id: string) => path.join(ws, ".rei", "sessions", `${id}.jso
 describe("createPublicChannel", () => {
   it("keeps one session per customer, named <prefix>-<key>", async () => {
     const { agent } = mockAgent();
-    const channel = createPublicChannel(agent, ws, "web");
+    const channel = createPublicChannel(agent, ws, "web", "plain");
 
     await channel.turn("abc", "hola");
     await channel.turn("xyz", "hello");
@@ -53,29 +53,41 @@ describe("createPublicChannel", () => {
 
   it("returns only the reply text, never the thinking", async () => {
     const { agent } = mockAgent("¡Hola!");
-    expect(await createPublicChannel(agent, ws, "web").turn("abc", "hola")).toBe("¡Hola!");
+    expect(await createPublicChannel(agent, ws, "web", "plain").turn("abc", "hola")).toBe("¡Hola!");
   });
 
-  it("hands each piece of the reply to onText as it arrives — never the thinking", async () => {
+  it("hands onText the finished reply, formatted — never the thinking", async () => {
+    // Formatting and the length cap need the whole reply: a piece already sent cannot be taken
+    // back. (The text reaches the channel in one piece today anyway.)
     const agent = {
       streamTurn: async function* (session: ChatSession, prompt: string) {
-        session.messages.push({ role: "user", content: prompt }, { role: "assistant", content: "¡Hola! ¿Qué tal?" });
+        session.messages.push({ role: "user", content: prompt }, { role: "assistant", content: "**¡Hola!** ¿Qué tal?" });
         yield "\x10thinking that must not leak";
-        yield "\x11¡Hola!";
+        yield "\x11**¡Hola!**";
         yield "\x11 ¿Qué tal?";
       },
     } as any;
     const pieces: string[] = [];
 
-    const reply = await createPublicChannel(agent, ws, "web").turn("abc", "hola", (t) => pieces.push(t));
+    const reply = await createPublicChannel(agent, ws, "web", "plain").turn("abc", "hola", (t) => pieces.push(t));
 
-    expect(pieces).toEqual(["¡Hola!", " ¿Qué tal?"]);
+    expect(pieces).toEqual(["¡Hola! ¿Qué tal?"]);
     expect(reply).toBe("¡Hola! ¿Qué tal?");
+  });
+
+  it("formats the reply for its channel and holds it to the persona's maxReplyChars", async () => {
+    // `general` ships with maxReplyChars: 700.
+    const long = `**Plan Pro** incluye todo. ${"Detalle del plan. ".repeat(80)}`;
+    const wa = await createPublicChannel(mockAgent(long).agent, ws, "wa", "whatsapp").turn("abc", "hola");
+
+    expect(wa.startsWith("*Plan Pro* incluye todo.")).toBe(true);
+    expect(wa.length).toBeLessThanOrEqual(700);
+    expect(wa.endsWith("Detalle del plan.")).toBe(true);
   });
 
   it("resumes the customer's own history on the next message", async () => {
     const { agent, turns } = mockAgent();
-    const channel = createPublicChannel(agent, ws, "web");
+    const channel = createPublicChannel(agent, ws, "web", "plain");
 
     await channel.turn("abc", "first");
     await channel.turn("abc", "second");
@@ -91,24 +103,76 @@ describe("createPublicChannel", () => {
     );
     const { agent, turns } = mockAgent();
 
-    await createPublicChannel(agent, ws, "web").turn("abc", "hola");
+    await createPublicChannel(agent, ws, "web", "plain").turn("abc", "hola");
 
     expect(turns[0].session.mode).toBe("ask");
+  });
+
+  it("answers as REI_PUBLIC_PERSONA, else general — never with the coding prompt", async () => {
+    const { agent, turns } = mockAgent();
+    await createPublicChannel(agent, ws, "web", "plain").turn("abc", "hola");
+    expect(turns[0].session.persona).toBe("general");
+
+    fs.mkdirSync(path.join(ws, ".rei", "personas"), { recursive: true });
+    fs.writeFileSync(path.join(ws, ".rei", "personas", "sales.md"), "---\nname: sales\ndescription: d\n---\n\nYou sell.\n");
+    vi.stubEnv("REI_PUBLIC_PERSONA", "sales");
+    await createPublicChannel(agent, ws, "web", "plain").turn("abc", "hola");
+    expect(turns[1].session.persona).toBe("sales");
+  });
+
+  it("throws, without a turn, when the persona stops loading — its error never reaches the customer", async () => {
+    // The agent fails closed with the error as the reply text, which names `.rei/personas/`; a
+    // throw is what the transports answer with their generic apology.
+    const file = path.join(ws, ".rei", "personas", "sales.md");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, "---\nname: sales\ndescription: d\n---\n\nYou sell.\n");
+    vi.stubEnv("REI_PUBLIC_PERSONA", "sales");
+    const { agent } = mockAgent();
+    const channel = createPublicChannel(agent, ws, "web", "plain");
+    fs.rmSync(file);
+
+    await expect(channel.turn("abc", "hola")).rejects.toThrow(/sales.*not found/);
+    expect(agent.streamTurn).not.toHaveBeenCalled();
+    expect(fs.existsSync(sessionFile("web-abc"))).toBe(false);
+  });
+
+  it("ignores a persona stored in the session: the channel's is the only one", async () => {
+    fs.mkdirSync(path.dirname(sessionFile("web-abc")), { recursive: true });
+    fs.writeFileSync(
+      sessionFile("web-abc"),
+      JSON.stringify({ version: 1, workspace: ws, mode: "ask", persona: "briefer", messages: [] }),
+    );
+    const { agent, turns } = mockAgent();
+
+    await createPublicChannel(agent, ws, "web", "plain").turn("abc", "hola");
+
+    expect(turns[0].session.persona).toBe("general");
   });
 
   it("gives the turn only the read tools, scoped to the knowledge dir", async () => {
     vi.stubEnv("REI_WHATSAPP_KNOWLEDGE_DIR", "kb");
     const { agent, turns } = mockAgent();
 
-    await createPublicChannel(agent, ws, "web").turn("abc", "hola");
+    await createPublicChannel(agent, ws, "web", "plain").turn("abc", "hola");
 
     expect(turns[0].opts.allowedTools).toEqual(["read_files", "grep_code", "list_files"]);
     expect(turns[0].opts.readRoot).toBe(path.join(ws, "kb"));
   });
 
+  it("hands every turn the public channel's rules, whatever persona answers", async () => {
+    const { agent, turns } = mockAgent();
+
+    await createPublicChannel(agent, ws, "web", "plain").turn("abc", "hola");
+
+    const policy: string = turns[0].opts.channelPolicy;
+    expect(policy).toMatch(/price/i);
+    expect(policy).toMatch(/instructions/i);
+    expect(policy).toMatch(/person on the team|hand-off/i);
+  });
+
   it("runs one customer's tasks in order, and a failed one does not block the next", async () => {
     const { agent } = mockAgent();
-    const channel = createPublicChannel(agent, ws, "web");
+    const channel = createPublicChannel(agent, ws, "web", "plain");
     const order: string[] = [];
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
