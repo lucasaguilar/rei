@@ -169,6 +169,7 @@ export function mapThinkingLevel(
 /**
  * Resolves the reasoning level to send, in precedence order:
  *   1. `/think <level>`                     — the most recent explicit instruction
+ *   1b. the persona's `reasoningEffort`     — the job's need (a sales reply needs no thinking)
  *   2. the model's `reasoningEffort`        — rei.config.json, per model
  *   3. `REI_REASONING_EFFORT_<MODE>`        — the per-mode default
  *   4. the model's `thinking: "off"`        — the binary shortcut, meaning "none"
@@ -200,13 +201,18 @@ export function reasoningEffortValues(): string[] {
   return [...REASONING_EFFORTS];
 }
 
-export function resolveReasoningEffort(mode?: string): string | undefined {
+export function resolveReasoningEffort(mode?: string, personaEffort?: string): string | undefined {
   const levelMap = getActiveModelTuning()?.thinkingLevelMap;
   // A live `/think` beats everything: it is the most recent explicit instruction from the user.
   // The override stores the ABSTRACT level; translation happens here, so switching models switches
   // the translation with it.
   if (thinkingOverride) return mapThinkingLevel(thinkingOverride, levelMap);
   if (!mode) return undefined;
+
+  // 1b. The persona's. Above the model's because it states what the JOB needs, and the same model
+  //     serves the CLI's ask too: tuning the model for the public channel would change both.
+  const persona = personaEffort?.trim().toLowerCase();
+  if (persona && REASONING_EFFORTS.has(persona)) return mapThinkingLevel(persona, levelMap);
 
   // 2. The model's own default (rei.config.json). Beats the env for the same reason every other
   //    per-model value does (see resolveAgentSampling): the point of tuning a model is that it needs
