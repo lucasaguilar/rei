@@ -10,6 +10,7 @@
  *    channel's own rules (PUBLIC_POLICY).
  *  - Reads are scoped to `readRoot`, which never reaches `.rei/`.
  *  - One turn at a time per customer, inside a cap across all of them.
+ *  - The reply leaves in the channel's format, held to the persona's maxReplyChars.
  *
  * What stays in a transport: how a message arrives and is authenticated, what it says when it
  * refuses one, and how the reply is sent.
@@ -23,6 +24,8 @@ import type { ChatSession, SessionMode } from "../chat/types.js";
 import { loadSessionById, sessionsDir } from "../chat/session-store.js";
 import { createSemaphore, maxConcurrentTurns } from "./whatsapp-limits.js";
 import { resolvePublicPersona } from "./public-persona.js";
+import { loadPersona } from "../personas/persona-loader.js";
+import { capReply, formatReply, type ReplyFormat } from "./reply-format.js";
 
 /**
  * The only tools a public turn gets: reading the workspace. Forcing `ask` mode is not enough —
@@ -74,8 +77,9 @@ export interface PublicChannel {
    */
   enqueue(key: string, task: () => Promise<void>): Promise<void>;
   /**
-   * One agent turn on the customer's session, persisted. Returns the reply text; throws on failure.
-   * `onText` gets each piece of the reply as the model writes it, for a transport that streams.
+   * One agent turn on the customer's session, persisted. Returns the reply as the channel shows it;
+   * throws on failure. `onText` gets that same reply, for a transport that streams — once, at the
+   * end: the format and the cap need the whole text, and a piece already sent cannot be taken back.
    */
   turn(key: string, prompt: string, onText?: (text: string) => void): Promise<string>;
 }
@@ -83,11 +87,13 @@ export interface PublicChannel {
 /**
  * @param sessionPrefix - `wa`, `web`…: keeps each channel's sessions apart from each other and from
  *   the CLI's (which use timestamped or named ids).
+ * @param format - how the channel shows text (see reply-format.ts).
  */
 export function createPublicChannel(
   agent: Agent,
   workspacePath: string,
   sessionPrefix: string,
+  format: ReplyFormat,
 ): PublicChannel {
   const queues = new Map<string, Promise<void>>();
   const runLimited = createSemaphore(maxConcurrentTurns());
@@ -142,6 +148,12 @@ export function createPublicChannel(
     },
 
     async turn(key, prompt, onText) {
+      // Checked here, not left to the agent: it fails closed by REPLYING with the error, which
+      // names `.rei/personas/` — fine for the owner at a terminal, not for a customer. A throw is
+      // what every transport answers with its generic apology (and logs).
+      const loaded = loadPersona(persona, workspacePath);
+      if (!loaded.ok) throw new Error(loaded.error);
+      const { maxReplyChars } = loaded.persona;
       const session = loadOrCreateSession(key);
       let response = "";
       for await (const chunk of agent.streamTurn(session, prompt, {
@@ -150,13 +162,13 @@ export function createPublicChannel(
         readRoot: publicReadRoot(workspacePath),
         channelPolicy: PUBLIC_POLICY,
       })) {
-        if (!chunk.startsWith("\x11")) continue;
-        response += chunk.slice(1);
-        onText?.(chunk.slice(1));
+        if (chunk.startsWith("\x11")) response += chunk.slice(1);
       }
       // streamTurn already pushed user + assistant messages.
       persistSession(key, session);
-      return response;
+      const reply = capReply(formatReply(response, format), maxReplyChars);
+      if (reply) onText?.(reply);
+      return reply;
     },
   };
 }
