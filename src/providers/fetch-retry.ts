@@ -19,6 +19,13 @@ const DEFAULT_RETRY_DELAY_MS = 900;
 // burned 4×timeout (e.g. 20 min) before failing, turning a scan into hours of dead time.
 const ABORT_MAX_RETRIES = 1;
 
+// HTTP statuses a hosted backend returns for a passing condition: a rate limit (OpenRouter's shared
+// upstream pool answered 429 for seconds at a time) or a gateway/overload blip. Any other status is
+// an answer — a bad request fails identically on every attempt — and goes straight to the caller.
+const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
+// A reply someone is waiting for: honour Retry-After, but never stall a turn for minutes on it.
+const MAX_STATUS_RETRY_DELAY_MS = 5_000;
+
 export interface FetchRetryOptions {
   /** Per-attempt timeout in ms (aborts the request). */
   timeoutMs: number;
@@ -28,7 +35,7 @@ export interface FetchRetryOptions {
   retryDelayMs?: number;
 }
 
-/** Transient/connection-level errors worth retrying (not 4xx/5xx, which are returned as Response). */
+/** Transient/connection-level errors worth retrying (HTTP statuses are handled in fetchWithRetry). */
 export function isRetryableFetchError(error: unknown): boolean {
   const msg = (
     error instanceof Error ? error.message : String(error)
@@ -56,6 +63,15 @@ export function isAbortError(error: unknown): boolean {
   return msg.includes("aborted");
 }
 
+/** How long to wait before retrying a retryable status: Retry-After (seconds), capped, or the default. */
+export function statusRetryDelayMs(response: Response, fallbackMs: number): number {
+  const seconds = Number(response.headers.get("retry-after"));
+  if (!response.headers.has("retry-after") || !Number.isFinite(seconds) || seconds < 0) {
+    return fallbackMs;
+  }
+  return Math.min(seconds * 1000, MAX_STATUS_RETRY_DELAY_MS);
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -63,8 +79,10 @@ function sleep(ms: number): Promise<void> {
 /**
  * Performs `fetch` with a per-attempt abort timeout and retry on transient connection
  * errors. Returns the Response as soon as headers arrive (the body — including streamed
- * bodies — is not covered by the timeout, matching the providers' prior behavior). HTTP
- * error statuses are returned, not retried; callers inspect `response.ok`.
+ * bodies — is not covered by the timeout, matching the providers' prior behavior). A rate limit
+ * or gateway status (429/502/503/504) is retried like a dropped connection; any other HTTP error
+ * status is returned as-is, and once retries run out the last response is returned — callers
+ * inspect `response.ok`.
  */
 export async function fetchWithRetry(
   url: string,
@@ -80,7 +98,13 @@ export async function fetchWithRetry(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), opts.timeoutMs);
     try {
-      return await fetch(url, { ...init, signal: controller.signal });
+      const response = await fetch(url, { ...init, signal: controller.signal });
+      if (attempt === maxRetries || !RETRYABLE_STATUSES.has(response.status)) {
+        return response;
+      }
+      // Free the discarded body so the connection can be reused.
+      await response.body?.cancel().catch(() => {});
+      await sleep(statusRetryDelayMs(response, retryDelayMs));
     } catch (error: unknown) {
       lastError = error;
       if (attempt === maxRetries || !isRetryableFetchError(error)) break;
