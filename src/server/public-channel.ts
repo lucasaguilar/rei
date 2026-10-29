@@ -6,6 +6,8 @@
  *  - One session per customer, `<prefix>-<key>.json` under `.rei/sessions/`. The agent's context
  *    comes from that file only; the core never learns which channel it serves.
  *  - Mode is forced to `ask`, and the tools to reading the workspace (see PUBLIC_TOOLS).
+ *  - Every turn runs as the public persona (REI_PUBLIC_PERSONA, else `general`), after the
+ *    channel's own rules (PUBLIC_POLICY).
  *  - Reads are scoped to `readRoot`, which never reaches `.rei/`.
  *  - One turn at a time per customer, inside a cap across all of them.
  *
@@ -20,6 +22,7 @@ import type { Agent } from "../core/agent.js";
 import type { ChatSession, SessionMode } from "../chat/types.js";
 import { loadSessionById, sessionsDir } from "../chat/session-store.js";
 import { createSemaphore, maxConcurrentTurns } from "./whatsapp-limits.js";
+import { resolvePublicPersona } from "./public-persona.js";
 
 /**
  * The only tools a public turn gets: reading the workspace. Forcing `ask` mode is not enough —
@@ -89,14 +92,19 @@ export function createPublicChannel(
   const queues = new Map<string, Promise<void>>();
   const runLimited = createSemaphore(maxConcurrentTurns());
   const sessionIdFor = (key: string) => `${sessionPrefix}-${key}`;
+  // Once, like the cap: the owner's choice for the process. A persona stored in a session is
+  // ignored — a customer cannot pick one (slash commands are refused), and none may outlive a
+  // change of REI_PUBLIC_PERSONA.
+  const persona = resolvePublicPersona(workspacePath).name;
 
-  /** Always forces `ask`, whatever was persisted: a customer must not switch modes via a message. */
+  /** Always forces `ask` and the public persona, whatever was persisted. */
   const loadOrCreateSession = (key: string): ChatSession => {
     const existing = loadSessionById(workspacePath, sessionIdFor(key));
     if (existing) {
       return {
         messages: existing.messages,
         mode: "ask" as SessionMode,
+        persona,
         createdAt: existing.createdAt,
         summary: existing.summary,
         // The backend's last measured prompt size for THIS conversation — compaction's floor. The
@@ -104,7 +112,7 @@ export function createPublicChannel(
         measuredPromptTokens: existing.measuredPromptTokens,
       };
     }
-    return { messages: [], mode: "ask" as SessionMode };
+    return { messages: [], mode: "ask" as SessionMode, persona };
   };
 
   const persistSession = (key: string, session: ChatSession): void => {

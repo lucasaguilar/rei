@@ -96,6 +96,31 @@ describe("createPublicChannel", () => {
     expect(turns[0].session.mode).toBe("ask");
   });
 
+  it("answers as REI_PUBLIC_PERSONA, else general — never with the coding prompt", async () => {
+    const { agent, turns } = mockAgent();
+    await createPublicChannel(agent, ws, "web").turn("abc", "hola");
+    expect(turns[0].session.persona).toBe("general");
+
+    fs.mkdirSync(path.join(ws, ".rei", "personas"), { recursive: true });
+    fs.writeFileSync(path.join(ws, ".rei", "personas", "sales.md"), "---\nname: sales\ndescription: d\n---\n\nYou sell.\n");
+    vi.stubEnv("REI_PUBLIC_PERSONA", "sales");
+    await createPublicChannel(agent, ws, "web").turn("abc", "hola");
+    expect(turns[1].session.persona).toBe("sales");
+  });
+
+  it("ignores a persona stored in the session: the channel's is the only one", async () => {
+    fs.mkdirSync(path.dirname(sessionFile("web-abc")), { recursive: true });
+    fs.writeFileSync(
+      sessionFile("web-abc"),
+      JSON.stringify({ version: 1, workspace: ws, mode: "ask", persona: "briefer", messages: [] }),
+    );
+    const { agent, turns } = mockAgent();
+
+    await createPublicChannel(agent, ws, "web").turn("abc", "hola");
+
+    expect(turns[0].session.persona).toBe("general");
+  });
+
   it("gives the turn only the read tools, scoped to the knowledge dir", async () => {
     vi.stubEnv("REI_WHATSAPP_KNOWLEDGE_DIR", "kb");
     const { agent, turns } = mockAgent();

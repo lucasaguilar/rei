@@ -18,6 +18,7 @@ import {
 import { createWhatsAppChannel } from "./server/whatsapp-channel.js";
 import { createWebChannelFor } from "./server/web-channel.js";
 import { describeWebChannel, handleWebChannelRequest, isWebChannelRequest } from "./server/web-http.js";
+import { describePublicPersona, resolvePublicPersona } from "./server/public-persona.js";
 import { REI_LOGO } from "./cli/rei-logo.js";
 import {
   isWorkspaceAllowed,
@@ -304,6 +305,7 @@ async function startServer() {
     );
     const webChannelLine = describeWebChannel();
     if (webChannelLine) console.log(webChannelLine);
+    console.log(describePublicPersona(resolvePublicPersona(WORKSPACE_PATH)));
     console.log(`Workspace: ${WORKSPACE_PATH}`);
     console.log(`Endpoint: http://${HOST}:${PORT}/chat/completions`);
     console.log(`Health:   http://${HOST}:${PORT}${HEALTH_PATH} (no auth — for platform probes)`);
