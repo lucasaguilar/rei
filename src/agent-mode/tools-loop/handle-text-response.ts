@@ -155,13 +155,42 @@ export async function handleTextResponse(params: {
     };
   }
 
+  const finalEdits = await virtualEdits();
+
+  // EMPTY-REPLY guard: the model spent its call reasoning and stopped with nothing to show. After
+  // edits that is a finished task; with none, the user would get "(no response)" — seen on a
+  // public channel, where a persona with inline knowledge answers in one call and has no tool
+  // round to recover in. Shares the format-correction budget so it can't loop.
+  if (
+    !content.trim() &&
+    finalEdits.length === 0 &&
+    createdFiles.length === 0 &&
+    formatCorrections < MAX_FORMAT_CORRECTIONS &&
+    loopCount < maxTurns
+  ) {
+    logger.logInfo("[tools] empty-reply nudge", { attempt: formatCorrections + 1 });
+    return {
+      action: "continue",
+      messages: [
+        ...currentMessages,
+        // Not empty: some chat templates reject an assistant turn with no content.
+        { role: "assistant", content: "(no reply)" },
+        {
+          role: "user",
+          content: "Your last response was empty — nothing reached the user. Write your answer now.",
+        },
+      ],
+      formatCorrections: formatCorrections + 1,
+      verifyRetries,
+    };
+  }
+
   // Genuine plain-text response = the model is done. Before finishing, run a FINAL verify of the
   // whole queued set (catches cross-edit breakage and any create_file content that no per-batch
   // check covered). If it fails and we still have budget, bounce the diagnostics back for one
   // more self-correction.
   let finalVerified: boolean | undefined = undefined;
   let finalRan: boolean | undefined = undefined;
-  const finalEdits = await virtualEdits();
   if (finalEdits.length > 0) {
     const finalCheck = await validateProposedPatches({
       workspacePath,
