@@ -197,6 +197,7 @@ export class Agent {
           surfaceTools: surfaceToolNames("agent", this.mcpRegistry),
           channelAllowedTools: options?.allowedTools,
           channelReadRoot: options?.readRoot,
+          channelPolicy: options?.channelPolicy,
         })
       : undefined;
     if (personaTurn && !personaTurn.ok) {

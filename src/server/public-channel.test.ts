@@ -106,6 +106,17 @@ describe("createPublicChannel", () => {
     expect(turns[0].opts.readRoot).toBe(path.join(ws, "kb"));
   });
 
+  it("hands every turn the public channel's rules, whatever persona answers", async () => {
+    const { agent, turns } = mockAgent();
+
+    await createPublicChannel(agent, ws, "web").turn("abc", "hola");
+
+    const policy: string = turns[0].opts.channelPolicy;
+    expect(policy).toMatch(/price/i);
+    expect(policy).toMatch(/instructions/i);
+    expect(policy).toMatch(/person on the team|hand-off/i);
+  });
+
   it("runs one customer's tasks in order, and a failed one does not block the next", async () => {
     const { agent } = mockAgent();
     const channel = createPublicChannel(agent, ws, "web");

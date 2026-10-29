@@ -27,6 +27,9 @@ export type StreamTurnOptions = {
   /** Confines read_files / list_files / grep_code to this absolute directory and keeps `.rei/`
    *  (other people's sessions, logs) out of reach. For multi-user channels and scoped roles. */
   readRoot?: string;
+  /** A public channel's rules, placed before the persona's own text in its prompt — the persona
+   *  cannot loosen them. Only a persona turn reads it: the coding prompt never runs on a channel. */
+  channelPolicy?: string;
 };
 
 export interface PendingPatchAssessmentItem {

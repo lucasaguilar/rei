@@ -123,6 +123,14 @@ describe("a session with a persona", () => {
     expect(p.seen[0].tools).toContain("run_command");
   });
 
+  it("puts a channel's policy first — the persona's text cannot come before it", async () => {
+    const p = new Recording();
+    await turn(session({ persona: "sales" }), "hola", p, { channelPolicy: "## Channel rules\n- Never quote a price." });
+    const system = systemOf(p.seen[0]);
+    expect(system.startsWith("## Channel rules\n- Never quote a price.")).toBe(true);
+    expect(system.indexOf("You are the commercial assistant")).toBeGreaterThan(0);
+  });
+
   it("is narrowed further by a channel's allowedTools", async () => {
     const p = new Recording();
     await turn(session({ persona: "sales" }), "hola", p, {
