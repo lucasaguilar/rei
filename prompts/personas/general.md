@@ -6,6 +6,8 @@ description: Neutral assistant for a public channel (web widget, WhatsApp) — t
 tools: [read_files, grep_code, list_files]
 language: auto
 maxReplyChars: 700
+# A front-desk answer needs no reasoning phase, and on a local model it is most of the wait.
+reasoningEffort: none
 handoff: "I'll pass your message to a person on the team, who will get back to you."
 ---
 

@@ -139,6 +139,8 @@ describe("the shipped general persona", () => {
     if (!r.ok) throw new Error(r.error);
     expect(r.persona.language).toBe("auto");
     expect(r.persona.maxReplyChars).toBeGreaterThan(0);
+    // A front-desk answer needs no reasoning phase: on a local model it is most of the reply time.
+    expect(r.persona.reasoningEffort).toBe("none");
     expect(r.persona.handoff).toMatch(/person/i);
     expect(r.persona.body).not.toMatch(/coding|repository|code/i);
   });
