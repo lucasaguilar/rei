@@ -117,3 +117,29 @@ describe("the shipped daily persona", () => {
     expect(resolvePersonaTools(r.persona, offered).tools).toEqual(["web_search", "weather", "mcp:spotify/play"]);
   });
 });
+
+describe("the shipped general persona", () => {
+  // The fallback of every public channel: when no persona is configured, a stranger must get a
+  // neutral assistant — never the coding prompt, and never more than reading what it is given.
+  it("loads, reads at most, and writes nothing — whatever surface it runs on", async () => {
+    const { loadPersona, resolvePersonaTools } = await import("./persona-loader.js");
+    const r = loadPersona("general", ws);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.persona.source).toBe("builtin");
+    expect(r.persona.writeGlob).toBeUndefined();
+    expect(r.persona.skills).toBeUndefined();
+    const offered = ["read_files", "grep_code", "list_files", "run_command", "edit_file", "web_search", "mcp:gmail/send"];
+    expect(resolvePersonaTools(r.persona, offered).tools).toEqual(["read_files", "grep_code", "list_files"]);
+  });
+
+  it("answers in the customer's language, briefly, and knows how to hand off", async () => {
+    const { loadPersona } = await import("./persona-loader.js");
+    const r = loadPersona("general", ws);
+    if (!r.ok) throw new Error(r.error);
+    expect(r.persona.language).toBe("auto");
+    expect(r.persona.maxReplyChars).toBeGreaterThan(0);
+    expect(r.persona.handoff).toMatch(/person/i);
+    expect(r.persona.body).not.toMatch(/coding|repository|code/i);
+  });
+});
