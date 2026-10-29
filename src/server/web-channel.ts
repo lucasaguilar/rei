@@ -90,7 +90,7 @@ export function createWebChannelFor(agent: Agent, workspacePath: string): WebCha
     maskKey: (key) => maskSession(key),
     logError: webError,
   });
-  return createWebChannel(createPublicChannel(agent, workspacePath, "web"), replica);
+  return createWebChannel(createPublicChannel(agent, workspacePath, "web", "plain"), replica);
 }
 
 export function createWebChannel(

@@ -147,7 +147,7 @@ export function createWhatsAppChannel(
   workspacePath: string,
   replica: WhatsAppReplica = createWhatsAppReplica(createBackendApi()),
 ): WhatsAppWebhookDeps {
-  const channel = createPublicChannel(agent, workspacePath, "wa");
+  const channel = createPublicChannel(agent, workspacePath, "wa", "whatsapp");
   const perMinute = turnsPerMinute();
   const rateCheck = createRateLimiter(perMinute);
 
