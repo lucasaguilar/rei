@@ -19,6 +19,7 @@ interface Seen {
   messages: ChatMessage[];
   tools: string[];
   model?: string;
+  reasoningEffort?: string;
 }
 
 /** Records every call; answers with the queued responses, then plain text. */
@@ -28,12 +29,13 @@ class Recording extends MockProvider {
   async completeChatWithTools(
     messages: ChatMessage[],
     tools: ToolDefinition[],
-    opts?: { model?: string },
+    opts?: { model?: string; reasoningEffort?: string },
   ): Promise<ChatCompletionWithTools> {
     this.seen.push({
       messages: structuredClone(messages),
       tools: tools.map((t) => t.function.name),
       model: opts?.model,
+      reasoningEffort: opts?.reasoningEffort,
     });
     return this.queue.shift() ?? { content: "ok", toolCalls: [], finishReason: "stop" };
   }
@@ -62,6 +64,7 @@ beforeEach(() => {
       "tools: [read_files, grep_code, web_search]",
       "knowledgeDir: kb",
       "preferredModel: persona-model",
+      "reasoningEffort: none",
       "---",
       "",
       "You are the commercial assistant of Acme Co.",
@@ -176,6 +179,12 @@ describe("a session with a persona", () => {
     const q = new Recording();
     await turn(session({ persona: "sales", manualModel: "manual-model" }), "hola", q);
     expect(q.seen[0].model).toBe("manual-model");
+  });
+
+  it("thinks as much as the persona says — none for a sales reply", async () => {
+    const p = new Recording();
+    await turn(session({ persona: "sales" }), "hola", p);
+    expect(p.seen[0].reasoningEffort).toBe("none");
   });
 
   it("ignores an active role — a persona and a role do not stack", async () => {
