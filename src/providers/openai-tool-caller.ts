@@ -160,8 +160,12 @@ function buildToolsRequestBody(
   const body: Record<string, unknown> = {
     model: options?.model ?? model,
     messages: mergeLeadingSystemMessages(messages).map(toApiMessage),
-    tools: tools.map(toWireTool),
-    tool_choice: "auto",
+    // A turn can legitimately have no tools (a persona whose knowledge is inline drops the read
+    // tools). Gemini rejects tool_choice without declarations — "Function calling config is set
+    // without function_declarations" — so an empty list sends neither field.
+    ...(tools.length > 0
+      ? { tools: tools.map(toWireTool), tool_choice: "auto" }
+      : {}),
     temperature: sampling.temperature,
     ...(sampling.frequencyPenalty > 0
       ? { frequency_penalty: sampling.frequencyPenalty }
