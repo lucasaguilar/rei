@@ -5,7 +5,7 @@ import {
   openaiCompleteChatWithTools,
   mergeLeadingSystemMessages,
 } from "./openai-tool-caller.js";
-import type { ToolStreamDelta } from "./model-provider.js";
+import type { ToolDefinition, ToolStreamDelta } from "./model-provider.js";
 import type { ChatMessage } from "../chat/types.js";
 
 describe("mergeLeadingSystemMessages", () => {
@@ -237,7 +237,15 @@ describe("openaiCompleteChatWithTools request body — omitParams (mocked fetch)
     );
   }
 
-  async function capture(omitParams?: string[]): Promise<Record<string, unknown>> {
+  const readTool: ToolDefinition = {
+    type: "function",
+    function: { name: "read_files", description: "Read files", parameters: { type: "object", properties: {}, required: [] } },
+  };
+
+  async function capture(
+    omitParams?: string[],
+    tools: ToolDefinition[] = [readTool],
+  ): Promise<Record<string, unknown>> {
     process.env.REI_AGENT_FREQUENCY_PENALTY = "0.3"; // ensure penalties are present to be stripped
     let sent: Record<string, unknown> = {};
     globalThis.fetch = vi.fn(async (_url: unknown, init: { body: string }) => {
@@ -249,7 +257,7 @@ describe("openaiCompleteChatWithTools request body — omitParams (mocked fetch)
       headers: {},
       model: "m",
       messages: [],
-      tools: [],
+      tools,
       timeoutMs: 1000,
       options: { reasoningEffort: "low" },
       omitParams,
@@ -289,6 +297,12 @@ describe("openaiCompleteChatWithTools request body — omitParams (mocked fetch)
     expect(body).toHaveProperty("model", "m");
     expect(body).toHaveProperty("tool_choice", "auto");
     expect(body).toHaveProperty("max_tokens");
+  });
+
+  it("sends neither tools nor tool_choice when the turn has no tools (Gemini 400s on tool_choice alone)", async () => {
+    const body = await capture(undefined, []);
+    expect(body).not.toHaveProperty("tools");
+    expect(body).not.toHaveProperty("tool_choice");
   });
 
   it("omits stream_options from the NON-streaming body (usage comes in the response, not a request flag)", async () => {
