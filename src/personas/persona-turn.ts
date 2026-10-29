@@ -2,8 +2,10 @@ import { loadPersona, resolvePersonaTools, type Persona } from "./persona-loader
 import { buildPersonaSystemMessage } from "./persona-prompt.js";
 import { within, realish } from "../agent-mode/tools-loop/read-scope.js";
 import { loadSkills } from "../skills/skill-loader.js";
+import { loadInlineKnowledge } from "./persona-knowledge.js";
 
 const WRITE_TOOLS = ["create_file", "edit_file", "rewrite_file"];
+const READ_TOOLS = ["read_files", "grep_code", "list_files"];
 
 /**
  * Everything a persona decides for one turn (docs/persona-spec.md, phase 3), resolved in one place
@@ -77,17 +79,27 @@ export function resolvePersonaTurn(params: {
       ? persona.knowledgeDir
       : outer;
 
+  // Only its own knowledgeDir, and only when the channel did not confine reads elsewhere — inlining
+  // it then would hand the model files the channel keeps out of reach. With all of it in the
+  // prompt there is nothing left to read, and an offered read tool still costs rounds.
+  const knowledge =
+    persona.knowledgeDir && readRoot === persona.knowledgeDir && tools.some((t) => READ_TOOLS.includes(t))
+      ? loadInlineKnowledge(persona.knowledgeDir) ?? undefined
+      : undefined;
+  const offered = knowledge ? tools.filter((t) => !READ_TOOLS.includes(t)) : tools;
+
   return {
     ok: true,
     turn: {
       persona,
       systemPrompt: buildPersonaSystemMessage(persona, {
-        tools,
+        tools: offered,
         workspacePath: params.workspacePath,
         channelPolicy: params.channelPolicy,
+        knowledge,
         skillNames,
       }),
-      allowedTools: tools,
+      allowedTools: offered,
       readRoot,
       writeGlob: persona.writeGlob,
       skillNames,

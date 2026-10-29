@@ -75,6 +75,22 @@ describe("buildPersonaSystemMessage", () => {
     expect(build(sales({ knowledgeDir: undefined }), ["read_files"])).toMatch(/knowledge base.*the workspace/is);
   });
 
+  it("carries a small knowledge base whole, one delimited block per file, with no lookup asked", () => {
+    const prompt = buildPersonaSystemMessage(sales(), {
+      tools: [],
+      workspacePath: WS,
+      knowledge: [
+        { path: "plans.md", content: "Plan Pro: $49" },
+        { path: "faq.md", content: "We open at 9." },
+      ],
+      now: NOW,
+    });
+    expect(prompt).toContain('<file path="plans.md">\nPlan Pro: $49\n</file>');
+    expect(prompt).toContain('<file path="faq.md">\nWe open at 9.\n</file>');
+    expect(prompt).toMatch(/only from it/i);
+    expect(prompt).not.toMatch(/Look it up/);
+  });
+
   it("has no knowledge-base section when it cannot read", () => {
     expect(build(sales(), ["web_search"])).not.toMatch(/knowledge base/i);
   });

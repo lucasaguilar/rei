@@ -73,6 +73,14 @@ beforeEach(() => {
   );
   fs.mkdirSync(path.join(ws, "kb"));
   fs.writeFileSync(path.join(ws, "kb", "prices.md"), "Plan Pro: $49");
+  // Too big for the prompt: `sales` searches its knowledge base, with the read tools.
+  fs.writeFileSync(path.join(ws, "kb", "catalog.md"), "Product line. ".repeat(4000));
+  fs.writeFileSync(
+    path.join(dir, "faq.md"),
+    "---\nname: faq\ndescription: d\ntools: [read_files, grep_code, web_search]\nknowledgeDir: faq\n---\n\nYou answer FAQs.\n",
+  );
+  fs.mkdirSync(path.join(ws, "faq"));
+  fs.writeFileSync(path.join(ws, "faq", "hours.md"), "We open at 9.");
   fs.writeFileSync(path.join(ws, "internal.md"), "INTERNAL-MARGIN 62%");
 });
 
@@ -151,6 +159,13 @@ describe("a session with a persona", () => {
     await turn(session({ persona: "sales" }), "margins?", p);
     const toolResult = p.seen[1].messages.filter((m) => m.role === "tool").map((m) => m.content).join("\n");
     expect(toolResult).not.toContain("INTERNAL-MARGIN");
+  });
+
+  it("with a small knowledge base, carries it in the prompt and drops the read tools", async () => {
+    const p = new Recording();
+    await turn(session({ persona: "faq" }), "¿a qué hora abren?", p);
+    expect(systemOf(p.seen[0])).toContain("We open at 9.");
+    expect(p.seen[0].tools).toEqual(["web_search"]);
   });
 
   it("runs on its preferredModel — unless the user chose one with /model", async () => {
