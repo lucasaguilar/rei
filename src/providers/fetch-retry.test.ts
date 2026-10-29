@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { isRetryableFetchError, fetchWithRetry } from "./fetch-retry.js";
+import { isRetryableFetchError, fetchWithRetry, statusRetryDelayMs } from "./fetch-retry.js";
 
 describe("isRetryableFetchError", () => {
   it("flags transient connection errors", () => {
@@ -97,6 +97,29 @@ describe("fetchWithRetry", () => {
     expect(fetchMock).toHaveBeenCalledTimes(4); // 1 + 3 retries — abort cap must not shrink this
   });
 
+  it("retries a rate limit (429) and returns the response that follows", async () => {
+    // A hosted model's shared pool answers 429 for seconds at a time (OpenRouter → Google, seen
+    // live); without a retry the visitor gets "something went wrong" for a blip.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("busy", { status: 429 }))
+      .mockResolvedValueOnce(new Response("ok", { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const res = await fetchWithRetry("http://x/y", {}, { timeoutMs: 1000, retryDelayMs: 1 });
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns the last 503 once retries run out (caller still checks .ok)", async () => {
+    const fetchMock = vi.fn(async () => new Response("down", { status: 503 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const res = await fetchWithRetry("http://x/y", {}, { timeoutMs: 1000, retryDelayMs: 1 });
+    expect(res.status).toBe(503);
+    expect(fetchMock).toHaveBeenCalledTimes(2); // 1 + the default single retry
+  });
+
   it("returns HTTP error responses without retrying (caller checks .ok)", async () => {
     const errResponse = new Response("bad", { status: 500 });
     const fetchMock = vi.fn().mockResolvedValue(errResponse);
@@ -105,5 +128,23 @@ describe("fetchWithRetry", () => {
     const res = await fetchWithRetry("http://x/y", {}, { timeoutMs: 1000 });
     expect(res.status).toBe(500);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("statusRetryDelayMs", () => {
+  const res = (retryAfter?: string) =>
+    new Response("", { status: 429, headers: retryAfter ? { "Retry-After": retryAfter } : {} });
+
+  it("waits what Retry-After asks, in seconds", () => {
+    expect(statusRetryDelayMs(res("2"), 900)).toBe(2000);
+  });
+
+  it("caps a long Retry-After so a visitor is not left waiting on a reply", () => {
+    expect(statusRetryDelayMs(res("120"), 900)).toBe(5000);
+  });
+
+  it("falls back to the default delay without a usable Retry-After", () => {
+    expect(statusRetryDelayMs(res(), 900)).toBe(900);
+    expect(statusRetryDelayMs(res("Wed, 21 Oct 2015 07:28:00 GMT"), 900)).toBe(900);
   });
 });
